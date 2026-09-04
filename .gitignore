@@ -1,0 +1,48 @@
+# ==============================================================================
+# HP ACCOUNT INTELLIGENCE PLATFORM — RECURSIVE GIT IGNORE RULES
+# ==============================================================================
+
+# Environment files (Secrets & Local Paths - DO NOT PUSH)
+.env
+.env.local
+.env.*.local
+*.env
+
+# Raw Reference Data Files (Private / DO NOT PUSH)
+Source A.xlsx
+Source B.xlsx
+google_news_rss_data.xlsx
+11-Features-Sourcing-Reference-Anonymized.docx
+Master Next.js Project Structure.pdf
+Master FastAPI Project Structure.pdf
+*.xlsx
+*.xls
+*.csv
+*.docx
+*.pdf
+
+# Customer Uploaded Data & Reference CSV Directories
+**/data/
+data/
+reference_csvs/
+
+# Recursive Dependencies & Build Outputs
+**/node_modules/
+**/.next/
+**/out/
+**/build/
+**/tsconfig.tsbuildinfo
+
+# Python Cache & Environments
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+.pytest_cache/
+.venv/
+env/
+venv/
+
+# OS Files
+.DS_Store
+Thumbs.db
+*.log

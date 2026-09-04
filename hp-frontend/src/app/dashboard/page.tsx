@@ -1,0 +1,2507 @@
+'use client';
+
+import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { useParams, useRouter } from 'next/navigation';
+import { ProtectedRoute } from '@/components/common/ProtectedRoute';
+import { useAuth } from '@/providers/AuthProvider';
+import api from '@/services/api';
+import { CompanyAccount } from '@/types/account';
+import { 
+  WidgetResponse, 
+  WidgetClassification 
+} from '@/types/widget';
+import { 
+  Building2, 
+  Search, 
+  Loader2, 
+  AlertCircle, 
+  Database, 
+  Layers, 
+  Info,
+  ChevronDown,
+  LayoutDashboard,
+  Newspaper,
+  Users,
+  Lightbulb,
+  Cpu,
+  ShieldAlert,
+  FileText,
+  MessageSquare,
+  CheckSquare,
+  Megaphone,
+  TrendingUp,
+  Sparkles,
+  Calculator,
+  Binary,
+  Maximize2,
+  ChevronLeft,
+  MapPin,
+  Globe,
+  User,
+  Play,
+  Check,
+  Filter,
+  Flame,
+  Zap,
+  Target,
+  FileSpreadsheet,
+  ExternalLink,
+  X
+} from 'lucide-react';
+
+const ICON_MAP: Record<string, React.FC<{ className?: string }>> = {
+  LayoutDashboard,
+  Newspaper,
+  Users,
+  Lightbulb,
+  Cpu,
+  ShieldAlert,
+  FileText,
+  MessageSquare,
+  CheckSquare,
+  Megaphone,
+  TrendingUp
+};
+
+interface SidebarItem {
+  key: string;
+  label: string;
+  subtitle: string;
+  description: string;
+  iconName: string;
+}
+
+interface SidebarGroup {
+  sectionTitle: string;
+  items: SidebarItem[];
+}
+
+const NORTHSTAR_SIDEBAR_GROUPS: SidebarGroup[] = [
+  {
+    sectionTitle: "INTELLIGENCE",
+    items: [
+      { key: 'executive_dashboard', label: 'Executive Dashboard', subtitle: 'Account profile & key metrics', description: 'Account profile & key metrics', iconName: 'LayoutDashboard' },
+      { key: 'recent_news_signals', label: 'Live Signals', subtitle: 'Real-time news & triggers', description: 'Real-time news & triggers', iconName: 'Newspaper' },
+      { key: 'intent_demand_signals', label: 'Intent & Demand Signals', subtitle: 'HP-category & topic-level buying intent', description: 'HP-category & topic-level buying intent', iconName: 'TrendingUp' },
+      { key: 'stakeholder_map', label: 'Stakeholder Map', subtitle: 'Contacts & influence map', description: 'Contacts & influence map', iconName: 'Users' },
+      { key: 'solution_narrative_opportunity_map', label: 'Opportunity Map', subtitle: 'HP plays: outcome, impact & evidence', description: 'HP plays: outcome, impact & evidence', iconName: 'Lightbulb' },
+      { key: 'tech_landscape', label: 'Tech Landscape', subtitle: 'Tech stack by category & HP fit', description: 'Tech stack by category & HP fit', iconName: 'Cpu' },
+      { key: 'objection_playbook', label: 'Objection Playbook', subtitle: 'Reframes & proof points', description: 'Reframes & proof points', iconName: 'ShieldAlert' }
+    ]
+  },
+  {
+    sectionTitle: "ACTION",
+    items: [
+      { key: 'content_messaging', label: 'Content Messaging', subtitle: 'Campaign messaging pillars', description: 'Campaign messaging pillars', iconName: 'Megaphone' },
+      { key: 'content_studio', label: 'Content Studio', subtitle: 'Generate tailored content', description: 'Generate tailored content', iconName: 'FileText' },
+      { key: 'strategy_chat', label: 'Strategy Chat', subtitle: 'AI strategy assistant', description: 'AI strategy assistant', iconName: 'MessageSquare' }
+    ]
+  },
+  {
+    sectionTitle: "SIMULATION & PLANNING",
+    items: [
+      { key: 'message_evaluator', label: 'Message Evaluator', subtitle: 'Test messages against personas', description: 'Test messages against personas', iconName: 'CheckSquare' }
+    ]
+  }
+];
+
+interface ProvenanceEntry {
+  field_path: string;
+  source: string;
+  type: string;
+  date: string;
+  confidence: string;
+  url: string;
+}
+
+export default function UserDashboardPage() {
+  const { user, logout } = useAuth();
+
+  const [accounts, setAccounts] = useState<CompanyAccount[]>([]);
+  const [selectedAccountId, setSelectedAccountId] = useState<string>('');
+  const [selectedAccount, setSelectedAccount] = useState<CompanyAccount | null>(null);
+  const [activeFeatureKey, setActiveFeatureKey] = useState<string>('executive_dashboard');
+  
+  const [widgets, setWidgets] = useState<WidgetResponse[]>([]);
+  const [isLoadingAccounts, setIsLoadingAccounts] = useState(true);
+  const [isLoadingWidgets, setIsLoadingLoadingWidgets] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // X-Ray Mode Toggle State (Northstar Debug / Provenance View)
+  const [isXRayOn, setIsXRayOn] = useState(false);
+  const [provenanceSearch, setProvenanceSearch] = useState('');
+  const [provenanceSourceFilter, setProvenanceSourceFilter] = useState('ALL');
+
+  // Urgency Score Driver Popover & Tooltip State
+  const [activeDriverPopover, setActiveDriverPopover] = useState<string | null>(null);
+  const [hoveredDriverTooltip, setHoveredDriverTooltip] = useState<string | null>(null);
+
+  // Key Metrics Source Citation Popover State
+  const [activeMetricPopover, setActiveMetricPopover] = useState<string | null>(null);
+
+  // Live Signals Filter Drawer State
+  const [isFilterDrawerOpen, setIsFilterDrawerOpen] = useState(false);
+  const [signalTypeFilter, setSignalTypeFilter] = useState('ALL');
+  const [dateRangeFilter, setDateRangeFilter] = useState('All time');
+
+  // Intent Topics Filter State
+  const [intentSearch, setIntentSearch] = useState('');
+  const [intentScoreFilter, setIntentScoreFilter] = useState('ALL');
+  const [isOtherTopicsExpanded, setIsOtherTopicsExpanded] = useState(false);
+  const [hoveredBarTopic, setHoveredBarTopic] = useState<{ name: string; score: number } | null>(null);
+
+  // Stakeholder Map Filter & View Sub-Tab State
+  const [stakeholderSearch, setStakeholderSearch] = useState('');
+  const [stakeholderDeptFilter, setStakeholderDeptFilter] = useState('ALL');
+  const [stakeholderSubTab, setStakeholderSubTab] = useState<'grid' | 'entry_path'>('grid');
+  const [isEntryPathInfoOpen, setIsEntryPathInfoOpen] = useState(false);
+
+  // Account search filter in dropdown
+  const [accountSearch, setAccountSearch] = useState('');
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+
+  // Fetch Active Accounts for User Account Switcher
+  const fetchUserAccounts = useCallback(async () => {
+    setIsLoadingAccounts(true);
+    setError(null);
+    try {
+      const response = await api.get<CompanyAccount[]>('/accounts/user-list');
+      setAccounts(response.data);
+      if (response.data.length > 0) {
+        setSelectedAccountId(response.data[0].id);
+        setSelectedAccount(response.data[0]);
+      }
+    } catch (err: any) {
+      const msg = err.response?.data?.detail || 'Failed to load accessible account list.';
+      setError(msg);
+    } finally {
+      setIsLoadingAccounts(false);
+    }
+  }, []);
+
+  // Fetch Widget Contracts for Selected Account + Feature
+  const fetchWidgetContracts = useCallback(async (accId: string, featureKey: string) => {
+    if (!accId) return;
+    setIsLoadingLoadingWidgets(true);
+    try {
+      const response = await api.get<WidgetResponse[]>(`/accounts/${accId}/widgets/${featureKey}`);
+      setWidgets(response.data);
+    } catch (err: any) {
+      // Non-blocking
+    } finally {
+      setIsLoadingLoadingWidgets(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchUserAccounts();
+  }, [fetchUserAccounts]);
+
+  useEffect(() => {
+    if (selectedAccountId) {
+      fetchWidgetContracts(selectedAccountId, activeFeatureKey);
+    }
+  }, [selectedAccountId, activeFeatureKey, fetchWidgetContracts]);
+
+  const handleSelectAccount = (acc: CompanyAccount) => {
+    setSelectedAccountId(acc.id);
+    setSelectedAccount(acc);
+    setIsDropdownOpen(false);
+  };
+
+  const getDownloadUrl = (datasetKey: string) => {
+    const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+    const token = typeof window !== 'undefined' ? (localStorage.getItem('hp_token') || '') : '';
+    return `${baseUrl}/api/v1/accounts/${selectedAccount?.id}/data/download/${datasetKey}?token=${encodeURIComponent(token)}`;
+  };
+
+  const allItems = NORTHSTAR_SIDEBAR_GROUPS.flatMap(g => g.items);
+  const activeFeatureDef = allItems.find(f => f.key === activeFeatureKey) || allItems[0];
+
+  const getClassificationBadge = (cls: WidgetClassification) => {
+    switch (cls) {
+      case 'deterministic':
+        return (
+          <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-hp-blue border border-blue-200">
+            <Binary className="w-3 h-3 mr-1" />
+            Deterministic
+          </span>
+        );
+      case 'derived':
+        return (
+          <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
+            <Calculator className="w-3 h-3 mr-1" />
+            Derived
+          </span>
+        );
+      case 'inferred':
+        return (
+          <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 text-purple-800 border border-purple-200">
+            <Sparkles className="w-3 h-3 mr-1" />
+            Inferred
+          </span>
+        );
+    }
+  };
+
+  const filteredAccounts = accounts.filter(a => 
+    a.name.toLowerCase().includes(accountSearch.toLowerCase().trim())
+  );
+
+  // Provenance map table data generator
+  const getProvenanceEntries = (): ProvenanceEntry[] => {
+    if (!selectedAccount) return [];
+    return [
+      { field_path: 'company_name', source: '1_firmographics.csv (Company Name)', type: 'Firmographics', date: '2026-09-04', confidence: '95%', url: 'data/accounts/' + selectedAccount.id + '/firmographics/firmographics.csv' },
+      { field_path: 'domain', source: '1_firmographics.csv (Company Domain)', type: 'Firmographics', date: '2026-09-04', confidence: '95%', url: 'data/accounts/' + selectedAccount.id + '/firmographics/firmographics.csv' },
+      { field_path: 'business_description', source: '1_firmographics.csv (Business Description)', type: 'Firmographics', date: '2026-09-04', confidence: '90%', url: 'data/accounts/' + selectedAccount.id + '/firmographics/firmographics.csv' },
+      { field_path: 'industry_classification', source: '1_firmographics.csv (NAICS, SIC, LinkedIn)', type: 'Firmographics', date: '2026-09-04', confidence: '90%', url: 'data/accounts/' + selectedAccount.id + '/firmographics/firmographics.csv' },
+      { field_path: 'hq_location', source: '1_firmographics.csv (City, Region, Country)', type: 'Firmographics', date: '2026-09-04', confidence: '90%', url: 'data/accounts/' + selectedAccount.id + '/firmographics/firmographics.csv' },
+      { field_path: 'employee_count', source: '1_firmographics.csv (Number Of Employees Range)', type: 'Firmographics', date: '2026-09-04', confidence: '90%', url: 'data/accounts/' + selectedAccount.id + '/firmographics/firmographics.csv' },
+      { field_path: 'revenue', source: '1_firmographics.csv (Yearly Revenue Range)', type: 'Firmographics', date: '2026-09-04', confidence: '90%', url: 'data/accounts/' + selectedAccount.id + '/firmographics/firmographics.csv' },
+      { field_path: 'company_hierarchy', source: '2_company_hierarchy.csv (Parent Company Name)', type: 'Hierarchy', date: '2026-09-04', confidence: '90%', url: 'data/accounts/' + selectedAccount.id + '/company_hierarchy/company_hierarchy.csv' },
+      { field_path: 'open_job_count', source: 'job_openings.csv (Active record count)', type: 'Job Openings', date: '2026-09-04', confidence: '85%', url: 'data/accounts/' + selectedAccount.id + '/job_openings/job_openings.csv' },
+      { field_path: 'liveSignals', source: 'google_news_rss_data.csv + news_events.csv', type: 'Google News', date: '2026-09-04', confidence: '80%', url: 'data/accounts/' + selectedAccount.id + '/google_news/google_news_rss_data.csv' },
+      { field_path: 'technology_stack', source: '4_technographics.csv (Full Tech Stack)', type: 'Technographics', date: '2026-09-04', confidence: '85%', url: 'data/accounts/' + selectedAccount.id + '/technographics/technographics.csv' },
+      { field_path: 'intentTopics', source: '11_intent_score.csv (Composite Score)', type: 'Bombora', date: '2026-09-04', confidence: '80%', url: 'data/accounts/' + selectedAccount.id + '/intent_score/intent_score.csv' }
+    ];
+  };
+
+  const provenanceEntries = getProvenanceEntries();
+  const filteredProvenanceEntries = provenanceEntries.filter(entry => {
+    const matchesSearch = entry.field_path.toLowerCase().includes(provenanceSearch.toLowerCase().trim()) ||
+                          entry.source.toLowerCase().includes(provenanceSearch.toLowerCase().trim());
+    const matchesSource = provenanceSourceFilter === 'ALL' || entry.type.toLowerCase().includes(provenanceSourceFilter.toLowerCase());
+    return matchesSearch && matchesSource;
+  });
+
+  return (
+    <ProtectedRoute allowedRoles={['user', 'admin']}>
+      <div className="flex h-screen bg-[#F8FAFC] overflow-hidden text-slate-800 font-sans">
+        
+        {/* ============================================================================== */}
+        {/* LEFT FIXED SIDEBAR — NORTHSTAR EXACT LAYOUT                                    */}
+        {/* ============================================================================== */}
+        <aside 
+          className={`bg-[#0B132B] text-white flex flex-col justify-between transition-all duration-300 z-50 flex-shrink-0 border-r border-slate-800/80 ${
+            isSidebarCollapsed ? 'w-16' : 'w-64'
+          }`}
+        >
+          <div className="flex flex-col h-full overflow-hidden">
+            
+            {/* Top Brand Header */}
+            <div className="p-4 flex items-center space-x-3 border-b border-slate-800/80">
+              <div className="w-8 h-8 bg-hp-navy text-white rounded-lg flex items-center justify-center font-extrabold text-sm tracking-wider shadow-md flex-shrink-0">
+                HP
+              </div>
+              {!isSidebarCollapsed && (
+                <div>
+                  <h1 className="text-sm font-bold text-white leading-tight tracking-tight">HP</h1>
+                  <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">
+                    Account Intelligence
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Target Account Selector Section */}
+            {!isSidebarCollapsed && (
+              <div className="p-3 border-b border-slate-800/80">
+                <span className="text-[9px] font-extrabold text-gray-400 uppercase tracking-widest block mb-1.5 px-1">
+                  Target Account
+                </span>
+
+                <div className="relative">
+                  <button
+                    type="button"
+                    disabled={isLoadingAccounts || accounts.length === 0}
+                    onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+                    className="w-full flex items-center justify-between p-2.5 bg-[#1C2541] hover:bg-slate-800 text-white rounded-xl border border-slate-700/80 transition text-left text-xs font-bold disabled:opacity-50 shadow-inner"
+                  >
+                    <div className="flex items-center space-x-2.5 truncate">
+                      <div className="p-1.5 bg-slate-800 text-hp-accent rounded-lg">
+                        <Building2 className="w-4 h-4" />
+                      </div>
+                      <div className="truncate">
+                        <span className="truncate block text-xs font-bold text-white">
+                          {isLoadingAccounts 
+                            ? 'Loading accounts...' 
+                            : selectedAccount 
+                            ? selectedAccount.name 
+                            : 'No target accounts'}
+                        </span>
+                        <span className="text-[10px] font-normal text-gray-400 block font-mono">
+                          {selectedAccount ? `ID: ${selectedAccount.id.substring(0, 8)}...` : 'N/A'}
+                        </span>
+                      </div>
+                    </div>
+                    <ChevronDown className="w-4 h-4 text-gray-400 flex-shrink-0 ml-1" />
+                  </button>
+
+                  {/* Dropdown Menu */}
+                  {isDropdownOpen && (
+                    <div className="absolute left-0 mt-2 w-full bg-[#1C2541] border border-slate-700 rounded-xl shadow-2xl z-50 overflow-hidden">
+                      <div className="p-2 border-b border-slate-800">
+                        <div className="relative">
+                          <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-2.5" />
+                          <input
+                            type="text"
+                            autoFocus
+                            value={accountSearch}
+                            onChange={(e) => setAccountSearch(e.target.value)}
+                            placeholder="Search company..."
+                            className="w-full pl-8 pr-2 py-1 bg-[#0B132B] text-xs text-white rounded-lg focus:outline-none focus:ring-1 focus:ring-hp-navy placeholder-gray-500"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="max-h-52 overflow-y-auto divide-y divide-slate-800 text-xs">
+                        {filteredAccounts.length === 0 ? (
+                          <div className="p-3 text-center text-gray-400">No active accounts</div>
+                        ) : (
+                          filteredAccounts.map((acc) => (
+                            <button
+                              key={acc.id}
+                              type="button"
+                              onClick={() => handleSelectAccount(acc)}
+                              className={`w-full text-left px-3 py-2.5 hover:bg-slate-800 transition flex items-center justify-between ${
+                                acc.id === selectedAccountId ? 'bg-hp-navy/20 text-hp-accent font-bold' : 'text-gray-200 font-medium'
+                              }`}
+                            >
+                              <span className="truncate">{acc.name}</span>
+                              {acc.id === selectedAccountId && (
+                                <span className="w-1.5 h-1.5 rounded-full bg-hp-accent ml-2"></span>
+                              )}
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Vertical Navigation Groups (INTELLIGENCE, ACTION, SIMULATION & PLANNING) */}
+            <div className="flex-1 overflow-y-auto p-2 space-y-4 no-scrollbar">
+              {NORTHSTAR_SIDEBAR_GROUPS.map((group) => (
+                <div key={group.sectionTitle} className="space-y-1">
+                  {!isSidebarCollapsed && (
+                    <span className="text-[9px] font-extrabold text-gray-400 uppercase tracking-widest px-2.5 pt-2 block">
+                      {group.sectionTitle}
+                    </span>
+                  )}
+
+                  {group.items.map((item) => {
+                    const IconComp = ICON_MAP[item.iconName] || LayoutDashboard;
+                    const isActive = item.key === activeFeatureKey;
+
+                    return (
+                      <button
+                        key={item.key}
+                        type="button"
+                        onClick={() => setActiveFeatureKey(item.key)}
+                        title={item.label}
+                        className={`w-full flex items-center space-x-3 px-2.5 py-2 rounded-xl transition text-left ${
+                          isActive
+                            ? 'bg-[#1C2541] text-white border-l-4 border-hp-accent font-bold shadow-md'
+                            : 'text-gray-300 hover:text-white hover:bg-slate-800/60 font-medium'
+                        }`}
+                      >
+                        <IconComp className={`w-4 h-4 flex-shrink-0 ${isActive ? 'text-hp-accent' : 'text-gray-400'}`} />
+                        {!isSidebarCollapsed && (
+                          <div className="truncate">
+                            <span className="text-xs block truncate leading-tight">{item.label}</span>
+                            <span className="text-[10px] text-gray-400 font-normal block truncate leading-tight">
+                              {item.subtitle}
+                            </span>
+                          </div>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+
+            {/* Bottom Footer User Info & Collapse Toggle */}
+            <div className="p-3 border-t border-slate-800/80 bg-[#0B132B] flex items-center justify-between">
+              {!isSidebarCollapsed && (
+                <div className="flex items-center space-x-2 truncate">
+                  <div className="w-7 h-7 bg-slate-800 text-hp-accent rounded-full flex items-center justify-center font-bold text-xs">
+                    {user?.full_name?.substring(0, 1) || 'U'}
+                  </div>
+                  <div className="truncate text-xs">
+                    <span className="font-bold text-gray-200 block truncate">{user?.full_name}</span>
+                    <button onClick={logout} className="text-[10px] text-red-400 hover:underline">
+                      Sign Out
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <button
+                onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+                className="p-1.5 text-gray-400 hover:text-white rounded-lg bg-slate-800/60 hover:bg-slate-800 transition ml-auto"
+                title={isSidebarCollapsed ? 'Expand Sidebar' : 'Collapse Sidebar'}
+              >
+                <ChevronLeft className={`w-4 h-4 transition-transform ${isSidebarCollapsed ? 'rotate-180' : ''}`} />
+              </button>
+            </div>
+
+          </div>
+        </aside>
+
+        {/* ============================================================================== */}
+        {/* RIGHT MAIN CONTENT AREA                                                        */}
+        {/* ============================================================================== */}
+        <div className="flex-1 flex flex-col h-screen overflow-hidden">
+          
+          {/* Top Status Bar (Northstar Header) */}
+          <header className="bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between flex-shrink-0 shadow-xs">
+            <div className="flex items-center space-x-3">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+              <h2 className="text-base font-extrabold text-slate-900 tracking-tight">
+                {selectedAccount ? selectedAccount.name : 'Select Target Account'}
+              </h2>
+              <span className="text-[10px] font-bold bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-mono uppercase border border-slate-200">
+                ACTIVE
+              </span>
+
+              {/* Urgency Score Pill */}
+              <div className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-amber-50 text-amber-800 border border-amber-200/80 text-xs font-bold">
+                <span className="text-[11px]">Urgency Score</span>
+                <span className="bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded font-mono text-[10px]">Contract TBD</span>
+              </div>
+            </div>
+
+            {/* X-Ray Mode Toggle Button */}
+            <div className="flex items-center space-x-3">
+              <button
+                type="button"
+                onClick={() => setIsXRayOn(!isXRayOn)}
+                className={`inline-flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl border text-xs font-bold transition shadow-xs ${
+                  isXRayOn
+                    ? 'bg-hp-navy text-white border-hp-navy shadow-sm'
+                    : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                }`}
+              >
+                <Maximize2 className="w-3.5 h-3.5" />
+                <span>X-Ray: {isXRayOn ? 'ON' : 'OFF'}</span>
+              </button>
+            </div>
+          </header>
+
+          {/* Main Dashboard Canvas Scroll Area */}
+          <main className="flex-1 overflow-y-auto p-8 space-y-6">
+            
+            {error && (
+              <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-r-lg flex items-center space-x-2 text-red-800 text-xs font-semibold">
+                <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0" />
+                <span>{error}</span>
+              </div>
+            )}
+
+            {!selectedAccount ? (
+              <div className="bg-white rounded-2xl p-12 text-center border border-slate-200 shadow-sm">
+                <Building2 className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+                <h3 className="text-base font-bold text-slate-800">No Target Account Selected</h3>
+                <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
+                  Please select an active target company account from the left sidebar to view intelligence feature widgets.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-6">
+                
+                {/* Provenance Map Explorer Table when X-Ray ON */}
+                {isXRayOn && selectedAccount && (
+                  <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-4 animate-fade-in">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+                      <div>
+                        <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
+                          <Database className="w-5 h-5 text-hp-navy" />
+                          <span>All Data Sources & Lineage</span>
+                        </h3>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          Provenance map for {selectedAccount.name} — Field paths, dataset sources, dates, and confidence ratings
+                        </p>
+                      </div>
+
+                      <span className="text-xs font-bold text-hp-navy bg-blue-50 px-3 py-1 rounded-full border border-blue-200 self-start sm:self-auto">
+                        X-Ray Mode Active
+                      </span>
+                    </div>
+
+                    {/* Provenance Filters */}
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
+                      <div className="relative flex-1 max-w-md">
+                        <Search className="w-3.5 h-3.5 text-gray-400 absolute left-3 top-2.5" />
+                        <input
+                          type="text"
+                          value={provenanceSearch}
+                          onChange={(e) => setProvenanceSearch(e.target.value)}
+                          placeholder="Search field path or source..."
+                          className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-hp-navy"
+                        />
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Filter className="w-3.5 h-3.5 text-slate-400 mr-1" />
+                        <select
+                          value={provenanceSourceFilter}
+                          onChange={(e) => setProvenanceSourceFilter(e.target.value)}
+                          className="px-3 py-1.5 bg-slate-50 border border-slate-300 rounded-lg text-xs font-semibold text-slate-700 focus:outline-none"
+                        >
+                          <option value="ALL">All Source Types</option>
+                          <option value="Firmographics">Firmographics (1_Firmographics)</option>
+                          <option value="Hierarchy">Hierarchy (2_Company_Hierarchy)</option>
+                          <option value="Technographics">Technographics (4_Technographics)</option>
+                          <option value="Bombora">Bombora (Intent)</option>
+                          <option value="Google News">Google News RSS</option>
+                          <option value="Job Openings">Job Openings (Source B)</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* Lineage Table */}
+                    <div className="overflow-x-auto rounded-xl border border-slate-200">
+                      <table className="w-full text-left border-collapse text-xs">
+                        <thead>
+                          <tr className="bg-slate-50 border-b border-slate-200 font-extrabold uppercase tracking-wider text-[10px] text-slate-600">
+                            <th className="py-3 px-4">Field Path</th>
+                            <th className="py-3 px-4">Source</th>
+                            <th className="py-3 px-4">Type</th>
+                            <th className="py-3 px-4">Date</th>
+                            <th className="py-3 px-4">Confidence</th>
+                            <th className="py-3 px-4">File Path / Reference</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-200 font-medium">
+                          {filteredProvenanceEntries.map((entry, idx) => (
+                            <tr key={idx} className="hover:bg-slate-50 transition">
+                              <td className="py-3 px-4 font-mono font-bold text-slate-800">{entry.field_path}</td>
+                              <td className="py-3 px-4 text-slate-600">{entry.source}</td>
+                              <td className="py-3 px-4">
+                                <span className="px-2 py-0.5 rounded font-bold text-[10px] bg-slate-100 text-slate-700 border border-slate-200">
+                                  {entry.type}
+                                </span>
+                              </td>
+                              <td className="py-3 px-4 text-slate-500 font-mono">{entry.date}</td>
+                              <td className="py-3 px-4 font-bold text-emerald-700">{entry.confidence}</td>
+                              <td className="py-3 px-4 font-mono text-hp-navy text-[11px] truncate max-w-xs">{entry.url}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {/* ============================================================================== */}
+                {/* EXECUTIVE DASHBOARD VIEW — EXACT NORTHSTAR 5 SECTIONS                          */}
+                {/* ============================================================================== */}
+                {activeFeatureKey === 'executive_dashboard' && (() => {
+                  const summaryWidget = widgets.find(w => w.widget_key === 'exec_summary_card');
+                  const metricsWidget = widgets.find(w => w.widget_key === 'exec_key_metrics');
+                  const hiringWidget = widgets.find(w => w.widget_key === 'exec_hiring_velocity');
+
+                  const summaryData = (summaryWidget && summaryWidget.status === 'available' && summaryWidget.data) ? summaryWidget.data : null;
+                  const metricsData = (metricsWidget && metricsWidget.status === 'available' && metricsWidget.data) ? metricsWidget.data : null;
+                  const hiringData = (hiringWidget && hiringWidget.status === 'available' && hiringWidget.data) ? hiringWidget.data : null;
+                  
+                  const displayName = summaryData?.company_name || selectedAccount.name;
+                  const displayDesc = summaryData?.business_description || `${selectedAccount.name} is an active target company account in the HP Account Intelligence platform. Upload firmographics.csv to view extracted company profile.`;
+                  const domainVal = summaryData?.domain || null;
+                  const locationVal = summaryData?.hq_location || null;
+                  const industryVal = summaryData?.industry_classification || null;
+                  const parentVal = summaryData?.ultimate_parent || null;
+
+                  return (
+                    <div className="space-y-6">
+                      
+                      {/* Section 1: Executive Summary Company Profile Card */}
+                      <div className="bg-white rounded-2xl p-8 border border-slate-200 shadow-sm">
+                        <div className="flex items-start space-x-5">
+                          {/* Clean Building SVG Icon Box (Matching Northstar Image 1) */}
+                          <div className="w-16 h-16 bg-slate-100 border border-slate-200 text-slate-600 rounded-2xl flex items-center justify-center flex-shrink-0">
+                            <Building2 className="w-8 h-8 text-slate-600" />
+                          </div>
+
+                          <div className="flex-1 space-y-3">
+                            <div className="flex items-center space-x-3">
+                              <h2 className="text-2xl font-extrabold text-slate-900 tracking-tight">
+                                {displayName}
+                              </h2>
+                              <span className="text-xs font-bold text-slate-500 bg-slate-100 px-2.5 py-0.5 rounded border border-slate-200 uppercase">
+                                ACTIVE TARGET
+                              </span>
+                            </div>
+
+                            {/* Single Clean Description Render */}
+                            <p className="text-xs text-slate-600 leading-relaxed max-w-5xl">
+                              {displayDesc}
+                            </p>
+
+                            <div className="flex flex-wrap items-center gap-4 text-xs font-medium text-slate-500 pt-3 border-t border-slate-100">
+                              {domainVal && (
+                                <a
+                                  href={domainVal.startsWith('http') ? domainVal : `https://${domainVal}`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="flex items-center space-x-1.5 text-hp-navy font-bold hover:underline"
+                                >
+                                  <Globe className="w-4 h-4 text-hp-navy" />
+                                  <span>{domainVal}</span>
+                                </a>
+                              )}
+                              
+                              {locationVal && (
+                                <div className="flex items-center space-x-1.5 text-slate-700">
+                                  <MapPin className="w-4 h-4 text-hp-navy" />
+                                  <span>{locationVal}</span>
+                                </div>
+                              )}
+
+                              {industryVal && (
+                                <div className="flex items-center space-x-1.5 text-slate-700">
+                                  <Building2 className="w-4 h-4 text-hp-navy" />
+                                  <span className="truncate max-w-md">{industryVal}</span>
+                                </div>
+                              )}
+
+                              {parentVal && (
+                                <div className="flex items-center space-x-1.5 text-slate-700">
+                                  <User className="w-4 h-4 text-hp-navy" />
+                                  <span>Ultimate Parent: <strong className="font-bold text-slate-900">{parentVal}</strong></span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Section 2: Executive Briefing Video Card */}
+                      <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm flex items-center space-x-6">
+                        <div className="relative w-48 h-28 bg-slate-900 rounded-xl overflow-hidden flex items-center justify-center flex-shrink-0 shadow-md">
+                          <div className="w-10 h-10 rounded-full bg-hp-navy text-white flex items-center justify-center shadow-lg">
+                            <Play className="w-5 h-5 ml-0.5" />
+                          </div>
+                        </div>
+
+                        <div className="space-y-1">
+                          <span className="text-[10px] font-extrabold text-hp-blue uppercase tracking-wider block">
+                            WATCH THE EXECUTIVE BRIEFING
+                          </span>
+                          <h3 className="text-base font-extrabold text-slate-900">
+                            HP's Play for {displayName}
+                          </h3>
+                          <p className="text-xs text-slate-500 leading-relaxed">
+                            A personal executive briefing covering the strategic rationale, key triggers, and recommended engagement approach for this account.
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Section 3: KEY METRICS GRID (Exact Northstar 5-Column Style with Citation Popovers) */}
+                      <div className="space-y-3">
+                        <div className="flex items-center space-x-3">
+                          <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700">
+                            KEY METRICS
+                          </h3>
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-hp-navy border border-blue-200">
+                            Verified Datasets Sourced
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+                          
+                          {/* Card 1: Total Employees */}
+                          <div className="relative bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col justify-between h-28">
+                            <span className="text-[11px] font-semibold text-slate-500 block">Total Employees</span>
+                            <span className="text-xl font-extrabold text-slate-900">
+                              {metricsData ? metricsData.employee_count : 'N/A'}
+                            </span>
+                            <div className="flex items-center space-x-1.5 text-[10px] font-bold">
+                              <span className="px-1.5 py-0.5 bg-blue-50 text-hp-navy rounded font-bold border border-blue-200">T1</span>
+                              <button
+                                type="button"
+                                onClick={() => setActiveMetricPopover(activeMetricPopover === 'emp' ? null : 'emp')}
+                                className="inline-flex items-center space-x-1 px-2 py-0.5 rounded bg-blue-50/80 hover:bg-blue-100 text-hp-navy border border-blue-200/80 font-bold transition"
+                              >
+                                <FileText className="w-3 h-3 text-hp-navy" />
+                                <span>Firmographics</span>
+                                <ExternalLink className="w-2.5 h-2.5 ml-0.5" />
+                              </button>
+                            </div>
+
+                            {/* Citation Popover Modal */}
+                            {activeMetricPopover === 'emp' && (
+                              <div className="absolute left-0 bottom-full mb-2 w-72 bg-white border border-slate-200 rounded-2xl shadow-2xl p-4 z-50 animate-fade-in text-xs">
+                                <div className="flex items-center justify-between border-b border-slate-100 pb-2 mb-2">
+                                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                                    PRIMARY SOURCE · FIRMOGRAPHICS
+                                  </span>
+                                  <button onClick={() => setActiveMetricPopover(null)} className="text-slate-400 hover:text-slate-600">
+                                    <X className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                                <p className="text-slate-700 italic font-serif leading-relaxed text-[11px] mb-2">
+                                  “Number Of Employees Range: {metricsData ? metricsData.employee_count : '10001+'} extracted from 1_firmographics.csv for {displayName}.”
+                                </p>
+                                <a
+                                  href={getDownloadUrl('firmographics')}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-hp-navy font-bold text-[10px] inline-flex items-center hover:underline"
+                                >
+                                  <ExternalLink className="w-3 h-3 mr-1" />
+                                  <span>Open source file</span>
+                                </a>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Card 2: Yearly Revenue Range */}
+                          <div className="relative bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col justify-between h-28">
+                            <span className="text-[11px] font-semibold text-slate-500 block">Yearly Revenue Range</span>
+                            <span className="text-xl font-extrabold text-emerald-700">
+                              {metricsData ? metricsData.revenue : 'N/A'}
+                            </span>
+                            <div className="flex items-center space-x-1.5 text-[10px] font-bold">
+                              <span className="px-1.5 py-0.5 bg-blue-50 text-hp-navy rounded font-bold border border-blue-200">T1</span>
+                              <button
+                                type="button"
+                                onClick={() => setActiveMetricPopover(activeMetricPopover === 'rev' ? null : 'rev')}
+                                className="inline-flex items-center space-x-1 px-2 py-0.5 rounded bg-blue-50/80 hover:bg-blue-100 text-hp-navy border border-blue-200/80 font-bold transition"
+                              >
+                                <FileText className="w-3 h-3 text-hp-navy" />
+                                <span>Firmographics</span>
+                                <ExternalLink className="w-2.5 h-2.5 ml-0.5" />
+                              </button>
+                            </div>
+
+                            {/* Citation Popover Modal */}
+                            {activeMetricPopover === 'rev' && (
+                              <div className="absolute left-0 bottom-full mb-2 w-72 bg-white border border-slate-200 rounded-2xl shadow-2xl p-4 z-50 animate-fade-in text-xs">
+                                <div className="flex items-center justify-between border-b border-slate-100 pb-2 mb-2">
+                                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                                    PRIMARY SOURCE · FIRMOGRAPHICS
+                                  </span>
+                                  <button onClick={() => setActiveMetricPopover(null)} className="text-slate-400 hover:text-slate-600">
+                                    <X className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                                <p className="text-slate-700 italic font-serif leading-relaxed text-[11px] mb-2">
+                                  “Yearly Revenue Range: {metricsData ? metricsData.revenue : '10B-100B'} extracted from 1_firmographics.csv for {displayName}.”
+                                </p>
+                                <a
+                                  href={getDownloadUrl('firmographics')}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-hp-navy font-bold text-[10px] inline-flex items-center hover:underline"
+                                >
+                                  <ExternalLink className="w-3 h-3 mr-1" />
+                                  <span>Open source file</span>
+                                </a>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Card 3: Active Open Job Postings */}
+                          <div className="relative bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col justify-between h-28">
+                            <span className="text-[11px] font-semibold text-slate-500 block">Active Open Job Postings</span>
+                            <span className="text-xl font-extrabold text-hp-navy">
+                              {hiringData ? `${hiringData.open_job_count} roles` : 'N/A'}
+                            </span>
+                            <div className="flex items-center space-x-1.5 text-[10px] font-bold">
+                              <span className="px-1.5 py-0.5 bg-blue-50 text-hp-navy rounded font-bold border border-blue-200">T1</span>
+                              <button
+                                type="button"
+                                onClick={() => setActiveMetricPopover(activeMetricPopover === 'jobs' ? null : 'jobs')}
+                                className="inline-flex items-center space-x-1 px-2 py-0.5 rounded bg-blue-50/80 hover:bg-blue-100 text-hp-navy border border-blue-200/80 font-bold transition"
+                              >
+                                <FileText className="w-3 h-3 text-hp-navy" />
+                                <span>Job Openings</span>
+                                <ExternalLink className="w-2.5 h-2.5 ml-0.5" />
+                              </button>
+                            </div>
+
+                            {/* Citation Popover Modal */}
+                            {activeMetricPopover === 'jobs' && (
+                              <div className="absolute left-0 bottom-full mb-2 w-72 bg-white border border-slate-200 rounded-2xl shadow-2xl p-4 z-50 animate-fade-in text-xs">
+                                <div className="flex items-center justify-between border-b border-slate-100 pb-2 mb-2">
+                                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                                    PRIMARY SOURCE · JOB OPENINGS
+                                  </span>
+                                  <button onClick={() => setActiveMetricPopover(null)} className="text-slate-400 hover:text-slate-600">
+                                    <X className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                                <p className="text-slate-700 italic font-serif leading-relaxed text-[11px] mb-2">
+                                  “{hiringData ? hiringData.open_job_count : '100'} active open job postings recorded in job_openings.csv for {displayName}.”
+                                </p>
+                                <a
+                                  href={getDownloadUrl('job_openings')}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-hp-navy font-bold text-[10px] inline-flex items-center hover:underline"
+                                >
+                                  <ExternalLink className="w-3 h-3 mr-1" />
+                                  <span>Open source file</span>
+                                </a>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Card 4: Revenue Growth (Northstar Metric Placeholder) */}
+                          <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col justify-between h-28 opacity-80">
+                            <span className="text-[11px] font-semibold text-slate-500 block">Revenue Growth (YoY)</span>
+                            <span className="text-sm font-bold text-slate-400 italic">Derived TBD</span>
+                            <div className="flex items-center space-x-1 text-[10px] font-bold text-slate-400">
+                              <span className="px-1.5 py-0.5 bg-slate-100 rounded text-slate-600 border border-slate-200">T1</span>
+                              <span>Future Calc</span>
+                            </div>
+                          </div>
+
+                          {/* Card 5: Annual ICT Spend (Northstar Metric Placeholder) */}
+                          <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col justify-between h-28 opacity-80">
+                            <span className="text-[11px] font-semibold text-slate-500 block">Est. Annual ICT Spend</span>
+                            <span className="text-sm font-bold text-slate-400 italic">Derived TBD</span>
+                            <div className="flex items-center space-x-1 text-[10px] font-bold text-slate-400">
+                              <span className="px-1.5 py-0.5 bg-slate-100 rounded text-slate-600 border border-slate-200">T2</span>
+                              <span>Future Calc</span>
+                            </div>
+                          </div>
+
+                        </div>
+                      </div>
+
+                      {/* Section 4: URGENCY SCORE & QUICK STATS (Two-Column Layout) */}
+                      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        
+                        {/* Urgency Score Breakdown Card */}
+                        <div className="lg:col-span-2 bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-4">
+                          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                            <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700 flex items-center gap-2">
+                              <Flame className="w-4 h-4 text-amber-500" />
+                              <span>URGENCY SCORE & DRIVER BREAKDOWN</span>
+                            </h3>
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200">
+                              Derived Contract TBD
+                            </span>
+                          </div>
+
+                          <div className="flex flex-col sm:flex-row items-center gap-6">
+                            <div className="w-24 h-24 rounded-full border-4 border-amber-400 flex flex-col items-center justify-center flex-shrink-0 bg-amber-50/50 shadow-inner">
+                              <span className="text-xl font-extrabold text-slate-800">TBD</span>
+                              <span className="text-[10px] font-bold text-slate-400">/100</span>
+                            </div>
+
+                            <div className="flex-1 w-full space-y-3 text-xs">
+                              {[
+                                {
+                                  id: 'fleet_refresh',
+                                  label: 'Fleet-Refresh & Dual-OS',
+                                  scoreText: 'TBD',
+                                  progressPct: '0%',
+                                  barColor: 'bg-slate-300',
+                                  rationale: `Fleet-refresh & dual-OS driver calculation: TBD for future runtime calculation. Current workforce size: ${metricsData ? metricsData.employee_count : 'Dataset not uploaded'}.`
+                                },
+                                {
+                                  id: 'ai_catalysts',
+                                  label: 'AI / Workstation Catalysts',
+                                  scoreText: 'TBD',
+                                  progressPct: '0%',
+                                  barColor: 'bg-slate-300',
+                                  rationale: `AI/workstation catalysts driver calculation: TBD for future runtime calculation.`
+                                },
+                                {
+                                  id: 'hiring_velocity',
+                                  label: 'Hiring Velocity',
+                                  scoreText: hiringData ? `${hiringData.open_job_count} open roles` : 'TBD',
+                                  progressPct: hiringData ? '80%' : '0%',
+                                  barColor: hiringData ? 'bg-hp-navy' : 'bg-slate-300',
+                                  rationale: `Hiring velocity signal: ${hiringData ? `${hiringData.open_job_count} active open job postings extracted from job_openings.csv.` : 'No job openings dataset uploaded yet.'}`
+                                },
+                                {
+                                  id: 'expansion_triggers',
+                                  label: 'Expansion / Print Triggers',
+                                  scoreText: 'TBD',
+                                  progressPct: '0%',
+                                  barColor: 'bg-slate-300',
+                                  rationale: `Expansion / print triggers driver calculation: TBD for future runtime calculation.`
+                                },
+                                {
+                                  id: 'intent_intensity',
+                                  label: 'Intent Intensity',
+                                  scoreText: 'TBD',
+                                  progressPct: '0%',
+                                  barColor: 'bg-slate-300',
+                                  rationale: `Intent intensity driver calculation: TBD for future runtime calculation.`
+                                }
+                              ].map((driver) => (
+                                <div key={driver.id} className="relative">
+                                  <div className="flex justify-between items-center font-bold text-slate-700 text-[11px] mb-1">
+                                    <div className="flex items-center space-x-1.5">
+                                      <span>{driver.label}</span>
+                                      
+                                      {/* Interactive Info Icon Button */}
+                                      <div className="relative inline-block">
+                                        <button
+                                          type="button"
+                                          onMouseEnter={() => setHoveredDriverTooltip(driver.id)}
+                                          onMouseLeave={() => setHoveredDriverTooltip(null)}
+                                          onClick={() => setActiveDriverPopover(activeDriverPopover === driver.id ? null : driver.id)}
+                                          className="text-slate-400 hover:text-slate-700 p-0.5 rounded transition"
+                                          title="Why this score"
+                                        >
+                                          <Info className="w-3.5 h-3.5" />
+                                        </button>
+
+                                        {/* Hover Tooltip Badge ("Why this score") */}
+                                        {hoveredDriverTooltip === driver.id && activeDriverPopover !== driver.id && (
+                                          <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 z-30 px-2 py-1 bg-slate-900 text-white text-[10px] font-bold rounded shadow-md whitespace-nowrap pointer-events-none">
+                                            Why this score
+                                            <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-900"></div>
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+
+                                    <span className="font-mono text-slate-500 font-bold">{driver.scoreText}</span>
+                                  </div>
+
+                                  {/* Progress Bar */}
+                                  <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                                    <div className={`${driver.barColor} h-2 rounded-full transition-all duration-500`} style={{ width: driver.progressPct }}></div>
+                                  </div>
+
+                                  {/* Popover Card Modal */}
+                                  {activeDriverPopover === driver.id && (
+                                    <div className="absolute left-0 top-full mt-2 w-80 bg-white border border-slate-200 rounded-2xl shadow-2xl p-4 z-50 animate-fade-in text-xs font-medium">
+                                      <div className="flex justify-between items-center border-b border-slate-100 pb-2 mb-2">
+                                        <h4 className="font-extrabold text-slate-900 text-xs">{driver.label}</h4>
+                                        <button
+                                          type="button"
+                                          onClick={() => setActiveDriverPopover(null)}
+                                          className="text-slate-400 hover:text-slate-600 rounded p-0.5"
+                                        >
+                                          <X className="w-4 h-4" />
+                                        </button>
+                                      </div>
+                                      <p className="text-slate-600 leading-relaxed text-[11px]">
+                                        {driver.rationale}
+                                      </p>
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Quick Stats Card */}
+                        <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm flex flex-col justify-between space-y-4">
+                          <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700 border-b border-slate-100 pb-3">
+                            QUICK STATS
+                          </h3>
+
+                          <div className="space-y-3 text-xs font-bold text-slate-800">
+                            <div className="flex items-center space-x-3 p-2.5 rounded-xl bg-slate-50">
+                              <div className="p-2 bg-blue-100 text-hp-blue rounded-lg">
+                                <Lightbulb className="w-4 h-4" />
+                              </div>
+                              <div>
+                                <span className="text-base font-extrabold text-slate-900 block">5</span>
+                                <span className="text-[10px] text-slate-500 font-medium">Solution Narratives</span>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center space-x-3 p-2.5 rounded-xl bg-slate-50">
+                              <div className="p-2 bg-purple-100 text-purple-700 rounded-lg">
+                                <Users className="w-4 h-4" />
+                              </div>
+                              <div>
+                                <span className="text-base font-extrabold text-slate-900 block">
+                                  {widgets.find(w => w.widget_key === 'stakeholder_contacts_grid')?.status === 'available' ? '8' : '0'}
+                                </span>
+                                <span className="text-[10px] text-slate-500 font-medium">Stakeholders Mapped</span>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center space-x-3 p-2.5 rounded-xl bg-slate-50">
+                              <div className="p-2 bg-red-100 text-red-600 rounded-lg">
+                                <Flame className="w-4 h-4" />
+                              </div>
+                              <div>
+                                <span className="text-base font-extrabold text-slate-900 block">
+                                  {hiringData ? hiringData.open_job_count : '0'}
+                                </span>
+                                <span className="text-[10px] text-slate-500 font-medium">Active Urgent Signals</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                      </div>
+
+                      {/* Section 5: STRATEGIC PRIORITIES (Catalyst Cards Placeholder) */}
+                      <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-4">
+                        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                          <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700 flex items-center gap-2">
+                            <Target className="w-4 h-4 text-hp-navy" />
+                            <span>STRATEGIC PRIORITIES & CATALYSTS</span>
+                          </h3>
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-purple-50 text-purple-800 border border-purple-200">
+                            Inferred Contract TBD
+                          </span>
+                        </div>
+
+                        <div className="bg-slate-50 border border-dashed border-slate-200 rounded-xl p-8 text-center space-y-2">
+                          <div className="w-10 h-10 rounded-full bg-purple-100 text-purple-700 flex items-center justify-center mx-auto">
+                            <Sparkles className="w-5 h-5" />
+                          </div>
+                          <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                            Strategic Priority Catalyst Generation Placeholder
+                          </h4>
+                          <p className="text-[11px] text-slate-500 max-w-md mx-auto leading-relaxed">
+                            AI-synthesized strategic catalysts, evidence claims, and filing citations for <strong className="text-slate-800">{displayName}</strong> will be generated in Step 7.2+.
+                          </p>
+                        </div>
+                      </div>
+
+                    </div>
+                  );
+                })()}
+
+                {/* Live Signals View (Feature Key: recent_news_signals) */}
+                {activeFeatureKey === 'recent_news_signals' && (() => {
+                  const feedWidget = widgets.find(w => w.widget_key === 'news_signals_feed');
+                  const feedData = (feedWidget && feedWidget.status === 'available' && feedWidget.data) ? feedWidget.data : null;
+                  const signals = feedData?.signals || [];
+
+                  const getCleanCategoryBadge = (rawType: string) => {
+                    const typeClean = (rawType || '').toLowerCase().trim();
+                    if (['launch', 'launches', 'is_developing', 'product', 'technology'].includes(typeClean)) {
+                      return <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">Technology</span>;
+                    }
+                    if (['partners_with', 'leadership', 'attends_event', 'strategic'].includes(typeClean)) {
+                      return <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200">Strategic</span>;
+                    }
+                    if (['has_earnings', 'financing_type', 'funding', 'invests_into', 'financial'].includes(typeClean)) {
+                      return <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">Financial</span>;
+                    }
+                    if (['identified_as_competitor_of', 'competitive'].includes(typeClean)) {
+                      return <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">Competitive</span>;
+                    }
+                    if (['acquires', 'sells_assets_to', 'm&a'].includes(typeClean)) {
+                      return <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-red-50 text-red-700 border border-red-200">Strategic M&A</span>;
+                    }
+                    return <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200 capitalize">{typeClean || 'Signal'}</span>;
+                  };
+
+                  const filteredSignals = signals.filter((sig: any) => {
+                    // 1. Signal Type Filter
+                    if (signalTypeFilter !== 'ALL') {
+                      const rawT = (sig.event_type || '').toLowerCase();
+                      if (signalTypeFilter === 'Technology' && !['launch', 'launches', 'is_developing', 'product', 'technology'].includes(rawT)) return false;
+                      if (signalTypeFilter === 'Strategic' && !['partners_with', 'leadership', 'attends_event', 'strategic', 'acquires', 'sells_assets_to'].includes(rawT)) return false;
+                      if (signalTypeFilter === 'Financial' && !['has_earnings', 'financing_type', 'funding', 'invests_into', 'financial'].includes(rawT)) return false;
+                      if (signalTypeFilter === 'Competitive' && !['identified_as_competitor_of', 'competitive'].includes(rawT)) return false;
+                    }
+
+                    // 2. Date Range Filter
+                    if (dateRangeFilter !== 'All time' && sig.event_date && sig.event_date !== 'N/A') {
+                      try {
+                        const sigTime = new Date(sig.event_date).getTime();
+                        const validTimes = signals.map((s: any) => (s.event_date && s.event_date !== 'N/A') ? new Date(s.event_date).getTime() : 0).filter((t: number) => !isNaN(t) && t > 0);
+                        const maxTime = validTimes.length > 0 ? Math.max(...validTimes) : Date.now();
+                        
+                        const diffDays = (maxTime - sigTime) / (1000 * 60 * 60 * 24);
+                        if (dateRangeFilter === 'Last 7 days' && diffDays > 7) return false;
+                        if (dateRangeFilter === 'Last 30 days' && diffDays > 30) return false;
+                        if (dateRangeFilter === 'Last 90 days' && diffDays > 90) return false;
+                      } catch (e) {
+                        // Keep if date parse fails
+                      }
+                    }
+
+                    return true;
+                  });
+
+                  return (
+                    <div className="space-y-6">
+                      
+                      {/* Header Bar */}
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                        <div>
+                          <h2 className="text-xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
+                            <Newspaper className="w-5 h-5 text-hp-navy" />
+                            <span>Live Signals</span>
+                          </h2>
+                          <p className="text-xs text-slate-500 mt-0.5">
+                            Real-time intelligence triggers for {selectedAccount.name}
+                          </p>
+                        </div>
+
+                        <div className="flex items-center space-x-3">
+                          <span className="px-3 py-1 bg-white border border-slate-200 shadow-xs rounded-full text-slate-700 font-bold text-xs">
+                            {filteredSignals.length} Signals
+                          </span>
+
+                          <button
+                            type="button"
+                            onClick={() => setIsFilterDrawerOpen(!isFilterDrawerOpen)}
+                            className={`inline-flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl border text-xs font-bold transition shadow-xs ${
+                              isFilterDrawerOpen
+                                ? 'bg-hp-navy text-white border-hp-navy shadow-sm'
+                                : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                            }`}
+                          >
+                            <Filter className="w-3.5 h-3.5" />
+                            <span>Filters</span>
+                            <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isFilterDrawerOpen ? 'rotate-180' : ''}`} />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Expanded Interactive Filter Drawer (Matching Image 1) */}
+                      {isFilterDrawerOpen && (
+                        <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-5 animate-fade-in text-xs font-medium">
+                          {/* SIGNAL TYPE */}
+                          <div className="space-y-2">
+                            <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 block">
+                              SIGNAL TYPE
+                            </span>
+                            <div className="flex flex-wrap items-center gap-2">
+                              {['ALL', 'Financial', 'Technology', 'Strategic', 'Competitive'].map((st) => (
+                                <button
+                                  key={st}
+                                  type="button"
+                                  onClick={() => setSignalTypeFilter(st)}
+                                  className={`px-3 py-1 rounded-full border font-bold text-xs transition ${
+                                    signalTypeFilter === st
+                                      ? 'bg-hp-navy text-white border-hp-navy shadow-xs'
+                                      : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                                  }`}
+                                >
+                                  {st}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* MINIMUM SCORE */}
+                          <div className="space-y-2">
+                            <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 block">
+                              MINIMUM SCORE (Derived TBD)
+                            </span>
+                            <div className="flex flex-wrap items-center gap-2">
+                              {['All', '4+', '6+', '8+'].map((score) => (
+                                <button
+                                  key={score}
+                                  type="button"
+                                  className="px-3 py-1 rounded-lg border font-bold text-xs bg-slate-50 text-slate-400 border-slate-200 cursor-not-allowed"
+                                  title="Score filtering will be enabled when derived scoring runs in Step 8"
+                                >
+                                  {score}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* DATE RANGE */}
+                          <div className="space-y-2">
+                            <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 block">
+                              DATE RANGE
+                            </span>
+                            <div className="flex flex-wrap items-center gap-2">
+                              {['All time', 'Last 7 days', 'Last 30 days', 'Last 90 days'].map((range) => (
+                                <button
+                                  key={range}
+                                  type="button"
+                                  onClick={() => setDateRangeFilter(range)}
+                                  className={`px-3 py-1 rounded-lg border font-bold text-xs transition ${
+                                    dateRangeFilter === range
+                                      ? 'bg-hp-navy text-white border-hp-navy shadow-xs'
+                                      : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                                  }`}
+                                >
+                                  {range}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Signals Stream (Full Width Cards) */}
+                      {filteredSignals.length === 0 ? (
+                        <div className="bg-white rounded-2xl p-12 text-center border border-slate-200 shadow-sm">
+                          <Newspaper className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+                          <h3 className="text-base font-bold text-slate-800">No Live Signals Match Filter</h3>
+                          <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
+                            Try adjusting or resetting the signal type and date range filters above.
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="space-y-4">
+                          {filteredSignals.map((sig: any, idx: number) => (
+                            <div key={idx} className="bg-white rounded-2xl p-6 border border-slate-200/90 shadow-sm space-y-3.5 hover:border-slate-300 transition">
+                              
+                              {/* Top Meta Row */}
+                              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2.5">
+                                <div className="flex items-center space-x-2">
+                                  {getCleanCategoryBadge(sig.event_type)}
+                                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200">
+                                    Impact: Derived TBD
+                                  </span>
+                                  <span className="text-xs font-mono text-slate-400">
+                                    {sig.event_date || 'Date N/A'}
+                                  </span>
+                                </div>
+
+                                <div className="flex items-center space-x-1.5">
+                                  <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
+                                    Relevance: Derived TBD
+                                  </span>
+                                </div>
+                              </div>
+
+                              {/* Headline */}
+                              <div>
+                                <span className="text-[11px] font-extrabold text-slate-400 uppercase tracking-wider block mb-1">
+                                  WHAT'S NEW:
+                                </span>
+                                <h3 className="text-sm font-extrabold text-slate-900 leading-snug">
+                                  {sig.event_headline}
+                                </h3>
+                              </div>
+
+                              {/* Implication for HP Box */}
+                              <div className="bg-blue-50/70 border border-blue-200/80 rounded-xl p-3.5 text-xs text-blue-950 space-y-1">
+                                <div className="flex items-center space-x-2">
+                                  <span className="font-extrabold text-hp-navy text-[11px]">
+                                    Implication for HP:
+                                  </span>
+                                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-200">
+                                    Inferred TBD
+                                  </span>
+                                </div>
+                                <p className="text-[11px] leading-relaxed text-slate-500 italic">
+                                  AI-synthesized HP sales angle and portfolio implication TBD for future runtime generation.
+                                </p>
+                              </div>
+
+                              {/* Article Excerpt Paragraph */}
+                              {sig.article_detail && (
+                                <p className="text-xs text-slate-600 leading-relaxed font-normal pt-1">
+                                  {sig.article_detail}
+                                </p>
+                              )}
+
+                              {/* Source Button */}
+                              {sig.source_url ? (
+                                <div className="pt-1">
+                                  <a
+                                    href={sig.source_url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 transition"
+                                  >
+                                    <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+                                    <span className="truncate max-w-xs">{selectedAccount.name} Source Article</span>
+                                    <ExternalLink className="w-3 h-3 ml-0.5" />
+                                  </a>
+                                </div>
+                              ) : (
+                                <div className="pt-1 text-[11px] text-slate-400 font-medium italic">
+                                  Source: Source B News Events dataset (No external article URL provided)
+                                </div>
+                              )}
+
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                    </div>
+                  );
+                })()}
+
+                {/* Intent & Demand Signals View (Feature Key: intent_demand_signals) */}
+                {activeFeatureKey === 'intent_demand_signals' && (() => {
+                  const topicsWidget = widgets.find(w => w.widget_key === 'intent_topics_table');
+                  const hiringWidget = widgets.find(w => w.widget_key === 'intent_hiring_demand');
+
+                  const topicsData = (topicsWidget && topicsWidget.status === 'available' && topicsWidget.data) ? topicsWidget.data : null;
+                  const hiringData = (hiringWidget && hiringWidget.status === 'available' && hiringWidget.data) ? hiringWidget.data : null;
+
+                  const topicsList = topicsData?.topics || [];
+                  const openJobCount = hiringData?.open_job_count || 0;
+                  const seniorityBreakdown = hiringData?.seniority_breakdown || {};
+
+                  const filteredTopics = topicsList.filter((t: any) => {
+                    if (intentSearch && !t.topic_name.toLowerCase().includes(intentSearch.toLowerCase().trim())) {
+                      return false;
+                    }
+                    if (intentScoreFilter === '70+' && t.composite_score < 70) return false;
+                    if (intentScoreFilter === '85+' && t.composite_score < 85) return false;
+                    return true;
+                  });
+
+                  // Categorize topics into Northstar Domain Groups
+                  const aiGroup = filteredTopics.filter((t: any) => 
+                    ['ai', 'machine learning', 'data insights', 'analytics', 'chatgpt', 'openai'].some(k => t.topic_name.toLowerCase().includes(k))
+                  );
+                  const secGroup = filteredTopics.filter((t: any) => 
+                    ['security', 'privacy', 'authentication', 'tokenization', 'protection', 'aml', 'risk'].some(k => t.topic_name.toLowerCase().includes(k))
+                  );
+                  const finGroup = filteredTopics.filter((t: any) => 
+                    ['financial', 'visa', 'mastercard', 'mortgage', 'hedging', 'trading', 'investing', 'loan', 'credit', 'payment'].some(k => t.topic_name.toLowerCase().includes(k))
+                  );
+                  const collabGroup = filteredTopics.filter((t: any) => 
+                    ['workplace', 'teams', 'collaboration', 'working', 'hr', 'recruitment', 'talent', 'staffing', 'leadership', 'training', 'employee'].some(k => t.topic_name.toLowerCase().includes(k))
+                  );
+                  const cloudGroup = filteredTopics.filter((t: any) => 
+                    ['cloud', 'data center', 'server', 'postgres', 'aws', 'network', 'hardware', 'ai chips'].some(k => t.topic_name.toLowerCase().includes(k))
+                  );
+
+                  const categorizedKeys = new Set([...aiGroup, ...secGroup, ...finGroup, ...collabGroup, ...cloudGroup].map(t => t.topic_name));
+                  const otherGroup = filteredTopics.filter((t: any) => !categorizedKeys.has(t.topic_name));
+
+                  const topChartTopics = filteredTopics.slice(0, 10);
+
+                  return (
+                    <div className="space-y-6">
+                      
+                      {/* Header Banner (Matching Image 1) */}
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                        <div>
+                          <h2 className="text-xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
+                            <TrendingUp className="w-5 h-5 text-hp-navy" />
+                            <span>Intent & Demand Signals</span>
+                          </h2>
+                          <p className="text-xs text-slate-500 mt-0.5">
+                            5 HP category signals • {topicsList.length} broader Bombora intent topics for {selectedAccount?.name}
+                          </p>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2 text-xs font-bold">
+                          <span className="px-3 py-1 bg-[#0096D6]/10 text-hp-navy border border-[#0096D6]/20 rounded-full">
+                            Avg HP-category intent: Derived TBD
+                          </span>
+                          <span className="px-3 py-1 bg-slate-100 text-slate-600 border border-slate-200 rounded-full font-mono text-[11px]">
+                            Powered by Bombora
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* "So What for HP" Blue Insights Banner */}
+                      <div className="bg-blue-50/80 border border-blue-200/90 rounded-2xl p-6 text-xs text-blue-950 space-y-2 shadow-xs">
+                        <div className="flex items-center justify-between border-b border-blue-200/60 pb-2">
+                          <h3 className="text-xs font-black uppercase tracking-wider text-hp-navy flex items-center gap-2">
+                            <Sparkles className="w-4 h-4 text-hp-navy" />
+                            <span>SO WHAT FOR HP</span>
+                          </h3>
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-purple-100 text-purple-800 border border-purple-200">
+                            Inferred TBD
+                          </span>
+                        </div>
+                        <p className="text-[11px] leading-relaxed text-slate-700 font-medium">
+                          AI-synthesized intent topic categorization, low-relevance topic filtering, and HP play alignment TBD for future runtime generation in Step 8.
+                        </p>
+                      </div>
+
+                      {/* Section 1: HP Category Intent Scores Vertical Bar Chart (Matching Image 1) */}
+                      <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-4">
+                        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                          <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700 flex items-center gap-2">
+                            <Layers className="w-4 h-4 text-hp-navy" />
+                            <span>HP CATEGORY INTENT SCORES</span>
+                          </h3>
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200">
+                            Derived Contract TBD
+                          </span>
+                        </div>
+
+                        <div className="flex items-end space-x-8 h-48 pt-6 pb-2 px-8 border-b border-slate-200 relative">
+                          <div className="absolute left-2 top-2 bottom-6 flex flex-col justify-between text-[10px] font-mono text-slate-400">
+                            <span>100</span>
+                            <span>75</span>
+                            <span>50</span>
+                            <span>25</span>
+                            <span>0</span>
+                          </div>
+
+                          {[
+                            { name: 'Print', color: 'bg-amber-500' },
+                            { name: '3D', color: 'bg-pink-500' },
+                            { name: 'PC', color: 'bg-hp-navy' },
+                            { name: 'Workstation', color: 'bg-indigo-600' },
+                            { name: 'Poly', color: 'bg-emerald-500' }
+                          ].map((cat) => (
+                            <div key={cat.name} className="flex-1 flex flex-col items-center h-full justify-end group">
+                              <span className="text-[10px] font-bold text-slate-400 mb-1 opacity-0 group-hover:opacity-100 transition">TBD</span>
+                              <div className="w-12 bg-slate-100 rounded-t-lg h-full flex items-end justify-center border border-dashed border-slate-200 relative">
+                                <div className={`w-full ${cat.color} rounded-t-lg h-2 transition-all duration-300 opacity-60`}></div>
+                              </div>
+                              <span className="text-xs font-bold text-slate-700 mt-2">{cat.name}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Section 2: 5 HP Category Play Cards Grid */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+                        {[
+                          { 
+                            name: 'Print', 
+                            play: 'HP Enterprise Printing & Managed Print Services', 
+                            keywords: ['launches', 'digitization initiative', 'cost reduction'] 
+                          },
+                          { 
+                            name: '3D', 
+                            play: 'HP Multi Jet Fusion (3D)', 
+                            keywords: ['manufacturing innovation', 'is developing', 'supply chain'] 
+                          },
+                          { 
+                            name: 'PC', 
+                            play: 'HP Elite & Pro PCs', 
+                            keywords: ['fleet management', 'remote work expansion', 'hardware refresh'] 
+                          },
+                          { 
+                            name: 'Workstation', 
+                            play: 'Z by HP Workstations', 
+                            keywords: ['AI/ML expansion', 'data science growth', 'engineering'] 
+                          },
+                          { 
+                            name: 'Poly', 
+                            play: 'Poly Collaboration Hardware', 
+                            keywords: ['UC/collaboration', 'Zoom Rooms deployment', 'conferencing'] 
+                          }
+                        ].map((cat) => (
+                          <div key={cat.name} className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-3.5 flex flex-col justify-between hover:border-slate-300 transition">
+                            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                              <span className="text-sm font-extrabold text-slate-900">{cat.name}</span>
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200">
+                                Derived TBD
+                              </span>
+                            </div>
+
+                            <div>
+                              <span className="text-2xl font-black text-slate-400 block">TBD</span>
+                              <span className="text-[10px] text-slate-400 font-bold block">/100 Intent Score</span>
+                            </div>
+
+                            <div className="space-y-1.5 pt-1 border-t border-slate-100 text-[10px]">
+                              <span className="text-slate-400 font-bold uppercase block">SIGNAL TOPICS</span>
+                              <div className="flex flex-wrap gap-1">
+                                {cat.keywords.map((kw, i) => (
+                                  <span key={i} className="px-1.5 py-0.5 bg-slate-100 text-slate-700 rounded font-medium">
+                                    {kw}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+
+                            <div className="space-y-1 pt-1 border-t border-slate-100 text-[10px]">
+                              <span className="text-slate-400 font-bold uppercase block">MAPPED HP PLAY</span>
+                              <span className="font-bold text-hp-navy block leading-tight">{cat.play}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Section 3: Broader Intent Topics Section (Horizontal Bar Chart + Accordions matching Images 1 & 2) */}
+                      <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-6">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+                          <div>
+                            <h3 className="text-sm font-extrabold uppercase tracking-wider text-slate-800 flex items-center gap-2">
+                              <Database className="w-4 h-4 text-hp-navy" />
+                              <span>BROADER INTENT TOPICS ({topicsList.length})</span>
+                            </h3>
+                            <p className="text-xs text-slate-500 mt-0.5">
+                              Extracted directly from Bombora intent score export (11_intent_score.csv)
+                            </p>
+                          </div>
+
+                          {/* Filter Bar */}
+                          <div className="flex items-center space-x-2 text-xs">
+                            <div className="relative">
+                              <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-2.5" />
+                              <input
+                                type="text"
+                                value={intentSearch}
+                                onChange={(e) => setIntentSearch(e.target.value)}
+                                placeholder="Filter topics..."
+                                className="pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-300 rounded-xl text-xs focus:outline-none focus:ring-1 focus:ring-hp-navy w-44"
+                              />
+                            </div>
+
+                            <div className="flex items-center space-x-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
+                              {['ALL', '70+', '85+'].map((sc) => (
+                                <button
+                                  key={sc}
+                                  type="button"
+                                  onClick={() => setIntentScoreFilter(sc)}
+                                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition ${
+                                    intentScoreFilter === sc
+                                      ? 'bg-hp-navy text-white shadow-xs'
+                                      : 'text-slate-600 hover:text-slate-900'
+                                  }`}
+                                >
+                                  {sc}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Top Signal Topics Horizontal Bar Chart (Matching Image 1) */}
+                        {topChartTopics.length > 0 && (
+                          <div className="space-y-3 bg-slate-50/60 p-5 rounded-2xl border border-slate-200/80">
+                            <span className="text-[11px] font-bold text-slate-500 block uppercase tracking-wider">
+                              Top Signal Topics (Ranked by Composite Score)
+                            </span>
+
+                            <div className="space-y-2 pt-2">
+                              {topChartTopics.map((item: any, i: number) => (
+                                <div key={i} className="flex items-center space-x-3 text-xs relative group">
+                                  <span className="w-64 text-right truncate font-bold text-slate-800 text-[11px] flex-shrink-0">
+                                    {item.topic_name}
+                                  </span>
+
+                                  <div className="flex-1 bg-slate-200 h-5 rounded-md overflow-hidden relative cursor-pointer"
+                                       onMouseEnter={() => setHoveredBarTopic({ name: item.topic_name, score: item.composite_score })}
+                                       onMouseLeave={() => setHoveredBarTopic(null)}
+                                  >
+                                    <div 
+                                      className="bg-hp-navy h-full rounded-md transition-all duration-300 hover:bg-hp-blue"
+                                      style={{ width: `${Math.min(100, Math.max(0, item.composite_score))}%` }}
+                                    ></div>
+                                  </div>
+
+                                  {/* Hover Tooltip Card (Matching Image 2) */}
+                                  {hoveredBarTopic?.name === item.topic_name && (
+                                    <div className="absolute right-12 bottom-full mb-1 bg-white border border-slate-300 rounded-xl p-3 shadow-2xl z-50 text-xs font-medium w-64 animate-fade-in pointer-events-none">
+                                      <span className="font-extrabold text-slate-900 block truncate">{item.topic_name}</span>
+                                      <span className="text-[11px] text-hp-navy font-bold block mt-0.5">
+                                        Composite score: {item.composite_score}/100 — Bombora
+                                      </span>
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+
+                            <div className="flex justify-between text-[10px] font-mono text-slate-400 pl-64 pt-2 border-t border-slate-200">
+                              <span>0</span>
+                              <span>25</span>
+                              <span>50</span>
+                              <span>75</span>
+                              <span>100</span>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Grouped Intent Topics Category Cards (Matching Images 1 & 2) */}
+                        <div className="space-y-4 pt-2">
+                          
+                          {/* 1. AI & Compute Group */}
+                          {aiGroup.length > 0 && (
+                            <div className="bg-white rounded-2xl p-5 border border-purple-200 shadow-xs space-y-3">
+                              <div className="flex items-center justify-between border-b border-purple-100 pb-2.5">
+                                <div className="flex items-center space-x-2">
+                                  <span className="px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-purple-100 text-purple-800 border border-purple-200">
+                                    AI & Compute
+                                  </span>
+                                  <span className="text-xs font-semibold text-slate-500">
+                                    {aiGroup.length} topics • up to {Math.max(...aiGroup.map((x: any) => x.composite_score))}/100
+                                  </span>
+                                </div>
+                              </div>
+
+                              <div className="space-y-2">
+                                {aiGroup.map((item: any, idx: number) => (
+                                  <div key={idx} className="flex items-center justify-between text-xs py-1 px-2 rounded-lg hover:bg-purple-50/50 transition">
+                                    <div className="flex items-center space-x-3 font-semibold text-slate-800 truncate pr-2">
+                                      <span className="text-slate-400 font-mono text-[11px] w-5 text-right">{idx + 1}</span>
+                                      <span className="capitalize truncate">{item.topic_name}</span>
+                                    </div>
+                                    <div className="flex items-center space-x-3 flex-shrink-0">
+                                      <div className="w-24 bg-slate-200 h-1.5 rounded-full overflow-hidden">
+                                        <div className="bg-purple-600 h-1.5 rounded-full" style={{ width: `${item.composite_score}%` }}></div>
+                                      </div>
+                                      <span className="font-mono font-bold text-slate-900 w-8 text-right">{item.composite_score}</span>
+                                      <span className="text-[10px] text-slate-400 font-medium">Bombora</span>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* 2. Security & Infrastructure Group */}
+                          {secGroup.length > 0 && (
+                            <div className="bg-white rounded-2xl p-5 border border-red-200 shadow-xs space-y-3">
+                              <div className="flex items-center justify-between border-b border-red-100 pb-2.5">
+                                <div className="flex items-center space-x-2">
+                                  <span className="px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-red-100 text-red-800 border border-red-200">
+                                    Security & Infrastructure
+                                  </span>
+                                  <span className="text-xs font-semibold text-slate-500">
+                                    {secGroup.length} topics • up to {Math.max(...secGroup.map((x: any) => x.composite_score))}/100
+                                  </span>
+                                </div>
+                              </div>
+
+                              <div className="space-y-2">
+                                {secGroup.map((item: any, idx: number) => (
+                                  <div key={idx} className="flex items-center justify-between text-xs py-1 px-2 rounded-lg hover:bg-red-50/50 transition">
+                                    <div className="flex items-center space-x-3 font-semibold text-slate-800 truncate pr-2">
+                                      <span className="text-slate-400 font-mono text-[11px] w-5 text-right">{idx + 1}</span>
+                                      <span className="capitalize truncate">{item.topic_name}</span>
+                                    </div>
+                                    <div className="flex items-center space-x-3 flex-shrink-0">
+                                      <div className="w-24 bg-slate-200 h-1.5 rounded-full overflow-hidden">
+                                        <div className="bg-red-600 h-1.5 rounded-full" style={{ width: `${item.composite_score}%` }}></div>
+                                      </div>
+                                      <span className="font-mono font-bold text-slate-900 w-8 text-right">{item.composite_score}</span>
+                                      <span className="text-[10px] text-slate-400 font-medium">Bombora</span>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* 3. Financial Services Group */}
+                          {finGroup.length > 0 && (
+                            <div className="bg-white rounded-2xl p-5 border border-emerald-200 shadow-xs space-y-3">
+                              <div className="flex items-center justify-between border-b border-emerald-100 pb-2.5">
+                                <div className="flex items-center space-x-2">
+                                  <span className="px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                    Financial Services & Fintech
+                                  </span>
+                                  <span className="text-xs font-semibold text-slate-500">
+                                    {finGroup.length} topics • up to {Math.max(...finGroup.map((x: any) => x.composite_score))}/100
+                                  </span>
+                                </div>
+                              </div>
+
+                              <div className="space-y-2">
+                                {finGroup.map((item: any, idx: number) => (
+                                  <div key={idx} className="flex items-center justify-between text-xs py-1 px-2 rounded-lg hover:bg-emerald-50/50 transition">
+                                    <div className="flex items-center space-x-3 font-semibold text-slate-800 truncate pr-2">
+                                      <span className="text-slate-400 font-mono text-[11px] w-5 text-right">{idx + 1}</span>
+                                      <span className="capitalize truncate">{item.topic_name}</span>
+                                    </div>
+                                    <div className="flex items-center space-x-3 flex-shrink-0">
+                                      <div className="w-24 bg-slate-200 h-1.5 rounded-full overflow-hidden">
+                                        <div className="bg-emerald-600 h-1.5 rounded-full" style={{ width: `${item.composite_score}%` }}></div>
+                                      </div>
+                                      <span className="font-mono font-bold text-slate-900 w-8 text-right">{item.composite_score}</span>
+                                      <span className="text-[10px] text-slate-400 font-medium">Bombora</span>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* 4. Collaboration & Workplace Group */}
+                          {collabGroup.length > 0 && (
+                            <div className="bg-white rounded-2xl p-5 border border-green-200 shadow-xs space-y-3">
+                              <div className="flex items-center justify-between border-b border-green-100 pb-2.5">
+                                <div className="flex items-center space-x-2">
+                                  <span className="px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-green-100 text-green-800 border border-green-200">
+                                    Collaboration & Workplace
+                                  </span>
+                                  <span className="text-xs font-semibold text-slate-500">
+                                    {collabGroup.length} topics • up to {Math.max(...collabGroup.map((x: any) => x.composite_score))}/100
+                                  </span>
+                                </div>
+                              </div>
+
+                              <div className="space-y-2">
+                                {collabGroup.map((item: any, idx: number) => (
+                                  <div key={idx} className="flex items-center justify-between text-xs py-1 px-2 rounded-lg hover:bg-green-50/50 transition">
+                                    <div className="flex items-center space-x-3 font-semibold text-slate-800 truncate pr-2">
+                                      <span className="text-slate-400 font-mono text-[11px] w-5 text-right">{idx + 1}</span>
+                                      <span className="capitalize truncate">{item.topic_name}</span>
+                                    </div>
+                                    <div className="flex items-center space-x-3 flex-shrink-0">
+                                      <div className="w-24 bg-slate-200 h-1.5 rounded-full overflow-hidden">
+                                        <div className="bg-green-600 h-1.5 rounded-full" style={{ width: `${item.composite_score}%` }}></div>
+                                      </div>
+                                      <span className="font-mono font-bold text-slate-900 w-8 text-right">{item.composite_score}</span>
+                                      <span className="text-[10px] text-slate-400 font-medium">Bombora</span>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* 5. Cloud & Infrastructure Group */}
+                          {cloudGroup.length > 0 && (
+                            <div className="bg-white rounded-2xl p-5 border border-blue-200 shadow-xs space-y-3">
+                              <div className="flex items-center justify-between border-b border-blue-100 pb-2.5">
+                                <div className="flex items-center space-x-2">
+                                  <span className="px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-blue-100 text-blue-800 border border-blue-200">
+                                    Cloud & Infrastructure
+                                  </span>
+                                  <span className="text-xs font-semibold text-slate-500">
+                                    {cloudGroup.length} topics • up to {Math.max(...cloudGroup.map((x: any) => x.composite_score))}/100
+                                  </span>
+                                </div>
+                              </div>
+
+                              <div className="space-y-2">
+                                {cloudGroup.map((item: any, idx: number) => (
+                                  <div key={idx} className="flex items-center justify-between text-xs py-1 px-2 rounded-lg hover:bg-blue-50/50 transition">
+                                    <div className="flex items-center space-x-3 font-semibold text-slate-800 truncate pr-2">
+                                      <span className="text-slate-400 font-mono text-[11px] w-5 text-right">{idx + 1}</span>
+                                      <span className="capitalize truncate">{item.topic_name}</span>
+                                    </div>
+                                    <div className="flex items-center space-x-3 flex-shrink-0">
+                                      <div className="w-24 bg-slate-200 h-1.5 rounded-full overflow-hidden">
+                                        <div className="bg-hp-navy h-1.5 rounded-full" style={{ width: `${item.composite_score}%` }}></div>
+                                      </div>
+                                      <span className="font-mono font-bold text-slate-900 w-8 text-right">{item.composite_score}</span>
+                                      <span className="text-[10px] text-slate-400 font-medium">Bombora</span>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* 6. Other / Low Relevance Group (With Expand / Collapse Toggle matching Image 2) */}
+                          {otherGroup.length > 0 && (
+                            <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs space-y-3">
+                              <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
+                                <div className="flex items-center space-x-2">
+                                  <span className="px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-slate-100 text-slate-700 border border-slate-200">
+                                    Other / Low Relevance
+                                  </span>
+                                  <span className="text-xs font-semibold text-slate-500">
+                                    {otherGroup.length} topics • up to {Math.max(...otherGroup.map((x: any) => x.composite_score))}/100
+                                  </span>
+                                </div>
+
+                                <button
+                                  type="button"
+                                  onClick={() => setIsOtherTopicsExpanded(!isOtherTopicsExpanded)}
+                                  className="text-xs font-bold text-hp-navy hover:underline flex items-center gap-1"
+                                >
+                                  <span>{isOtherTopicsExpanded ? 'Collapse' : 'Expand'}</span>
+                                  <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isOtherTopicsExpanded ? 'rotate-180' : ''}`} />
+                                </button>
+                              </div>
+
+                              <div className="space-y-2">
+                                {(isOtherTopicsExpanded ? otherGroup : otherGroup.slice(0, 5)).map((item: any, idx: number) => (
+                                  <div key={idx} className="flex items-center justify-between text-xs py-1 px-2 rounded-lg hover:bg-slate-50 transition">
+                                    <div className="flex items-center space-x-3 font-semibold text-slate-800 truncate pr-2">
+                                      <span className="text-slate-400 font-mono text-[11px] w-5 text-right">{idx + 1}</span>
+                                      <span className="capitalize truncate">{item.topic_name}</span>
+                                    </div>
+                                    <div className="flex items-center space-x-3 flex-shrink-0">
+                                      <div className="w-24 bg-slate-200 h-1.5 rounded-full overflow-hidden">
+                                        <div className="bg-slate-500 h-1.5 rounded-full" style={{ width: `${item.composite_score}%` }}></div>
+                                      </div>
+                                      <span className="font-mono font-bold text-slate-900 w-8 text-right">{item.composite_score}</span>
+                                      <span className="text-[10px] text-slate-400 font-medium">Bombora</span>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                        </div>
+                      </div>
+
+                      {/* Hiring-Linked Demand Signals Section (job_openings.csv Extracted Data) */}
+                      <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-4">
+                        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                          <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700 flex items-center gap-2">
+                            <Users className="w-4 h-4 text-hp-navy" />
+                            <span>HIRING-LINKED INTENT DEMAND (job_openings.csv)</span>
+                          </h3>
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-50 text-hp-navy border border-blue-200">
+                            Source B job_openings
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs font-medium">
+                          <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-1">
+                            <span className="text-slate-400 font-bold uppercase text-[10px] block">Active Job Posting Volume</span>
+                            <span className="text-2xl font-extrabold text-slate-900 block">{openJobCount} open roles</span>
+                            <span className="text-[11px] text-slate-500">Hiring velocity used as staffing demand signal</span>
+                          </div>
+
+                          <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2">
+                            <span className="text-slate-400 font-bold uppercase text-[10px] block">Seniority Mix Breakdown</span>
+                            <div className="flex flex-wrap gap-2">
+                              {Object.entries(seniorityBreakdown).map(([k, v]) => (
+                                <span key={k} className="px-2.5 py-1 bg-white rounded-lg border border-slate-200 font-bold text-slate-800 text-[11px]">
+                                  <span className="capitalize">{k}</span>: <strong className="text-hp-navy">{String(v)}</strong>
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                    </div>
+                  );
+                })()}
+
+                {/* Solution Narrative / Opportunity Map View (Feature Key: solution_narrative_opportunity_map) */}
+                {activeFeatureKey === 'solution_narrative_opportunity_map' && (() => {
+                  const contextWidget = widgets.find(w => w.widget_key === 'opportunity_context_card');
+                  const triggerWidget = widgets.find(w => w.widget_key === 'opportunity_trigger_signals');
+
+                  const contextData = (contextWidget && contextWidget.status === 'available' && contextWidget.data) ? contextWidget.data : null;
+                  const triggerData = (triggerWidget && triggerWidget.status === 'available' && triggerWidget.data) ? triggerWidget.data : null;
+
+                  const busDesc = contextData?.business_description || '';
+                  const techStackList = contextData?.full_tech_stack_sample || [];
+                  const intentTopics = contextData?.top_intent_topics || [];
+                  const triggerSignals = triggerData?.triggers || [];
+
+                  return (
+                    <div className="space-y-6">
+                      
+                      {/* Header Banner */}
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                        <div>
+                          <h2 className="text-xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
+                            <Lightbulb className="w-5 h-5 text-hp-navy" />
+                            <span>Opportunity Map</span>
+                          </h2>
+                          <p className="text-xs text-slate-500 mt-0.5">
+                            5 HP opportunities mapped for {selectedAccount?.name} — business outcome, HP products, entry path, and evidence in one view.
+                          </p>
+                        </div>
+
+                        <div className="flex items-center space-x-2 text-xs font-bold">
+                          <span className="px-3 py-1 bg-white border border-slate-200 shadow-xs rounded-full text-slate-700">
+                            5 HP Plays
+                          </span>
+                          <span className="px-3 py-1 bg-purple-50 text-purple-800 border border-purple-200 rounded-full">
+                            Inferred TBD
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Section A: Deterministic Narrative Context Card */}
+                      <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-4">
+                        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                          <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700 flex items-center gap-2">
+                            <Database className="w-4 h-4 text-hp-navy" />
+                            <span>DETERMINISTIC OPPORTUNITY CONTEXT (1_firmographics & 4_technographics)</span>
+                          </h3>
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-50 text-hp-navy border border-blue-200">
+                            Deterministic Sourced
+                          </span>
+                        </div>
+
+                        <div className="space-y-4 text-xs">
+                          {busDesc && (
+                            <div>
+                              <span className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Business Description Context</span>
+                              <p className="text-slate-700 leading-relaxed font-medium bg-slate-50 p-3.5 rounded-xl border border-slate-200/80">
+                                {busDesc}
+                              </p>
+                            </div>
+                          )}
+
+                          {techStackList.length > 0 && (
+                            <div>
+                              <div className="flex items-center justify-between mb-1.5">
+                                <span className="text-[10px] font-bold text-slate-400 uppercase">Installed Tech Stack ({contextData?.total_tech_items_count} items)</span>
+                              </div>
+                              <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto p-3 bg-slate-50 rounded-xl border border-slate-200/80">
+                                {techStackList.map((tech: string, i: number) => (
+                                  <span key={i} className="px-2 py-0.5 bg-white text-slate-800 rounded font-semibold text-[11px] border border-slate-200">
+                                    {tech}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {intentTopics.length > 0 && (
+                            <div>
+                              <span className="text-[10px] font-bold text-slate-400 uppercase block mb-1.5">Top Research Topics (11_intent_score.csv)</span>
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                {intentTopics.slice(0, 3).map((item: any, i: number) => (
+                                  <div key={i} className="bg-slate-50 p-2.5 rounded-xl border border-slate-200/80 flex items-center justify-between">
+                                    <span className="font-bold text-slate-800 truncate pr-2">{item.topic_name}</span>
+                                    <span className="font-mono text-hp-navy font-extrabold text-xs">{item.composite_score}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Section B: Deterministic Trigger Signals Feed */}
+                      <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-4">
+                        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                          <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700 flex items-center gap-2">
+                            <Newspaper className="w-4 h-4 text-hp-navy" />
+                            <span>TRIGGER SIGNALS (google_news & news_events)</span>
+                          </h3>
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-50 text-hp-navy border border-blue-200">
+                            {triggerSignals.length} Active Triggers
+                          </span>
+                        </div>
+
+                        {triggerSignals.length === 0 ? (
+                          <div className="p-8 text-center text-slate-500 text-xs">
+                            No live trigger events uploaded yet. Upload google_news_rss_data.csv in Admin Data tab.
+                          </div>
+                        ) : (
+                          <div className="space-y-2.5 max-h-80 overflow-y-auto pr-1">
+                            {triggerSignals.slice(0, 5).map((sig: any, idx: number) => (
+                              <div key={idx} className="bg-slate-50 p-3 rounded-xl border border-slate-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                                <div className="space-y-0.5 font-medium flex-1 truncate pr-2">
+                                  <span className="font-bold text-slate-900 block truncate">{sig.event_headline}</span>
+                                  <span className="text-[10px] text-slate-400 font-mono">{sig.event_date || 'Date N/A'} • Type: {sig.event_type || 'news'}</span>
+                                </div>
+
+                                {sig.source_url && (
+                                  <a
+                                    href={sig.source_url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="inline-flex items-center space-x-1 text-hp-navy font-bold text-[11px] hover:underline flex-shrink-0"
+                                  >
+                                    <span>Source</span>
+                                    <ExternalLink className="w-3 h-3 ml-0.5" />
+                                  </a>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Section C: Inferred Opportunity Narrative Plays (Clean Inferred TBD Placeholders) */}
+                      <div className="space-y-4">
+                        <div className="flex items-center justify-between">
+                          <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700">
+                            HP OPPORTUNITY PLAYS (5 HP PRODUCT LINES)
+                          </h3>
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-purple-50 text-purple-800 border border-purple-200">
+                            Inferred Contract TBD
+                          </span>
+                        </div>
+
+                        {[
+                          { key: 'workstation', name: 'Z by HP Workstations', group: 'WORKSTATION' },
+                          { key: 'poly', name: 'Poly collaboration hardware', group: 'POLY' },
+                          { key: 'pc', name: 'HP Elite & Pro PCs', group: 'PC' },
+                          { key: 'print', name: 'HP Enterprise Printing & Managed Print Services', group: 'PRINT' },
+                          { key: '3d', name: 'HP Multi Jet Fusion (3D)', group: '3D' }
+                        ].map((play) => (
+                          <div key={play.key} className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-4">
+                            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                              <div className="flex items-center space-x-3">
+                                <h4 className="text-base font-extrabold text-slate-900">{play.name}</h4>
+                                <span className="text-[10px] font-mono text-slate-400 bg-slate-100 px-2 py-0.5 rounded uppercase">
+                                  {play.group}
+                                </span>
+                              </div>
+                              <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200">
+                                Priority: Derived TBD
+                              </span>
+                            </div>
+
+                            <div className="bg-slate-50 border border-dashed border-slate-200 rounded-xl p-6 text-center space-y-2">
+                              <div className="w-8 h-8 rounded-full bg-purple-100 text-purple-700 flex items-center justify-center mx-auto">
+                                <Sparkles className="w-4 h-4" />
+                              </div>
+                              <h5 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                                Opportunity Narrative Play Generation Placeholder
+                              </h5>
+                              <p className="text-[11px] text-slate-500 max-w-md mx-auto leading-relaxed">
+                                AI-synthesized business outcomes, quantified impact projections, recommended product family matches, and target CTA entry paths for <strong className="text-slate-800">{play.name}</strong> will be generated in Step 8.
+                              </p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                    </div>
+                  );
+                })()}
+
+                {/* Stakeholder Map View (Feature Key: stakeholder_map) */}
+                {activeFeatureKey === 'stakeholder_map' && (() => {
+                  const gridWidget = widgets.find(w => w.widget_key === 'stakeholder_contacts_grid');
+                  const gridData = (gridWidget && gridWidget.status === 'available' && gridWidget.data) ? gridWidget.data : null;
+
+                  const contactsList = gridData?.contacts || [];
+                  const deptDist = gridData?.department_distribution || {};
+                  const sourceBreakdown = gridData?.source_breakdown || {};
+
+                  const filteredContacts = contactsList.filter((c: any) => {
+                    if (stakeholderSearch) {
+                      const q = stakeholderSearch.toLowerCase().trim();
+                      const matchName = (c.full_name || '').toLowerCase().includes(q);
+                      const matchTitle = (c.title || '').toLowerCase().includes(q);
+                      const matchDept = (c.department || '').toLowerCase().includes(q);
+                      if (!matchName && !matchTitle && !matchDept) return false;
+                    }
+                    if (stakeholderDeptFilter !== 'ALL') {
+                      if ((c.department || 'Unassigned') !== stakeholderDeptFilter) return false;
+                    }
+                    return true;
+                  });
+
+                  return (
+                    <div className="space-y-6">
+                      
+                      {/* Header Banner (Matching Images 1 & 2) */}
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                        <div>
+                          <h2 className="text-xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
+                            <Users className="w-5 h-5 text-hp-navy" />
+                            <span>Stakeholder Map</span>
+                          </h2>
+                          <p className="text-xs text-slate-500 mt-0.5">
+                            {contactsList.length} active contacts identified for {selectedAccount?.name}
+                          </p>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2 text-xs font-bold">
+                          <span className="px-3 py-1 bg-white border border-slate-200 shadow-xs rounded-full text-slate-700">
+                            {contactsList.length} Contacts Mapped
+                          </span>
+                          {sourceBreakdown['Source A'] !== undefined && (
+                            <span className="px-3 py-1 bg-blue-50 text-hp-navy border border-blue-200 rounded-full font-mono text-[11px]">
+                              Source A: {sourceBreakdown['Source A']} • Apollo: {sourceBreakdown['Apollo']}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Sub-Tabs View Switcher Bar (Stakeholder Grid vs Entry Path) */}
+                      <div className="flex items-center justify-between bg-white p-2.5 rounded-2xl border border-slate-200 shadow-xs text-xs font-bold">
+                        <div className="flex items-center space-x-2">
+                          <button
+                            type="button"
+                            onClick={() => setStakeholderSubTab('grid')}
+                            className={`px-4 py-2 rounded-xl transition flex items-center space-x-2 ${
+                              stakeholderSubTab === 'grid'
+                                ? 'bg-hp-navy text-white shadow-xs'
+                                : 'bg-slate-50 text-slate-700 hover:bg-slate-100 border border-slate-200'
+                            }`}
+                          >
+                            <Users className="w-4 h-4" />
+                            <span>Stakeholder Grid</span>
+                          </button>
+
+                          <div className="relative inline-flex items-center">
+                            <button
+                              type="button"
+                              onClick={() => setStakeholderSubTab('entry_path')}
+                              className={`px-4 py-2 rounded-xl transition flex items-center space-x-2 ${
+                                stakeholderSubTab === 'entry_path'
+                                  ? 'bg-hp-navy text-white shadow-xs'
+                                  : 'bg-slate-50 text-slate-700 hover:bg-slate-100 border border-slate-200'
+                              }`}
+                            >
+                              <Layers className="w-4 h-4" />
+                              <span>Entry Path</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => setIsEntryPathInfoOpen(!isEntryPathInfoOpen)}
+                              className="ml-1 text-slate-400 hover:text-hp-navy p-1 rounded-lg"
+                              title="Entry Path Information"
+                            >
+                              <Info className="w-4 h-4" />
+                            </button>
+
+                            {/* Entry Path Info Popover Modal (Matching Image 2) */}
+                            {isEntryPathInfoOpen && (
+                              <div className="absolute left-0 top-full mt-2 w-80 bg-white border border-slate-300 rounded-2xl shadow-2xl p-4 z-50 animate-fade-in text-xs font-medium">
+                                <div className="flex justify-between items-center border-b border-slate-100 pb-2 mb-2">
+                                  <h4 className="font-extrabold text-slate-900 text-xs flex items-center gap-1.5">
+                                    <Layers className="w-4 h-4 text-hp-navy" />
+                                    <span>Entry Path</span>
+                                  </h4>
+                                  <button onClick={() => setIsEntryPathInfoOpen(false)} className="text-slate-400 hover:text-slate-600">
+                                    <X className="w-4 h-4" />
+                                  </button>
+                                </div>
+                                <p className="text-slate-600 leading-relaxed text-[11px]">
+                                  The entry path ranks stakeholders by their receptivity to an initial conversation, their organizational influence over the buying decision, and their alignment with HP's value proposition. Starting with the wrong stakeholder can create political friction or trigger premature gatekeeping. Follow the recommended sequence for the highest probability of gaining access to decision makers.
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        <span className="text-[11px] text-slate-400 font-medium hidden sm:inline">
+                          Showing active employees only
+                        </span>
+                      </div>
+
+                      {/* View 1: Stakeholder Grid (Contact Cards) */}
+                      {stakeholderSubTab === 'grid' && (
+                        <div className="space-y-6">
+                          
+                          {/* Filter Controls Bar */}
+                          <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+                            <div className="relative flex-1 max-w-md">
+                              <Search className="w-3.5 h-3.5 text-gray-400 absolute left-3 top-2.5" />
+                              <input
+                                type="text"
+                                value={stakeholderSearch}
+                                onChange={(e) => setStakeholderSearch(e.target.value)}
+                                placeholder="Search name, title, or department..."
+                                className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-hp-navy"
+                              />
+                            </div>
+
+                            <div className="flex flex-wrap items-center gap-2 text-xs font-bold">
+                              <Filter className="w-3.5 h-3.5 text-slate-400 mr-1" />
+                              <select
+                                value={stakeholderDeptFilter}
+                                onChange={(e) => setStakeholderDeptFilter(e.target.value)}
+                                className="px-3 py-1.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-700 focus:outline-none"
+                              >
+                                <option value="ALL">All Departments ({contactsList.length})</option>
+                                {Object.entries(deptDist).map(([dept, count]) => (
+                                  <option key={dept} value={dept}>
+                                    {dept} ({String(count)})
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+
+                          {/* Contacts Cards Grid (Matching Images 1 & 2 Layout) */}
+                          {filteredContacts.length === 0 ? (
+                            <div className="bg-white rounded-2xl p-12 text-center border border-slate-200 shadow-sm">
+                              <Users className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+                              <h3 className="text-base font-bold text-slate-800">
+                                {contactsList.length === 0 ? 'No Prospect Contacts Uploaded Yet' : 'No Contacts Match Filter'}
+                              </h3>
+                              <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
+                                {contactsList.length === 0 
+                                  ? 'Upload 14_prospect_contacts.csv in Admin Data tab to populate stakeholders.'
+                                  : 'Try clearing the search query or selecting All Departments.'}
+                              </p>
+                            </div>
+                          ) : (
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                              {filteredContacts.map((contact: any, idx: number) => {
+                                const initials = contact.full_name
+                                  ? contact.full_name.split(' ').map((n: string) => n[0]).join('').substring(0, 2).toUpperCase()
+                                  : 'U';
+
+                                return (
+                                  <div key={idx} className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-4 hover:border-slate-300 transition flex flex-col justify-between">
+                                    
+                                    <div className="space-y-3">
+                                      {/* Top Contact Header */}
+                                      <div className="flex items-start space-x-3">
+                                        <div className="w-11 h-11 bg-blue-50 text-hp-navy font-black rounded-full flex items-center justify-center text-xs flex-shrink-0 border border-blue-200">
+                                          {initials}
+                                        </div>
+
+                                        <div className="flex-1 truncate">
+                                          <div className="flex items-center space-x-2">
+                                            <h3 className="text-sm font-extrabold text-slate-900 truncate">{contact.full_name}</h3>
+                                            {contact.linkedin_url && (
+                                              <a
+                                                href={contact.linkedin_url.startsWith('http') ? contact.linkedin_url : `https://${contact.linkedin_url}`}
+                                                target="_blank"
+                                                rel="noreferrer"
+                                                className="text-hp-navy hover:text-hp-blue flex-shrink-0"
+                                                title="LinkedIn Profile"
+                                              >
+                                                <Globe className="w-3.5 h-3.5" />
+                                              </a>
+                                            )}
+                                          </div>
+                                          <p className="text-xs text-slate-600 font-semibold leading-snug line-clamp-2 mt-0.5">{contact.title || 'Title Unspecified'}</p>
+                                          <p className="text-[11px] text-slate-400 font-medium truncate mt-0.5">{contact.department || 'General'}</p>
+                                        </div>
+                                      </div>
+
+                                      {/* Badges Row */}
+                                      <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                                        {contact.seniority && (
+                                          <span className="px-2 py-0.5 rounded text-[10px] font-extrabold bg-slate-100 text-slate-700 border border-slate-200 uppercase">
+                                            {contact.seniority}
+                                          </span>
+                                        )}
+
+                                        {/* Persona Badge (Rendered ONLY when present in raw data; absent for Apollo contacts) */}
+                                        {contact.buying_committee_persona && (
+                                          <span className="px-2 py-0.5 rounded text-[10px] font-extrabold bg-red-50 text-red-700 border border-red-200">
+                                            {contact.buying_committee_persona.replace(/[\[\]"]/g, '')}
+                                          </span>
+                                        )}
+
+                                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200">
+                                          Priority: Derived TBD
+                                        </span>
+
+                                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-gray-50 text-slate-500 border border-slate-200 font-mono">
+                                          {contact.source}
+                                        </span>
+                                      </div>
+
+                                      {/* Contact Methods */}
+                                      <div className="bg-slate-50 p-3 rounded-xl border border-slate-200/80 space-y-1 text-xs text-slate-700 font-medium">
+                                        {contact.email ? (
+                                          <div className="flex items-center justify-between font-mono text-[11px]">
+                                            <span className="truncate text-hp-navy font-bold">{contact.email}</span>
+                                            {contact.email_status && (
+                                              <span className="text-[9px] font-bold px-1.5 py-0.2 bg-emerald-100 text-emerald-800 rounded">
+                                                {contact.email_status}
+                                              </span>
+                                            )}
+                                          </div>
+                                        ) : (
+                                          <span className="text-[11px] text-slate-400 italic">Email: Not provided</span>
+                                        )}
+
+                                        {contact.phone && (
+                                          <div className="text-[11px] font-mono text-slate-600">
+                                            Phone: {contact.phone}
+                                          </div>
+                                        )}
+                                      </div>
+
+                                      {/* Entry Path / How to Open (Inferred TBD Placeholder) */}
+                                      <div className="bg-blue-50/70 border border-blue-200/80 rounded-xl p-3.5 text-xs text-blue-950 space-y-2">
+                                        <div>
+                                          <span className="font-extrabold text-hp-navy text-[10px] uppercase block">
+                                            HOW TO OPEN:
+                                          </span>
+                                          <p className="text-[11px] leading-relaxed text-slate-600 italic">
+                                            AI-synthesized person-specific talking points TBD for future runtime generation in Step 8.
+                                          </p>
+                                        </div>
+
+                                        <div className="pt-2 border-t border-blue-200/60 space-y-1 text-[11px]">
+                                          <div className="flex justify-between text-slate-600 font-medium">
+                                            <span className="font-bold text-slate-500 uppercase text-[9px]">HP PLAY FOCUS:</span>
+                                            <span className="text-purple-700 font-bold bg-purple-50 px-1.5 py-0.5 rounded text-[10px]">Inferred TBD</span>
+                                          </div>
+                                          <div className="flex justify-between text-slate-600 font-medium">
+                                            <span className="font-bold text-slate-500 uppercase text-[9px]">DECISION POWER:</span>
+                                            <span className="text-purple-700 font-bold bg-purple-50 px-1.5 py-0.5 rounded text-[10px]">Inferred TBD</span>
+                                          </div>
+                                        </div>
+                                      </div>
+
+                                    </div>
+
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+
+                        </div>
+                      )}
+
+                      {/* View 2: Entry Path Ranked List View (Matching Image 2) */}
+                      {stakeholderSubTab === 'entry_path' && (
+                        <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-4">
+                          <div className="border-b border-slate-100 pb-3">
+                            <h3 className="text-sm font-extrabold text-slate-900 flex items-center gap-2">
+                              <Layers className="w-4 h-4 text-hp-navy" />
+                              <span>Entry Path Stakeholder Sequence</span>
+                            </h3>
+                            <p className="text-xs text-slate-500 mt-0.5">
+                              Dynamically ranked by seniority (25%), sector (20%), persona (25%), pain points (15%), priority (15%) — <strong className="text-amber-700 font-bold">Derived TBD</strong>
+                            </p>
+                          </div>
+
+                          <div className="divide-y divide-slate-100">
+                            {filteredContacts.map((contact: any, idx: number) => (
+                              <div key={idx} className="py-3.5 flex items-center justify-between hover:bg-slate-50/80 transition px-3 rounded-xl">
+                                <div className="flex items-center space-x-3.5">
+                                  <span className="w-7 h-7 rounded-full bg-blue-50 text-hp-navy font-extrabold text-xs flex items-center justify-center border border-blue-200">
+                                    {idx + 1}
+                                  </span>
+                                  <div>
+                                    <div className="flex items-center space-x-2">
+                                      <span className="text-sm font-bold text-slate-900">{contact.full_name}</span>
+                                      {contact.seniority && (
+                                        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200 uppercase">
+                                          {contact.seniority}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <p className="text-xs text-slate-500 font-medium">{contact.title || 'Title Unspecified'} • <span className="text-slate-400">{contact.department || 'General'}</span></p>
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center space-x-2">
+                                  <span className="text-xs font-mono font-bold text-slate-400 bg-slate-100 px-2.5 py-1 rounded-lg border border-slate-200">
+                                    Derived TBD / 100
+                                  </span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Dynamic Department Breakdown Cards Section (Bottom of Images 1 & 2) */}
+                      <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-4">
+                        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                          <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700 flex items-center gap-2">
+                            <Building2 className="w-4 h-4 text-hp-navy" />
+                            <span>DYNAMIC DEPARTMENT BREAKDOWN ({Object.keys(deptDist).length} Departments)</span>
+                          </h3>
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-50 text-hp-navy border border-blue-200">
+                            Calculated Runtime
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                          {Object.entries(deptDist).map(([dept, count]) => (
+                            <div key={dept} className="bg-slate-50 p-3.5 rounded-xl border border-slate-200/80 flex items-center justify-between text-xs">
+                              <span className="font-bold text-slate-800 truncate pr-2">{dept}</span>
+                              <span className="font-mono text-hp-navy font-black bg-white px-2 py-0.5 rounded border border-slate-200">
+                                {String(count)}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                    </div>
+                  );
+                })()}
+
+                {/* For all other Features (Tech Landscape, Objection Playbook, etc.) */}
+                {activeFeatureKey !== 'executive_dashboard' && activeFeatureKey !== 'recent_news_signals' && activeFeatureKey !== 'intent_demand_signals' && activeFeatureKey !== 'solution_narrative_opportunity_map' && activeFeatureKey !== 'stakeholder_map' && (
+                  <div className="space-y-6">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h3 className="text-sm font-extrabold uppercase tracking-wider text-slate-700 flex items-center gap-2">
+                          <span>{activeFeatureDef.label} Widgets</span>
+                        </h3>
+                        <p className="text-xs text-slate-500 mt-0.5">{activeFeatureDef.description}</p>
+                      </div>
+
+                      {isXRayOn && (
+                        <div className="text-[11px] font-mono text-hp-navy bg-blue-50 px-2.5 py-1 rounded-lg border border-blue-200">
+                          X-Ray Mode Active
+                        </div>
+                      )}
+                    </div>
+
+                    {isLoadingWidgets ? (
+                      <div className="bg-white rounded-2xl p-12 text-center border border-slate-200 shadow-sm flex flex-col items-center justify-center space-y-3">
+                        <Loader2 className="w-8 h-8 text-hp-navy animate-spin" />
+                        <p className="text-xs text-slate-500 font-medium">Loading feature widget contracts...</p>
+                      </div>
+                    ) : widgets.length === 0 ? (
+                      <div className="bg-white rounded-2xl p-12 text-center border border-slate-200 shadow-sm">
+                        <Info className="w-10 h-10 text-slate-300 mx-auto mb-2" />
+                        <h3 className="text-sm font-bold text-slate-800">No Widget Contracts Defined</h3>
+                        <p className="text-xs text-slate-500 mt-1">
+                          No widget contracts registered for feature "{activeFeatureDef.label}".
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        {widgets.map((widget) => (
+                          <div key={widget.widget_key} className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
+                            
+                            {/* Widget Card Header */}
+                            <div className="flex items-start justify-between gap-3 border-b border-slate-100 pb-3">
+                              <div>
+                                <div className="flex items-center space-x-2">
+                                  <h3 className="text-sm font-extrabold text-slate-900">{widget.widget_name}</h3>
+                                  {isXRayOn && (
+                                    <span className="text-[10px] font-mono text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">
+                                      {widget.widget_type}
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="text-xs text-slate-500 mt-0.5">{widget.description}</p>
+                              </div>
+
+                              {/* Classification Badge */}
+                              <div className="flex-shrink-0">
+                                {getClassificationBadge(widget.data_classification)}
+                              </div>
+                            </div>
+
+                            {/* X-Ray Mode Debug Metadata Bar */}
+                            {isXRayOn && (
+                              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200/80 space-y-1.5 text-[11px]">
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  <span className="text-slate-400 font-bold uppercase text-[10px]">Source Datasets:</span>
+                                  {widget.source_datasets.map((ds) => (
+                                    <span key={ds} className="inline-flex items-center px-2 py-0.5 rounded bg-white text-slate-700 font-mono text-[10px] border border-slate-200">
+                                      <Database className="w-3 h-3 mr-1 text-hp-navy" />
+                                      {ds}
+                                    </span>
+                                  ))}
+                                </div>
+
+                                <div className="flex flex-wrap items-center gap-1">
+                                  <span className="text-slate-400 font-bold uppercase text-[10px]">Mapped Fields:</span>
+                                  {widget.source_fields.map((field) => (
+                                    <span key={field} className="text-slate-600 font-mono text-[10px] bg-slate-200/60 px-1.5 py-0.5 rounded">
+                                      {field}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Widget Contract Empty Placeholder */}
+                            <div className="bg-slate-50 border border-dashed border-slate-200 rounded-xl p-6 text-center space-y-2">
+                              <div className="w-8 h-8 rounded-full bg-slate-200/70 text-slate-500 flex items-center justify-center mx-auto">
+                                <Info className="w-4 h-4" />
+                              </div>
+                              <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                                {widget.data_classification === 'deterministic' ? 'Dataset Not Uploaded / Empty' : 'Derived / Inferred Placeholder'}
+                              </h4>
+                              <p className="text-[11px] text-slate-500 max-w-sm mx-auto leading-relaxed">
+                                {widget.data_classification === 'deterministic'
+                                  ? `No raw CSV data uploaded yet for source datasets (${widget.source_datasets.join(', ')}). Upload datasets in Admin Data tab.`
+                                  : `Calculated or AI generated outputs for ${widget.widget_name} will be enabled in subsequent steps.`}
+                              </p>
+                            </div>
+
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+              </div>
+            )}
+
+          </main>
+        </div>
+
+      </div>
+    </ProtectedRoute>
+  );
+}
