@@ -22,6 +22,7 @@ from app.services.extractors.objection_playbook import extract_objection_playboo
 from app.services.extractors.content_messaging import extract_content_messaging
 from app.services.extractors.content_studio import extract_content_studio
 from app.services.extractors.strategy_chat import extract_strategy_chat
+from app.services.extractors.message_evaluator import extract_message_evaluator
 
 router = APIRouter(prefix="/accounts/{account_id}/data", tags=["Raw Data Management (Admin Only)"])
 
@@ -248,6 +249,11 @@ async def upload_account_data(
     if key_clean in ["firmographics", "company_hierarchy", "technographics", "webstack", "job_openings", "google_news", "news_events", "intent_score", "technology_detections", "prospect_contacts"]:
         try:
             extract_strategy_chat(account_id)
+        except Exception:
+            pass
+    if key_clean in ["prospect_contacts", "job_openings", "firmographics"]:
+        try:
+            extract_message_evaluator(account_id)
         except Exception:
             pass
 

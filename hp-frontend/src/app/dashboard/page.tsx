@@ -358,6 +358,16 @@ export default function UserDashboardPage() {
   const [chatInput, setChatInput] = useState<string>('');
   const [chatMessages, setChatMessages] = useState<Array<{ id: string; sender: 'user' | 'assistant'; text: string; timestamp: string }>>([]);
 
+  // Message Evaluator State
+  const [selectedPersonaId, setSelectedPersonaId] = useState<string>('procurement_finance');
+  const [selectedObjective, setSelectedObjective] = useState<string>('Initial Outreach / Cold Prospecting');
+  const [selectedFormat, setSelectedFormat] = useState<string>('Cold Email');
+  const [stimulusText, setStimulusText] = useState<string>('');
+  const [copiedRewrite, setCopiedRewrite] = useState<boolean>(false);
+  const [evaluatorStep, setEvaluatorStep] = useState<string>('inputs');
+  const [evaluatorMode, setEvaluatorMode] = useState<string>('LITE');
+  const [isEvaluatorInfoOpen, setIsEvaluatorInfoOpen] = useState<boolean>(false);
+
   // Account search filter in dropdown
   const [accountSearch, setAccountSearch] = useState('');
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
@@ -4728,8 +4738,8 @@ Are you available for a brief 10-minute briefing next Thursday to review how pee
                   );
                 })()}
 
-                {/* For all other Features (Message Evaluator, etc.) */}
-                {activeFeatureKey !== 'executive_dashboard' && activeFeatureKey !== 'recent_news_signals' && activeFeatureKey !== 'intent_demand_signals' && activeFeatureKey !== 'solution_narrative_opportunity_map' && activeFeatureKey !== 'stakeholder_map' && activeFeatureKey !== 'tech_landscape' && activeFeatureKey !== 'objection_playbook' && activeFeatureKey !== 'content_messaging' && activeFeatureKey !== 'content_studio' && activeFeatureKey !== 'strategy_chat' && (
+                {/* For all other Features (if any future unhandled feature is added) */}
+                {activeFeatureKey !== 'executive_dashboard' && activeFeatureKey !== 'recent_news_signals' && activeFeatureKey !== 'intent_demand_signals' && activeFeatureKey !== 'solution_narrative_opportunity_map' && activeFeatureKey !== 'stakeholder_map' && activeFeatureKey !== 'tech_landscape' && activeFeatureKey !== 'objection_playbook' && activeFeatureKey !== 'content_messaging' && activeFeatureKey !== 'content_studio' && activeFeatureKey !== 'strategy_chat' && activeFeatureKey !== 'message_evaluator' && (
                   <div className="space-y-6">
                     <div className="flex items-center justify-between">
                       <div>

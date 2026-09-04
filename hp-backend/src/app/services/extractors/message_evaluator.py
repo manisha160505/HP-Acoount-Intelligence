@@ -1,100 +1,10 @@
 import os
 import io
 import csv
-import json
 import pandas as pd
 from datetime import datetime, timezone
 from bson import ObjectId
 from app.database.mongodb import get_db
-
-ARCHETYPE_PERSONAS = [
-    {
-        "id": "ciso",
-        "label": "CISO — Chief Information Security Officer",
-        "short_title": "CISO",
-        "department": "Information Security / IT Risk",
-        "seniority": "C-Level",
-        "target_persona": "Security Decision Maker",
-        "matching_keywords": ["security", "risk", "governance", "audit", "compliance"]
-    },
-    {
-        "id": "cio",
-        "label": "CIO — Chief Information Officer",
-        "short_title": "CIO",
-        "department": "CIO Office / Executive IT",
-        "seniority": "C-Level",
-        "target_persona": "Executive IT Decision Maker",
-        "matching_keywords": ["cio", "chief information", "pdca", "information technology"]
-    },
-    {
-        "id": "cto",
-        "label": "CTO — Chief Technology Officer",
-        "short_title": "CTO",
-        "department": "Technology / Engineering",
-        "seniority": "C-Level",
-        "target_persona": "Technology Decision Maker",
-        "matching_keywords": ["cto", "technology development", "technology officer", "engineering"]
-    },
-    {
-        "id": "vp_infra",
-        "label": "VP Infrastructure — VP of Infrastructure & Infrastructure Security",
-        "short_title": "VP Infrastructure",
-        "department": "IT Operations / Infrastructure",
-        "seniority": "VP / Director",
-        "target_persona": "Infrastructure Lead",
-        "matching_keywords": ["infrastructure", "development operations", "cloud operation", "system administrator", "devops"]
-    },
-    {
-        "id": "sec_architect",
-        "label": "Security Architect — Security Architect / Director of Security",
-        "short_title": "Security Architect",
-        "department": "Security Architecture / Governance",
-        "seniority": "Director / Head",
-        "target_persona": "Security Evaluator",
-        "matching_keywords": ["security", "risk advisory", "governance", "threat"]
-    },
-    {
-        "id": "net_architect",
-        "label": "Network Architect — Network Architect / Director of Network Engineering",
-        "short_title": "Network Architect",
-        "department": "Network Engineering / Communications",
-        "seniority": "Director / Head",
-        "target_persona": "Network Lead",
-        "matching_keywords": ["network", "cloud", "telecommunications", "systems"]
-    },
-    {
-        "id": "it_director",
-        "label": "IT Director — IT Director / Director of Applications",
-        "short_title": "IT Director",
-        "department": "Applications Operations / Enterprise Systems",
-        "seniority": "Director / Head",
-        "target_persona": "Applications Lead",
-        "matching_keywords": ["applications", "software quality", "data governance", "business intelligence", "procurement"]
-    },
-    {
-        "id": "procurement_finance",
-        "label": "Procurement/Finance — CFO / VP of Procurement / Finance Executive",
-        "short_title": "Procurement / Finance",
-        "department": "Procurement / Corporate Finance",
-        "seniority": "Director / Head",
-        "target_persona": "Economic Buyer",
-        "matching_keywords": ["procurement", "finance", "tax", "accounting", "purchasing"]
-    }
-]
-
-def _find_file_path(rel_path: str) -> str | None:
-    if not rel_path:
-        return None
-    candidate_paths = [
-        os.path.join(os.getcwd(), rel_path),
-        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", rel_path)),
-        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", rel_path)),
-        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", rel_path)),
-    ]
-    for cp in candidate_paths:
-        if os.path.exists(cp):
-            return cp
-    return None
 
 def _read_dataset_records(account_id: str, dataset_key: str) -> list[dict]:
     db = get_db()
@@ -108,9 +18,21 @@ def _read_dataset_records(account_id: str, dataset_key: str) -> list[dict]:
         return []
     
     rel_path = file_doc.get("file_path", "")
-    full_path = _find_file_path(rel_path)
+    candidate_paths = [
+        os.path.join(os.getcwd(), rel_path),
+        os.path.join("/app", rel_path),
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", rel_path)),
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", rel_path)),
+        os.path.join(r"C:\hp-account\HP-Acoount-Intelligence\hp-backend", rel_path)
+    ]
     
-    if not full_path or not os.path.exists(full_path):
+    full_path = None
+    for cp in candidate_paths:
+        if os.path.exists(cp):
+            full_path = cp
+            break
+            
+    if not full_path:
         return []
     
     ext = os.path.splitext(full_path)[1].lower()
@@ -130,124 +52,85 @@ def extract_message_evaluator(account_id: str) -> list[dict]:
     db = get_db()
     now = datetime.now(timezone.utc)
     
+    firmo_records = _read_dataset_records(account_id, "firmographics")
+    contacts_records = _read_dataset_records(account_id, "prospect_contacts")
+    
+    results = []
+
+    # Get dynamic company name
     account_doc = None
     if ObjectId.is_valid(account_id):
         account_doc = db["accounts"].find_one({"_id": ObjectId(account_id)})
     
-    account_name = account_doc.get("name", "Target Account") if account_doc else "Target Account"
+    company_name = account_doc.get("name", "Target Account") if account_doc else "Target Account"
     
-    contacts_records = _read_dataset_records(account_id, "prospect_contacts")
-    job_records = _read_dataset_records(account_id, "job_openings")
-    
-    results = []
-    
-    # 1. Map contacts to Archetypes
-    calibrated_personas = []
-    
-    for arch in ARCHETYPE_PERSONAS:
-        matching_contact = None
-        
-        for c in contacts_records:
-            full_title = (str(c.get("Prospect job_title") or c.get("apollo_title") or "")).lower()
-            dept = (str(c.get("Prospect job_department_main") or c.get("apollo_department") or "")).lower()
-            skills = (str(c.get("Prospect skills") or "")).lower()
-            
-            combined_text = f"{full_title} {dept} {skills}"
-            if any(k in combined_text for k in arch["matching_keywords"]):
-                matching_contact = c
-                break
-                
-        # If no specific match, fallback to general contact or account role proxy
-        if not matching_contact and contacts_records:
-            matching_contact = contacts_records[0]
-            
-        contact_name = "Account Executive Lead"
-        contact_title = arch["short_title"]
-        contact_dept = arch["department"]
-        contact_seniority = arch["seniority"]
-        contact_email = None
-        contact_phone = None
-        contact_linkedin = None
-        buying_persona = arch["target_persona"]
-        source_name = "Archetype Template"
-        
-        if matching_contact:
-            fname = (str(matching_contact.get("Prospect full_name") or "")).strip()
-            if not fname:
-                fn = (str(matching_contact.get("Prospect first_name") or "")).strip()
-                ln = (str(matching_contact.get("Prospect last_name") or "")).strip()
-                fname = f"{fn} {ln}".strip()
-            if fname:
-                contact_name = fname
-                
-            t = (str(matching_contact.get("Prospect job_title") or matching_contact.get("apollo_title") or "")).strip()
-            if t:
-                contact_title = t
-                
-            d = (str(matching_contact.get("Prospect job_department_main") or matching_contact.get("apollo_department") or "")).strip()
-            if d:
-                contact_dept = d
-                
-            s = (str(matching_contact.get("Prospect job_level_main") or matching_contact.get("apollo_seniority") or "")).strip()
-            if s:
-                contact_seniority = s
-                
-            em = (str(matching_contact.get("Contact professions_email") or matching_contact.get("Email") or matching_contact.get("apollo_verified_work_email") or "")).strip()
-            if em:
-                contact_email = em
-                
-            ph = (str(matching_contact.get("Contact mobile_phone") or matching_contact.get("Mobile Phone") or matching_contact.get("apollo_direct_mobile_phone") or "")).strip()
-            if ph:
-                contact_phone = ph
-                
-            li = (str(matching_contact.get("Prospect linkedin") or matching_contact.get("apollo_linkedin_url") or "")).strip()
-            if li:
-                contact_linkedin = li
-                
-            bp = (str(matching_contact.get("Prospect buying_committee_personas") or "")).strip()
-            if bp:
-                buying_persona = bp.replace('[', '').replace(']', '').replace('"', '')
-                
-            source_name = "14_prospect_contacts.csv"
-            
-        calibrated_personas.append({
-            "id": arch["id"],
-            "label": arch["label"],
-            "short_title": arch["short_title"],
-            "archetype_role": arch["label"],
-            "account_name": account_name,
-            "matched_contact": {
-                "name": contact_name,
-                "title": contact_title,
-                "department": contact_dept,
-                "seniority": contact_seniority,
-                "email": contact_email,
-                "phone": contact_phone,
-                "linkedin_url": contact_linkedin,
-                "buying_committee_persona": buying_persona,
-                "data_source": source_name
-            },
-            "behavioral_profile": {
-                "decision_orientation": "Inferred TBD",
-                "risk_tolerance": "Inferred TBD",
-                "communication_style": "Inferred TBD",
-                "primary_concerns": ["Inferred TBD", "Inferred TBD"],
-                "objection_triggers": ["Inferred TBD", "Inferred TBD"]
-            }
-        })
-        
-    # 2. Extract job openings role proxies
-    job_proxies = []
-    for j in job_records[:10]:
-        jt = (str(j.get("title") or j.get("normalized_title") or "")).strip()
-        jsen = (str(j.get("seniority") or "mid")).strip()
-        if jt and jt not in [p["title"] for p in job_proxies]:
-            job_proxies.append({
-                "title": jt,
-                "seniority": jsen,
-                "source": "job_openings.csv"
+    if firmo_records and len(firmo_records) > 0:
+        f_name = str(firmo_records[0].get("Company Name") or firmo_records[0].get("company_name") or "").strip()
+        if f_name:
+            company_name = f_name
+
+    # 1. Persona Archetypes
+    base_personas = [
+        {"id": "procurement_finance", "title": "Regional IT Procurement / Corporate IT", "default_contact_match": "Stephen Dharma", "department": "IT Procurement"},
+        {"id": "cio_it", "title": "CIO / IT Leadership", "default_contact_match": "Mochamad (ivan) Triawan", "department": "Technology Development"},
+        {"id": "infra_workplace", "title": "Infrastructure & Workplace IT", "subtitle": "Device fleet owners", "department": "IT Operations"},
+        {"id": "security_wolf", "title": "Security Leadership (Wolf Security)", "subtitle": "Endpoint risk decision makers", "department": "Risk Advisory"},
+        {"id": "engineering_ai", "title": "Engineering / AI & Compute Leadership", "subtitle": "AI & GPU compute buyers", "department": "Data Enablement"}
+    ]
+
+    sourced_contact_personas = []
+    seen_titles = set()
+    for row in contacts_records:
+        title = str(row.get("Prospect job_title") or row.get("title") or "").strip()
+        name = str(row.get("Prospect full_name") or row.get("full_name") or "").strip()
+        dept = str(row.get("Prospect job_department") or row.get("department") or "").strip()
+
+        if title and title.lower() not in seen_titles and len(title) > 3:
+            seen_titles.add(title.lower())
+            p_id = f"contact_{len(sourced_contact_personas) + 1}"
+            sourced_contact_personas.append({
+                "id": p_id,
+                "title": title.title(),
+                "default_contact_match": name if name else "Target Executive",
+                "department": dept if dept else "Corporate",
+                "is_sourced_contact": True
             })
-            
+
+    persona_archetypes = base_personas + sourced_contact_personas[:5]
+
+    # 2. Business Context
+    business_context = {}
+    if firmo_records and len(firmo_records) > 0:
+        f = firmo_records[0]
+        
+        c_name = str(f.get("Company Name") or f.get("company_name") or f.get("Name") or "").strip()
+        domain_val = str(f.get("Company Domain") or f.get("company_domain") or f.get("Domain") or f.get("Website") or f.get("website") or "").strip()
+
+        city = str(f.get("City Name") or f.get("city_name") or "").strip()
+        region = str(f.get("Region Name") or f.get("region_name") or "").strip()
+        country = str(f.get("Country Name") or f.get("country_name") or "").strip()
+        loc_parts = [p for p in [city, region, country] if p]
+        hq_loc_val = ", ".join(loc_parts) if loc_parts else str(f.get("HQ Location") or f.get("hq_location") or "").strip()
+
+        linkedin_ind = str(f.get("Linkedin Industry Category") or f.get("linkedin_industry_category") or "").strip()
+        naics = str(f.get("Naics Description") or f.get("naics_description") or "").strip()
+        sic = str(f.get("Sic Code Description") or f.get("sic_code_description") or "").strip()
+        ind_parts = [p for p in [linkedin_ind, naics, sic] if p]
+        ind_val = " / ".join(list(dict.fromkeys(ind_parts))) if ind_parts else str(f.get("Industry Classification") or f.get("industry") or "").strip()
+
+        emp_val = str(f.get("Number Of Employees Range") or f.get("employee_count_range") or f.get("Employee Count") or f.get("employee_count") or "").strip()
+        rev_val = str(f.get("Yearly Revenue Range") or f.get("yearly_revenue_range") or f.get("Yearly Revenue") or f.get("revenue") or "").strip()
+
+        business_context = {
+            "company_name": c_name,
+            "domain": domain_val,
+            "industry_classification": ind_val,
+            "hq_location": hq_loc_val,
+            "employee_count": emp_val,
+            "revenue": rev_val
+        }
+
+    # Widget 1: evaluator_persona_context (Deterministic)
     persona_payload = {
         "account_id": account_id,
         "feature_key": "message_evaluator",
@@ -255,60 +138,43 @@ def extract_message_evaluator(account_id: str) -> list[dict]:
         "data_classification": "deterministic",
         "status": "available",
         "data": {
-            "account_name": account_name,
-            "total_contacts_mapped": len(contacts_records),
-            "archetypes": calibrated_personas,
-            "job_role_proxies": job_proxies
+            "company_name": company_name,
+            "persona_archetypes": persona_archetypes,
+            "business_context": business_context
         },
-        "source_datasets": ["prospect_contacts", "job_openings"],
+        "source_datasets": ["prospect_contacts", "job_openings", "firmographics"],
         "extracted_at": now,
         "updated_at": now
     }
-    
+
     db["account_widgets"].update_one(
         {"account_id": account_id, "widget_key": "evaluator_persona_context"},
         {"$set": persona_payload},
         upsert=True
     )
     results.append(persona_payload)
-    
-    # 3. Widget: evaluator_feedback_score schema
-    feedback_payload = {
+
+    # Widget 2: evaluator_feedback_score (Inferred - Left as Pending / TBD)
+    score_payload = {
         "account_id": account_id,
         "feature_key": "message_evaluator",
         "widget_key": "evaluator_feedback_score",
         "data_classification": "inferred",
-        "status": "empty",
+        "status": "pending",
         "data": {
-            "evaluation_engine": "Inferred TBD",
-            "supported_modes": ["LITE", "DEEP"],
-            "funnel_stages": [
-                "Initial Outreach / Cold Prospecting",
-                "Follow-up / Re-engagement",
-                "Discovery / Meeting Request",
-                "Solution Presentation / Pitch",
-                "Objection Handling",
-                "Executive Briefing",
-                "Proposal / Commercial Closing"
-            ],
-            "content_formats": [
-                "Cold Email",
-                "LinkedIn Message / InMail",
-                "Sales Call Script / Phone Pitch",
-                "Executive Briefing / One-Pager",
-                "Follow-up Email"
-            ]
+            "feedback_score": "Inferred TBD",
+            "notice": "Message effectiveness scoring, guardrail rules evaluation, and rewrite recommendations using LLM prompts are TBD for Step 8 AI model execution."
         },
         "source_datasets": ["prospect_contacts", "job_openings"],
         "extracted_at": now,
         "updated_at": now
     }
-    
+
     db["account_widgets"].update_one(
         {"account_id": account_id, "widget_key": "evaluator_feedback_score"},
-        {"$set": feedback_payload},
+        {"$set": score_payload},
         upsert=True
     )
-    results.append(feedback_payload)
-    
+    results.append(score_payload)
+
     return results

@@ -14,6 +14,7 @@ from app.services.extractors.objection_playbook import extract_objection_playboo
 from app.services.extractors.content_messaging import extract_content_messaging
 from app.services.extractors.content_studio import extract_content_studio
 from app.services.extractors.strategy_chat import extract_strategy_chat
+from app.services.extractors.message_evaluator import extract_message_evaluator
 
 router = APIRouter(tags=["Widget Contracts & Dashboard Shell"])
 
@@ -430,6 +431,10 @@ def get_account_feature_widgets(
             extracted_widgets_map[w["widget_key"]] = w
     elif key_clean == "strategy_chat":
         extracted_list = extract_strategy_chat(account_id)
+        for w in extracted_list:
+            extracted_widgets_map[w["widget_key"]] = w
+    elif key_clean == "message_evaluator":
+        extracted_list = extract_message_evaluator(account_id)
         for w in extracted_list:
             extracted_widgets_map[w["widget_key"]] = w
 
