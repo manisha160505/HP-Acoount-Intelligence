@@ -18,6 +18,7 @@ from app.services.extractors.intent_demand_signals import extract_intent_demand_
 from app.services.extractors.solution_narrative_opportunity_map import extract_solution_narrative_opportunity_map
 from app.services.extractors.stakeholder_map import extract_stakeholder_map
 from app.services.extractors.tech_landscape import extract_tech_landscape
+from app.services.extractors.message_evaluator import extract_message_evaluator
 
 router = APIRouter(prefix="/accounts/{account_id}/data", tags=["Raw Data Management (Admin Only)"])
 
@@ -229,6 +230,11 @@ async def upload_account_data(
     if key_clean in ["technographics", "technology_detections", "webstack"]:
         try:
             extract_tech_landscape(account_id)
+        except Exception:
+            pass
+    if key_clean in ["prospect_contacts", "job_openings"]:
+        try:
+            extract_message_evaluator(account_id)
         except Exception:
             pass
 

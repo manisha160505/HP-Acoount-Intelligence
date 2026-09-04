@@ -10,6 +10,7 @@ from app.services.extractors.intent_demand_signals import extract_intent_demand_
 from app.services.extractors.solution_narrative_opportunity_map import extract_solution_narrative_opportunity_map
 from app.services.extractors.stakeholder_map import extract_stakeholder_map
 from app.services.extractors.tech_landscape import extract_tech_landscape
+from app.services.extractors.message_evaluator import extract_message_evaluator
 
 router = APIRouter(tags=["Widget Contracts & Dashboard Shell"])
 
@@ -410,6 +411,10 @@ def get_account_feature_widgets(
             extracted_widgets_map[w["widget_key"]] = w
     elif key_clean == "tech_landscape":
         extracted_list = extract_tech_landscape(account_id)
+        for w in extracted_list:
+            extracted_widgets_map[w["widget_key"]] = w
+    elif key_clean == "message_evaluator":
+        extracted_list = extract_message_evaluator(account_id)
         for w in extracted_list:
             extracted_widgets_map[w["widget_key"]] = w
 

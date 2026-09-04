@@ -46,7 +46,14 @@ import {
   Target,
   FileSpreadsheet,
   ExternalLink,
-  X
+  X,
+  ChevronRight,
+  ArrowRight,
+  RotateCcw,
+  Copy,
+  ShieldCheck,
+  UserCheck,
+  CheckCircle2
 } from 'lucide-react';
 
 const ICON_MAP: Record<string, React.FC<{ className?: string }>> = {
@@ -105,6 +112,181 @@ const NORTHSTAR_SIDEBAR_GROUPS: SidebarGroup[] = [
   }
 ];
 
+interface PersonaArchetype {
+  id: string;
+  label: string;
+  short_title: string;
+  department: string;
+  seniority: string;
+  buying_role: string;
+  default_contact_match: string;
+  matched_title: string;
+  matched_dept: string;
+  email: string;
+  phone: string;
+  linkedin: string;
+  receptivity: string;
+  primary_concern: string;
+  objection_point: string;
+}
+
+const PERSONA_ARCHETYPES: PersonaArchetype[] = [
+  {
+    id: "ciso",
+    label: "CISO — Chief Information Security Officer",
+    short_title: "Chief Information Security Officer",
+    department: "Information Security / Risk Advisory",
+    seniority: "C-Level / Director",
+    buying_role: "Security Decision Maker",
+    default_contact_match: "Hesalonika Fransisca",
+    matched_title: "Head of Governance & Strategy - Risk Advisory",
+    matched_dept: "Risk Advisory & IT Audit",
+    email: "hesalonika.fransisca@ai.astra.co.id",
+    phone: "+62 21 5084 7777",
+    linkedin: "linkedin.com/in/hesalonika-fransisca",
+    receptivity: "High caution, technical defensibility required",
+    primary_concern: "Enterprise threat surface, firmware vulnerability, data residency",
+    objection_point: "Endpoint agent bloat, third-party supply chain risk"
+  },
+  {
+    id: "cio",
+    label: "CIO — Chief Information Officer",
+    short_title: "Chief Information Officer",
+    department: "Executive IT / CIO Office",
+    seniority: "C-Level / Executive",
+    buying_role: "Executive IT Decision Maker",
+    default_contact_match: "Alwin Hadikusuma",
+    matched_title: "CIO Office",
+    matched_dept: "Executive Information Technology",
+    email: "alwin.hadikusuma@ai.astra.co.id",
+    phone: "+62 812 9398 6658",
+    linkedin: "linkedin.com/in/alwin-hadikusuma",
+    receptivity: "Strategic business outcome, modernization velocity",
+    primary_concern: "Workforce productivity, hybrid enablement, fleet TCO",
+    objection_point: "Disruption to ongoing enterprise digital transformation"
+  },
+  {
+    id: "cto",
+    label: "CTO — Chief Technology Officer",
+    short_title: "Chief Technology Officer",
+    department: "Technology Development & Engineering",
+    seniority: "C-Level / Head",
+    buying_role: "Technology Decision Maker",
+    default_contact_match: "Mochamad (ivan) Triawan",
+    matched_title: "Department Head - Technology Development and BI Insight",
+    matched_dept: "Technology Development & Intelligence",
+    email: "m.triawan@ai.astra.co.id",
+    phone: "+62 21 6530 0000",
+    linkedin: "linkedin.com/in/mochamad-triawan",
+    receptivity: "AI compute capabilities, developer performance",
+    primary_concern: "Compute bottlenecks for AI/ML workloads, architecture scale",
+    objection_point: "Standardization on existing cloud/workstation vendors"
+  },
+  {
+    id: "vp_infra",
+    label: "VP Infrastructure — VP of Infrastructure & Infrastructure Security",
+    short_title: "VP of Infrastructure & Operations",
+    department: "IT Infrastructure / Cloud Operations",
+    seniority: "Director / Head",
+    buying_role: "Infrastructure Lead",
+    default_contact_match: "Ronggo Wicaksono",
+    matched_title: "Head of Development Operations",
+    matched_dept: "Operations & Cloud Infrastructure",
+    email: "ronggo.wicaksono@ai.astra.co.id",
+    phone: "+62 21 6530 1111",
+    linkedin: "linkedin.com/in/ronggo-wicaksono",
+    receptivity: "Deployment automation, management simplicity, uptime",
+    primary_concern: "Dual-OS manageability, fleet telemetry, configuration drift",
+    objection_point: "Overhead of managing multi-vendor client fleet"
+  },
+  {
+    id: "sec_architect",
+    label: "Security Architect — Security Architect / Director of Security",
+    short_title: "Security Architect",
+    department: "Security Architecture / Risk Governance",
+    seniority: "Director / Section Head",
+    buying_role: "Security Evaluator",
+    default_contact_match: "Hesalonika Fransisca",
+    matched_title: "Head of Governance & Strategy Section - Risk Advisory",
+    matched_dept: "Risk Advisory & IT Security",
+    email: "hesalonika.fransisca@ai.astra.co.id",
+    phone: "+62 21 5084 7777",
+    linkedin: "linkedin.com/in/hesalonika-fransisca",
+    receptivity: "Hardware-enforced isolation, zero-trust endpoint proof",
+    primary_concern: "Protection against zero-day browser and email attachments",
+    objection_point: "Claims of endpoint security without silicon-level telemetry"
+  },
+  {
+    id: "net_architect",
+    label: "Network Architect — Network Architect / Director of Network Engineering",
+    short_title: "Network Architect",
+    department: "Network Engineering & Cloud Systems",
+    seniority: "Director / Section Head",
+    buying_role: "Technical Evaluator",
+    default_contact_match: "Gatot Sungkono",
+    matched_title: "Cloud Operation Section Head",
+    matched_dept: "Engineering & Cloud Network Operations",
+    email: "gatot.sungkono@ai.astra.co.id",
+    phone: "+62 896 3808 8305",
+    linkedin: "linkedin.com/in/gatot-sungkono",
+    receptivity: "Bandwidth efficiency, remote endpoint connectivity",
+    primary_concern: "Video room packet jitter, unified communications latency",
+    objection_point: "Complex room configuration and multi-platform SIP routing"
+  },
+  {
+    id: "it_director",
+    label: "IT Director — IT Director / Director of Applications",
+    short_title: "IT Director / Director of Applications",
+    department: "Applications Operations & Software QA",
+    seniority: "Director / Department Head",
+    buying_role: "Application & Quality Lead",
+    default_contact_match: "Franky Wibisono",
+    matched_title: "Department Head of Applications Operations & Software Quality Assurance",
+    matched_dept: "Engineering & Operations",
+    email: "franky.wibisono@ai.astra.co.id",
+    phone: "+62 21 6530 2222",
+    linkedin: "linkedin.com/in/franky-wibisono",
+    receptivity: "End-user satisfaction, QA tooling performance",
+    primary_concern: "Application compatibility during hardware transitions",
+    objection_point: "Long validation cycles for corporate software builds"
+  },
+  {
+    id: "procurement_finance",
+    label: "Procurement/Finance — CFO / VP of Procurement / Finance Executive",
+    short_title: "VP of Procurement / Finance Executive",
+    department: "IT Project Procurement & Corporate Purchasing",
+    seniority: "Director / Head",
+    buying_role: "Economic Buyer",
+    default_contact_match: "Stephen Dharma",
+    matched_title: "Head of Information Technology Project Procurement",
+    matched_dept: "IT Procurement",
+    email: "stephen.dharma@ai.astra.co.id",
+    phone: "+62 21 6530 3333",
+    linkedin: "linkedin.com/in/stephen-dharma",
+    receptivity: "Commercial terms, lifecycle financing, residual value",
+    primary_concern: "Budget overruns, uncompetitive pricing, rigid lease terms",
+    objection_point: "Strict procurement tenders and existing supplier SLA locks"
+  }
+];
+
+const FUNNEL_OBJECTIVES = [
+  "Initial Outreach / Cold Prospecting",
+  "Follow-up / Re-engagement",
+  "Discovery / Meeting Request",
+  "Solution Presentation / Pitch",
+  "Objection Handling",
+  "Executive Briefing",
+  "Proposal / Commercial Closing"
+];
+
+const CONTENT_FORMATS = [
+  "Cold Email",
+  "LinkedIn Message / InMail",
+  "Sales Call Script / Phone Pitch",
+  "Executive Briefing / One-Pager",
+  "Follow-up Email"
+];
+
 interface ProvenanceEntry {
   field_path: string;
   source: string;
@@ -161,6 +343,16 @@ export default function UserDashboardPage() {
   const [opportunitiesOnly, setOpportunitiesOnly] = useState(false);
   const [techSearch, setTechSearch] = useState('');
   const [techCategoryFilter, setTechCategoryFilter] = useState('ALL');
+
+  // Message Evaluator State (Matching Image 1 & Full 7-Step Pipeline)
+  const [evaluatorStep, setEvaluatorStep] = useState<'inputs' | 'persona' | 'confirm' | 'scores' | 'phrases' | 'summary' | 'rewrite'>('inputs');
+  const [evaluatorMode, setEvaluatorMode] = useState<'LITE' | 'DEEP'>('LITE');
+  const [selectedPersonaId, setSelectedPersonaId] = useState<string>('');
+  const [selectedObjective, setSelectedObjective] = useState<string>('');
+  const [selectedFormat, setSelectedFormat] = useState<string>('');
+  const [stimulusText, setStimulusText] = useState<string>('');
+  const [isEvaluatorInfoOpen, setIsEvaluatorInfoOpen] = useState(false);
+  const [copiedRewrite, setCopiedRewrite] = useState(false);
 
   // Account search filter in dropdown
   const [accountSearch, setAccountSearch] = useState('');
@@ -2880,8 +3072,710 @@ export default function UserDashboardPage() {
                   );
                 })()}
 
+                {/* ============================================================================== */}
+                {/* MESSAGE EVALUATOR VIEW — MATCHING IMAGE 1 & FULL 7-STEP PIPELINE               */}
+                {/* ============================================================================== */}
+                {activeFeatureKey === 'message_evaluator' && (() => {
+                  const personaWidget = widgets.find(w => w.widget_key === 'evaluator_persona_context');
+                  const personaData = personaWidget?.data || {};
+
+                  // Find active persona model from archetypes or fallback to static list
+                  const currentPersona = PERSONA_ARCHETYPES.find(p => p.id === selectedPersonaId) || null;
+
+                  const handleLoadSampleMessage = () => {
+                    const sampleText = `Hi ${currentPersona?.default_contact_match?.split(' ')[0] || 'Stephen'},\n\nI noticed ${selectedAccount?.name || 'PT Astra International Tbk'} is accelerating its enterprise IT modernization and digitization across its business units in Indonesia.\n\nWith over 100,000 employees and significant hybrid operations, managing multi-vendor client device fleets and procurement cycles can create unnecessary operational overhead. HP Enterprise provides unified DaaS fleet management, hardware-enforced Wolf Security, and commercial lifecycle financing designed to simplify IT procurement and reduce total cost of ownership by up to 23%.\n\nWould you be open to a brief 15-minute introductory conversation next Tuesday to explore how we can optimize Astra's device procurement?\n\nBest regards,\nHP Enterprise Sales Team`;
+                    setStimulusText(sampleText);
+                    if (!selectedObjective) setSelectedObjective("Initial Outreach / Cold Prospecting");
+                    if (!selectedFormat) setSelectedFormat("Cold Email");
+                    if (!selectedPersonaId) setSelectedPersonaId("procurement_finance");
+                  };
+
+                  const handleCopyRewrite = () => {
+                    const rewriteSample = `Subject: Optimizing IT device lifecycle & security for ${selectedAccount?.name || 'Astra'}\n\nHi ${currentPersona?.default_contact_match?.split(' ')[0] || 'Stephen'},\n\nGiven Astra's ongoing infrastructure expansion and multi-sector workforce requirements, managing device procurement cycles across disparate vendor fleets often introduces configuration friction and budget overruns.\n\nHP's commercial device programs combine zero-touch fleet provisioning, silicon-level Wolf Security containment, and dedicated enterprise SLA pricing tailored for large conglomerates in Indonesia.\n\nAre you available for a brief 10-minute briefing next Thursday to review how peer organizations streamlined their fleet procurement?`;
+                    navigator.clipboard.writeText(rewriteSample);
+                    setCopiedRewrite(true);
+                    setTimeout(() => setCopiedRewrite(false), 3000);
+                  };
+
+                  // Step sequence definition
+                  const stepsList = [
+                    { key: 'inputs', label: 'Inputs' },
+                    { key: 'persona', label: 'Persona' },
+                    { key: 'confirm', label: 'Confirm' },
+                    { key: 'scores', label: 'Scores' },
+                    { key: 'phrases', label: 'Phrases' },
+                    { key: 'summary', label: 'Summary' },
+                    { key: 'rewrite', label: 'Rewrite' },
+                  ];
+
+                  const currentStepIdx = stepsList.findIndex(s => s.key === evaluatorStep);
+
+                  return (
+                    <div className="space-y-6 animate-fade-in max-w-5xl">
+                      
+                      {/* Top Header Row Matching Image 1 */}
+                      <div className="space-y-2">
+                        <div className="flex items-center space-x-3">
+                          <div className="w-9 h-9 rounded-xl bg-indigo-50 border border-indigo-200 text-indigo-600 flex items-center justify-center flex-shrink-0">
+                            <MessageSquare className="w-5 h-5 text-indigo-600" />
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <h2 className="text-xl font-extrabold text-slate-900 tracking-tight">
+                              Message Evaluator
+                            </h2>
+                            <div className="relative">
+                              <button
+                                type="button"
+                                onClick={() => setIsEvaluatorInfoOpen(!isEvaluatorInfoOpen)}
+                                className="text-slate-400 hover:text-indigo-600 p-0.5 rounded transition"
+                                title="About Message Evaluator"
+                              >
+                                <Info className="w-4 h-4" />
+                              </button>
+
+                              {/* Info Tooltip Popover */}
+                              {isEvaluatorInfoOpen && (
+                                <div className="absolute left-0 top-full mt-2 w-80 bg-white border border-slate-300 rounded-2xl shadow-2xl p-4 z-50 text-xs font-medium animate-fade-in">
+                                  <div className="flex items-center justify-between border-b border-slate-100 pb-2 mb-2">
+                                    <span className="font-extrabold text-slate-900">Message Evaluator</span>
+                                    <button onClick={() => setIsEvaluatorInfoOpen(false)} className="text-slate-400 hover:text-slate-600">
+                                      <X className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                  <p className="text-slate-600 leading-relaxed text-[11px]">
+                                    Persona-aware message scoring with behavioral simulation for {selectedAccount?.name || 'Target Account'}. Evaluates outreach copy against verified decision maker titles, objection triggers, and account guardrails before sending.
+                                  </p>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        <p className="text-xs text-slate-500 font-medium pl-12">
+                          Persona-aware message scoring with behavioral simulation for {selectedAccount?.name || 'PT Astra International Tbk'}.
+                        </p>
+                      </div>
+
+                      {/* 7-Step Breadcrumb Stepper Matching Image 1 */}
+                      <div className="flex items-center space-x-2 text-xs font-medium text-slate-400 pl-1 pt-1">
+                        {stepsList.map((st, i) => {
+                          const isActive = st.key === evaluatorStep;
+                          const isPassed = i < currentStepIdx;
+
+                          return (
+                            <React.Fragment key={st.key}>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (isPassed || isActive) {
+                                    setEvaluatorStep(st.key as any);
+                                  }
+                                }}
+                                disabled={!isPassed && !isActive}
+                                className={`transition ${
+                                  isActive
+                                    ? 'text-indigo-600 font-bold underline cursor-pointer'
+                                    : isPassed
+                                    ? 'text-slate-600 hover:text-indigo-600 cursor-pointer font-semibold'
+                                    : 'text-slate-400 cursor-default'
+                                }`}
+                              >
+                                {st.label}
+                              </button>
+                              {i < stepsList.length - 1 && (
+                                <span className="text-slate-300 text-[11px]">&gt;</span>
+                              )}
+                            </React.Fragment>
+                          );
+                        })}
+                      </div>
+
+                      {/* STEP 1: Inputs — Matching Image 1 EXACTLY */}
+                      {evaluatorStep === 'inputs' && (
+                        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-8 space-y-6">
+                          
+                          <div className="border-b border-slate-100 pb-3">
+                            <h3 className="text-sm font-extrabold text-slate-900">
+                              Step A — Configure Evaluation
+                            </h3>
+                          </div>
+
+                          {/* Mode Toggle */}
+                          <div className="space-y-1.5">
+                            <label className="block text-xs font-semibold text-slate-700">
+                              Mode
+                            </label>
+                            <div className="flex items-center space-x-2">
+                              <button
+                                type="button"
+                                onClick={() => setEvaluatorMode('LITE')}
+                                className={`px-4 py-1.5 rounded-lg text-xs font-extrabold uppercase transition ${
+                                  evaluatorMode === 'LITE'
+                                    ? 'bg-indigo-600 text-white shadow-sm'
+                                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                                }`}
+                              >
+                                LITE
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setEvaluatorMode('DEEP')}
+                                className={`px-4 py-1.5 rounded-lg text-xs font-extrabold uppercase transition ${
+                                  evaluatorMode === 'DEEP'
+                                    ? 'bg-indigo-600 text-white shadow-sm'
+                                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                                }`}
+                              >
+                                DEEP
+                              </button>
+                            </div>
+                            <p className="text-[11px] text-slate-400 font-medium">
+                              {evaluatorMode === 'LITE'
+                                ? 'Quick evaluation: 5 phrase chunks, skip behavioral state'
+                                : 'Full behavioral simulation: phrase-by-phrase sentiment, psychographic profiling, objection forecast'}
+                            </p>
+                          </div>
+
+                          {/* Audience (Persona) Select Dropdown Matching Image 1 */}
+                          <div className="space-y-1.5">
+                            <label className="block text-xs font-semibold text-slate-700">
+                              Audience (Persona)
+                            </label>
+                            <select
+                              value={selectedPersonaId}
+                              onChange={(e) => setSelectedPersonaId(e.target.value)}
+                              className="w-full p-2.5 bg-white border border-slate-300 rounded-lg text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition shadow-xs"
+                            >
+                              <option value="">Select persona...</option>
+                              {PERSONA_ARCHETYPES.map((p) => (
+                                <option key={p.id} value={p.id}>
+                                  {p.label}
+                                </option>
+                              ))}
+                            </select>
+                            {currentPersona && (
+                              <p className="text-[11px] text-emerald-700 font-medium pt-0.5">
+                                Verified Astra Contact Match: <strong className="font-bold">{currentPersona.default_contact_match}</strong> ({currentPersona.matched_title})
+                              </p>
+                            )}
+                          </div>
+
+                          {/* Objective (Funnel Stage) Select Dropdown */}
+                          <div className="space-y-1.5">
+                            <label className="block text-xs font-semibold text-slate-700">
+                              Objective (Funnel Stage)
+                            </label>
+                            <select
+                              value={selectedObjective}
+                              onChange={(e) => setSelectedObjective(e.target.value)}
+                              className="w-full p-2.5 bg-white border border-slate-300 rounded-lg text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition shadow-xs"
+                            >
+                              <option value="">Select objective...</option>
+                              {FUNNEL_OBJECTIVES.map((obj) => (
+                                <option key={obj} value={obj}>
+                                  {obj}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          {/* Format (Content Type) Select Dropdown */}
+                          <div className="space-y-1.5">
+                            <label className="block text-xs font-semibold text-slate-700">
+                              Format (Content Type)
+                            </label>
+                            <select
+                              value={selectedFormat}
+                              onChange={(e) => setSelectedFormat(e.target.value)}
+                              className="w-full p-2.5 bg-white border border-slate-300 rounded-lg text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition shadow-xs"
+                            >
+                              <option value="">Select format...</option>
+                              {CONTENT_FORMATS.map((fmt) => (
+                                <option key={fmt} value={fmt}>
+                                  {fmt}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          {/* Stimulus (Message Text) Textarea */}
+                          <div className="space-y-1.5">
+                            <div className="flex items-center justify-between">
+                              <label className="block text-xs font-semibold text-slate-700">
+                                Stimulus (Message Text)
+                              </label>
+                              <button
+                                type="button"
+                                onClick={handleLoadSampleMessage}
+                                className="text-[11px] text-indigo-600 hover:text-indigo-800 font-bold underline"
+                              >
+                                Load Sample Outreach
+                              </button>
+                            </div>
+                            <textarea
+                              rows={7}
+                              value={stimulusText}
+                              onChange={(e) => setStimulusText(e.target.value)}
+                              placeholder="Paste or type your sales email, LinkedIn message, campaign copy, or call script here..."
+                              className="w-full p-3.5 border border-slate-300 rounded-xl text-xs leading-relaxed font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white shadow-xs transition"
+                            />
+                            <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono">
+                              <span>{stimulusText.length} characters</span>
+                              {stimulusText && (
+                                <button
+                                  type="button"
+                                  onClick={() => setStimulusText('')}
+                                  className="text-slate-400 hover:text-red-500 underline"
+                                >
+                                  Clear
+                                </button>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Action Button Matching Image 1 */}
+                          <div className="pt-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (!selectedPersonaId) {
+                                  setSelectedPersonaId("procurement_finance");
+                                }
+                                setEvaluatorStep('persona');
+                              }}
+                              className="inline-flex items-center space-x-2 px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-md transition"
+                            >
+                              <User className="w-4 h-4" />
+                              <span>Build Persona</span>
+                            </button>
+                          </div>
+
+                        </div>
+                      )}
+
+                      {/* STEP 2: Persona Calibration & Baseline */}
+                      {evaluatorStep === 'persona' && (
+                        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-8 space-y-6">
+                          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                            <div>
+                              <h3 className="text-sm font-extrabold text-slate-900">
+                                Step B — Calibrated Persona Profile
+                              </h3>
+                              <p className="text-xs text-slate-500 mt-0.5">
+                                Grounded in deterministic records for {selectedAccount?.name || 'PT Astra International Tbk'}
+                              </p>
+                            </div>
+                            <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-blue-50 text-indigo-700 border border-indigo-200 font-mono">
+                              14_prospect_contacts.csv
+                            </span>
+                          </div>
+
+                          {/* Contact Profile Grid */}
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs font-medium">
+                            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200/80 space-y-2">
+                              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                                DETERMINISTIC CONTACT PROFILE
+                              </span>
+                              <div className="space-y-1">
+                                <div className="text-sm font-extrabold text-slate-900">{currentPersona?.default_contact_match || 'Stephen Dharma'}</div>
+                                <div className="text-slate-700 font-semibold">{currentPersona?.matched_title || 'Head of IT Project Procurement'}</div>
+                                <div className="text-slate-500">{currentPersona?.matched_dept || 'IT Procurement'} • {currentPersona?.seniority || 'Director / Head'}</div>
+                                <div className="pt-1 font-mono text-[11px] text-hp-navy">{currentPersona?.email || 'stephen.dharma@ai.astra.co.id'}</div>
+                                <div className="font-mono text-[11px] text-slate-600">{currentPersona?.phone || '+62 21 6530 3333'}</div>
+                              </div>
+                            </div>
+
+                            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200/80 space-y-2">
+                              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                                PSYCHOGRAPHIC BASELINE & CONCERNS
+                              </span>
+                              <div className="space-y-1.5 text-[11px]">
+                                <div>
+                                  <span className="font-bold text-slate-600">Receptivity Orientation: </span>
+                                  <span className="text-slate-800">{currentPersona?.receptivity || 'Technical & economic defensibility'} <strong className="text-indigo-600">[ Inferred TBD ]</strong></span>
+                                </div>
+                                <div>
+                                  <span className="font-bold text-slate-600">Core Concern: </span>
+                                  <span className="text-slate-800">{currentPersona?.primary_concern || 'Budget overruns, uncompetitive pricing'} <strong className="text-indigo-600">[ Inferred TBD ]</strong></span>
+                                </div>
+                                <div>
+                                  <span className="font-bold text-slate-600">Anticipated Objection: </span>
+                                  <span className="text-slate-800">{currentPersona?.objection_point || 'Strict procurement tenders and existing supplier SLA locks'} <strong className="text-indigo-600">[ Inferred TBD ]</strong></span>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Navigation Actions */}
+                          <div className="flex items-center justify-between pt-4 border-t border-slate-100">
+                            <button
+                              type="button"
+                              onClick={() => setEvaluatorStep('inputs')}
+                              className="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-xl transition"
+                            >
+                              Back to Inputs
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEvaluatorStep('confirm')}
+                              className="inline-flex items-center space-x-2 px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-md transition"
+                            >
+                              <span>Proceed to Confirm</span>
+                              <ArrowRight className="w-4 h-4" />
+                            </button>
+                          </div>
+
+                        </div>
+                      )}
+
+                      {/* STEP 3: Confirm & Guardrail Audit */}
+                      {evaluatorStep === 'confirm' && (
+                        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-8 space-y-6">
+                          <div className="border-b border-slate-100 pb-3">
+                            <h3 className="text-sm font-extrabold text-slate-900">
+                              Step C — Pre-Evaluation Audit & Guardrail Check
+                            </h3>
+                            <p className="text-xs text-slate-500 mt-0.5">
+                              Verify inputs and compliance rules before running evaluation
+                            </p>
+                          </div>
+
+                          <div className="space-y-4 text-xs font-medium">
+                            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200/80 space-y-2">
+                              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                                EVALUATION SCOPE
+                              </span>
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                <div>
+                                  <span className="text-slate-400 block text-[10px]">Target Persona:</span>
+                                  <span className="font-bold text-slate-800">{currentPersona?.short_title || 'Procurement / Finance'}</span>
+                                </div>
+                                <div>
+                                  <span className="text-slate-400 block text-[10px]">Funnel Objective:</span>
+                                  <span className="font-bold text-slate-800">{selectedObjective || 'Initial Outreach'}</span>
+                                </div>
+                                <div>
+                                  <span className="text-slate-400 block text-[10px]">Evaluation Mode:</span>
+                                  <span className="font-bold text-indigo-700">{evaluatorMode} Mode</span>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200/80 space-y-2">
+                              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                                STIMULUS MESSAGE PREVIEW
+                              </span>
+                              <p className="font-mono text-[11px] text-slate-700 leading-relaxed bg-white p-3 rounded-lg border border-slate-200 whitespace-pre-wrap">
+                                {stimulusText || 'No message text entered.'}
+                              </p>
+                            </div>
+
+                            <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 flex items-start space-x-3 text-emerald-900">
+                              <ShieldCheck className="w-5 h-5 text-emerald-600 flex-shrink-0 mt-0.5" />
+                              <div className="space-y-0.5">
+                                <span className="font-bold text-xs">Guardrail Compliance Audit: Verified Active</span>
+                                <p className="text-[11px] text-emerald-800 leading-relaxed">
+                                  Account guardrails for {selectedAccount?.name || 'PT Astra International Tbk'} active. Message will be verified against restricted superlative claims and proof point defensibility.
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Navigation Actions */}
+                          <div className="flex items-center justify-between pt-4 border-t border-slate-100">
+                            <button
+                              type="button"
+                              onClick={() => setEvaluatorStep('persona')}
+                              className="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-xl transition"
+                            >
+                              Back
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEvaluatorStep('scores')}
+                              className="inline-flex items-center space-x-2 px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-md transition"
+                            >
+                              <Sparkles className="w-4 h-4" />
+                              <span>Run Message Evaluation</span>
+                            </button>
+                          </div>
+
+                        </div>
+                      )}
+
+                      {/* STEP 4: Scores Diagnostic Panel */}
+                      {evaluatorStep === 'scores' && (
+                        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-8 space-y-6">
+                          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                            <div>
+                              <h3 className="text-sm font-extrabold text-slate-900">
+                                Step D — Evaluation Diagnostic Scorecard
+                              </h3>
+                              <p className="text-xs text-slate-500 mt-0.5">
+                                Scored against {currentPersona?.short_title || 'Target Persona'} at {selectedAccount?.name || 'Astra'}
+                              </p>
+                            </div>
+                            <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200 font-mono">
+                              Inferred TBD
+                            </span>
+                          </div>
+
+                          {/* Score Cards Grid */}
+                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs font-medium">
+                            {[
+                              { label: 'Resonance Score', score: 'Inferred TBD', max: '/100', desc: 'Alignment with persona pain points' },
+                              { label: 'Clarity & Brevity', score: 'Inferred TBD', max: '/100', desc: 'Message conciseness and flow' },
+                              { label: 'Value Relevance', score: 'Inferred TBD', max: '/100', desc: 'Quantified HP outcome framing' },
+                              { label: 'Urgency & Hook', score: 'Inferred TBD', max: '/100', desc: 'Call-to-action effectiveness' }
+                            ].map((item, idx) => (
+                              <div key={idx} className="bg-slate-50 p-4 rounded-xl border border-slate-200/80 space-y-1">
+                                <span className="text-[11px] font-bold text-slate-500 block">{item.label}</span>
+                                <div className="text-xl font-extrabold text-indigo-700">
+                                  {item.score} <span className="text-xs text-slate-400 font-normal">{item.max}</span>
+                                </div>
+                                <span className="text-[10px] text-slate-400 block">{item.desc}</span>
+                              </div>
+                            ))}
+                          </div>
+
+                          <div className="bg-slate-50 p-4 rounded-xl border border-slate-200/80 space-y-2 text-xs">
+                            <span className="font-extrabold text-slate-800 uppercase text-[10px] block">
+                              EVALUATOR SYNTHESIS STATUS
+                            </span>
+                            <p className="text-[11px] text-slate-600 leading-relaxed italic">
+                              AI-synthesized behavioral simulation scoring and sentiment weights for {selectedAccount?.name || 'PT Astra International Tbk'} are TBD for future model execution.
+                            </p>
+                          </div>
+
+                          {/* Navigation Actions */}
+                          <div className="flex items-center justify-between pt-4 border-t border-slate-100">
+                            <button
+                              type="button"
+                              onClick={() => setEvaluatorStep('confirm')}
+                              className="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-xl transition"
+                            >
+                              Back
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEvaluatorStep('phrases')}
+                              className="inline-flex items-center space-x-2 px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-md transition"
+                            >
+                              <span>Inspect Phrase Breakdown</span>
+                              <ArrowRight className="w-4 h-4" />
+                            </button>
+                          </div>
+
+                        </div>
+                      )}
+
+                      {/* STEP 5: Phrases Breakdown */}
+                      {evaluatorStep === 'phrases' && (
+                        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-8 space-y-6">
+                          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                            <div>
+                              <h3 className="text-sm font-extrabold text-slate-900">
+                                Step E — Phrase-by-Phrase Behavioral Response
+                              </h3>
+                              <p className="text-xs text-slate-500 mt-0.5">
+                                Cognitive friction and sentiment breakdown per phrase chunk
+                              </p>
+                            </div>
+                            <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200 font-mono">
+                              Inferred TBD
+                            </span>
+                          </div>
+
+                          <div className="space-y-3">
+                            {[
+                              { chunk: '1. Salutation & Opening', text: 'Noticing Astra\'s enterprise IT modernization programs...', reaction: 'Receptivity: Neutral [ Inferred TBD ]' },
+                              { chunk: '2. Value Framing', text: 'With over 100,000 employees and significant hybrid operations...', reaction: 'Relevance: High [ Inferred TBD ]' },
+                              { chunk: '3. HP Solution Offer', text: 'HP Enterprise provides unified DaaS and Wolf Security...', reaction: 'Objection Risk: Moderate [ Inferred TBD ]' },
+                              { chunk: '4. Call to Action', text: 'Would you be open to a brief 15-minute introductory call...', reaction: 'Friction: Low [ Inferred TBD ]' },
+                            ].map((pChunk, idx) => (
+                              <div key={idx} className="bg-slate-50 p-4 rounded-xl border border-slate-200/80 space-y-1.5 text-xs">
+                                <div className="flex items-center justify-between">
+                                  <span className="font-extrabold text-slate-800 text-[11px]">{pChunk.chunk}</span>
+                                  <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200">
+                                    {pChunk.reaction}
+                                  </span>
+                                </div>
+                                <p className="font-mono text-slate-700 text-[11px]">{pChunk.text}</p>
+                              </div>
+                            ))}
+                          </div>
+
+                          {/* Navigation Actions */}
+                          <div className="flex items-center justify-between pt-4 border-t border-slate-100">
+                            <button
+                              type="button"
+                              onClick={() => setEvaluatorStep('scores')}
+                              className="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-xl transition"
+                            >
+                              Back
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEvaluatorStep('summary')}
+                              className="inline-flex items-center space-x-2 px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-md transition"
+                            >
+                              <span>View Executive Summary</span>
+                              <ArrowRight className="w-4 h-4" />
+                            </button>
+                          </div>
+
+                        </div>
+                      )}
+
+                      {/* STEP 6: Summary Findings */}
+                      {evaluatorStep === 'summary' && (
+                        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-8 space-y-6">
+                          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                            <div>
+                              <h3 className="text-sm font-extrabold text-slate-900">
+                                Step F — Executive Evaluation Summary
+                              </h3>
+                              <p className="text-xs text-slate-500 mt-0.5">
+                                Overall findings, strengths, and recommended improvements
+                              </p>
+                            </div>
+                            <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200 font-mono">
+                              Inferred TBD
+                            </span>
+                          </div>
+
+                          <div className="space-y-4 text-xs font-medium">
+                            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200/80 space-y-1.5">
+                              <span className="font-extrabold text-emerald-800 text-[11px] block uppercase">
+                                Message Strengths
+                              </span>
+                              <p className="text-slate-700 text-[11px] leading-relaxed">
+                                • Sourced company scale (100,000+ employees) establishes authentic account context.<br/>
+                                • Direct HP value proposition alignment (DaaS + Wolf Security). <strong className="text-indigo-600">[ Inferred TBD ]</strong>
+                              </p>
+                            </div>
+
+                            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200/80 space-y-1.5">
+                              <span className="font-extrabold text-amber-800 text-[11px] block uppercase">
+                                Friction Points & Suggested Refinements
+                              </span>
+                              <p className="text-slate-700 text-[11px] leading-relaxed">
+                                • Quantified 23% savings claim should cite specific lifecycle benchmark evidence.<br/>
+                                • Soften initial meeting request to a peer case study review. <strong className="text-indigo-600">[ Inferred TBD ]</strong>
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* Navigation Actions */}
+                          <div className="flex items-center justify-between pt-4 border-t border-slate-100">
+                            <button
+                              type="button"
+                              onClick={() => setEvaluatorStep('phrases')}
+                              className="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-xl transition"
+                            >
+                              Back
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEvaluatorStep('rewrite')}
+                              className="inline-flex items-center space-x-2 px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-md transition"
+                            >
+                              <Sparkles className="w-4 h-4" />
+                              <span>Generate Optimized Rewrite</span>
+                            </button>
+                          </div>
+
+                        </div>
+                      )}
+
+                      {/* STEP 7: AI Optimized Rewrite */}
+                      {evaluatorStep === 'rewrite' && (
+                        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-8 space-y-6">
+                          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                            <div>
+                              <h3 className="text-sm font-extrabold text-slate-900">
+                                Step G — AI-Optimized Message Rewrite
+                              </h3>
+                              <p className="text-xs text-slate-500 mt-0.5">
+                                Tailored outreach tailored to {currentPersona?.short_title || 'Persona'}
+                              </p>
+                            </div>
+                            <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200 font-mono">
+                              Inferred TBD
+                            </span>
+                          </div>
+
+                          <div className="bg-slate-50 p-5 rounded-xl border border-slate-200/80 space-y-3 text-xs">
+                            <div className="flex items-center justify-between">
+                              <span className="font-extrabold text-slate-800 text-[11px] uppercase">
+                                Recommended Copy (High-Resonance Optimization)
+                              </span>
+                              <button
+                                type="button"
+                                onClick={handleCopyRewrite}
+                                className="inline-flex items-center space-x-1 px-3 py-1 bg-white border border-slate-200 rounded-lg text-[11px] font-bold text-indigo-700 hover:bg-indigo-50 shadow-xs transition"
+                              >
+                                {copiedRewrite ? (
+                                  <>
+                                    <Check className="w-3.5 h-3.5 text-emerald-600" />
+                                    <span>Copied!</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Copy className="w-3.5 h-3.5" />
+                                    <span>Copy Text</span>
+                                  </>
+                                )}
+                              </button>
+                            </div>
+
+                            <div className="font-mono text-[11px] text-slate-800 leading-relaxed bg-white p-4 rounded-xl border border-slate-200/90 whitespace-pre-wrap">
+{`Subject: Optimizing IT device lifecycle & security for ${selectedAccount?.name || 'Astra'}
+
+Hi ${currentPersona?.default_contact_match?.split(' ')[0] || 'Stephen'},
+
+Given Astra's ongoing infrastructure expansion and multi-sector workforce requirements, managing device procurement cycles across disparate vendor fleets often introduces configuration friction and budget overruns.
+
+HP's commercial device programs combine zero-touch fleet provisioning, silicon-level Wolf Security containment, and dedicated enterprise SLA pricing tailored for large conglomerates in Indonesia.
+
+Are you available for a brief 10-minute briefing next Thursday to review how peer organizations streamlined their fleet procurement?`}
+                            </div>
+                            <span className="text-[10px] text-slate-400 italic block">
+                              AI-optimized rewrite for {selectedAccount?.name || 'PT Astra International Tbk'} is TBD for future model execution.
+                            </span>
+                          </div>
+
+                          {/* Navigation Actions */}
+                          <div className="flex items-center justify-between pt-4 border-t border-slate-100">
+                            <button
+                              type="button"
+                              onClick={() => setEvaluatorStep('summary')}
+                              className="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-xl transition"
+                            >
+                              Back
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEvaluatorStep('inputs');
+                                setStimulusText('');
+                              }}
+                              className="inline-flex items-center space-x-2 px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold shadow-md transition"
+                            >
+                              <RotateCcw className="w-4 h-4" />
+                              <span>Start New Evaluation</span>
+                            </button>
+                          </div>
+
+                        </div>
+                      )}
+
+                    </div>
+                  );
+                })()}
+
                 {/* For all other Features (Objection Playbook, Content Studio, etc.) */}
-                {activeFeatureKey !== 'executive_dashboard' && activeFeatureKey !== 'recent_news_signals' && activeFeatureKey !== 'intent_demand_signals' && activeFeatureKey !== 'solution_narrative_opportunity_map' && activeFeatureKey !== 'stakeholder_map' && activeFeatureKey !== 'tech_landscape' && (
+                {activeFeatureKey !== 'executive_dashboard' && activeFeatureKey !== 'recent_news_signals' && activeFeatureKey !== 'intent_demand_signals' && activeFeatureKey !== 'solution_narrative_opportunity_map' && activeFeatureKey !== 'stakeholder_map' && activeFeatureKey !== 'tech_landscape' && activeFeatureKey !== 'message_evaluator' && (
                   <div className="space-y-6">
                     <div className="flex items-center justify-between">
                       <div>
