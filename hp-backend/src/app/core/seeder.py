@@ -36,10 +36,11 @@ def seed_database_if_empty():
     # 1. Seed Default Users
     users_col = db["users"]
     
-    if not users_col.find_one({"email": "admin@hp.com"}):
+    admin_doc = users_col.find_one({"email": "admin@hp.com"})
+    if not admin_doc:
         admin_doc = {
             "email": "admin@hp.com",
-            "hashed_password": get_password_hash("Password123!"),
+            "password_hash": get_password_hash("AdminPassword123!"),
             "role": "admin",
             "full_name": "HP Enterprise Admin",
             "is_active": True,
@@ -48,11 +49,17 @@ def seed_database_if_empty():
         }
         users_col.insert_one(admin_doc)
         logger.info("Seeded default admin user: admin@hp.com")
+    elif "password_hash" not in admin_doc:
+        users_col.update_one(
+            {"_id": admin_doc["_id"]},
+            {"$set": {"password_hash": get_password_hash("AdminPassword123!")}}
+        )
 
-    if not users_col.find_one({"email": "user@hp.com"}):
+    user_doc = users_col.find_one({"email": "user@hp.com"})
+    if not user_doc:
         user_doc = {
             "email": "user@hp.com",
-            "hashed_password": get_password_hash("Password123!"),
+            "password_hash": get_password_hash("UserPassword123!"),
             "role": "user",
             "full_name": "HP Sales Representative",
             "is_active": True,
@@ -61,6 +68,11 @@ def seed_database_if_empty():
         }
         users_col.insert_one(user_doc)
         logger.info("Seeded default user: user@hp.com")
+    elif "password_hash" not in user_doc:
+        users_col.update_one(
+            {"_id": user_doc["_id"]},
+            {"$set": {"password_hash": get_password_hash("UserPassword123!")}}
+        )
 
     # 2. Seed Benchmark Company Account
     accounts_col = db["accounts"]

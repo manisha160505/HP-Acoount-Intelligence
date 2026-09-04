@@ -21,6 +21,11 @@ Master FastAPI Project Structure.pdf
 *.docx
 *.pdf
 
+# Allow Seed Data for Auto-Seeding Fresh Clones
+!hp-backend/seed_data/
+!hp-backend/seed_data/*
+!hp-backend/seed_data/**/*
+
 # Customer Uploaded Data & Reference CSV Directories
 **/data/
 data/

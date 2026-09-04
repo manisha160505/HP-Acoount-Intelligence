@@ -1,0 +1,101 @@
+﻿_related_company_domain,behind_firewall,company_domain,department_onet_codes,first_seen_at,id,last_seen_at,location_data,score,source_count
+astra.co.id,False,astra.co.id,[],2026-08-04T22:00:00Z,ec63c921-5ba1-4d2f-bc0f-d6e2bab82ab4,2026-08-04T22:00:00Z,[],0.5,1
+astra.co.id,True,astra.co.id,"[""15-1299.08""]",2026-06-17T10:00:00Z,856bdfe5-4a50-4146-b311-ff3507ec30e6,2026-07-02T10:00:00Z,[],0.25,1
+astra.co.id,True,astra.co.id,"[""15-1211.00""]",2026-06-16T04:00:00Z,23335f62-dfac-4d7e-87c2-fadca17a10f6,2026-07-08T22:45:36Z,[],0.25,1
+astra.co.id,True,astra.co.id,"[""15-1211.00""]",2026-06-16T04:00:00Z,54c4744b-bb6a-4c8b-9e81-11c73ec2d324,2026-07-08T22:45:36Z,[],0.25,1
+astra.co.id,True,astra.co.id,"[""15-1211.00""]",2026-06-16T04:00:00Z,9427d801-d175-4254-8ba6-ab61f817a015,2026-07-08T22:45:36Z,[],0.25,1
+astra.co.id,True,astra.co.id,"[""13-1161.01""]",2026-06-11T16:00:00Z,50907179-8d6d-4934-9bb4-f311c08f330f,2026-07-08T22:45:36Z,[],0.25,1
+astra.co.id,True,astra.co.id,"[""15-1211.00""]",2026-06-11T16:00:00Z,344e5769-d644-4ace-a789-45f7875ed2dc,2026-06-13T04:00:00Z,[],0.25,1
+astra.co.id,True,astra.co.id,"[""15-1211.00""]",2026-06-11T16:00:00Z,a680001d-cd03-4945-8579-7d78cf41ac2f,2026-06-13T04:00:00Z,[],0.25,1
+astra.co.id,True,astra.co.id,"[""13-1161.01""]",2026-06-11T16:00:00Z,02aafa4f-23b2-434e-87aa-0a10f29b33ec,2026-07-08T22:45:36Z,[],0.25,1
+astra.co.id,True,astra.co.id,"[""11-3031.01""]",2026-05-25T22:02:52Z,8e9f5f1b-527a-4d84-93fd-468bc91d1fdd,2026-07-10T10:00:00Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1
+astra.co.id,True,astra.co.id,"[""17-2131.00"", ""53-5021.00"", ""17-2121.00""]",2026-05-22T10:00:00Z,b80e5f6e-39dc-42b5-af98-14cac8a40f96,2026-08-05T10:00:00Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.52,4
+astra.co.id,True,astra.co.id,"[""17-2131.00"", ""47-1011.00"", ""53-5021.00"", ""17-2121.00""]",2026-05-22T10:00:00Z,d69be854-4b36-4c08-a8e7-c255f8730c09,2026-08-05T10:00:00Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.61,6
+astra.co.id,True,astra.co.id,"[""17-2131.00"", ""53-5021.00"", ""17-2121.00""]",2026-05-22T10:00:00Z,0117e2f9-fa2d-4fbd-baa0-b2b83419c6bb,2026-08-05T10:00:00Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.52,4
+astra.co.id,True,astra.co.id,"[""17-2131.00"", ""53-5021.00"", ""17-2121.00""]",2026-05-22T10:00:00Z,9fc2f737-9611-48f2-bb42-194f766a2909,2026-08-05T10:00:00Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.52,4
+astra.co.id,False,astra.co.id,[],2026-05-16T13:22:43Z,a61aeb44-54a0-4e03-b816-4a88bcbabb20,2026-08-09T19:03:35Z,[],1.0,3
+astra.co.id,True,astra.co.id,"[""19-1029.01""]",2026-05-15T22:00:03Z,756802c3-2b5b-42eb-bb8b-5086181b0adf,2026-06-12T22:00:00Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1
+astra.co.id,True,astra.co.id,"[""19-1029.01""]",2026-05-15T22:00:03Z,94da604b-8790-43d5-8938-1ad1687cd149,2026-06-12T22:00:00Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1
+astra.co.id,True,astra.co.id,"[""19-1029.01""]",2026-05-15T22:00:03Z,5ee474dd-06b9-44c4-8d65-28ee43278098,2026-06-12T22:00:00Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1
+astra.co.id,True,astra.co.id,"[""19-1029.01""]",2026-05-15T22:00:03Z,93ae3852-a14a-4a16-a1d1-5f9f499e6850,2026-06-12T22:00:00Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1
+astra.co.id,True,astra.co.id,"[""19-1029.01""]",2026-05-15T22:00:03Z,8aaeb2f2-1028-4bd2-bf42-d99964eb175d,2026-06-12T22:00:00Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1
+astra.co.id,True,astra.co.id,"[""19-1029.01""]",2026-05-15T22:00:03Z,ada8fbfc-30af-42a8-8c97-8a01fb8b268c,2026-06-12T22:00:00Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1
+astra.co.id,True,astra.co.id,"[""17-3011.00""]",2026-05-15T16:00:06Z,4dbb7c8f-73db-4360-ad2e-6c12e961464b,2026-07-10T16:00:00Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1
+astra.co.id,True,astra.co.id,"[""17-3011.00""]",2026-05-15T16:00:06Z,2a397edd-7596-4323-8c97-1c3d4d366ae6,2026-07-10T16:00:00Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1
+astra.co.id,True,astra.co.id,"[""11-2011.00""]",2026-05-13T10:00:05Z,cdabc332-a081-4bf7-996b-725f898272b4,2026-07-04T10:00:00Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1
+astra.co.id,True,astra.co.id,"[""15-2051.01""]",2026-05-10T10:19:11Z,d4d3c038-2792-4059-9db3-4afda0e25bf7,2026-06-12T22:00:00Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1
+astra.co.id,True,astra.co.id,"[""15-2051.01""]",2026-05-10T10:19:11Z,c81f90f5-6e5d-450e-9b16-5361f1db426f,2026-06-12T22:00:00Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1
+astra.co.id,True,astra.co.id,"[""15-2051.01""]",2026-05-10T10:19:11Z,f8b7a786-1367-4865-ac5b-1ed8308ec620,2026-06-12T22:00:00Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1
+astra.co.id,True,astra.co.id,"[""15-2051.01""]",2026-05-10T10:19:11Z,a961796d-d509-44b5-b255-3f6e6552ad33,2026-06-12T22:00:00Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1
+astra.co.id,True,astra.co.id,"[""15-2051.01""]",2026-05-10T10:19:11Z,ad3dacff-3871-4781-aae9-ab68cbb8fc37,2026-06-12T22:00:00Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1
+astra.co.id,True,astra.co.id,"[""15-2051.01""]",2026-05-10T10:19:11Z,3474d87c-878c-4f20-86a9-083c6198d695,2026-06-12T22:00:00Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1
+astra.co.id,True,astra.co.id,"[""15-2051.01""]",2026-05-10T10:19:11Z,3c5dbe74-7055-4c89-9dba-d09a53e8d1d6,2026-06-12T22:00:00Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1
+astra.co.id,True,astra.co.id,"[""15-2051.01""]",2026-05-10T10:19:11Z,55df2aa3-42a1-4825-a7ac-2b04db19bf95,2026-06-12T22:00:00Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1
+astra.co.id,False,astra.co.id,[],2026-05-09T15:21:00Z,4f198534-1a1c-4d6b-924f-0d7c34ba780a,2026-08-11T11:34:02Z,[],0.5,1
+astra.co.id,False,astra.co.id,[],2026-05-09T15:21:00Z,1c0d6274-5c41-4fc5-b332-3b76a25b9e7f,2026-08-11T11:34:02Z,[],0.5,1
+astra.co.id,False,astra.co.id,[],2026-05-09T15:21:00Z,1c174092-b663-4c05-891e-ee7593367c2e,2026-08-11T11:34:02Z,[],0.5,1
+astra.co.id,False,astra.co.id,[],2026-05-09T15:21:00Z,4d16c770-4471-43eb-b312-9a945be83c62,2026-08-11T11:34:02Z,[],0.5,1
+astra.co.id,True,astra.co.id,"[""15-1254.00""]",2026-05-07T10:00:09Z,53bdbe88-efa0-40ee-aa0f-5c1ffd44df10,2026-07-10T16:00:00Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1
+astra.co.id,True,astra.co.id,"[""15-1254.00""]",2026-05-07T10:00:09Z,f7046583-1ec8-4410-b752-42656bf3f30d,2026-07-10T16:00:00Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1
+astra.co.id,False,astra.co.id,[],2026-05-02T00:31:03Z,b0485651-8bf7-4df2-ac84-ac26cf502d0d,2026-05-02T00:31:03Z,[],0.5,1
+astra.co.id,False,astra.co.id,[],2026-05-02T00:31:03Z,1e40356b-8bc2-494b-89cc-19bbe7004b59,2026-05-02T00:31:03Z,[],0.45,1
+astra.co.id,True,astra.co.id,"[""15-1252.00""]",2026-04-30T10:00:06Z,8703a03f-3b1b-4f6d-89a8-00134bfb367a,2026-08-04T10:54:36Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.39,2
+astra.co.id,True,astra.co.id,"[""15-1252.00""]",2026-04-22T10:00:03Z,1ea6acac-c5b4-45dc-b337-ba4d0eda4a39,2026-06-12T22:00:00Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1
+astra.co.id,True,astra.co.id,"[""15-1252.00""]",2026-04-22T10:00:03Z,3ce63963-b10e-4866-aded-f3e1700a8d2a,2026-06-12T22:00:00Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1
+astra.co.id,True,astra.co.id,"[""27-4031.00""]",2026-04-19T10:18:57Z,b3a69015-57e5-46cb-a9ee-154e11acedb9,2026-07-10T16:00:00Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1
+astra.co.id,True,astra.co.id,"[""27-4031.00""]",2026-04-19T10:18:57Z,53c1cab9-f063-48b8-82a8-59b386b53201,2026-07-10T16:00:00Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1
+astra.co.id,True,astra.co.id,"[""15-1252.00""]",2026-04-18T10:00:04Z,78e3e49e-f110-4ef8-8a36-5a7d999e1296,2026-07-10T16:00:00Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1
+astra.co.id,True,astra.co.id,"[""15-1252.00""]",2026-04-18T10:00:04Z,90b8f3ef-48dc-46f4-8903-c9e71a3eeedb,2026-07-10T16:00:00Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.39,2
+astra.co.id,True,astra.co.id,"[""15-1252.00""]",2026-04-18T10:00:04Z,d0f9cbe6-f167-4d1b-89a1-70c7e315d6a6,2026-07-10T16:00:00Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.39,2
+astra.co.id,True,astra.co.id,"[""15-1252.00""]",2026-04-18T10:00:04Z,4c7e28ed-0273-4b1c-b96f-4fd83f733c04,2026-07-10T16:00:00Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.39,2
+astra.co.id,True,astra.co.id,"[""13-1111.00""]",2026-04-14T10:00:04Z,16fc5b06-9a4c-4a1e-83cb-bcc7121fe5d9,2026-06-12T22:00:00Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1
+astra.co.id,True,astra.co.id,"[""15-1252.00""]",2026-04-14T10:00:04Z,f00cef6e-6e65-4249-b4b8-6d9dfbf89f43,2026-06-17T22:00:00Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1
+astra.co.id,True,astra.co.id,"[""15-1252.00""]",2026-04-14T10:00:04Z,6718bb91-0093-4730-ae44-250d20af1382,2026-06-17T22:00:00Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1
+astra.co.id,True,astra.co.id,"[""15-1254.00""]",2026-04-10T16:00:01Z,a4cdf748-7646-43b2-81e7-eed351f25887,2026-06-21T10:57:30Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1
+astra.co.id,True,astra.co.id,"[""13-2051.00""]",2026-03-22T23:16:02Z,1cf1ff68-264d-428a-b174-6829e4ff635c,2026-05-21T16:00:00Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1
+astra.co.id,True,astra.co.id,"[""11-9039.00""]",2026-03-18T11:00:02Z,b021ade8-cb89-4184-8638-98e88d229934,2026-04-16T16:00:03Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1
+astra.co.id,True,astra.co.id,"[""15-1211.00"", ""15-1299.08""]",2026-02-24T07:53:27Z,9a339a04-2a2c-415a-a9ba-216d17f9355d,2026-06-29T10:35:58Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.39,2
+astra.co.id,True,astra.co.id,"[""15-1299.09""]",2026-02-23T15:00:27Z,2ee7aec6-4989-4fd3-a2d3-bf1fac606926,2026-06-19T16:00:00Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1
+astra.co.id,True,astra.co.id,"[""11-2011.00"", ""13-1161.00""]",2026-02-06T11:00:04Z,268b028f-9e83-4b1c-9a63-ec2b5a6a7a85,2026-07-04T10:00:00Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.39,2
+astra.co.id,True,astra.co.id,"[""13-1161.00""]",2026-02-06T11:00:04Z,9bbc1979-da2a-49a4-b849-3e84fdce9d68,2026-02-12T17:00:06Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1
+astra.co.id,True,astra.co.id,"[""13-1161.00""]",2026-02-06T11:00:04Z,81d18b17-811c-4e14-a379-e5ed0d75978d,2026-02-12T17:00:06Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1
+astra.co.id,True,astra.co.id,"[""13-1161.00""]",2026-02-06T11:00:04Z,bc4af8db-d8b8-4ddb-8bc3-873a0696450e,2026-02-12T17:00:06Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1
+astra.co.id,True,astra.co.id,"[""13-1161.00""]",2026-02-06T11:00:04Z,71c091f4-3838-4242-bb29-322dd2bc6932,2026-02-12T17:00:06Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1
+astra.co.id,True,astra.co.id,"[""43-4051.00"", ""13-1111.00"", ""13-1161.00""]",2026-02-06T11:00:04Z,afc8f7ab-7598-4598-ad98-e41230da4651,2026-07-19T10:06:54Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.47,3
+astra.co.id,True,astra.co.id,"[""13-1161.01"", ""13-1161.00""]",2026-02-06T11:00:04Z,cb4c9214-31e1-492f-907a-001e26f6f978,2026-07-08T22:45:36Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.39,2
+astra.co.id,True,astra.co.id,"[""13-1161.01"", ""13-1161.00""]",2026-02-06T11:00:04Z,90f8726e-cc60-4228-823e-42fe9f569b92,2026-07-08T22:45:36Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.39,2
+astra.co.id,True,astra.co.id,"[""15-1299.08""]",2026-02-05T05:00:01Z,22319ca2-a2bd-4cfe-b345-c8286746dc67,2026-07-10T16:00:00Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1
+astra.co.id,True,astra.co.id,"[""15-1299.08""]",2026-02-05T05:00:01Z,d452fdf9-2c89-4d40-9a2c-bb37919cd0a9,2026-07-10T16:00:00Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1
+astra.co.id,True,astra.co.id,"[""15-1299.08"", ""15-2051.01""]",2026-02-05T05:00:01Z,27b739ed-ab64-4f08-bfc2-edf6008ba11f,2026-07-10T16:00:00Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.39,2
+astra.co.id,True,astra.co.id,"[""15-1299.08""]",2026-02-05T05:00:01Z,a156ae01-7127-42ca-ac52-9d11e391e7c8,2026-07-10T16:00:00Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.39,2
+astra.co.id,True,astra.co.id,"[""13-1111.00"", ""11-3121.00""]",2026-01-29T05:00:06Z,09337951-26af-46a7-a010-9fbf9e755532,2026-06-12T22:00:00Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.39,2
+astra.co.id,True,astra.co.id,"[""15-1232.00""]",2026-01-25T11:00:03Z,a6389eb7-515f-4659-9414-b92caed05179,2026-02-13T11:00:13Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1
+astra.co.id,True,astra.co.id,"[""15-1232.00""]",2026-01-25T11:00:03Z,7e3afe2f-6510-4cc2-aeb1-c7d6caa22a91,2026-02-13T11:00:13Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1
+astra.co.id,True,astra.co.id,"[""15-1212.00""]",2025-12-19T11:00:04Z,b9c070ce-bc24-4484-8ac4-4731c9ef63ed,2026-01-01T17:00:01Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1
+astra.co.id,True,astra.co.id,"[""15-1212.00""]",2025-12-19T11:00:04Z,fbf721ac-fdb4-43c2-a6f0-0f85b8e4112e,2026-01-01T17:00:01Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1
+astra.co.id,True,astra.co.id,"[""15-1253.00""]",2025-12-06T11:00:03Z,aff5b5a6-9119-4f1d-aa31-efde4685f89b,2025-12-19T11:00:04Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1
+astra.co.id,True,astra.co.id,"[""15-1299.08""]",2025-12-06T11:00:03Z,8c147e30-ff6e-4711-b44b-a4b29350f5be,2025-12-14T17:04:49Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1
+astra.co.id,True,astra.co.id,"[""15-1253.00""]",2025-12-06T11:00:03Z,74069261-648b-4cb8-99fc-bf4d7b25e254,2025-12-14T17:04:49Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1
+astra.co.id,True,astra.co.id,"[""15-2051.01""]",2025-12-06T11:00:03Z,b0da7288-97c0-482a-a92a-62c84d11f87e,2025-12-14T17:04:49Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1
+astra.co.id,True,astra.co.id,"[""15-1299.08""]",2025-12-06T11:00:03Z,1c5200c3-f91b-462a-aff4-afe07739f516,2025-12-14T17:04:49Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1
+astra.co.id,True,astra.co.id,"[""27-3031.00""]",2025-12-05T11:00:04Z,12537eab-4f78-4490-a946-c556af2af432,2025-12-16T17:00:02Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1
+astra.co.id,True,astra.co.id,"[""27-3031.00""]",2025-12-05T11:00:04Z,92649e6b-0a81-4747-98f6-754edaffbe6f,2025-12-16T17:00:02Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1
+astra.co.id,True,astra.co.id,"[""15-1252.00"", ""15-1299.08""]",2025-12-04T11:00:05Z,b4557950-e992-42a5-b10c-1a173fafc600,2026-06-18T10:00:00Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.47,3
+astra.co.id,True,astra.co.id,"[""15-1253.00""]",2025-12-04T11:00:05Z,0f61b89b-a4de-4a5c-a311-da4d3be37cca,2025-12-18T23:00:04Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1
+astra.co.id,True,astra.co.id,"[""13-1161.00""]",2025-12-04T11:00:05Z,1a54a5f8-9f13-4482-8fe6-fbb87eb4c5e6,2025-12-21T23:06:48Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1
+astra.co.id,True,astra.co.id,"[""15-1299.08""]",2025-12-04T11:00:05Z,bcf84c02-9052-44d0-9447-1ea49a5cfdfa,2025-12-18T23:00:04Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1
+astra.co.id,True,astra.co.id,"[""15-1212.00""]",2025-11-27T11:00:02Z,55d11118-6745-4513-a27e-9fe33ffba1e1,2026-01-01T17:00:01Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1
+astra.co.id,True,astra.co.id,"[""15-2051.01""]",2025-11-24T11:01:19Z,f1e4fd21-722b-4ce5-8aa6-d837f2677d7e,2026-07-10T10:00:00Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.39,2
+astra.co.id,True,astra.co.id,"[""15-1254.00""]",2025-11-18T11:00:01Z,fc18d25c-1c32-4a35-a7c0-ce7848eed004,2026-07-10T16:00:00Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1
+astra.co.id,True,astra.co.id,"[""15-1254.00""]",2025-11-18T11:00:01Z,ef9339e8-4e45-4c78-b568-03275db417fc,2026-07-10T16:00:00Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1
+astra.co.id,True,astra.co.id,"[""15-1254.00""]",2025-11-18T11:00:01Z,6dd0ddcc-7879-4b0e-9a83-f16176ca43ee,2026-07-10T16:00:00Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1
+astra.co.id,True,astra.co.id,"[""15-1254.00""]",2025-11-18T11:00:01Z,2124c7b4-d4e5-4a6a-83a8-2360de6b9a9b,2026-07-10T16:00:00Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1
+astra.co.id,True,astra.co.id,"[""15-1254.00""]",2025-11-18T11:00:01Z,94b0f01a-d9b7-4ea8-9a78-fbf4f94e7eba,2026-07-10T16:00:00Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1
+astra.co.id,True,astra.co.id,"[""15-1251.00""]",2025-11-01T11:00:02Z,8fd827a4-5674-4585-9bc3-ddcba219fb94,2026-07-10T16:00:00Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.39,2
+astra.co.id,True,astra.co.id,"[""15-1254.00""]",2025-10-29T17:00:07Z,63b278a9-162a-48d2-ba40-bf61bf69f5d0,2025-11-27T23:00:05Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1
+astra.co.id,False,astra.co.id,[],2025-10-27T15:00:27Z,c1a88b88-3ef3-49a1-86ec-5382eb4c4482,2026-08-23T19:10:45Z,[],0.6,1
+astra.co.id,False,astra.co.id,"[""13-1161.01""]",2025-10-27T15:00:26Z,09e6e253-be8e-43c5-a7ad-9ffa8f99217e,2026-08-23T19:10:45Z,[],0.85,3
+astra.co.id,True,astra.co.id,"[""15-1241.00""]",2025-10-27T14:51:20Z,1c097069-c2e9-43d8-ba2a-cc8a90ba916c,2026-01-01T17:00:01Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1
+astra.co.id,True,astra.co.id,"[""15-1241.00""]",2025-10-27T14:51:20Z,254eb9dd-26cf-4fa3-a0de-5e7f08adb3fb,2026-01-01T17:00:01Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1
+astra.co.id,True,astra.co.id,"[""15-1241.00""]",2025-10-27T14:51:20Z,542effb5-da02-4d2e-8783-0ff579fe4855,2026-01-01T17:00:01Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1
+astra.co.id,True,astra.co.id,"[""15-1232.00""]",2025-10-27T14:51:20Z,b0f37618-ff39-4ac0-8351-a577b3369574,2026-01-01T17:00:01Z,"[{""city"": ""Jakarta"", ""state"": null, ""country"": ""Indonesia""}]",0.25,1

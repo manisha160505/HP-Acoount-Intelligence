@@ -2522,9 +2522,14 @@ export default function UserDashboardPage() {
                         <div className="space-y-6">
                           {/* STRATEGIC READ Banner */}
                           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
-                            <span className="text-[10px] font-mono font-extrabold uppercase tracking-widest text-slate-400">
-                              STRATEGIC READ
-                            </span>
+                            <div className="flex items-center justify-between">
+                              <span className="text-[10px] font-mono font-extrabold uppercase tracking-widest text-slate-400">
+                                STRATEGIC READ
+                              </span>
+                              <span className="text-[10px] font-mono font-extrabold text-amber-700 bg-amber-50 px-2.5 py-0.5 rounded-full border border-amber-200">
+                                [ Strategic Read: Inferred TBD ]
+                              </span>
+                            </div>
                             <p className="text-xs text-slate-700 leading-relaxed font-medium">
                               {mapData.strategic_read}
                             </p>
@@ -2642,7 +2647,7 @@ export default function UserDashboardPage() {
                                       );
                                     }
 
-                                    return (
+                                     return (
                                       <div key={vIdx} className="bg-white border border-slate-200 rounded-2xl p-4 space-y-3 flex flex-col justify-between hover:border-slate-300 transition shadow-xs">
                                         <div>
                                           <div className="flex items-center justify-between gap-2 border-b border-slate-100 pb-2 mb-2">
@@ -2668,6 +2673,11 @@ export default function UserDashboardPage() {
                                                   Contextual
                                                 </span>
                                               )}
+                                              {vendor.risk_level === 'Inferred TBD' && (
+                                                <span className="text-[10px] font-mono font-extrabold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-200">
+                                                  Inferred TBD
+                                                </span>
+                                              )}
                                             </div>
                                           </div>
 
@@ -2688,7 +2698,7 @@ export default function UserDashboardPage() {
 
                                         <div className="text-[9px] font-mono uppercase tracking-wider text-slate-400 border-t border-slate-100 pt-2 flex items-center justify-between">
                                           <span className="truncate pr-2">{vendor.provenance}</span>
-                                          <span className="font-bold text-slate-500">{vendor.confidence}</span>
+                                          <span className="font-bold text-slate-500">{vendor.confidence === 'TBD' ? 'Confidence: TBD' : vendor.confidence}</span>
                                         </div>
                                       </div>
                                     );
