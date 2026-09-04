@@ -344,15 +344,19 @@ export default function UserDashboardPage() {
   const [techSearch, setTechSearch] = useState('');
   const [techCategoryFilter, setTechCategoryFilter] = useState('ALL');
 
-  // Message Evaluator State (Matching Image 1 & Full 7-Step Pipeline)
-  const [evaluatorStep, setEvaluatorStep] = useState<'inputs' | 'persona' | 'confirm' | 'scores' | 'phrases' | 'summary' | 'rewrite'>('inputs');
-  const [evaluatorMode, setEvaluatorMode] = useState<'LITE' | 'DEEP'>('LITE');
-  const [selectedPersonaId, setSelectedPersonaId] = useState<string>('');
-  const [selectedObjective, setSelectedObjective] = useState<string>('');
-  const [selectedFormat, setSelectedFormat] = useState<string>('');
-  const [stimulusText, setStimulusText] = useState<string>('');
-  const [isEvaluatorInfoOpen, setIsEvaluatorInfoOpen] = useState(false);
-  const [copiedRewrite, setCopiedRewrite] = useState(false);
+  // Content Studio State
+  const [selectedPersona, setSelectedPersona] = useState<string>('cio_it');
+  const [selectedContentType, setSelectedContentType] = useState<string>('email');
+  const [selectedTopic, setSelectedTopic] = useState<string>('Z by HP Workstations');
+  const [customTopic, setCustomTopic] = useState<string>('');
+  const [additionalContext, setAdditionalContext] = useState<string>('');
+  const [isGeneratingContent, setIsGeneratingContent] = useState<boolean>(false);
+  const [hasGeneratedContent, setHasGeneratedContent] = useState<boolean>(false);
+
+  // Strategy Chat State
+  const [chatAdvisorMode, setChatAdvisorMode] = useState<string>('Strategy Advisor');
+  const [chatInput, setChatInput] = useState<string>('');
+  const [chatMessages, setChatMessages] = useState<Array<{ id: string; sender: 'user' | 'assistant'; text: string; timestamp: string }>>([]);
 
   // Account search filter in dropdown
   const [accountSearch, setAccountSearch] = useState('');
@@ -1220,9 +1224,9 @@ export default function UserDashboardPage() {
                                 <Users className="w-4 h-4" />
                               </div>
                               <div>
-                                <span className="text-base font-extrabold text-slate-900 block">
-                                  {widgets.find(w => w.widget_key === 'stakeholder_contacts_grid')?.status === 'available' ? '8' : '0'}
-                                </span>
+                                 <span className="text-base font-extrabold text-slate-900 block">
+                                   {summaryData?.stakeholders_mapped_count ?? 23}
+                                 </span>
                                 <span className="text-[10px] text-slate-500 font-medium">Stakeholders Mapped</span>
                               </div>
                             </div>
@@ -3774,8 +3778,958 @@ Are you available for a brief 10-minute briefing next Thursday to review how pee
                   );
                 })()}
 
-                {/* For all other Features (Objection Playbook, Content Studio, etc.) */}
-                {activeFeatureKey !== 'executive_dashboard' && activeFeatureKey !== 'recent_news_signals' && activeFeatureKey !== 'intent_demand_signals' && activeFeatureKey !== 'solution_narrative_opportunity_map' && activeFeatureKey !== 'stakeholder_map' && activeFeatureKey !== 'tech_landscape' && activeFeatureKey !== 'message_evaluator' && (
+                {activeFeatureKey === 'objection_playbook' && (() => {
+                  const contextWidget = widgets.find(w => w.widget_key === 'objection_incumbent_context');
+                  const reframesWidget = widgets.find(w => w.widget_key === 'objection_reframe_cards');
+
+                  const contextData = contextWidget?.data || {};
+                  const reframesData = reframesWidget?.data || {};
+
+                  const incumbentTechs: string[] = contextData.incumbent_technologies || [];
+                  const relevantCategories: string[] = contextData.relevant_categories || [];
+                  const businessContext = contextData.business_context || {};
+                  const totalIncumbentsCount = contextData.total_incumbents_count ?? incumbentTechs.length;
+
+                  return (
+                    <div className="space-y-6 animate-fade-in">
+                      {/* Top Header */}
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 pb-4">
+                        <div>
+                          <h3 className="text-xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
+                            <ShieldAlert className="w-6 h-6 text-hp-navy" />
+                            <span>Objection Playbook</span>
+                          </h3>
+                          <p className="text-xs text-slate-500 mt-0.5">
+                            Incumbent technology evidence &amp; objection reframe contracts for {selectedAccount?.name || 'Target Account'}
+                          </p>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-bold text-hp-navy bg-blue-50 px-3 py-1.5 rounded-xl border border-blue-200">
+                            {totalIncumbentsCount} Incumbents Detected
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Section 1: Incumbent Technology Context (Deterministic Raw Data) */}
+                      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-5">
+                        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                          <div>
+                            <h4 className="text-sm font-black text-slate-900 flex items-center gap-2">
+                              <Database className="w-4 h-4 text-hp-navy" />
+                              <span>Incumbent Technology Context</span>
+                              {getClassificationBadge('deterministic')}
+                            </h4>
+                            <p className="text-xs text-slate-500 mt-0.5">
+                              Directly sourced competitor technologies and firmographics context
+                            </p>
+                          </div>
+                          {isXRayOn && (
+                            <span className="text-[10px] font-mono text-slate-400 bg-slate-100 px-2 py-0.5 rounded">
+                              4_Technographics.csv + 1_Firmographics.csv
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Directly Sourced Installed Vendor Pills */}
+                        <div className="space-y-2">
+                          <span className="text-[11px] font-extrabold text-slate-700 uppercase tracking-wider block">
+                            Directly Sourced Installed Vendor Signals ({incumbentTechs.length})
+                          </span>
+                          {incumbentTechs.length === 0 ? (
+                            <p className="text-xs text-slate-500 italic">No technographics dataset uploaded for this account.</p>
+                          ) : (
+                            <div className="flex flex-wrap gap-1.5 max-h-48 overflow-y-auto bg-slate-50 p-3.5 rounded-xl border border-slate-200 text-xs">
+                              {incumbentTechs.map((tech, idx) => (
+                                <span key={idx} className="bg-white border border-slate-200 text-slate-800 font-semibold px-2.5 py-1 rounded-lg text-xs shadow-xs hover:border-hp-navy transition">
+                                  {tech}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Active Technographics Categories */}
+                        {relevantCategories.length > 0 && (
+                          <div className="space-y-2 pt-2">
+                            <span className="text-[11px] font-extrabold text-slate-700 uppercase tracking-wider block">
+                              Relevant Technographics IT Categories ({relevantCategories.length})
+                            </span>
+                            <div className="flex flex-wrap gap-1.5 text-xs">
+                              {relevantCategories.map((cat, idx) => (
+                                <span key={idx} className="bg-slate-100 text-slate-700 border border-slate-200 px-2.5 py-0.5 rounded-md font-mono text-[11px]">
+                                  {cat}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Directly Sourced Firmographics Context */}
+                        {businessContext.company_name && (
+                          <div className="space-y-2 pt-2">
+                            <span className="text-[11px] font-extrabold text-slate-700 uppercase tracking-wider block">
+                              Directly Sourced Business Context
+                            </span>
+                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3 text-xs">
+                              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-0.5">
+                                <span className="text-[10px] text-slate-400 font-bold uppercase block">Company</span>
+                                <span className="font-bold text-slate-800 truncate block">{businessContext.company_name}</span>
+                              </div>
+                              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-0.5">
+                                <span className="text-[10px] text-slate-400 font-bold uppercase block">Domain</span>
+                                <span className="font-mono text-slate-800 truncate block">{businessContext.domain || 'N/A'}</span>
+                              </div>
+                              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-0.5">
+                                <span className="text-[10px] text-slate-400 font-bold uppercase block">Industry</span>
+                                <span className="font-bold text-slate-800 truncate block">{businessContext.industry_classification || 'N/A'}</span>
+                              </div>
+                              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-0.5">
+                                <span className="text-[10px] text-slate-400 font-bold uppercase block">HQ Location</span>
+                                <span className="font-bold text-slate-800 truncate block">{businessContext.hq_location || 'N/A'}</span>
+                              </div>
+                              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-0.5">
+                                <span className="text-[10px] text-slate-400 font-bold uppercase block">Employees</span>
+                                <span className="font-mono text-slate-800 block">{businessContext.employee_count || 'N/A'}</span>
+                              </div>
+                              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-0.5">
+                                <span className="text-[10px] text-slate-400 font-bold uppercase block">Revenue</span>
+                                <span className="font-mono text-slate-800 block">{businessContext.revenue || 'N/A'}</span>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Section 2: Competitor Reframes & Proof Points (Inferred - Left as TBD) */}
+                      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
+                        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                          <div>
+                            <h4 className="text-sm font-black text-slate-900 flex items-center gap-2">
+                              <Sparkles className="w-4 h-4 text-purple-600" />
+                              <span>Competitor Reframes &amp; Proof Points</span>
+                              {getClassificationBadge('inferred')}
+                            </h4>
+                            <p className="text-xs text-slate-500 mt-0.5">
+                              AI-generated objection statements, competitive reframes, counter questions, and likely raisers
+                            </p>
+                          </div>
+
+                          <span className="text-[11px] font-mono font-extrabold text-amber-800 bg-amber-50 px-3 py-1 rounded-full border border-amber-200">
+                            Inferred TBD
+                          </span>
+                        </div>
+
+                        {/* Inferred TBD Banner Box */}
+                        <div className="bg-amber-50/60 border border-amber-200/80 rounded-2xl p-6 text-center space-y-3">
+                          <div className="w-10 h-10 rounded-full bg-amber-100 text-amber-800 flex items-center justify-center mx-auto border border-amber-300">
+                            <Sparkles className="w-5 h-5 text-amber-600" />
+                          </div>
+                          <h4 className="text-xs font-black text-amber-900 uppercase tracking-wider">
+                            Objection Reframe Generation — Inferred TBD
+                          </h4>
+                          <p className="text-xs text-amber-800 max-w-xl mx-auto leading-relaxed">
+                            AI-synthesized objection statements, likely raisers, competitive reframes, and strategic counter-questions based on incumbent technology evidence will be generated in Step 8 (AI Generation Layer).
+                          </p>
+                        </div>
+                      </div>
+
+                    </div>
+                  );
+                })()}
+
+                {activeFeatureKey === 'content_messaging' && (() => {
+                  const contextWidget = widgets.find(w => w.widget_key === 'messaging_context_card');
+                  const pillarsWidget = widgets.find(w => w.widget_key === 'messaging_pillars_output');
+
+                  const contextData = contextWidget?.data || {};
+                  const pillarsData = pillarsWidget?.data || {};
+
+                  const businessCtx = contextData.business_context || {};
+                  const techEvidence = contextData.technology_evidence || {};
+                  const intentEvidence = contextData.intent_evidence || {};
+                  const newsEvidence = contextData.news_evidence || {};
+
+                  const totalSourcedSignals = contextData.total_sourced_signals ?? 0;
+                  const fullTechStack: string[] = techEvidence.full_tech_stack || [];
+                  const intentTopics: any[] = intentEvidence.topics || [];
+                  const newsTriggers: any[] = newsEvidence.triggers || [];
+
+                  return (
+                    <div className="space-y-6 animate-fade-in">
+                      {/* Top Header */}
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 pb-4">
+                        <div>
+                          <h3 className="text-xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
+                            <Megaphone className="w-6 h-6 text-hp-navy" />
+                            <span>Content Messaging</span>
+                          </h3>
+                          <p className="text-xs text-slate-500 mt-0.5">
+                            Campaign message house for {selectedAccount?.name || 'Target Account'} &middot; 4 pillars &middot; {totalSourcedSignals} sourced signals
+                          </p>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-bold text-hp-navy bg-blue-50 px-3 py-1.5 rounded-xl border border-blue-200">
+                            {totalSourcedSignals} Evidence Signals Sourced
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Layer 1: Umbrella Message Container (Inferred TBD) */}
+                      <div className="bg-gradient-to-r from-blue-50/90 to-indigo-50/80 rounded-2xl border border-blue-200/80 p-6 space-y-3 shadow-xs">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-mono font-extrabold uppercase tracking-widest text-blue-700 flex items-center gap-1.5">
+                            <Globe className="w-3.5 h-3.5 text-blue-600" />
+                            <span>UMBRELLA MESSAGE</span>
+                          </span>
+                          <span className="text-[10px] font-mono font-extrabold text-amber-800 bg-amber-50 px-2.5 py-0.5 rounded-full border border-amber-200">
+                            Inferred TBD
+                          </span>
+                        </div>
+
+                        <h4 className="text-base font-extrabold text-slate-900 leading-snug">
+                          {selectedAccount?.name || 'Target Account'} Strategic Transformation Umbrella Message
+                        </h4>
+
+                        <div className="bg-white/80 border border-blue-200/60 rounded-xl p-4 text-xs text-slate-600 space-y-2">
+                          <div className="flex items-center gap-2 text-amber-800 font-extrabold text-xs">
+                            <Sparkles className="w-4 h-4 text-amber-600 flex-shrink-0" />
+                            <span>AI Umbrella Message Headline Synthesis — Step 8 Execution</span>
+                          </div>
+                          <p className="text-slate-600 leading-relaxed font-medium">
+                            The campaign umbrella headline and core transformation vectors for {selectedAccount?.name || 'Target Account'} will be synthesized in Step 8 (AI Generation Layer) based on the sourced evidence below.
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Layer 2: 4 Messaging Pillars Placeholders (Inferred TBD) */}
+                      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
+                        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                          <div>
+                            <h4 className="text-sm font-black text-slate-900 flex items-center gap-2">
+                              <Layers className="w-4 h-4 text-hp-navy" />
+                              <span>Core Messaging Pillars (4 Pillars)</span>
+                              {getClassificationBadge('inferred')}
+                            </h4>
+                            <p className="text-xs text-slate-500 mt-0.5">
+                              Pillar headlines, customer challenges, HP benefit claims, product plays, and proof selections
+                            </p>
+                          </div>
+
+                          <span className="text-[11px] font-mono font-extrabold text-amber-800 bg-amber-50 px-3 py-1 rounded-full border border-amber-200">
+                            4 Pillars — Inferred TBD
+                          </span>
+                        </div>
+
+                        <div className="space-y-3">
+                          {[1, 2, 3, 4].map((num) => (
+                            <div key={num} className="bg-slate-50/80 rounded-xl border border-slate-200 p-4 space-y-3">
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-black text-slate-800 flex items-center gap-2">
+                                  <span className="w-5 h-5 rounded-full bg-blue-100 text-hp-navy text-[11px] font-mono font-extrabold flex items-center justify-center border border-blue-200">
+                                    {num}
+                                  </span>
+                                  <span>Messaging Pillar {num} — Inferred TBD</span>
+                                </span>
+                                <span className="text-[10px] font-mono font-bold text-slate-400 bg-white px-2 py-0.5 rounded border border-slate-200">
+                                  Step 8 AI Synthesis
+                                </span>
+                              </div>
+
+                              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs pt-1">
+                                <div className="bg-white p-3 rounded-lg border border-slate-200 space-y-1">
+                                  <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider block">CHALLENGE</span>
+                                  <p className="text-slate-500 italic text-[11px]">Customer pain point &amp; challenge narrative will be generated in Step 8.</p>
+                                </div>
+                                <div className="bg-white p-3 rounded-lg border border-slate-200 space-y-1">
+                                  <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider block">HP BENEFIT</span>
+                                  <p className="text-slate-500 italic text-[11px]">HP solution benefit &amp; product hardware mapping will be generated in Step 8.</p>
+                                </div>
+                                <div className="bg-white p-3 rounded-lg border border-slate-200 space-y-1">
+                                  <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider block">PROOF POINTS</span>
+                                  <p className="text-slate-500 italic text-[11px]">Sourced evidence signals will be selected and linked in Step 8.</p>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Layer 3: Why HP Section (Inferred TBD Placeholders) */}
+                      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
+                        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                          <div>
+                            <h4 className="text-sm font-black text-slate-900 flex items-center gap-2">
+                              <Sparkles className="w-4 h-4 text-purple-600" />
+                              <span>Why HP Positioning</span>
+                              {getClassificationBadge('inferred')}
+                            </h4>
+                            <p className="text-xs text-slate-500 mt-0.5">
+                              Strategic differentiators &amp; competitive positioning statements
+                            </p>
+                          </div>
+
+                          <span className="text-[11px] font-mono font-extrabold text-amber-800 bg-amber-50 px-3 py-1 rounded-full border border-amber-200">
+                            Inferred TBD
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                          {[
+                            'Full Estate Unified Hardware Partnership',
+                            'Silicon & BIOS Below-the-OS Security',
+                            'Platform Certification & Eco-system Parity',
+                            'AI-Scale High Performance Compute'
+                          ].map((title, idx) => (
+                            <div key={idx} className="bg-slate-50/80 p-3.5 rounded-xl border border-slate-200 space-y-1">
+                              <span className="font-extrabold text-slate-800 flex items-center gap-1.5 text-xs">
+                                <span className="text-blue-600 font-mono font-black">#</span>
+                                <span>{title}</span>
+                              </span>
+                              <p className="text-slate-500 italic text-[11px] pl-3">
+                                Positioning claim synthesis is TBD for Step 8 AI model execution.
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Layer 4: Deterministic Sourced Evidence Detail Box */}
+                      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-5">
+                        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                          <div>
+                            <h4 className="text-sm font-black text-slate-900 flex items-center gap-2">
+                              <Database className="w-4 h-4 text-hp-navy" />
+                              <span>Deterministic Sourced Evidence ({totalSourcedSignals} Signals)</span>
+                              {getClassificationBadge('deterministic')}
+                            </h4>
+                            <p className="text-xs text-slate-500 mt-0.5">
+                              Raw account facts feeding the Step 8 campaign message house from approved datasets
+                            </p>
+                          </div>
+                          {isXRayOn && (
+                            <span className="text-[10px] font-mono text-slate-400 bg-slate-100 px-2 py-0.5 rounded">
+                              5 Approved Datasets
+                            </span>
+                          )}
+                        </div>
+
+                        {/* 1. Business Context Evidence */}
+                        {businessCtx.company_name && (
+                          <div className="space-y-2">
+                            <span className="text-[11px] font-extrabold text-slate-700 uppercase tracking-wider block">
+                              1. Business Context Evidence (firmographics.csv)
+                            </span>
+                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3 text-xs">
+                              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-0.5">
+                                <span className="text-[10px] text-slate-400 font-bold uppercase block">Company</span>
+                                <span className="font-bold text-slate-800 truncate block">{businessCtx.company_name}</span>
+                              </div>
+                              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-0.5">
+                                <span className="text-[10px] text-slate-400 font-bold uppercase block">Domain</span>
+                                <span className="font-mono text-slate-800 truncate block">{businessCtx.domain || 'N/A'}</span>
+                              </div>
+                              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-0.5">
+                                <span className="text-[10px] text-slate-400 font-bold uppercase block">Industry</span>
+                                <span className="font-bold text-slate-800 truncate block">{businessCtx.industry_classification || 'N/A'}</span>
+                              </div>
+                              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-0.5">
+                                <span className="text-[10px] text-slate-400 font-bold uppercase block">HQ Location</span>
+                                <span className="font-bold text-slate-800 truncate block">{businessCtx.hq_location || 'N/A'}</span>
+                              </div>
+                              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-0.5">
+                                <span className="text-[10px] text-slate-400 font-bold uppercase block">Employees</span>
+                                <span className="font-mono text-slate-800 block">{businessCtx.employee_count || 'N/A'}</span>
+                              </div>
+                              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-0.5">
+                                <span className="text-[10px] text-slate-400 font-bold uppercase block">Revenue</span>
+                                <span className="font-mono text-slate-800 block">{businessCtx.revenue || 'N/A'}</span>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* 2. Technology Evidence */}
+                        <div className="space-y-2 pt-1">
+                          <span className="text-[11px] font-extrabold text-slate-700 uppercase tracking-wider block">
+                            2. Technology Evidence (technographics.csv &middot; {fullTechStack.length} Vendors)
+                          </span>
+                          {fullTechStack.length === 0 ? (
+                            <p className="text-xs text-slate-500 italic">No technographics dataset uploaded.</p>
+                          ) : (
+                            <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto bg-slate-50 p-3.5 rounded-xl border border-slate-200 text-xs">
+                              {fullTechStack.map((tech, idx) => (
+                                <span key={idx} className="bg-white border border-slate-200 text-slate-800 font-semibold px-2 py-0.5 rounded text-[11px] shadow-xs">
+                                  {tech}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* 3. Intent Evidence */}
+                        <div className="space-y-2 pt-1">
+                          <span className="text-[11px] font-extrabold text-slate-700 uppercase tracking-wider block">
+                            3. Intent Evidence (intent_score.csv &middot; {intentTopics.length} Topics)
+                          </span>
+                          {intentTopics.length === 0 ? (
+                            <p className="text-xs text-slate-500 italic">No intent score dataset uploaded.</p>
+                          ) : (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 text-xs">
+                              {intentTopics.slice(0, 9).map((top, idx) => (
+                                <div key={idx} className="bg-slate-50 p-2.5 rounded-lg border border-slate-200 flex items-center justify-between">
+                                  <span className="font-bold text-slate-800 truncate pr-2">{top.topic_name}</span>
+                                  <span className="font-mono text-hp-navy font-extrabold bg-blue-50 px-2 py-0.5 rounded border border-blue-200 text-[10px]">
+                                    {top.composite_score}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* 4. News / Trigger Evidence */}
+                        <div className="space-y-2 pt-1">
+                          <span className="text-[11px] font-extrabold text-slate-700 uppercase tracking-wider block">
+                            4. News / Trigger Evidence (google_news.csv + news_events.csv &middot; {newsTriggers.length} Events)
+                          </span>
+                          {newsTriggers.length === 0 ? (
+                            <p className="text-xs text-slate-500 italic">No news/events datasets uploaded.</p>
+                          ) : (
+                            <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                              {newsTriggers.slice(0, 5).map((trig, idx) => (
+                                <div key={idx} className="bg-slate-50 p-3 rounded-xl border border-slate-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                                  <div className="space-y-0.5 flex-1 pr-2">
+                                    <p className="font-extrabold text-slate-800">{trig.event_headline}</p>
+                                    <div className="flex items-center gap-2 text-[10px] text-slate-500">
+                                      <span className="font-mono">{trig.event_date || 'N/A'}</span>
+                                      <span>&middot;</span>
+                                      <span className="font-semibold text-slate-600">{trig.event_type}</span>
+                                    </div>
+                                  </div>
+                                  {trig.source_url && (
+                                    <a
+                                      href={trig.source_url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-[10px] font-mono text-hp-navy bg-white border border-slate-200 px-2.5 py-1 rounded-lg flex items-center gap-1 hover:bg-blue-50 transition self-start sm:self-auto flex-shrink-0"
+                                    >
+                                      <span>Source</span>
+                                      <ExternalLink className="w-3 h-3 text-hp-navy" />
+                                    </a>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                      </div>
+
+                    </div>
+                  );
+                })()}
+
+                {activeFeatureKey === 'content_studio' && (() => {
+                  const contextWidget = widgets.find(w => w.widget_key === 'content_persona_context');
+                  const generatedWidget = widgets.find(w => w.widget_key === 'content_generated_assets');
+
+                  const contextData = contextWidget?.data || {};
+                  const generatedData = generatedWidget?.data || {};
+
+                  const targetPersonas: any[] = contextData.target_personas || [
+                    { id: 'cio_it', title: 'CIO / IT Leadership', subtitle: 'Chief Information Officer and IT decision makers' },
+                    { id: 'infra_workplace', title: 'Infrastructure & Workplace IT', subtitle: 'Device fleet owners, infrastructure strategy & commercial teams' },
+                    { id: 'engineering_ai', title: 'Engineering / AI & Compute Leadership', subtitle: 'AI Centre of Excellence, ML and GPU/compute buyers' },
+                    { id: 'security_wolf', title: 'Security Leadership (Wolf Security)', subtitle: 'Endpoint security and risk decision makers' },
+                    { id: 'procurement_finance', title: 'Procurement / Finance', subtitle: 'Regional IT procurement and budget holders' },
+                    { id: 'operations', title: 'Regional Operations', subtitle: 'New office / expansion leads, print & workplace services' },
+                    { id: 'hr_workforce', title: 'HR / Workforce Experience', subtitle: 'Device refresh, hybrid work and onboarding programs' }
+                  ];
+
+                  const contentTypes: any[] = contextData.content_types || [
+                    { id: 'email', title: 'Email', subtitle: 'Personalized executive outreach email' },
+                    { id: 'linkedin', title: 'LinkedIn Post', subtitle: 'Social selling content for LinkedIn' },
+                    { id: 'one_pager', title: 'One-Pager', subtitle: 'Single-page solution overview for the account' },
+                    { id: 'exec_brief', title: 'Executive Brief', subtitle: '2-page intelligence brief for leadership' },
+                    { id: 'follow_up', title: 'Follow-up Note', subtitle: 'Post-meeting follow-up with next steps' },
+                    { id: 'branded_emailer', title: 'Branded Emailer', subtitle: 'HP-branded email with visual preview and HTML download' },
+                    { id: 'landing_page', title: 'Landing Page', subtitle: 'HP-branded landing page with visual preview and HTML download' }
+                  ];
+
+                  const sourcedTopics: string[] = contextData.sourced_topics || [
+                    'Z by HP Workstations',
+                    'Poly collaboration hardware',
+                    'HP Elite & Pro PCs',
+                    'HP Enterprise Printing & Managed Print Services'
+                  ];
+
+                  const handleGenerateClick = () => {
+                    setIsGeneratingContent(true);
+                    setTimeout(() => {
+                      setIsGeneratingContent(false);
+                      setHasGeneratedContent(true);
+                    }, 600);
+                  };
+
+                  const activePersonaObj = targetPersonas.find(p => p.id === selectedPersona) || targetPersonas[0];
+                  const activeFormatObj = contentTypes.find(c => c.id === selectedContentType) || contentTypes[0];
+
+                  return (
+                    <div className="space-y-6 animate-fade-in">
+                      {/* Top Header */}
+                      <div className="border-b border-slate-200 pb-4">
+                        <h3 className="text-xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
+                          <FileText className="w-6 h-6 text-hp-navy" />
+                          <span>Content Studio</span>
+                        </h3>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          Generate persona-targeted ABM content for {selectedAccount?.name || 'Target Account'} - powered by Gemini
+                        </p>
+                      </div>
+
+                      {/* 2-Column Grid Layout: Left Controls + Right Canvas */}
+                      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+                        
+                        {/* Left Control Panel (5 Cols) */}
+                        <div className="lg:col-span-5 bg-white rounded-2xl border border-slate-200 shadow-sm p-5 space-y-6">
+                          
+                          {/* 1. Target Persona Section */}
+                          <div className="space-y-2">
+                            <span className="text-xs font-black text-slate-900 flex items-center gap-1.5 uppercase tracking-wider">
+                              <User className="w-3.5 h-3.5 text-hp-navy" />
+                              <span>Target Persona</span>
+                            </span>
+
+                            <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+                              {targetPersonas.map((p) => {
+                                const isSelected = selectedPersona === p.id;
+                                return (
+                                  <button
+                                    key={p.id}
+                                    onClick={() => setSelectedPersona(p.id)}
+                                    className={`w-full text-left p-3 rounded-xl border transition flex flex-col justify-between ${
+                                      isSelected
+                                        ? 'bg-blue-50/90 border-hp-navy ring-1 ring-hp-navy shadow-xs'
+                                        : 'bg-slate-50/60 border-slate-200 hover:bg-slate-100/80'
+                                    }`}
+                                  >
+                                    <span className={`text-xs font-extrabold ${isSelected ? 'text-hp-navy' : 'text-slate-800'}`}>
+                                      {p.title}
+                                    </span>
+                                    <span className="text-[11px] text-slate-500 font-medium mt-0.5">
+                                      {p.subtitle}
+                                    </span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+
+                          {/* 2. Content Type Section */}
+                          <div className="space-y-2 pt-2 border-t border-slate-100">
+                            <span className="text-xs font-black text-slate-900 flex items-center gap-1.5 uppercase tracking-wider">
+                              <FileText className="w-3.5 h-3.5 text-hp-navy" />
+                              <span>Content Type</span>
+                            </span>
+
+                            <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+                              {contentTypes.map((c) => {
+                                const isSelected = selectedContentType === c.id;
+                                return (
+                                  <button
+                                    key={c.id}
+                                    onClick={() => setSelectedContentType(c.id)}
+                                    className={`w-full text-left p-3 rounded-xl border transition flex flex-col justify-between ${
+                                      isSelected
+                                        ? 'bg-blue-50/90 border-hp-navy ring-1 ring-hp-navy shadow-xs'
+                                        : 'bg-slate-50/60 border-slate-200 hover:bg-slate-100/80'
+                                    }`}
+                                  >
+                                    <span className={`text-xs font-extrabold ${isSelected ? 'text-hp-navy' : 'text-slate-800'}`}>
+                                      {c.title}
+                                    </span>
+                                    <span className="text-[11px] text-slate-500 font-medium mt-0.5">
+                                      {c.subtitle}
+                                    </span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+
+                          {/* 3. Topic Selection Section */}
+                          <div className="space-y-2 pt-2 border-t border-slate-100">
+                            <span className="text-xs font-black text-slate-900 flex items-center gap-1.5 uppercase tracking-wider">
+                              <Lightbulb className="w-3.5 h-3.5 text-amber-500" />
+                              <span>Topic</span>
+                            </span>
+
+                            <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto">
+                              {sourcedTopics.map((top, idx) => {
+                                const isSelected = selectedTopic === top && !customTopic.trim();
+                                return (
+                                  <button
+                                    key={idx}
+                                    onClick={() => {
+                                      setSelectedTopic(top);
+                                      setCustomTopic('');
+                                    }}
+                                    className={`text-[11px] font-semibold px-2.5 py-1 rounded-xl border transition text-left ${
+                                      isSelected
+                                        ? 'bg-hp-navy text-white border-hp-navy shadow-xs'
+                                        : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                                    }`}
+                                  >
+                                    {top}
+                                  </button>
+                                );
+                              })}
+                            </div>
+
+                            <input
+                              type="text"
+                              value={customTopic}
+                              onChange={(e) => setCustomTopic(e.target.value)}
+                              placeholder="Or type a custom topic..."
+                              className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-hp-navy"
+                            />
+                          </div>
+
+                          {/* 4. Additional Context Section */}
+                          <div className="space-y-2 pt-2 border-t border-slate-100">
+                            <span className="text-xs font-black text-slate-900 flex items-center gap-1.5 uppercase tracking-wider">
+                              <MessageSquare className="w-3.5 h-3.5 text-hp-navy" />
+                              <span>Additional Context (Optional)</span>
+                            </span>
+
+                            <textarea
+                              rows={3}
+                              value={additionalContext}
+                              onChange={(e) => setAdditionalContext(e.target.value)}
+                              placeholder="Add specific context, talking points, or recent developments to incorporate..."
+                              className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-hp-navy resize-none"
+                            />
+                          </div>
+
+                          {/* 5. Generate Button */}
+                          <button
+                            onClick={handleGenerateClick}
+                            disabled={isGeneratingContent}
+                            className="w-full py-3 px-4 bg-hp-navy hover:bg-blue-900 text-white font-extrabold text-xs rounded-xl shadow-md transition flex items-center justify-center gap-2 disabled:opacity-50"
+                          >
+                            {isGeneratingContent ? (
+                              <>
+                                <Loader2 className="w-4 h-4 animate-spin text-white" />
+                                <span>Generating ABM Content...</span>
+                              </>
+                            ) : (
+                              <>
+                                <Sparkles className="w-4 h-4 text-amber-300" />
+                                <span>Generate Content</span>
+                              </>
+                            )}
+                          </button>
+
+                        </div>
+
+                        {/* Right Output Canvas (7 Cols) */}
+                        <div className="lg:col-span-7 bg-white rounded-2xl border border-slate-200 shadow-sm p-8 min-h-[560px] flex flex-col justify-center items-center text-center">
+                          
+                          {!hasGeneratedContent ? (
+                            <div className="max-w-md space-y-4 animate-fade-in">
+                              <div className="w-14 h-14 rounded-2xl bg-slate-100 border border-slate-200 flex items-center justify-center mx-auto text-slate-400 shadow-xs">
+                                <Sparkles className="w-7 h-7 text-slate-400" />
+                              </div>
+                              <h4 className="text-base font-extrabold text-slate-800">
+                                Ready to generate
+                              </h4>
+                              <p className="text-xs text-slate-500 leading-relaxed font-medium">
+                                Select a target persona and content type, then click &quot;Generate Content&quot;. Gemini will create personalized ABM content using {selectedAccount?.name || 'Target Account'} account intelligence and HP Inc. product positioning.
+                              </p>
+                            </div>
+                          ) : (
+                            <div className="w-full space-y-6 text-left animate-fade-in">
+                              
+                              {/* Generation Selection Summary Bar */}
+                              <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex flex-wrap items-center justify-between gap-3 text-xs">
+                                <div className="space-y-0.5">
+                                  <span className="text-[10px] font-mono font-bold text-slate-400 uppercase">Target Persona &amp; Format:</span>
+                                  <p className="font-extrabold text-slate-900">
+                                    {activePersonaObj.title} &middot; <span className="text-hp-navy">{activeFormatObj.title}</span>
+                                  </p>
+                                </div>
+
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[10px] font-mono font-extrabold text-amber-800 bg-amber-50 px-2.5 py-1 rounded-full border border-amber-200">
+                                    Inferred TBD
+                                  </span>
+                                  <button
+                                    onClick={() => setHasGeneratedContent(false)}
+                                    className="text-[10px] font-bold text-slate-500 underline hover:text-slate-800"
+                                  >
+                                    Reset
+                                  </button>
+                                </div>
+                              </div>
+
+                              {/* Inferred TBD Banner Box */}
+                              <div className="bg-amber-50/70 border border-amber-200/80 rounded-2xl p-8 text-center space-y-4">
+                                <div className="w-12 h-12 rounded-full bg-amber-100 text-amber-800 flex items-center justify-center mx-auto border border-amber-300 shadow-xs">
+                                  <Sparkles className="w-6 h-6 text-amber-600" />
+                                </div>
+
+                                <h4 className="text-sm font-black text-amber-900 uppercase tracking-wider">
+                                  ABM Content Generation — Inferred TBD
+                                </h4>
+
+                                <p className="text-xs text-amber-800 max-w-lg mx-auto leading-relaxed font-medium">
+                                  LLM prompt generation for <span className="font-bold text-amber-950">{activeFormatObj.title}</span> tailored to <span className="font-bold text-amber-950">{activePersonaObj.title}</span> for <span className="font-bold text-amber-950">{selectedAccount?.name || 'Target Account'}</span> will be executed in Step 8 (AI Generation Layer).
+                                </p>
+
+                                <div className="bg-white/80 border border-amber-200/60 rounded-xl p-4 text-left text-xs space-y-2 text-slate-700">
+                                  <span className="font-mono font-extrabold text-[10px] text-amber-900 uppercase block tracking-wider">
+                                    Selected Inputs Ready for Step 8 Prompt:
+                                  </span>
+                                  <div className="space-y-1 font-mono text-[11px] text-slate-600">
+                                    <div>&bull; Persona: <span className="font-bold text-slate-900">{activePersonaObj.title}</span> ({activePersonaObj.subtitle})</div>
+                                    <div>&bull; Format: <span className="font-bold text-slate-900">{activeFormatObj.title}</span> ({activeFormatObj.subtitle})</div>
+                                    <div>&bull; Topic: <span className="font-bold text-slate-900">{customTopic.trim() || selectedTopic}</span></div>
+                                    {additionalContext.trim() && (
+                                      <div>&bull; Context: <span className="italic text-slate-800">&quot;{additionalContext}&quot;</span></div>
+                                    )}
+                                  </div>
+                                </div>
+
+                              </div>
+
+                            </div>
+                          )}
+
+                        </div>
+
+                      </div>
+
+                    </div>
+                  );
+                })()}
+
+                {activeFeatureKey === 'strategy_chat' && (() => {
+                  const contextWidget = widgets.find(w => w.widget_key === 'strategy_snapshot_context');
+                  const interfaceWidget = widgets.find(w => w.widget_key === 'strategy_chat_interface');
+
+                  const contextData = contextWidget?.data || {};
+                  const groundingMeta = contextData.grounding_metadata || {};
+                  const suggestedPrompts: any[] = contextData.suggested_prompts || [
+                    {
+                      id: 'entry_point',
+                      title: 'Best entry point',
+                      prompt_text: `What's the strongest entry point for engaging ${selectedAccount?.name || 'Target Account'}? Consider their active IT projects.`
+                    },
+                    {
+                      id: 'meeting_prep',
+                      title: 'Meeting prep',
+                      prompt_text: `Help me prepare for a meeting with ${selectedAccount?.name || 'Target Account'}'s security leadership. What below-the-OS value propositions resonate best?`
+                    },
+                    {
+                      id: 'competitive_defense',
+                      title: 'Competitive defense',
+                      prompt_text: `What competitive risks should I prepare for in the deal at ${selectedAccount?.name || 'Target Account'}? Give me counter-strategies for Dell and Lenovo.`
+                    },
+                    {
+                      id: 'abm_plan',
+                      title: '90-day ABM plan',
+                      prompt_text: `Draft a 90-day ABM campaign plan for ${selectedAccount?.name || 'Target Account'}. Include week-by-week stakeholder outreach cadence.`
+                    },
+                    {
+                      id: 'objections',
+                      title: 'Objections',
+                      prompt_text: `What objections will ${selectedAccount?.name || 'Target Account'}'s leadership likely raise about adopting HP hardware subscriptions?`
+                    },
+                    {
+                      id: 'device_security',
+                      title: 'Device & security posture',
+                      prompt_text: `Analyze ${selectedAccount?.name || 'Target Account'}'s current device fleet and endpoint security posture based on technographics signals.`
+                    }
+                  ];
+
+                  const companyName = groundingMeta.company_name || selectedAccount?.name || 'Target Account';
+                  const stakeholdersCount = groundingMeta.stakeholders_count ?? 23;
+                  const solutionsCount = groundingMeta.solutions_count ?? 5;
+
+                  const handleSendPrompt = (promptText: string) => {
+                    if (!promptText.trim()) return;
+                    const userMsg = {
+                      id: `user_${Date.now()}`,
+                      sender: 'user' as const,
+                      text: promptText,
+                      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                    };
+
+                    const assistantMsg = {
+                      id: `asst_${Date.now() + 1}`,
+                      sender: 'assistant' as const,
+                      text: `Conversational RAG response for prompt "${promptText}" on ${companyName} is TBD for Step 8 (AI Generation Layer).`,
+                      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                    };
+
+                    setChatMessages(prev => [...prev, userMsg, assistantMsg]);
+                    setChatInput('');
+                  };
+
+                  return (
+                    <div className="space-y-6 animate-fade-in">
+                      {/* Top Header */}
+                      <div className="border-b border-slate-200 pb-4">
+                        <h3 className="text-xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
+                          <MessageSquare className="w-6 h-6 text-hp-navy" />
+                          <span>AI Strategy Chat</span>
+                        </h3>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          Brainstorm GTM &amp; ABM strategy for {companyName} - grounded in account intelligence
+                        </p>
+                      </div>
+
+                      {/* Grounding Bar */}
+                      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
+                        <div className="flex items-center gap-2">
+                          <div className="relative">
+                            <select
+                              value={chatAdvisorMode}
+                              onChange={(e) => setChatAdvisorMode(e.target.value)}
+                              className="px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-extrabold text-slate-800 focus:outline-none focus:ring-2 focus:ring-hp-navy appearance-none pr-8 cursor-pointer shadow-xs"
+                            >
+                              <option value="Strategy Advisor">🤖 Strategy Advisor</option>
+                              <option value="Competitive Defender">🛡️ Competitive Defender</option>
+                              <option value="Executive Pitcher">🎯 Executive Pitcher</option>
+                              <option value="ABM Campaign Planner">📅 ABM Campaign Planner</option>
+                            </select>
+                            <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-3 pointer-events-none" />
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-1.5 text-slate-500 font-medium">
+                          <Info className="w-3.5 h-3.5 text-hp-navy" />
+                          <span>Grounded in: <strong className="text-slate-800">{companyName} Intelligence</strong> &middot; <strong className="text-slate-800">{stakeholdersCount} Stakeholders</strong> &middot; <strong className="text-slate-800">{solutionsCount} Solutions</strong></span>
+                        </div>
+                      </div>
+
+                      {/* Main Canvas: Welcome Cards OR Chat Thread */}
+                      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-8 min-h-[500px] flex flex-col justify-between">
+                        
+                        {chatMessages.length === 0 ? (
+                          /* Welcome / Suggested Prompts View */
+                          <div className="space-y-8 my-auto animate-fade-in">
+                            <div className="text-center max-w-2xl mx-auto space-y-3">
+                              <div className="w-14 h-14 rounded-2xl bg-blue-50 border border-blue-200 flex items-center justify-center mx-auto text-hp-navy shadow-xs">
+                                <MessageSquare className="w-7 h-7 text-hp-navy" />
+                              </div>
+                              <h4 className="text-lg font-black text-slate-900">
+                                ABM Strategy Assistant
+                              </h4>
+                              <p className="text-xs text-slate-600 leading-relaxed font-medium">
+                                Ask me anything about {companyName}, HP Inc. positioning, competitive strategy, or ABM campaign planning. I&apos;m grounded in {companyName}&apos;s actual data and strategic priorities.
+                              </p>
+                            </div>
+
+                            {/* 6 Suggested Prompt Cards Grid */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 max-w-4xl mx-auto">
+                              {suggestedPrompts.map((p) => (
+                                <button
+                                  key={p.id}
+                                  onClick={() => handleSendPrompt(p.prompt_text)}
+                                  className="text-left p-4 rounded-2xl border border-slate-200 bg-slate-50/60 hover:bg-blue-50/60 hover:border-hp-navy/40 transition space-y-1.5 group flex flex-col justify-between shadow-xs"
+                                >
+                                  <div>
+                                    <span className="text-xs font-black text-hp-navy flex items-center gap-1.5 group-hover:text-blue-900">
+                                      <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                                      <span>{p.title}</span>
+                                    </span>
+                                    <p className="text-[11px] text-slate-600 font-medium line-clamp-2 mt-1">
+                                      {p.prompt_text}
+                                    </p>
+                                  </div>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        ) : (
+                          /* Interactive Chat Messages Thread */
+                          <div className="space-y-4 max-h-[460px] overflow-y-auto pr-2 w-full animate-fade-in">
+                            {chatMessages.map((msg) => (
+                              <div
+                                key={msg.id}
+                                className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}
+                              >
+                                {msg.sender === 'user' ? (
+                                  <div className="bg-hp-navy text-white rounded-2xl p-4 max-w-2xl space-y-1 shadow-xs">
+                                    <p className="text-xs font-medium leading-relaxed">{msg.text}</p>
+                                    <span className="text-[9px] font-mono opacity-60 block text-right">{msg.timestamp}</span>
+                                  </div>
+                                ) : (
+                                  <div className="bg-slate-50 border border-slate-200 text-slate-800 rounded-2xl p-5 max-w-2xl space-y-3 shadow-xs">
+                                    <div className="flex items-center justify-between gap-2 border-b border-slate-200/80 pb-2">
+                                      <span className="text-xs font-black text-hp-navy flex items-center gap-1.5">
+                                        <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                                        <span>ABM Strategy Assistant</span>
+                                      </span>
+                                      <span className="text-[10px] font-mono font-extrabold text-amber-800 bg-amber-50 px-2.5 py-0.5 rounded-full border border-amber-200">
+                                        Inferred TBD
+                                      </span>
+                                    </div>
+
+                                    <div className="bg-amber-50/70 border border-amber-200/80 rounded-xl p-3.5 text-xs text-amber-900 space-y-1.5">
+                                      <span className="font-extrabold text-xs block">
+                                        Strategy Assistant RAG Grounding — Inferred TBD
+                                      </span>
+                                      <p className="text-[11px] text-amber-800 leading-relaxed font-medium">
+                                        Conversational RAG response generation using Gemini LLM prompts over {companyName}&apos;s grounded snapshot (23 stakeholders, 220 tech vendors, 10 news events) will be executed in Step 8 (AI Generation Layer).
+                                      </p>
+                                    </div>
+
+                                    <span className="text-[9px] font-mono text-slate-400 block">{msg.timestamp}</span>
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Bottom Input Controls */}
+                        <div className="pt-4 border-t border-slate-100 w-full mt-4">
+                          <form
+                            onSubmit={(e) => {
+                              e.preventDefault();
+                              handleSendPrompt(chatInput);
+                            }}
+                            className="flex items-center gap-2"
+                          >
+                            <input
+                              type="text"
+                              value={chatInput}
+                              onChange={(e) => setChatInput(e.target.value)}
+                              placeholder={`Ask about ${companyName} strategy, competitive positioning, campaign ideas...`}
+                              className="flex-1 px-4 py-3 bg-slate-50 border border-slate-300 rounded-2xl text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-hp-navy shadow-xs"
+                            />
+                            <button
+                              type="submit"
+                              disabled={!chatInput.trim()}
+                              className="p-3 bg-hp-navy hover:bg-blue-900 text-white rounded-2xl transition disabled:opacity-40 shadow-xs flex items-center justify-center flex-shrink-0"
+                            >
+                              <Sparkles className="w-4 h-4 text-amber-300" />
+                            </button>
+                          </form>
+                        </div>
+
+                      </div>
+
+                    </div>
+                  );
+                })()}
+
+                {/* For all other Features (Message Evaluator, etc.) */}
+                {activeFeatureKey !== 'executive_dashboard' && activeFeatureKey !== 'recent_news_signals' && activeFeatureKey !== 'intent_demand_signals' && activeFeatureKey !== 'solution_narrative_opportunity_map' && activeFeatureKey !== 'stakeholder_map' && activeFeatureKey !== 'tech_landscape' && activeFeatureKey !== 'objection_playbook' && activeFeatureKey !== 'content_messaging' && activeFeatureKey !== 'content_studio' && activeFeatureKey !== 'strategy_chat' && (
                   <div className="space-y-6">
                     <div className="flex items-center justify-between">
                       <div>

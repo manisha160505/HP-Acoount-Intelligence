@@ -10,9 +10,11 @@ def _find_file_path(rel_path: str) -> str | None:
         return None
     candidate_paths = [
         os.path.join(os.getcwd(), rel_path),
+        os.path.join("/app", rel_path),
         os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", rel_path)),
         os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", rel_path)),
         os.path.abspath(os.path.join(os.path.dirname(__file__), "..", rel_path)),
+        os.path.join(r"C:\hp-account\HP-Acoount-Intelligence\hp-backend", rel_path)
     ]
     for cp in candidate_paths:
         if os.path.exists(cp):
@@ -23,7 +25,7 @@ def _read_dataset_csv(account_id: str, dataset_key: str) -> list[dict]:
     db = get_db()
     file_doc = db["account_data_files"].find_one({
         "account_id": account_id,
-        "dataset_key": dataset_key,
+        "$or": [{"dataset_key": dataset_key}, {"category": dataset_key}],
         "status": "active"
     })
     
@@ -51,6 +53,7 @@ def extract_executive_dashboard(account_id: str) -> list[dict]:
     firmo_rows = _read_dataset_csv(account_id, "firmographics")
     hier_rows = _read_dataset_csv(account_id, "company_hierarchy")
     job_rows = _read_dataset_csv(account_id, "job_openings")
+    contact_rows = _read_dataset_csv(account_id, "prospect_contacts")
     
     results = []
 
@@ -87,7 +90,8 @@ def extract_executive_dashboard(account_id: str) -> list[dict]:
             "industry_classification": industry_classification,
             "hq_location": hq_location,
             "parent_company": parent_company,
-            "ultimate_parent": ultimate_parent
+            "ultimate_parent": ultimate_parent,
+            "stakeholders_mapped_count": len(contact_rows)
         }
         
         summary_payload = {
@@ -97,7 +101,7 @@ def extract_executive_dashboard(account_id: str) -> list[dict]:
             "data_classification": "deterministic",
             "status": "available",
             "data": summary_data,
-            "source_datasets": ["firmographics", "company_hierarchy"],
+            "source_datasets": ["firmographics", "company_hierarchy", "prospect_contacts"],
             "extracted_at": now,
             "updated_at": now
         }
