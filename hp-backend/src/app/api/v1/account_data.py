@@ -18,6 +18,10 @@ from app.services.extractors.intent_demand_signals import extract_intent_demand_
 from app.services.extractors.solution_narrative_opportunity_map import extract_solution_narrative_opportunity_map
 from app.services.extractors.stakeholder_map import extract_stakeholder_map
 from app.services.extractors.tech_landscape import extract_tech_landscape
+from app.services.extractors.objection_playbook import extract_objection_playbook
+from app.services.extractors.content_messaging import extract_content_messaging
+from app.services.extractors.content_studio import extract_content_studio
+from app.services.extractors.strategy_chat import extract_strategy_chat
 
 router = APIRouter(prefix="/accounts/{account_id}/data", tags=["Raw Data Management (Admin Only)"])
 
@@ -229,6 +233,21 @@ async def upload_account_data(
     if key_clean in ["technographics", "technology_detections", "webstack"]:
         try:
             extract_tech_landscape(account_id)
+        except Exception:
+            pass
+    if key_clean in ["firmographics", "technographics", "intent_score", "google_news", "news_events"]:
+        try:
+            extract_content_messaging(account_id)
+        except Exception:
+            pass
+    if key_clean in ["prospect_contacts", "job_openings", "firmographics", "google_news", "news_events"]:
+        try:
+            extract_content_studio(account_id)
+        except Exception:
+            pass
+    if key_clean in ["firmographics", "company_hierarchy", "technographics", "webstack", "job_openings", "google_news", "news_events", "intent_score", "technology_detections", "prospect_contacts"]:
+        try:
+            extract_strategy_chat(account_id)
         except Exception:
             pass
 

@@ -10,6 +10,10 @@ from app.services.extractors.intent_demand_signals import extract_intent_demand_
 from app.services.extractors.solution_narrative_opportunity_map import extract_solution_narrative_opportunity_map
 from app.services.extractors.stakeholder_map import extract_stakeholder_map
 from app.services.extractors.tech_landscape import extract_tech_landscape
+from app.services.extractors.objection_playbook import extract_objection_playbook
+from app.services.extractors.content_messaging import extract_content_messaging
+from app.services.extractors.content_studio import extract_content_studio
+from app.services.extractors.strategy_chat import extract_strategy_chat
 
 router = APIRouter(tags=["Widget Contracts & Dashboard Shell"])
 
@@ -410,6 +414,22 @@ def get_account_feature_widgets(
             extracted_widgets_map[w["widget_key"]] = w
     elif key_clean == "tech_landscape":
         extracted_list = extract_tech_landscape(account_id)
+        for w in extracted_list:
+            extracted_widgets_map[w["widget_key"]] = w
+    elif key_clean == "objection_playbook":
+        extracted_list = extract_objection_playbook(account_id)
+        for w in extracted_list:
+            extracted_widgets_map[w["widget_key"]] = w
+    elif key_clean == "content_messaging":
+        extracted_list = extract_content_messaging(account_id)
+        for w in extracted_list:
+            extracted_widgets_map[w["widget_key"]] = w
+    elif key_clean == "content_studio":
+        extracted_list = extract_content_studio(account_id)
+        for w in extracted_list:
+            extracted_widgets_map[w["widget_key"]] = w
+    elif key_clean == "strategy_chat":
+        extracted_list = extract_strategy_chat(account_id)
         for w in extracted_list:
             extracted_widgets_map[w["widget_key"]] = w
 
