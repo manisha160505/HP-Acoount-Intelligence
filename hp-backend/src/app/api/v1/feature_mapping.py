@@ -269,7 +269,7 @@ FEATURE_MAPPINGS = {
     },
     "tech_landscape": {
         "feature_key": "tech_landscape",
-        "display_name": "Tech Landscape",
+        "display_name": "Technographic Map",
         "purpose": "Comprehensive mapping of installed hardware, software, cloud, security, and web technologies",
         "dependent_datasets": ["technographics", "technology_detections", "webstack"],
         "mapped_fields": [
