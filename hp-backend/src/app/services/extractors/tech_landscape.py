@@ -43,8 +43,9 @@ def _read_dataset_records(account_id: str, dataset_key: str) -> list[dict]:
     rel_path = file_doc.get("file_path", "")
     candidate_paths = [
         os.path.join(os.getcwd(), rel_path),
-        os.path.join(r"C:\hp-account\HP-Acoount-Intelligence\hp-backend", rel_path),
-        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", rel_path))
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", rel_path)),
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", rel_path)),
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", rel_path)),
     ]
     
     full_path = None

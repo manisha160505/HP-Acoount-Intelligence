@@ -6,6 +6,20 @@ from datetime import datetime, timezone
 from bson import ObjectId
 from app.database.mongodb import get_db
 
+def _find_file_path(rel_path: str) -> str | None:
+    if not rel_path:
+        return None
+    candidate_paths = [
+        os.path.join(os.getcwd(), rel_path),
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", rel_path)),
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", rel_path)),
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", rel_path)),
+    ]
+    for cp in candidate_paths:
+        if os.path.exists(cp):
+            return cp
+    return None
+
 def _read_dataset_records(account_id: str, dataset_key: str) -> list[dict]:
     db = get_db()
     file_doc = db["account_data_files"].find_one({
@@ -18,9 +32,9 @@ def _read_dataset_records(account_id: str, dataset_key: str) -> list[dict]:
         return []
     
     rel_path = file_doc.get("file_path", "")
-    full_path = os.path.join(os.getcwd(), rel_path)
+    full_path = _find_file_path(rel_path)
     
-    if not os.path.exists(full_path):
+    if not full_path or not os.path.exists(full_path):
         return []
     
     ext = os.path.splitext(full_path)[1].lower()

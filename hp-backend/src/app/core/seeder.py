@@ -29,6 +29,19 @@ SEED_FILES = [
     ("prospect_contacts", "prospect_contacts.csv", "14_Prospect_Contacts (Target Decision Makers)")
 ]
 
+def _find_backend_root() -> str:
+    """Resolve backend root where seed_data and data directories reside across Docker, local, and module contexts."""
+    candidates = [
+        os.getcwd(),
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")),
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")),
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "..")),
+    ]
+    for c in candidates:
+        if os.path.exists(os.path.join(c, "seed_data", "astra")):
+            return c
+    return os.getcwd()
+
 def seed_database_if_empty():
     db = get_db()
     now = datetime.now(timezone.utc)
@@ -42,7 +55,7 @@ def seed_database_if_empty():
             "email": "admin@hp.com",
             "password_hash": get_password_hash("AdminPassword123!"),
             "role": "admin",
-            "full_name": "HP Enterprise Admin",
+            "full_name": "HP System Administrator",
             "is_active": True,
             "created_at": now,
             "updated_at": now
@@ -61,7 +74,7 @@ def seed_database_if_empty():
             "email": "user@hp.com",
             "password_hash": get_password_hash("UserPassword123!"),
             "role": "user",
-            "full_name": "HP Sales Representative",
+            "full_name": "HP Enterprise Sales Representative",
             "is_active": True,
             "created_at": now,
             "updated_at": now
@@ -107,8 +120,9 @@ def seed_database_if_empty():
 
     # 3. Seed Dataset CSV Files
     data_files_col = db["account_data_files"]
-    backend_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    backend_root = _find_backend_root()
     seed_source_dir = os.path.join(backend_root, "seed_data", "astra")
+    logger.info(f"Using seed source directory: {seed_source_dir}")
 
     if os.path.exists(seed_source_dir):
         for d_key, filename, display_name in SEED_FILES:
@@ -122,21 +136,30 @@ def seed_database_if_empty():
                 "status": "active"
             })
 
-            dest_dir = os.path.join(backend_root, "data", "accounts", astra_id, d_key)
-            os.makedirs(dest_dir, exist_ok=True)
-            dest_file_path = os.path.join(dest_dir, filename)
+            # Create destination dirs in both backend_root and current working directory
+            target_dirs = {
+                os.path.join(backend_root, "data", "accounts", astra_id, d_key),
+                os.path.join(os.getcwd(), "data", "accounts", astra_id, d_key)
+            }
 
-            # Copy seed file to destination if missing
-            if not os.path.exists(dest_file_path):
-                shutil.copy2(src_file_path, dest_file_path)
+            dest_file_path = None
+            for dest_dir in target_dirs:
+                os.makedirs(dest_dir, exist_ok=True)
+                dest_path = os.path.join(dest_dir, filename)
+                if not dest_file_path:
+                    dest_file_path = dest_path
+                # Copy seed file to destination if missing or different size
+                if not os.path.exists(dest_path) or os.path.getsize(dest_path) == 0:
+                    shutil.copy2(src_file_path, dest_path)
 
             rel_file_path = os.path.join("data", "accounts", astra_id, d_key, filename).replace("\\", "/")
 
-            file_size = os.path.getsize(dest_file_path)
+            file_size = os.path.getsize(dest_file_path) if dest_file_path and os.path.exists(dest_file_path) else 0
             row_count = 0
             try:
-                with open(dest_file_path, "r", encoding="utf-8-sig", errors="replace") as f:
-                    row_count = max(0, sum(1 for _ in f) - 1)
+                if dest_file_path and os.path.exists(dest_file_path):
+                    with open(dest_file_path, "r", encoding="utf-8-sig", errors="replace") as f:
+                        row_count = max(0, sum(1 for _ in f) - 1)
             except Exception:
                 row_count = 0
 
@@ -157,6 +180,18 @@ def seed_database_if_empty():
                 }
                 data_files_col.insert_one(metadata)
                 logger.info(f"Seeded active dataset '{d_key}' for account {astra_id}")
+            else:
+                # Ensure status is active and row_count/size are up to date
+                data_files_col.update_one(
+                    {"_id": existing_file["_id"]},
+                    {"$set": {
+                        "status": "active",
+                        "file_path": rel_file_path,
+                        "file_size": file_size,
+                        "row_count": row_count,
+                        "updated_at": now
+                    }}
+                )
 
     # 4. Trigger Extractors to Pre-Populate Widgets
     try:

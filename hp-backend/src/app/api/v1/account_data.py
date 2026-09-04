@@ -45,6 +45,20 @@ def sanitize_filename(filename: str) -> str:
     cleaned = re.sub(r'[^a border-zA-Z0-9_\.-]', '_', filename)
     return cleaned if cleaned else "dataset_file"
 
+def _find_file_path(rel_path: str) -> str | None:
+    if not rel_path:
+        return None
+    candidate_paths = [
+        os.path.join(os.getcwd(), rel_path),
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", rel_path)),
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", rel_path)),
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", rel_path)),
+    ]
+    for cp in candidate_paths:
+        if os.path.exists(cp):
+            return cp
+    return None
+
 @router.post("", response_model=AccountDataFileResponse, status_code=status.HTTP_201_CREATED)
 async def upload_account_data(
     account_id: str,
@@ -258,8 +272,8 @@ def delete_account_data_file(
     # Delete physical file if exists
     rel_path = file_doc.get("file_path", "")
     if rel_path:
-        full_path = os.path.join(os.getcwd(), rel_path)
-        if os.path.exists(full_path):
+        full_path = _find_file_path(rel_path)
+        if full_path and os.path.exists(full_path):
             try:
                 os.remove(full_path)
             except Exception:
@@ -306,9 +320,9 @@ def download_account_data_file(
         )
 
     rel_path = file_doc.get("file_path", "")
-    full_path = os.path.join(os.getcwd(), rel_path)
+    full_path = _find_file_path(rel_path)
 
-    if not os.path.exists(full_path):
+    if not full_path or not os.path.exists(full_path):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="File record exists in database but physical file is missing from server disk."
