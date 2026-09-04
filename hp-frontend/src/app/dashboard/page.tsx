@@ -156,6 +156,12 @@ export default function UserDashboardPage() {
   const [stakeholderSubTab, setStakeholderSubTab] = useState<'grid' | 'entry_path'>('grid');
   const [isEntryPathInfoOpen, setIsEntryPathInfoOpen] = useState(false);
 
+  // Tech Landscape Filter & Sub-Tab State
+  const [techSubTab, setTechSubTab] = useState<'map' | 'raw_matrix' | 'webstack' | 'detections'>('map');
+  const [opportunitiesOnly, setOpportunitiesOnly] = useState(false);
+  const [techSearch, setTechSearch] = useState('');
+  const [techCategoryFilter, setTechCategoryFilter] = useState('ALL');
+
   // Account search filter in dropdown
   const [accountSearch, setAccountSearch] = useState('');
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
@@ -2393,8 +2399,479 @@ export default function UserDashboardPage() {
                   );
                 })()}
 
-                {/* For all other Features (Tech Landscape, Objection Playbook, etc.) */}
-                {activeFeatureKey !== 'executive_dashboard' && activeFeatureKey !== 'recent_news_signals' && activeFeatureKey !== 'intent_demand_signals' && activeFeatureKey !== 'solution_narrative_opportunity_map' && activeFeatureKey !== 'stakeholder_map' && (
+                {activeFeatureKey === 'tech_landscape' && (() => {
+                  const mapWidget = widgets.find(w => w.widget_key === 'technographic_map');
+                  const matrixWidget = widgets.find(w => w.widget_key === 'tech_stack_matrix');
+                  const webstackWidget = widgets.find(w => w.widget_key === 'webstack_breakdown');
+                  const detectionsWidget = widgets.find(w => w.widget_key === 'tech_detections_reference');
+
+                  const mapData = mapWidget?.data || {};
+                  const matrixData = matrixWidget?.data || {};
+                  const webstackData = webstackWidget?.data || {};
+                  const detectionsData = detectionsWidget?.data || {};
+
+                  const categoriesList: any[] = mapData.categories || [];
+                  const displayedCategories = categoriesList.filter((cat: any) => {
+                    if (opportunitiesOnly && !cat.is_opportunity) return false;
+                    return true;
+                  });
+
+                  const totalTechCount = matrixData.total_tech_count ?? 0;
+                  const categoryMatrix: Record<string, string[]> = matrixData.category_matrix || {};
+                  const totalWebTechCount = webstackData.total_web_tech_count ?? 0;
+                  const premiumTechCount = webstackData.premium_tech_count || '0';
+                  const webSpendEst = webstackData.web_spend_estimate || 'N/A';
+                  const webstackTechs: string[] = webstackData.technologies || [];
+                  const totalDetectionsCount = detectionsData.total_detections_count ?? 0;
+                  const detectionsList: any[] = detectionsData.detections || [];
+
+                  const rawCategories = Object.keys(categoryMatrix);
+                  const filteredRawCategories = rawCategories.filter(cat => {
+                    if (techCategoryFilter !== 'ALL' && cat !== techCategoryFilter) return false;
+                    if (!techSearch.trim()) return true;
+                    const query = techSearch.toLowerCase();
+                    const catMatches = cat.toLowerCase().includes(query);
+                    const items = categoryMatrix[cat] || [];
+                    const itemMatches = items.some(item => item.toLowerCase().includes(query));
+                    return catMatches || itemMatches;
+                  });
+
+                  return (
+                    <div className="space-y-6 animate-fade-in">
+                      {/* Top Header & Opportunities Toggle */}
+                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200 pb-4">
+                        <div>
+                          <h3 className="text-xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
+                            <Cpu className="w-6 h-6 text-hp-navy" />
+                            <span>Technographic Map</span>
+                          </h3>
+                          <p className="text-xs text-slate-500 mt-0.5">
+                            {mapData.total_detected_technologies || 21} detected technologies across {mapData.total_categories || 7} categories in {selectedAccount?.name || 'Target Account'}&apos;s stack, mapped to what each one means for HP
+                          </p>
+                        </div>
+
+                        {/* Top Action Toggle */}
+                        <div className="flex items-center gap-2 self-start md:self-auto">
+                          <button
+                            onClick={() => setOpportunitiesOnly(!opportunitiesOnly)}
+                            className={`px-3.5 py-1.5 rounded-xl text-xs font-extrabold transition flex items-center gap-1.5 shadow-sm ${
+                              opportunitiesOnly
+                                ? 'bg-hp-navy text-white ring-2 ring-hp-navy ring-offset-1'
+                                : 'bg-white text-slate-700 border border-slate-300 hover:bg-slate-50'
+                            }`}
+                          >
+                            <Sparkles className={`w-3.5 h-3.5 ${opportunitiesOnly ? 'text-amber-300' : 'text-slate-400'}`} />
+                            <span>Opportunities only</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* View Switcher Sub-Tabs */}
+                      <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 pb-3 text-xs font-extrabold">
+                        <button
+                          onClick={() => setTechSubTab('map')}
+                          className={`px-4 py-2 rounded-xl transition flex items-center gap-2 ${
+                            techSubTab === 'map'
+                              ? 'bg-hp-navy text-white shadow'
+                              : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
+                          }`}
+                        >
+                          <Layers className="w-4 h-4" />
+                          <span>Technographic Map</span>
+                        </button>
+
+                        <button
+                          onClick={() => setTechSubTab('raw_matrix')}
+                          className={`px-4 py-2 rounded-xl transition flex items-center gap-2 ${
+                            techSubTab === 'raw_matrix'
+                              ? 'bg-hp-navy text-white shadow'
+                              : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
+                          }`}
+                        >
+                          <Database className="w-4 h-4" />
+                          <span>Raw Installed Stack ({totalTechCount})</span>
+                        </button>
+
+                        <button
+                          onClick={() => setTechSubTab('webstack')}
+                          className={`px-4 py-2 rounded-xl transition flex items-center gap-2 ${
+                            techSubTab === 'webstack'
+                              ? 'bg-hp-navy text-white shadow'
+                              : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
+                          }`}
+                        >
+                          <Globe className="w-4 h-4" />
+                          <span>Webstack Infrastructure ({totalWebTechCount})</span>
+                        </button>
+
+                        <button
+                          onClick={() => setTechSubTab('detections')}
+                          className={`px-4 py-2 rounded-xl transition flex items-center gap-2 ${
+                            techSubTab === 'detections'
+                              ? 'bg-hp-navy text-white shadow'
+                              : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
+                          }`}
+                        >
+                          <Binary className="w-4 h-4" />
+                          <span>Digital Detections ({totalDetectionsCount})</span>
+                        </button>
+                      </div>
+
+                      {/* Sub-Tab 1: Technographic Map (Default Benchmark View) */}
+                      {techSubTab === 'map' && (
+                        <div className="space-y-6">
+                          {/* STRATEGIC READ Banner */}
+                          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
+                            <span className="text-[10px] font-mono font-extrabold uppercase tracking-widest text-slate-400">
+                              STRATEGIC READ
+                            </span>
+                            <p className="text-xs text-slate-700 leading-relaxed font-medium">
+                              {mapData.strategic_read}
+                            </p>
+
+                            {/* 4 Stat Cards */}
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
+                              <div className="bg-slate-50/80 p-3.5 rounded-xl border border-slate-200 space-y-1">
+                                <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider block">DETECTED TECHNOLOGIES</span>
+                                <div className="text-xl font-black font-mono text-slate-900">{mapData.total_detected_technologies || 21}</div>
+                              </div>
+                              <div className="bg-slate-50/80 p-3.5 rounded-xl border border-slate-200 space-y-1">
+                                <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider block">CATEGORIES</span>
+                                <div className="text-xl font-black font-mono text-slate-900">{mapData.total_categories || 7}</div>
+                              </div>
+                              <div className="bg-blue-50/60 p-3.5 rounded-xl border border-blue-200/80 space-y-1">
+                                <span className="text-[10px] font-extrabold text-blue-800 uppercase tracking-wider block">HP-MAPPED CATEGORIES</span>
+                                <div className="text-xl font-black font-mono text-hp-navy">{mapData.hp_mapped_categories || '5/7'}</div>
+                              </div>
+                              <div className="bg-emerald-50/60 p-3.5 rounded-xl border border-emerald-200/80 space-y-1">
+                                <span className="text-[10px] font-extrabold text-emerald-800 uppercase tracking-wider block">WHITESPACE CATEGORIES</span>
+                                <div className="text-xl font-black font-mono text-emerald-700">{mapData.whitespace_categories || '4/7'}</div>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Category Blocks List */}
+                          <div className="space-y-6">
+                            {displayedCategories.map((cat: any) => (
+                              <div key={cat.category_key} className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4 hover:border-slate-300 transition">
+                                
+                                {/* Category Header */}
+                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                                  <div>
+                                    <h4 className="text-sm font-black text-slate-900 flex items-center gap-2">
+                                      <Cpu className="w-4 h-4 text-hp-navy" />
+                                      <span>{cat.category_name}</span>
+                                    </h4>
+                                    <p className="text-[11px] font-medium text-slate-500 mt-0.5">
+                                      {cat.detected_signals_count} detected signals{cat.whitespace_count > 0 ? ` - ${cat.whitespace_count} whitespace` : ''}
+                                    </p>
+                                  </div>
+
+                                  {/* Status Badge */}
+                                  <div>
+                                    {cat.badge_type === 'displacement' && (
+                                      <span className="text-[11px] font-extrabold text-red-700 bg-red-50 border border-red-200 px-3 py-1 rounded-full flex items-center gap-1">
+                                        <TrendingUp className="w-3 h-3 text-red-600" />
+                                        <span>{cat.status_badge}</span>
+                                      </span>
+                                    )}
+                                    {cat.badge_type === 'complementary' && (
+                                      <span className="text-[11px] font-extrabold text-blue-700 bg-blue-50 border border-blue-200 px-3 py-1 rounded-full flex items-center gap-1">
+                                        <Zap className="w-3 h-3 text-blue-600" />
+                                        <span>{cat.status_badge}</span>
+                                      </span>
+                                    )}
+                                    {cat.badge_type === 'contextual' && (
+                                      <span className="text-[11px] font-semibold text-slate-600 bg-slate-100 border border-slate-200 px-3 py-1 rounded-full flex items-center gap-1">
+                                        <Info className="w-3 h-3 text-slate-400" />
+                                        <span>{cat.status_badge}</span>
+                                      </span>
+                                    )}
+                                    {cat.badge_type === 'whitespace' && (
+                                      <span className="text-[11px] font-extrabold text-emerald-800 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-full flex items-center gap-1">
+                                        <Sparkles className="w-3 h-3 text-emerald-600" />
+                                        <span>{cat.status_badge}</span>
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {/* WHAT IT MEANS FOR HP Callout */}
+                                <div className="bg-blue-50/50 border border-blue-100/80 rounded-xl p-4 space-y-1">
+                                  <span className="text-[10px] font-mono font-extrabold uppercase tracking-widest text-blue-600 block">
+                                    WHAT IT MEANS FOR HP
+                                  </span>
+                                  <p className="text-xs text-slate-700 font-medium leading-relaxed">
+                                    {cat.what_it_means}
+                                  </p>
+                                </div>
+
+                                {/* Vendor Cards Grid */}
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                  {cat.vendors?.map((vendor: any, vIdx: number) => {
+                                    if (vendor.is_whitespace) {
+                                      return (
+                                        <div key={vIdx} className="bg-emerald-50/40 border-2 border-emerald-300/80 rounded-2xl p-4 space-y-3 flex flex-col justify-between">
+                                          <div>
+                                            <div className="flex items-center justify-between gap-2 border-b border-emerald-200/60 pb-2 mb-2">
+                                              <h5 className="text-xs font-black text-slate-900">{vendor.vendor_name}</h5>
+                                              <span className="text-[10px] font-extrabold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-300">
+                                                {vendor.risk_level}
+                                              </span>
+                                            </div>
+                                            <p className="text-xs text-slate-600 font-medium">{vendor.description}</p>
+
+                                            {vendor.hp_play && (
+                                              <div className="mt-3 bg-white border border-emerald-200 rounded-xl p-2.5 text-xs text-emerald-900 font-semibold space-y-0.5 shadow-sm">
+                                                <span className="font-extrabold text-emerald-800 flex items-center gap-1">
+                                                  <Sparkles className="w-3 h-3 text-emerald-600" />
+                                                  <span>{vendor.hp_play.product}</span>
+                                                </span>
+                                                <p className="text-[11px] text-slate-600 font-normal italic pl-4">
+                                                  {vendor.hp_play.play_text}
+                                                </p>
+                                              </div>
+                                            )}
+                                          </div>
+
+                                          <div className="text-[9px] font-mono uppercase tracking-wider text-slate-400 border-t border-emerald-200/60 pt-2 flex items-center justify-between">
+                                            <span className="truncate pr-2">{vendor.provenance}</span>
+                                            <span className="font-bold text-slate-500">{vendor.confidence}</span>
+                                          </div>
+                                        </div>
+                                      );
+                                    }
+
+                                    return (
+                                      <div key={vIdx} className="bg-white border border-slate-200 rounded-2xl p-4 space-y-3 flex flex-col justify-between hover:border-slate-300 transition shadow-xs">
+                                        <div>
+                                          <div className="flex items-center justify-between gap-2 border-b border-slate-100 pb-2 mb-2">
+                                            <h5 className="text-xs font-black text-slate-900">{vendor.vendor_name}</h5>
+                                            <div>
+                                              {vendor.risk_level === 'High risk' && (
+                                                <span className="text-[10px] font-extrabold text-red-700 bg-red-50 px-2 py-0.5 rounded-md border border-red-200">
+                                                  High risk
+                                                </span>
+                                              )}
+                                              {vendor.risk_level === 'Medium risk' && (
+                                                <span className="text-[10px] font-extrabold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
+                                                  Medium risk
+                                                </span>
+                                              )}
+                                              {vendor.risk_level === 'Low risk' && (
+                                                <span className="text-[10px] font-extrabold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                                                  Low risk
+                                                </span>
+                                              )}
+                                              {vendor.risk_level === 'Contextual' && (
+                                                <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200">
+                                                  Contextual
+                                                </span>
+                                              )}
+                                            </div>
+                                          </div>
+
+                                          <p className="text-xs text-slate-500 font-medium">{vendor.description}</p>
+
+                                          {vendor.hp_play && (
+                                            <div className="mt-3 bg-blue-50/80 border border-blue-200/80 rounded-xl p-2.5 text-xs text-hp-navy font-semibold space-y-0.5">
+                                              <span className="font-extrabold text-hp-navy flex items-center gap-1">
+                                                <span>&rarr;</span>
+                                                <span>{vendor.hp_play.product}</span>
+                                              </span>
+                                              <p className="text-[11px] text-slate-600 font-normal italic pl-4">
+                                                {vendor.hp_play.play_text}
+                                              </p>
+                                            </div>
+                                          )}
+                                        </div>
+
+                                        <div className="text-[9px] font-mono uppercase tracking-wider text-slate-400 border-t border-slate-100 pt-2 flex items-center justify-between">
+                                          <span className="truncate pr-2">{vendor.provenance}</span>
+                                          <span className="font-bold text-slate-500">{vendor.confidence}</span>
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Sub-Tab 2: Raw Technographics Matrix (19 Categories) */}
+                      {techSubTab === 'raw_matrix' && (
+                        <div className="space-y-4">
+                          <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm flex flex-col md:flex-row items-center justify-between gap-3 text-xs">
+                            <div className="relative flex-1 w-full max-w-md">
+                              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+                              <input
+                                type="text"
+                                value={techSearch}
+                                onChange={(e) => setTechSearch(e.target.value)}
+                                placeholder="Search technology vendor or category..."
+                                className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-hp-navy"
+                              />
+                            </div>
+
+                            <div className="flex items-center gap-2 w-full md:w-auto">
+                              <Filter className="w-3.5 h-3.5 text-slate-400" />
+                              <select
+                                value={techCategoryFilter}
+                                onChange={(e) => setTechCategoryFilter(e.target.value)}
+                                className="px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold text-slate-700 focus:outline-none"
+                              >
+                                <option value="ALL">All Categories ({rawCategories.length})</option>
+                                {rawCategories.map(cat => (
+                                  <option key={cat} value={cat}>{cat}</option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                            {filteredRawCategories.map(cat => {
+                              const items = categoryMatrix[cat] || [];
+                              const filteredItems = items.filter(item => 
+                                !techSearch.trim() || item.toLowerCase().includes(techSearch.toLowerCase()) || cat.toLowerCase().includes(techSearch.toLowerCase())
+                              );
+
+                              return (
+                                <div key={cat} className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 space-y-3 flex flex-col justify-between hover:border-hp-navy/40 transition">
+                                  <div>
+                                    <div className="flex items-center justify-between border-b border-slate-100 pb-2 mb-2">
+                                      <h5 className="text-xs font-extrabold text-slate-800 truncate pr-2">{cat}</h5>
+                                      <span className="text-[10px] font-mono font-bold text-hp-navy bg-blue-50 px-2 py-0.5 rounded-full border border-blue-200 flex-shrink-0">
+                                        {items.length} {items.length === 1 ? 'item' : 'items'}
+                                      </span>
+                                    </div>
+
+                                    <div className="flex flex-wrap gap-1.5 max-h-48 overflow-y-auto pr-1">
+                                      {filteredItems.map((item, idx) => (
+                                        <span key={idx} className="text-[11px] font-medium bg-slate-100 text-slate-800 border border-slate-200/80 px-2 py-1 rounded-lg hover:bg-blue-50 hover:text-hp-navy hover:border-blue-300 transition">
+                                          {item}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Sub-Tab 3: Webstack Infrastructure */}
+                      {techSubTab === 'webstack' && (
+                        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
+                          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                            <div>
+                              <h4 className="text-xs font-extrabold uppercase tracking-wider text-slate-800 flex items-center gap-2">
+                                <Globe className="w-4 h-4 text-emerald-600" />
+                                <span>Web & Digital Infrastructure Stack</span>
+                              </h4>
+                              <p className="text-xs text-slate-500 mt-0.5">
+                                Technologies detected on corporate website domain
+                              </p>
+                            </div>
+                            {isXRayOn && (
+                              <span className="text-[10px] font-mono text-slate-400 bg-slate-100 px-2 py-0.5 rounded">
+                                5_Webstack.csv
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-1">
+                              <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Web Spend Estimate</span>
+                              <div className="text-sm font-black font-mono text-slate-800">{webSpendEst}</div>
+                            </div>
+                            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-1">
+                              <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Premium Web Technologies</span>
+                              <div className="text-sm font-black font-mono text-amber-700">{premiumTechCount}</div>
+                            </div>
+                            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-1">
+                              <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Detected Web Technologies</span>
+                              <div className="text-sm font-black font-mono text-emerald-700">{totalWebTechCount}</div>
+                            </div>
+                          </div>
+
+                          {webstackTechs.length > 0 && (
+                            <div className="space-y-2 pt-2">
+                              <span className="text-[11px] font-extrabold text-slate-700 uppercase tracking-wider">Detected Web Technologies List</span>
+                              <div className="flex flex-wrap gap-1.5 max-h-48 overflow-y-auto bg-slate-50 p-3 rounded-xl border border-slate-200 text-xs">
+                                {webstackTechs.map((tech, idx) => (
+                                  <span key={idx} className="bg-white border border-slate-200 text-slate-700 px-2 py-0.5 rounded text-[11px] font-medium">
+                                    {tech}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Sub-Tab 4: Digital Tech Detections Reference */}
+                      {techSubTab === 'detections' && (
+                        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
+                          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                            <div>
+                              <h4 className="text-xs font-extrabold uppercase tracking-wider text-slate-800 flex items-center gap-2">
+                                <Binary className="w-4 h-4 text-indigo-600" />
+                                <span>Digital Technology Detections Reference ({totalDetectionsCount})</span>
+                              </h4>
+                              <p className="text-xs text-slate-500 mt-0.5">
+                                Confidence scores, first/last seen timestamps, and department ONET codes
+                              </p>
+                            </div>
+                            {isXRayOn && (
+                              <span className="text-[10px] font-mono text-slate-400 bg-slate-100 px-2 py-0.5 rounded">
+                                technology_detections.csv
+                              </span>
+                            )}
+                          </div>
+
+                          {detectionsList.length === 0 ? (
+                            <div className="p-6 text-center text-xs text-slate-500">
+                              No technology detection records found for this account.
+                            </div>
+                          ) : (
+                            <div className="overflow-x-auto rounded-xl border border-slate-200">
+                              <table className="w-full text-left border-collapse text-xs">
+                                <thead>
+                                  <tr className="bg-slate-50 border-b border-slate-200 font-extrabold uppercase tracking-wider text-[10px] text-slate-600">
+                                    <th className="py-2.5 px-4">Detection ID / Tech</th>
+                                    <th className="py-2.5 px-4">Score</th>
+                                    <th className="py-2.5 px-4">First Seen</th>
+                                    <th className="py-2.5 px-4">Last Seen</th>
+                                    <th className="py-2.5 px-4">Department ONET Codes</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-200 font-medium">
+                                  {detectionsList.map((det, idx) => (
+                                    <tr key={idx} className="hover:bg-slate-50 transition">
+                                      <td className="py-2.5 px-4 font-mono font-bold text-slate-800">{det.id || 'N/A'}</td>
+                                      <td className="py-2.5 px-4 font-mono font-bold text-indigo-700">{det.score || 'N/A'}</td>
+                                      <td className="py-2.5 px-4 font-mono text-slate-500 text-[11px]">{det.first_seen_at || 'N/A'}</td>
+                                      <td className="py-2.5 px-4 font-mono text-slate-500 text-[11px]">{det.last_seen_at || 'N/A'}</td>
+                                      <td className="py-2.5 px-4 font-mono text-slate-600 text-[11px] truncate max-w-xs">{det.department_onet_codes || '[]'}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                    </div>
+                  );
+                })()}
+
+                {/* For all other Features (Objection Playbook, Content Studio, etc.) */}
+                {activeFeatureKey !== 'executive_dashboard' && activeFeatureKey !== 'recent_news_signals' && activeFeatureKey !== 'intent_demand_signals' && activeFeatureKey !== 'solution_narrative_opportunity_map' && activeFeatureKey !== 'stakeholder_map' && activeFeatureKey !== 'tech_landscape' && (
                   <div className="space-y-6">
                     <div className="flex items-center justify-between">
                       <div>

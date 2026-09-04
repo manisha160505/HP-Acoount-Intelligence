@@ -5,12 +5,17 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config.settings import settings
 from app.database.mongodb import connect_to_mongo, close_mongo_connection
 from app.database.seed import seed_users
+from app.core.seeder import seed_database_if_empty
 from app.api.v1.router import api_v1_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     connect_to_mongo()
     seed_users()
+    try:
+        seed_database_if_empty()
+    except Exception as e:
+        print(f"[Startup Seeder Notice] {e}")
     yield
     close_mongo_connection()
 

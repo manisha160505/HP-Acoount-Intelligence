@@ -9,6 +9,7 @@ from app.services.extractors.recent_news_signals import extract_recent_news_sign
 from app.services.extractors.intent_demand_signals import extract_intent_demand_signals
 from app.services.extractors.solution_narrative_opportunity_map import extract_solution_narrative_opportunity_map
 from app.services.extractors.stakeholder_map import extract_stakeholder_map
+from app.services.extractors.tech_landscape import extract_tech_landscape
 
 router = APIRouter(tags=["Widget Contracts & Dashboard Shell"])
 
@@ -155,6 +156,17 @@ WIDGET_REGISTRY = {
     ],
     "tech_landscape": [
         {
+            "widget_key": "technographic_map",
+            "widget_name": "Technographic Map",
+            "feature_key": "tech_landscape",
+            "description": "Detected technologies across IT categories mapped to HP product lines, displacement opportunities, and sales plays",
+            "widget_type": "technographic_map",
+            "data_classification": "deterministic",
+            "source_datasets": ["technographics", "technology_detections", "webstack"],
+            "source_fields": ["technology_category", "vendor_product", "hp_product_line"],
+            "display_order": 1
+        },
+        {
             "widget_key": "tech_stack_matrix",
             "widget_name": "Technology Stack Matrix",
             "feature_key": "tech_landscape",
@@ -163,7 +175,7 @@ WIDGET_REGISTRY = {
             "data_classification": "deterministic",
             "source_datasets": ["technographics"],
             "source_fields": ["technology_category", "vendor_product"],
-            "display_order": 1
+            "display_order": 2
         },
         {
             "widget_key": "tech_detections_reference",
@@ -174,7 +186,7 @@ WIDGET_REGISTRY = {
             "data_classification": "deterministic",
             "source_datasets": ["technology_detections"],
             "source_fields": ["detection_confidence", "first_last_seen"],
-            "display_order": 2
+            "display_order": 3
         },
         {
             "widget_key": "webstack_breakdown",
@@ -185,7 +197,7 @@ WIDGET_REGISTRY = {
             "data_classification": "deterministic",
             "source_datasets": ["webstack"],
             "source_fields": ["website_tech"],
-            "display_order": 3
+            "display_order": 4
         }
     ],
     "objection_playbook": [
@@ -394,6 +406,10 @@ def get_account_feature_widgets(
             extracted_widgets_map[w["widget_key"]] = w
     elif key_clean == "stakeholder_map":
         extracted_list = extract_stakeholder_map(account_id)
+        for w in extracted_list:
+            extracted_widgets_map[w["widget_key"]] = w
+    elif key_clean == "tech_landscape":
+        extracted_list = extract_tech_landscape(account_id)
         for w in extracted_list:
             extracted_widgets_map[w["widget_key"]] = w
 
