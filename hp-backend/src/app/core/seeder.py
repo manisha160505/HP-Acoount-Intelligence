@@ -90,6 +90,7 @@ def seed_database_if_empty():
             "industry": "Automotive & Industrial Conglomerate",
             "hq_location": "Jakarta, Indonesia",
             "employee_range": "100,000+",
+            "status": "active",
             "is_active": True,
             "created_at": now,
             "updated_at": now
@@ -99,6 +100,10 @@ def seed_database_if_empty():
         logger.info(f"Created benchmark target account 'PT Astra International Tbk' (ID: {astra_id})")
     else:
         astra_id = str(astra_doc["_id"])
+        accounts_col.update_one(
+            {"_id": astra_doc["_id"]},
+            {"$set": {"status": "active", "is_active": True, "updated_at": now}}
+        )
 
     # 3. Seed Dataset CSV Files
     data_files_col = db["account_data_files"]
