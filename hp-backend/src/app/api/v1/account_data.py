@@ -15,7 +15,7 @@ from app.schemas.account_data import DATASET_REGISTRY, AccountDataFileResponse
 from app.services.extractors.executive_dashboard import extract_executive_dashboard
 from app.services.extractors.recent_news_signals import extract_recent_news_signals
 from app.services.extractors.intent_demand_signals import extract_intent_demand_signals
-from app.services.extractors.solution_narrative_opportunity_map import extract_solution_narrative_opportunity_map
+from app.services.extractors.solution_narrative_opportunity_map import extract_solution_narrative_opportunity_map, generate_opportunity_map_plays_with_gpt4o
 from app.services.extractors.stakeholder_map import extract_stakeholder_map
 from app.services.extractors.tech_landscape import extract_tech_landscape
 from app.services.extractors.objection_playbook import extract_objection_playbook
@@ -224,6 +224,7 @@ async def upload_account_data(
     if key_clean in ["firmographics", "technographics", "intent_score", "google_news", "news_events"]:
         try:
             extract_solution_narrative_opportunity_map(account_id)
+            generate_opportunity_map_plays_with_gpt4o(account_id)
         except Exception:
             pass
     if key_clean in ["prospect_contacts"]:

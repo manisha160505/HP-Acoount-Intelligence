@@ -47,6 +47,10 @@ reference_csvs/
 env/
 venv/
 
+# Media & Reference Codebase Directories
+*.mp4
+hp-sea-abm-dev-main/
+
 # OS Files
 .DS_Store
 Thumbs.db

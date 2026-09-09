@@ -7,7 +7,7 @@ from app.schemas.widget import WidgetContract, WidgetResponse
 from app.services.extractors.executive_dashboard import extract_executive_dashboard
 from app.services.extractors.recent_news_signals import extract_recent_news_signals
 from app.services.extractors.intent_demand_signals import extract_intent_demand_signals
-from app.services.extractors.solution_narrative_opportunity_map import extract_solution_narrative_opportunity_map
+from app.services.extractors.solution_narrative_opportunity_map import extract_solution_narrative_opportunity_map, generate_opportunity_map_plays_with_gpt4o
 from app.services.extractors.stakeholder_map import extract_stakeholder_map
 from app.services.extractors.tech_landscape import extract_tech_landscape
 from app.services.extractors.objection_playbook import extract_objection_playbook
@@ -116,12 +116,23 @@ WIDGET_REGISTRY = {
             "widget_key": "stakeholder_influence_map",
             "widget_name": "Buying Center & Influence Grouping",
             "feature_key": "stakeholder_map",
-            "description": "Derived departmental influence classification contract. Grouping algorithms are TBD for future runtime calculation.",
+            "description": "Departmental grouping with HP-relevance counts, buying-group coverage, and the stakeholder ranking used for the entry path. Scored 25% seniority + 25% HP relevance + 20% influence + 15% data completeness + 15% priority.",
             "widget_type": "hierarchy_chart",
             "data_classification": "derived",
             "source_datasets": ["prospect_contacts"],
-            "source_fields": ["department", "seniority"],
+            "source_fields": ["department", "seniority", "influence_type", "priority", "hp_relevance_band", "stakeholder_score"],
             "display_order": 2
+        },
+        {
+            "widget_key": "stakeholder_talking_points",
+            "widget_name": "Per-Contact Opening Angle",
+            "feature_key": "stakeholder_map",
+            "description": "Inferred per-contact opener, HP play focus, role-based decision power, and evidenced pain points. Generated from the contact's own record plus account-level evidence; omitted where evidence does not support the claim.",
+            "widget_type": "talking_point_cards",
+            "data_classification": "inferred",
+            "source_datasets": ["prospect_contacts", "firmographics", "technographics", "intent_score", "google_news", "news_events"],
+            "source_fields": ["how_to_open", "hp_play_focus", "decision_power", "pain_points"],
+            "display_order": 3
         }
     ],
     "solution_narrative_opportunity_map": [
@@ -480,3 +491,38 @@ def get_account_feature_widgets(
             })
 
     return responses
+
+@router.post("/accounts/{account_id}/widgets/solution_narrative_opportunity_map/generate", response_model=WidgetResponse)
+def generate_opportunity_map_endpoint(
+    account_id: str,
+    current_user: dict = Depends(require_user_role)
+):
+    if not ObjectId.is_valid(account_id):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid account ID format")
+
+    db = get_db()
+    account = db["accounts"].find_one({"_id": ObjectId(account_id)})
+    if not account:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company account not found")
+
+    ext_doc = generate_opportunity_map_plays_with_gpt4o(account_id)
+    updated_at_val = ext_doc.get("updated_at")
+    updated_at_str = updated_at_val.isoformat() if isinstance(updated_at_val, datetime) else str(updated_at_val or "")
+
+    contract = WIDGET_REGISTRY["solution_narrative_opportunity_map"][2]
+
+    return {
+        "account_id": account_id,
+        "feature_key": "solution_narrative_opportunity_map",
+        "widget_key": "opportunity_narrative_plays",
+        "widget_name": contract["widget_name"],
+        "description": contract["description"],
+        "widget_type": contract["widget_type"],
+        "data_classification": contract["data_classification"],
+        "status": ext_doc.get("status", "pending"),
+        "data": ext_doc.get("data", {}),
+        "source_datasets": contract["source_datasets"],
+        "source_fields": contract["source_fields"],
+        "display_order": contract["display_order"],
+        "updated_at": updated_at_str
+    }

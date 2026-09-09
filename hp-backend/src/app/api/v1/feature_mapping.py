@@ -211,6 +211,87 @@ FEATURE_MAPPINGS = {
                 "source_sheet": "14_Prospect_Contacts",
                 "source_column": "Linkedin Url",
                 "data_type": "DETERMINISTIC"
+            },
+            {
+                "field_key": "buying_committee_persona",
+                "display_name": "Buying Committee Persona",
+                "purpose": "Uploaded buying-committee classification; primary input to influence type",
+                "dataset_key": "prospect_contacts",
+                "source_sheet": "14_Prospect_Contacts",
+                "source_column": "Prospect buying_committee_personas",
+                "data_type": "DETERMINISTIC"
+            },
+            {
+                "field_key": "seniority_band",
+                "display_name": "Seniority Band (derived)",
+                "purpose": "Job level normalised to C-Suite / VP / Director / Manager / Individual Contributor; scored 100/75/50/25/10",
+                "dataset_key": "prospect_contacts",
+                "source_sheet": "14_Prospect_Contacts",
+                "source_column": "Prospect job_level_main",
+                "data_type": "DETERMINISTIC"
+            },
+            {
+                "field_key": "normalized_department",
+                "display_name": "Normalised Department (derived)",
+                "purpose": "Source A labels and Apollo slugs mapped onto one department set",
+                "dataset_key": "prospect_contacts",
+                "source_sheet": "14_Prospect_Contacts",
+                "source_column": "Prospect job_department_main",
+                "data_type": "DETERMINISTIC"
+            },
+            {
+                "field_key": "influence_type",
+                "display_name": "Influence Type (derived)",
+                "purpose": "Decision Maker / Budget Holder / Technical Evaluator / Influencer. Buying-committee persona leads; procurement and technical title terms override. Scored 100/85/60/50",
+                "dataset_key": "prospect_contacts",
+                "source_sheet": "14_Prospect_Contacts",
+                "source_column": "Prospect buying_committee_personas, Prospect job_title",
+                "data_type": "DETERMINISTIC"
+            },
+            {
+                "field_key": "hp_relevance_band",
+                "display_name": "HP Relevance (derived)",
+                "purpose": "Title, department and skills matched against HP product lines; 100/70/40/20 tiers, banded High >=70, Medium 40-69, Lower <40",
+                "dataset_key": "prospect_contacts",
+                "source_sheet": "14_Prospect_Contacts",
+                "source_column": "Prospect job_title, Prospect job_department_main, Prospect skills",
+                "data_type": "DETERMINISTIC"
+            },
+            {
+                "field_key": "data_completeness",
+                "display_name": "Data Completeness (derived)",
+                "purpose": "Which contact fields are populated: base 20, LinkedIn +15, email +20, verified email +10, phone +20, profile data +15",
+                "dataset_key": "prospect_contacts",
+                "source_sheet": "14_Prospect_Contacts",
+                "source_column": "Email, Email Status, Contact mobile_phone, Prospect linkedin, Prospect skills, Prospect experience",
+                "data_type": "DETERMINISTIC"
+            },
+            {
+                "field_key": "priority",
+                "display_name": "Priority (derived)",
+                "purpose": "High for C-Suite/VP in a high-priority department, Medium for other bands there, otherwise Low. Scored 100/50/10",
+                "dataset_key": "prospect_contacts",
+                "source_sheet": "14_Prospect_Contacts",
+                "source_column": "Prospect job_department_main, Prospect job_level_main",
+                "data_type": "DETERMINISTIC"
+            },
+            {
+                "field_key": "stakeholder_score",
+                "display_name": "Stakeholder Score (derived)",
+                "purpose": "25% seniority + 25% HP relevance + 20% influence + 15% data completeness + 15% priority. Drives Priority Contact selection and the entry-path ranking",
+                "dataset_key": "prospect_contacts",
+                "source_sheet": "14_Prospect_Contacts",
+                "source_column": "All fields above",
+                "data_type": "DETERMINISTIC"
+            },
+            {
+                "field_key": "how_to_open",
+                "display_name": "Opening Angle, HP Play Focus, Decision Power, Pain Points",
+                "purpose": "Synthesized per-contact opener and role-based authority note, grounded in the contact's own record plus account-level evidence. Omitted where evidence does not support the claim",
+                "dataset_key": None,
+                "source_sheet": None,
+                "source_column": None,
+                "data_type": "INFERRED / SYNTHESIZED"
             }
         ]
     },

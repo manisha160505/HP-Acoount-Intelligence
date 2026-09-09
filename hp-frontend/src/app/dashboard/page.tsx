@@ -19,18 +19,26 @@ import {
   Layers, 
   Info,
   ChevronDown,
+  ChevronUp,
   LayoutDashboard,
   Newspaper,
   Users,
   Lightbulb,
+  Compass,
   Cpu,
   ShieldAlert,
+  Shield,
+  Clock,
   FileText,
   MessageSquare,
   CheckSquare,
   Megaphone,
   TrendingUp,
   Sparkles,
+  Star,
+  Linkedin,
+  Mail,
+  Phone,
   Calculator,
   Binary,
   Maximize2,
@@ -337,6 +345,14 @@ export default function UserDashboardPage() {
   const [stakeholderDeptFilter, setStakeholderDeptFilter] = useState('ALL');
   const [stakeholderSubTab, setStakeholderSubTab] = useState<'grid' | 'entry_path'>('grid');
   const [isEntryPathInfoOpen, setIsEntryPathInfoOpen] = useState(false);
+  const [stakeholderSeniorityFilter, setStakeholderSeniorityFilter] = useState('ALL');
+  const [stakeholderInfluenceFilter, setStakeholderInfluenceFilter] = useState('ALL');
+  const [stakeholderPriorityFilter, setStakeholderPriorityFilter] = useState('ALL');
+  const [stakeholderRelevanceFilter, setStakeholderRelevanceFilter] = useState('ALL');
+  const [expandedDepts, setExpandedDepts] = useState<Record<string, boolean>>({});
+  const [stakeholderViewMode, setStakeholderViewMode] = useState<'departments' | 'top_contacts'>('departments');
+  const [expandedContacts, setExpandedContacts] = useState<Record<string, boolean>>({});
+  const [revealedContacts, setRevealedContacts] = useState<Record<string, boolean>>({});
 
   // Tech Landscape Filter & Sub-Tab State
   const [techSubTab, setTechSubTab] = useState<'map' | 'raw_matrix' | 'webstack' | 'detections'>('map');
@@ -352,6 +368,8 @@ export default function UserDashboardPage() {
   const [additionalContext, setAdditionalContext] = useState<string>('');
   const [isGeneratingContent, setIsGeneratingContent] = useState<boolean>(false);
   const [hasGeneratedContent, setHasGeneratedContent] = useState<boolean>(false);
+  const [isGeneratingOppMap, setIsGeneratingOppMap] = useState<boolean>(false);
+  const [expandedCalc, setExpandedCalc] = useState<Record<string, boolean>>({});
 
   // Strategy Chat State
   const [chatAdvisorMode, setChatAdvisorMode] = useState<string>('Strategy Advisor');
@@ -2085,14 +2103,19 @@ export default function UserDashboardPage() {
                   const intentTopics = contextData?.top_intent_topics || [];
                   const triggerSignals = triggerData?.triggers || [];
 
+                  const playsWidget = widgets.find(w => w.widget_key === 'opportunity_narrative_plays');
+                  const playsData = playsWidget?.data || {};
+                  const generatedPlays: any[] = playsData.opportunity_plays || [];
+                  const isAvailable = playsWidget?.status === 'available' && generatedPlays.length > 0;
+
                   return (
-                    <div className="space-y-6">
+                    <div className="space-y-6 animate-fade-in">
                       
                       {/* Header Banner */}
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 pb-4">
                         <div>
                           <h2 className="text-xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
-                            <Lightbulb className="w-5 h-5 text-hp-navy" />
+                            <Lightbulb className="w-6 h-6 text-hp-navy" />
                             <span>Opportunity Map</span>
                           </h2>
                           <p className="text-xs text-slate-500 mt-0.5">
@@ -2102,58 +2125,274 @@ export default function UserDashboardPage() {
 
                         <div className="flex items-center space-x-2 text-xs font-bold">
                           <span className="px-3 py-1 bg-white border border-slate-200 shadow-xs rounded-full text-slate-700">
-                            5 HP Plays
+                            {isAvailable ? generatedPlays.length : 5} HP Plays
                           </span>
-                          <span className="px-3 py-1 bg-purple-50 text-purple-800 border border-purple-200 rounded-full">
-                            Inferred TBD
+                          <span className={`px-3 py-1 rounded-full ${isAvailable ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 'bg-purple-50 text-purple-800 border border-purple-200'}`}>
+                            {isAvailable ? 'GPT-4o Generated' : 'Inferred TBD'}
                           </span>
                         </div>
                       </div>
 
-                      {/* Section C: Inferred Opportunity Narrative Plays (Clean Inferred TBD Placeholders) */}
-                      <div className="space-y-4">
+                      {/* Opportunity Plays List */}
+                      <div className="space-y-5">
                         <div className="flex items-center justify-between">
-                          <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700">
-                            HP OPPORTUNITY PLAYS (5 HP PRODUCT LINES)
+                          <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700 flex items-center gap-2">
+                            <span>HP OPPORTUNITY PLAYS</span>
+                            <span className="text-slate-400">({isAvailable ? generatedPlays.length : 5} PRODUCT LINES)</span>
                           </h3>
-                          <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-purple-50 text-purple-800 border border-purple-200">
-                            Inferred Contract TBD
-                          </span>
+                          {getClassificationBadge('inferred')}
                         </div>
 
-                        {[
-                          { key: 'workstation', name: 'Z by HP Workstations', group: 'WORKSTATION' },
-                          { key: 'poly', name: 'Poly collaboration hardware', group: 'POLY' },
-                          { key: 'pc', name: 'HP Elite & Pro PCs', group: 'PC' },
-                          { key: 'print', name: 'HP Enterprise Printing & Managed Print Services', group: 'PRINT' },
-                          { key: '3d', name: 'HP Multi Jet Fusion (3D)', group: '3D' }
-                        ].map((play) => (
-                          <div key={play.key} className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-4">
-                            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                              <div className="flex items-center space-x-3">
-                                <h4 className="text-base font-extrabold text-slate-900">{play.name}</h4>
-                                <span className="text-[10px] font-mono text-slate-400 bg-slate-100 px-2 py-0.5 rounded uppercase">
-                                  {play.group}
-                                </span>
-                              </div>
-                              <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200">
-                                Priority: Derived TBD
-                              </span>
-                            </div>
+                        {isAvailable ? (
+                          /* Render Generated Plays from GPT-4o Automatically matching Northstar UI */
+                          <div className="space-y-8">
+                            {generatedPlays.map((play: any, pIdx: number) => {
+                              const pKey = play.play_key || `play_${pIdx}`;
+                              const isCalcExpanded = expandedCalc[pKey] || false;
 
-                            <div className="bg-slate-50 border border-dashed border-slate-200 rounded-xl p-6 text-center space-y-2">
-                              <div className="w-8 h-8 rounded-full bg-purple-100 text-purple-700 flex items-center justify-center mx-auto">
-                                <Sparkles className="w-4 h-4" />
-                              </div>
-                              <h5 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
-                                Opportunity Narrative Play Generation Placeholder
-                              </h5>
-                              <p className="text-[11px] text-slate-500 max-w-md mx-auto leading-relaxed">
-                                AI-synthesized business outcomes, quantified impact projections, recommended product family matches, and target CTA entry paths for <strong className="text-slate-800">{play.name}</strong> will be generated in Step 8.
-                              </p>
-                            </div>
+                              return (
+                                <div key={pIdx} className="space-y-3">
+                                  {/* Category Divider Bar */}
+                                  <div className="relative flex items-center justify-center my-4">
+                                    <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-200"></div></div>
+                                    <span className="relative bg-slate-100 px-4 text-[10px] font-mono font-extrabold uppercase tracking-widest text-slate-500 rounded-full border border-slate-200">
+                                      — {play.category_label || play.play_key || 'OPPORTUNITY PLAY'} —
+                                    </span>
+                                  </div>
+
+                                  {/* Card Body */}
+                                  <div className={`bg-white rounded-xl border border-slate-200 border-l-4 shadow-xs p-5 space-y-3.5 ${
+                                    play.severity === 'Critical' ? 'border-l-red-500' : play.severity === 'High' ? 'border-l-orange-400' : 'border-l-amber-400'
+                                  }`}>
+                                    
+                                    {/* Card Header */}
+                                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-2.5">
+                                      <div className="flex items-center space-x-2">
+                                        <Compass className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                                        <h4 className="text-base font-bold text-slate-900">{play.title || 'HP Opportunity Play'}</h4>
+                                        <Info className="w-3.5 h-3.5 text-slate-400" />
+                                      </div>
+
+                                      <div className="flex items-center gap-2">
+                                        {play.severity === 'Critical' && (
+                                          <span className="text-[11px] font-semibold text-red-700 bg-red-100 border border-red-200 px-2 py-0.5 rounded">
+                                            Critical
+                                          </span>
+                                        )}
+                                        {play.severity === 'High' && (
+                                          <span className="text-[11px] font-semibold text-orange-700 bg-orange-100 border border-orange-200 px-2 py-0.5 rounded">
+                                            High
+                                          </span>
+                                        )}
+                                        {play.severity === 'Medium' && (
+                                          <span className="text-[11px] font-semibold text-amber-700 bg-yellow-100 border border-yellow-200 px-2 py-0.5 rounded">
+                                            Medium
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+
+                                    {/* Summary Paragraph */}
+                                    {play.summary && (
+                                      <p className="text-sm text-slate-700 leading-relaxed font-normal">
+                                        {play.summary}
+                                      </p>
+                                    )}
+
+                                    {/* HOW HP ENABLES */}
+                                    {play.how_hp_enables && (
+                                      <div className="space-y-1">
+                                        <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">
+                                          HOW HP ENABLES
+                                        </span>
+                                        <p className="text-xs text-slate-600 leading-relaxed font-normal">
+                                          {play.how_hp_enables}
+                                        </p>
+                                      </div>
+                                    )}
+
+                                    {/* HP PRODUCTS & RESOURCE BUTTON */}
+                                    <div className="flex flex-wrap items-center justify-between gap-3 pt-0.5">
+                                      {play.hp_products?.length > 0 && (
+                                        <div className="space-y-1">
+                                          <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">
+                                            HP PRODUCTS
+                                          </span>
+                                          <div className="flex flex-wrap gap-1.5">
+                                            {play.hp_products.map((prod: string, idx: number) => (
+                                              <span key={idx} className="bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded-full text-[11px] font-medium">
+                                                {prod}
+                                              </span>
+                                            ))}
+                                          </div>
+                                        </div>
+                                      )}
+
+                                      {play.hp_resource_url && (
+                                        <div className="space-y-1">
+                                          <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">
+                                            HP PROOF / RESOURCE
+                                          </span>
+                                          <a
+                                            href={play.hp_resource_url}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 font-semibold text-[11px] hover:bg-emerald-100 transition"
+                                          >
+                                            <Globe className="w-3 h-3 text-emerald-600" />
+                                            <span>HP ↗</span>
+                                          </a>
+                                        </div>
+                                      )}
+                                    </div>
+
+                                    {/* QUANTIFIED IMPACT BOX (Soft Blue/Purple) */}
+                                    <div className="bg-indigo-50/70 border border-indigo-100 rounded-lg p-3.5 space-y-1.5">
+                                      <div className="flex flex-wrap items-center justify-between gap-2">
+                                        <div className="flex items-center gap-1.5 text-indigo-600 font-semibold text-[10px] uppercase tracking-wider">
+                                          <Target className="w-3.5 h-3.5 text-indigo-500" />
+                                          <span>QUANTIFIED IMPACT - HP-MODELED</span>
+                                        </div>
+                                        <span className="text-[9px] font-medium text-indigo-700 bg-indigo-100/80 px-1.5 py-0.5 rounded">
+                                          Internal projection - not an external source
+                                        </span>
+                                      </div>
+
+                                      <p className="text-sm font-semibold text-slate-900 leading-snug">
+                                        {play.quantified_impact ? `Quantified Impact: ${play.quantified_impact}` : (play.quantified_impact_title || play.title)}
+                                      </p>
+
+                                      {play.how_hp_calculated_this && (
+                                        <div className="pt-0.5">
+                                          <button
+                                            type="button"
+                                            onClick={() => setExpandedCalc(prev => ({ ...prev, [pKey]: !prev[pKey] }))}
+                                            className="text-[10px] font-semibold text-indigo-600 hover:underline flex items-center gap-1"
+                                          >
+                                            {isCalcExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                                            <span>How HP calculated this</span>
+                                          </button>
+
+                                          {isCalcExpanded && (
+                                            <p className="text-xs text-slate-600 font-normal leading-relaxed bg-white p-2.5 rounded-md border border-indigo-100 mt-1.5">
+                                              {play.how_hp_calculated_this}
+                                            </p>
+                                          )}
+                                        </div>
+                                      )}
+                                    </div>
+
+                                    {/* SUPPORTING SIGNAL - SOURCED BOX (Soft Green) */}
+                                    {play.proof_point && (
+                                      <div className="bg-emerald-50/70 border border-emerald-100 rounded-lg p-3.5 space-y-1.5">
+                                        <div className="flex items-center justify-between gap-2">
+                                          <div className="flex items-center gap-1.5 text-emerald-700 font-semibold text-[10px] uppercase tracking-wider">
+                                            <Shield className="w-3.5 h-3.5 text-emerald-600" />
+                                            <span>SUPPORTING SIGNAL - SOURCED</span>
+                                          </div>
+
+                                          {play.source_url ? (
+                                            <a
+                                              href={play.source_url}
+                                              target="_blank"
+                                              rel="noreferrer"
+                                              className="text-[10px] font-semibold text-emerald-700 bg-white border border-emerald-200 px-2 py-0.5 rounded-full flex items-center gap-1 hover:bg-emerald-100 transition"
+                                            >
+                                              <span>{play.source_type || 'Source'} ↗</span>
+                                            </a>
+                                          ) : (
+                                            <span className="text-[10px] font-medium text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded">
+                                              {play.source_type || 'Source Signal'}
+                                            </span>
+                                          )}
+                                        </div>
+
+                                        <p className="text-xs text-emerald-800 italic font-normal leading-relaxed">
+                                          &quot;{play.proof_point}&quot;
+                                        </p>
+                                      </div>
+                                    )}
+
+                                    {/* ENTRY PATH BOX (Soft Sky Blue) */}
+                                    <div className="bg-sky-50/50 border border-sky-100 rounded-lg p-3.5 space-y-2.5">
+                                      <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 block">
+                                        ENTRY PATH
+                                      </span>
+
+                                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                                        <div className="flex items-center gap-2">
+                                          <Clock className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+                                          <div>
+                                            <span className="text-[10px] text-slate-400 font-semibold uppercase block">TIMELINE</span>
+                                            <span className="font-semibold text-slate-800">{play.entry_path?.timeline || '0-90 days'}</span>
+                                          </div>
+                                        </div>
+
+                                        <div className="flex items-center gap-2">
+                                          <Users className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+                                          <div>
+                                            <span className="text-[10px] text-slate-400 font-semibold uppercase block">TARGET BUYERS</span>
+                                            <span className="font-semibold text-slate-800">{play.entry_path?.target_buyers?.join(', ') || 'IT Leadership'}</span>
+                                          </div>
+                                        </div>
+                                      </div>
+
+                                      {/* RECOMMENDED CTA BOX */}
+                                      {play.entry_path?.recommended_cta && (
+                                        <div className="bg-sky-100/60 border border-sky-200/80 rounded-lg p-2.5 space-y-0.5">
+                                          <span className="text-[10px] font-semibold text-sky-800 uppercase tracking-wider block">
+                                            RECOMMENDED CTA
+                                          </span>
+                                          <p className="text-xs font-semibold text-sky-900 leading-relaxed">
+                                            {play.entry_path.recommended_cta}
+                                          </p>
+                                        </div>
+                                      )}
+                                    </div>
+
+                                  </div>
+                                </div>
+                              );
+                            })}
                           </div>
-                        ))}
+                        ) : (
+                          /* Inferred TBD Placeholder State */
+                          <div className="space-y-4">
+                            {[
+                              { key: 'workstation', name: 'Z by HP Workstations', group: 'WORKSTATION' },
+                              { key: 'poly', name: 'Poly collaboration hardware', group: 'POLY' },
+                              { key: 'pc', name: 'HP Elite & Pro PCs', group: 'PC' },
+                              { key: 'print', name: 'HP Enterprise Printing & Managed Print Services', group: 'PRINT' },
+                              { key: '3d', name: 'HP Multi Jet Fusion (3D)', group: '3D' }
+                            ].map((play) => (
+                              <div key={play.key} className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-4">
+                                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                                  <div className="flex items-center space-x-3">
+                                    <h4 className="text-base font-extrabold text-slate-900">{play.name}</h4>
+                                    <span className="text-[10px] font-mono text-slate-400 bg-slate-100 px-2 py-0.5 rounded uppercase">
+                                      {play.group}
+                                    </span>
+                                  </div>
+                                  <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200">
+                                    Inferred TBD
+                                  </span>
+                                </div>
+
+                                <div className="bg-amber-50/60 border border-amber-200/80 rounded-xl p-6 text-center space-y-2">
+                                  <div className="w-8 h-8 rounded-full bg-amber-100 text-amber-800 flex items-center justify-center mx-auto border border-amber-300">
+                                    <Sparkles className="w-4 h-4 text-amber-600" />
+                                  </div>
+                                  <h5 className="text-xs font-black text-amber-900 uppercase tracking-wider">
+                                    Opportunity Narrative Play Generation — Inferred TBD
+                                  </h5>
+                                  <p className="text-[11px] text-amber-800 max-w-md mx-auto leading-relaxed">
+                                    AI-synthesized business outcomes, quantified impact projections, recommended product family matches, and target CTA entry paths for <strong className="text-amber-950">{play.name}</strong> will be generated automatically when account datasets are uploaded.
+                                  </p>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
 
                     </div>
@@ -2163,318 +2402,579 @@ export default function UserDashboardPage() {
                 {/* Stakeholder Map View (Feature Key: stakeholder_map) */}
                 {activeFeatureKey === 'stakeholder_map' && (() => {
                   const gridWidget = widgets.find(w => w.widget_key === 'stakeholder_contacts_grid');
+                  const influenceWidget = widgets.find(w => w.widget_key === 'stakeholder_influence_map');
+                  const talkingWidget = widgets.find(w => w.widget_key === 'stakeholder_talking_points');
+
                   const gridData = (gridWidget && gridWidget.status === 'available' && gridWidget.data) ? gridWidget.data : null;
+                  const influenceData: any = influenceWidget?.data || {};
+                  const talkingPoints: Record<string, any> = talkingWidget?.data?.talking_points || {};
 
-                  const contactsList = gridData?.contacts || [];
-                  const deptDist = gridData?.department_distribution || {};
-                  const sourceBreakdown = gridData?.source_breakdown || {};
+                  const contactsList: any[] = gridData?.contacts || [];
+                  const deptDist: Record<string, any> = gridData?.department_distribution || {};
+                  const sourceBreakdown: Record<string, any> = gridData?.source_breakdown || {};
+                  const relevanceBreakdown: any = gridData?.relevance_breakdown || { high: 0, medium: 0, low: 0 };
+                  const priorityCount: number = gridData?.priority_contacts_count ?? 0;
+                  const departmentGroups: any[] = influenceData.department_groups || [];
+                  const rankedEntryPath: any[] = influenceData.ranked_entry_path || [];
 
-                  const filteredContacts = contactsList.filter((c: any) => {
+                  // Filter option lists are derived from the data, never hardcoded.
+                  const uniq = (vals: any[]) => Array.from(new Set(vals.filter(Boolean))).sort() as string[];
+                  const seniorityOptions = uniq(contactsList.map(c => c.seniority_band));
+                  const influenceOptions = uniq(contactsList.map(c => c.influence_type));
+                  const priorityOptions = uniq(contactsList.map(c => c.priority));
+                  const departmentOptions = uniq(contactsList.map(c => c.normalized_department));
+
+                  const matchesFilters = (c: any) => {
                     if (stakeholderSearch) {
                       const q = stakeholderSearch.toLowerCase().trim();
-                      const matchName = (c.full_name || '').toLowerCase().includes(q);
-                      const matchTitle = (c.title || '').toLowerCase().includes(q);
-                      const matchDept = (c.department || '').toLowerCase().includes(q);
-                      if (!matchName && !matchTitle && !matchDept) return false;
+                      const hay = `${c.full_name || ''} ${c.title || ''} ${c.normalized_department || ''}`.toLowerCase();
+                      if (!hay.includes(q)) return false;
                     }
-                    if (stakeholderDeptFilter !== 'ALL') {
-                      if ((c.department || 'Unassigned') !== stakeholderDeptFilter) return false;
-                    }
+                    if (stakeholderDeptFilter !== 'ALL' && c.normalized_department !== stakeholderDeptFilter) return false;
+                    if (stakeholderSeniorityFilter !== 'ALL' && c.seniority_band !== stakeholderSeniorityFilter) return false;
+                    if (stakeholderInfluenceFilter !== 'ALL' && c.influence_type !== stakeholderInfluenceFilter) return false;
+                    if (stakeholderPriorityFilter !== 'ALL' && c.priority !== stakeholderPriorityFilter) return false;
+                    if (stakeholderRelevanceFilter !== 'ALL' && c.hp_relevance_band !== stakeholderRelevanceFilter) return false;
                     return true;
-                  });
+                  };
+
+                  const filteredContacts = contactsList.filter(matchesFilters);
+                  const filteredIds = new Set(filteredContacts.map(c => c.contact_id));
+                  const priorityContacts = filteredContacts.filter(c => c.is_priority_contact);
+                  const topContacts = filteredContacts
+                    .filter(c => c.is_priority_contact || c.hp_relevance_band === 'high')
+                    .sort((a, b) => b.stakeholder_score - a.stakeholder_score);
+                  const byId: Record<string, any> = {};
+                  contactsList.forEach(c => { byId[c.contact_id] = c; });
+
+                  const initialsOf = (name: string) =>
+                    (name || '?').split(' ').filter(Boolean).map(n => n[0]).join('').substring(0, 2).toUpperCase();
+
+                  const linkedinHref = (url: string) => url.startsWith('http') ? url : `https://${url}`;
+
+                  const seniorityBadge: Record<string, string> = {
+                    'C-Suite': 'bg-purple-100 text-purple-700',
+                    'VP': 'bg-blue-100 text-blue-700',
+                    'Director': 'bg-green-100 text-green-700',
+                    'Manager': 'bg-yellow-100 text-yellow-700',
+                    'Individual Contributor': 'bg-gray-100 text-gray-600',
+                  };
+                  const influenceBadge: Record<string, string> = {
+                    'Decision Maker': 'bg-red-50 text-red-600 border border-red-200',
+                    'Budget Holder': 'bg-orange-50 text-orange-600 border border-orange-200',
+                    'Technical Evaluator': 'bg-purple-50 text-purple-600 border border-purple-200',
+                    'Influencer': 'bg-blue-50 text-blue-600 border border-blue-200',
+                  };
+                  const priorityBadge: Record<string, string> = {
+                    High: 'bg-red-100 text-red-700',
+                    Medium: 'bg-yellow-100 text-yellow-700',
+                    Low: 'bg-gray-100 text-gray-600',
+                  };
+                  const relevanceMeta: Record<string, { label: string; cls: string }> = {
+                    high: { label: 'High HP fit', cls: 'bg-emerald-50 text-emerald-700 border border-emerald-200' },
+                    medium: { label: 'Medium HP fit', cls: 'bg-blue-50 text-blue-600 border border-blue-200' },
+                    low: { label: 'Lower HP fit', cls: 'bg-slate-100 text-slate-400 border border-slate-200' },
+                  };
+
+                  const handleExportCsv = () => {
+                    const cols = ['full_name', 'title', 'normalized_department', 'seniority_band', 'influence_type',
+                      'priority', 'hp_relevance_band', 'stakeholder_score', 'is_priority_contact',
+                      'email', 'email_status', 'phone', 'linkedin_url', 'source'];
+                    const esc = (v: any) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+                    const rows = filteredContacts.map((c: any) => {
+                      const tp = talkingPoints[c.contact_id] || {};
+                      return [...cols.map(k => esc(c[k])), esc(tp.how_to_open), esc(tp.hp_play_focus), esc(tp.decision_power)].join(',');
+                    });
+                    const csv = [[...cols, 'how_to_open', 'hp_play_focus', 'decision_power'].join(','), ...rows].join('\n');
+                    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `stakeholders_${selectedAccount?.name || 'account'}.csv`.replace(/\s+/g, '_');
+                    a.click();
+                    URL.revokeObjectURL(url);
+                  };
+
+                  const renderFilter = (label: string, value: string, onChange: (v: string) => void, options: string[]) => (
+                    <select
+                      value={value}
+                      onChange={(e) => onChange(e.target.value)}
+                      className="text-xs font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-hp-navy"
+                    >
+                      <option value="ALL">{label}</option>
+                      {options.map(o => (
+                        <option key={o} value={o}>{relevanceMeta[o]?.label || o}</option>
+                      ))}
+                    </select>
+                  );
+
+                  const renderBadges = (c: any) => (
+                    <>
+                      <span className={`text-[11px] font-medium px-2 py-0.5 rounded ${seniorityBadge[c.seniority_band] || 'bg-gray-100 text-gray-600'}`}>{c.seniority_band}</span>
+                      <span className={`text-[11px] font-medium px-2 py-0.5 rounded ${influenceBadge[c.influence_type] || 'bg-slate-50 text-slate-600 border border-slate-200'}`}>{c.influence_type}</span>
+                      <span className={`text-[11px] font-medium px-2 py-0.5 rounded ${priorityBadge[c.priority] || 'bg-gray-100 text-gray-600'}`}>{c.priority}</span>
+                    </>
+                  );
+
+                  // Email / phone block, shared by the expandable card once revealed.
+                  const renderContactLines = (c: any) => (
+                    <div className="space-y-1 text-xs">
+                      <p className="text-slate-600 font-normal">
+                        <span className="text-slate-500">Email: </span>
+                        {c.email
+                          ? <a href={`mailto:${c.email}`} className="text-hp-navy font-medium hover:underline">{c.email}</a>
+                          : <span className="text-slate-400 italic">not available</span>}
+                      </p>
+                      <p className="text-slate-600 font-normal flex items-center gap-1.5 flex-wrap">
+                        <span className="text-slate-500">Phone: </span>
+                        {c.phone
+                          ? <span>{c.phone}</span>
+                          : <span className="text-slate-400 italic">not available</span>}
+                        {c.contact_location && (
+                          <span className="text-[10px] font-medium text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">{c.contact_location}</span>
+                        )}
+                        <span className="text-[10px] font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">{c.source}</span>
+                      </p>
+                    </div>
+                  );
+
+                  // One expandable card, used by both All Departments and Top Contacts.
+                  const renderExpandableCard = (c: any) => {
+                    const tp = talkingPoints[c.contact_id] || {};
+                    const isOpen = expandedContacts[c.contact_id] || false;
+                    const isRevealed = revealedContacts[c.contact_id] || false;
+                    const bullets: string[] = [];
+                    if (tp.how_to_open) bullets.push(tp.how_to_open);
+                    if (tp.hp_play_focus) bullets.push(`HP play focus: ${tp.hp_play_focus}`);
+                    if (tp.decision_power) bullets.push(`Decision power: ${tp.decision_power}`);
+
+                    return (
+                      <div key={c.contact_id} className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+                        <button
+                          type="button"
+                          onClick={() => setExpandedContacts(prev => ({ ...prev, [c.contact_id]: !prev[c.contact_id] }))}
+                          className="w-full flex items-center gap-3 p-4 text-left hover:bg-slate-50/60 transition"
+                        >
+                          <div className="w-9 h-9 rounded-full bg-slate-100 text-slate-600 flex items-center justify-center text-[11px] font-semibold flex-shrink-0">
+                            {initialsOf(c.full_name)}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-sm font-bold text-slate-900">{c.full_name}</span>
+                              {c.is_priority_contact && <Star className="w-3.5 h-3.5 text-hp-navy fill-hp-navy flex-shrink-0" />}
+                            </div>
+                            <p className="text-xs text-slate-500 font-normal leading-snug">
+                              {c.title || 'Title unspecified'} &middot; <span className="text-slate-400">{c.normalized_department}</span>
+                            </p>
+                          </div>
+                          <div className="hidden sm:flex items-center gap-1.5 flex-wrap justify-end flex-shrink-0">
+                            {renderBadges(c)}
+                          </div>
+                          {c.linkedin_url && (
+                            <a
+                              href={linkedinHref(c.linkedin_url)}
+                              target="_blank"
+                              rel="noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              className="text-slate-400 hover:text-hp-navy flex-shrink-0"
+                              title="Open LinkedIn profile"
+                            >
+                              <Linkedin className="w-4 h-4" />
+                            </a>
+                          )}
+                          {isOpen
+                            ? <ChevronUp className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                            : <ChevronDown className="w-4 h-4 text-slate-400 flex-shrink-0" />}
+                        </button>
+
+                        {isOpen && (
+                          <div className="border-t border-slate-100 bg-slate-50/50 px-4 py-3 space-y-3">
+                            {bullets.length > 0 ? (
+                              <div className="space-y-1.5">
+                                <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">Talking points</span>
+                                <ul className="space-y-1">
+                                  {bullets.map((b, i) => (
+                                    <li key={i} className="text-xs text-slate-700 font-normal leading-relaxed flex gap-2">
+                                      <span className="text-hp-navy flex-shrink-0">&bull;</span>
+                                      <span>{b}</span>
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            ) : (
+                              <p className="text-[11px] text-slate-400 italic">No talking points generated for this contact.</p>
+                            )}
+
+                            {Array.isArray(tp.pain_points) && tp.pain_points.length > 0 && (
+                              <div className="space-y-1">
+                                <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">Pain points</span>
+                                <ul className="space-y-0.5">
+                                  {tp.pain_points.map((p: string, i: number) => (
+                                    <li key={i} className="text-xs text-slate-600 font-normal flex gap-2">
+                                      <span className="text-red-400 flex-shrink-0">&bull;</span>
+                                      <span>{p}</span>
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+
+                            {isRevealed ? renderContactLines(c) : (
+                              <button
+                                type="button"
+                                onClick={() => setRevealedContacts(prev => ({ ...prev, [c.contact_id]: true }))}
+                                className="text-xs font-semibold text-hp-navy hover:underline"
+                              >
+                                Show Contact Info
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  };
 
                   return (
-                    <div className="space-y-6">
-                      
-                      {/* Header Banner (Matching Images 1 & 2) */}
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div className="space-y-6 animate-fade-in">
+
+                      {/* Header */}
+                      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 border-b border-slate-200 pb-4">
                         <div>
-                          <h2 className="text-xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
+                          <h3 className="text-xl font-bold text-slate-900 flex items-center gap-2">
                             <Users className="w-5 h-5 text-hp-navy" />
                             <span>Stakeholder Map</span>
-                          </h2>
-                          <p className="text-xs text-slate-500 mt-0.5">
-                            {contactsList.length} active contacts identified for {selectedAccount?.name}
+                          </h3>
+                          <p className="text-sm text-slate-500 mt-0.5">
+                            {contactsList.length} contact{contactsList.length === 1 ? '' : 's'} identified for {selectedAccount?.name}
                           </p>
-                        </div>
-
-                        <div className="flex flex-wrap items-center gap-2 text-xs font-bold">
-                          <span className="px-3 py-1 bg-white border border-slate-200 shadow-xs rounded-full text-slate-700">
-                            {contactsList.length} Contacts Mapped
-                          </span>
+                          <p className="text-xs text-slate-400 mt-0.5">
+                            {priorityCount} Priority Contact{priorityCount === 1 ? '' : 's'} &middot; {relevanceBreakdown.high} high &middot; {relevanceBreakdown.medium} medium &middot; {relevanceBreakdown.low} lower-relevance HP fit
+                          </p>
                           {sourceBreakdown['Source A'] !== undefined && (
-                            <span className="px-3 py-1 bg-blue-50 text-hp-navy border border-blue-200 rounded-full font-mono text-[11px]">
-                              Source A: {sourceBreakdown['Source A']} • Apollo: {sourceBreakdown['Apollo']}
-                            </span>
+                            <p className="text-[11px] text-slate-400 mt-0.5">
+                              Source A: {sourceBreakdown['Source A']} &middot; Apollo: {sourceBreakdown['Apollo']}
+                            </p>
                           )}
                         </div>
+                        <button
+                          type="button"
+                          onClick={handleExportCsv}
+                          disabled={filteredContacts.length === 0}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-50 transition disabled:opacity-40"
+                        >
+                          <FileSpreadsheet className="w-3.5 h-3.5" />
+                          <span>Export CSV</span>
+                        </button>
                       </div>
 
-                      {/* Sub-Tabs View Switcher Bar (Stakeholder Grid vs Entry Path) */}
-                      <div className="flex items-center justify-between bg-white p-2.5 rounded-2xl border border-slate-200 shadow-xs text-xs font-bold">
-                        <div className="flex items-center space-x-2">
-                          <button
-                            type="button"
-                            onClick={() => setStakeholderSubTab('grid')}
-                            className={`px-4 py-2 rounded-xl transition flex items-center space-x-2 ${
-                              stakeholderSubTab === 'grid'
-                                ? 'bg-hp-navy text-white shadow-xs'
-                                : 'bg-slate-50 text-slate-700 hover:bg-slate-100 border border-slate-200'
-                            }`}
-                          >
-                            <Users className="w-4 h-4" />
-                            <span>Stakeholder Grid</span>
-                          </button>
+                      {/* Filters */}
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="relative flex-1 min-w-[220px]">
+                          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+                          <input
+                            type="text"
+                            value={stakeholderSearch}
+                            onChange={(e) => setStakeholderSearch(e.target.value)}
+                            placeholder="Search name, title, or department..."
+                            className="w-full pl-9 pr-3 py-2 text-xs font-medium bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-hp-navy"
+                          />
+                        </div>
+                        {renderFilter('Seniority', stakeholderSeniorityFilter, setStakeholderSeniorityFilter, seniorityOptions)}
+                        {renderFilter('Department', stakeholderDeptFilter, setStakeholderDeptFilter, departmentOptions)}
+                        {renderFilter('Influence', stakeholderInfluenceFilter, setStakeholderInfluenceFilter, influenceOptions)}
+                        {renderFilter('Priority', stakeholderPriorityFilter, setStakeholderPriorityFilter, priorityOptions)}
+                        {renderFilter('HP Relevance', stakeholderRelevanceFilter, setStakeholderRelevanceFilter, ['high', 'medium', 'low'])}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setStakeholderSearch(''); setStakeholderDeptFilter('ALL'); setStakeholderSeniorityFilter('ALL');
+                            setStakeholderInfluenceFilter('ALL'); setStakeholderPriorityFilter('ALL'); setStakeholderRelevanceFilter('ALL');
+                          }}
+                          className="text-xs font-medium text-slate-500 hover:text-slate-800 px-2 py-1.5"
+                        >
+                          Clear
+                        </button>
+                      </div>
 
-                          <div className="relative inline-flex items-center">
-                            <button
-                              type="button"
-                              onClick={() => setStakeholderSubTab('entry_path')}
-                              className={`px-4 py-2 rounded-xl transition flex items-center space-x-2 ${
-                                stakeholderSubTab === 'entry_path'
-                                  ? 'bg-hp-navy text-white shadow-xs'
-                                  : 'bg-slate-50 text-slate-700 hover:bg-slate-100 border border-slate-200'
-                              }`}
-                            >
-                              <Layers className="w-4 h-4" />
-                              <span>Entry Path</span>
-                            </button>
+                      {/* Sub-tabs */}
+                      <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1 w-fit">
+                        <button
+                          type="button"
+                          onClick={() => setStakeholderSubTab('grid')}
+                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition ${
+                            stakeholderSubTab === 'grid' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'
+                          }`}
+                        >
+                          <Users className="w-3.5 h-3.5" />
+                          <span>Stakeholder Grid</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setStakeholderSubTab('entry_path')}
+                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition ${
+                            stakeholderSubTab === 'entry_path' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'
+                          }`}
+                        >
+                          <ArrowRight className="w-3.5 h-3.5" />
+                          <span>Entry Path</span>
+                        </button>
+                      </div>
 
-                            <button
-                              type="button"
-                              onClick={() => setIsEntryPathInfoOpen(!isEntryPathInfoOpen)}
-                              className="ml-1 text-slate-400 hover:text-hp-navy p-1 rounded-lg"
-                              title="Entry Path Information"
-                            >
-                              <Info className="w-4 h-4" />
-                            </button>
+                      {stakeholderSubTab === 'grid' && (
+                        <div className="space-y-6">
 
-                            {/* Entry Path Info Popover Modal (Matching Image 2) */}
-                            {isEntryPathInfoOpen && (
-                              <div className="absolute left-0 top-full mt-2 w-80 bg-white border border-slate-300 rounded-2xl shadow-2xl p-4 z-50 animate-fade-in text-xs font-medium">
-                                <div className="flex justify-between items-center border-b border-slate-100 pb-2 mb-2">
-                                  <h4 className="font-extrabold text-slate-900 text-xs flex items-center gap-1.5">
-                                    <Layers className="w-4 h-4 text-hp-navy" />
-                                    <span>Entry Path</span>
-                                  </h4>
-                                  <button onClick={() => setIsEntryPathInfoOpen(false)} className="text-slate-400 hover:text-slate-600">
-                                    <X className="w-4 h-4" />
-                                  </button>
-                                </div>
-                                <p className="text-slate-600 leading-relaxed text-[11px]">
-                                  The entry path ranks stakeholders by their receptivity to an initial conversation, their organizational influence over the buying decision, and their alignment with HP's value proposition. Starting with the wrong stakeholder can create political friction or trigger premature gatekeeping. Follow the recommended sequence for the highest probability of gaining access to decision makers.
-                                </p>
+                          {/* Priority Contacts - three across */}
+                          <div className="space-y-3">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <Star className="w-4 h-4 text-hp-navy fill-hp-navy" />
+                              <h4 className="text-base font-bold text-slate-900">Priority Contacts</h4>
+                              <span className="text-[10px] font-semibold text-hp-navy bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-full">
+                                {priorityContacts.length} HP-relevant
+                              </span>
+                              {getClassificationBadge('inferred')}
+                            </div>
+                            <p className="text-xs text-slate-500 font-normal">
+                              The stakeholders scored most relevant to driving HP&apos;s case at {selectedAccount?.name} &mdash; each with their own contact details and an opening angle, not just role and department counts.
+                            </p>
+
+                            {priorityContacts.length === 0 ? (
+                              <p className="text-xs text-slate-400 italic py-4">No priority contacts match the current filters.</p>
+                            ) : (
+                              <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
+                                {priorityContacts.map((c: any) => {
+                                  const tp = talkingPoints[c.contact_id] || {};
+                                  return (
+                                    <div key={c.contact_id} className="bg-white rounded-xl border border-slate-200 shadow-xs p-4 space-y-3">
+
+                                      {/* Identity */}
+                                      <div className="flex items-start gap-3">
+                                        <div className="w-10 h-10 rounded-full bg-sky-50 text-hp-navy flex items-center justify-center text-xs font-bold flex-shrink-0">
+                                          {initialsOf(c.full_name)}
+                                        </div>
+                                        <div className="min-w-0 flex-1">
+                                          <div className="flex items-center gap-1.5">
+                                            <h5 className="text-sm font-bold text-slate-900 truncate">{c.full_name}</h5>
+                                            {c.linkedin_url && (
+                                              <a href={linkedinHref(c.linkedin_url)} target="_blank" rel="noreferrer"
+                                                 title="Open LinkedIn profile"
+                                                 className="text-slate-400 hover:text-hp-navy flex-shrink-0">
+                                                <Linkedin className="w-3.5 h-3.5" />
+                                              </a>
+                                            )}
+                                          </div>
+                                          <p className="text-xs text-slate-500 font-normal leading-snug">{c.title || 'Title unspecified'}</p>
+                                          <p className="text-[11px] text-slate-400 font-normal">{c.normalized_department}</p>
+                                        </div>
+                                      </div>
+
+                                      {/* Badges */}
+                                      <div className="flex flex-wrap gap-1.5">
+                                        {renderBadges(c)}
+                                      </div>
+
+                                      {/* Contact details */}
+                                      <div className="border-t border-slate-100 pt-3 space-y-1.5 text-xs">
+                                        <div className="flex items-center gap-2">
+                                          <Mail className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+                                          {c.email
+                                            ? <a href={`mailto:${c.email}`} className="text-hp-navy font-medium truncate hover:underline">{c.email}</a>
+                                            : <span className="text-slate-400 italic">Email not available</span>}
+                                        </div>
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                          <Phone className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+                                          {c.phone
+                                            ? <span className="text-slate-700 font-normal">{c.phone}</span>
+                                            : <span className="text-slate-400 italic">Phone not available</span>}
+                                          {c.contact_location && (
+                                            <span className="text-[10px] font-medium text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">{c.contact_location}</span>
+                                          )}
+                                          <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">
+                                            {c.source}
+                                          </span>
+                                        </div>
+                                        {c.email_status && (
+                                          <p className="text-[10px] text-slate-400 italic">Email status: {c.email_status}</p>
+                                        )}
+                                      </div>
+
+                                      {/* How to open */}
+                                      {tp.how_to_open ? (
+                                        <div className="bg-sky-50/70 border border-sky-100 rounded-lg p-3 space-y-1">
+                                          <span className="text-[11px] font-semibold text-hp-navy uppercase tracking-wider block">How to open</span>
+                                          <p className="text-xs text-slate-700 font-normal leading-relaxed">{tp.how_to_open}</p>
+                                        </div>
+                                      ) : (
+                                        <p className="text-[11px] text-slate-400 italic">No opening angle generated for this contact.</p>
+                                      )}
+
+                                      {/* Label / value rows */}
+                                      {(tp.hp_play_focus || tp.decision_power) && (
+                                        <div className="space-y-1.5">
+                                          {tp.hp_play_focus && (
+                                            <div className="flex gap-2">
+                                              <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider w-24 flex-shrink-0 pt-0.5">HP play focus:</span>
+                                              <span className="text-xs text-slate-700 font-normal leading-relaxed">{tp.hp_play_focus}</span>
+                                            </div>
+                                          )}
+                                          {tp.decision_power && (
+                                            <div className="flex gap-2">
+                                              <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider w-24 flex-shrink-0 pt-0.5">Decision power:</span>
+                                              <span className="text-xs text-slate-700 font-normal leading-relaxed">{tp.decision_power}</span>
+                                            </div>
+                                          )}
+                                        </div>
+                                      )}
+
+                                      {Array.isArray(tp.pain_points) && tp.pain_points.length > 0 && (
+                                        <div className="space-y-1">
+                                          <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">Pain points</span>
+                                          <ul className="space-y-0.5">
+                                            {tp.pain_points.map((p: string, i: number) => (
+                                              <li key={i} className="text-[11px] text-slate-600 font-normal flex gap-1.5">
+                                                <span className="text-red-400 flex-shrink-0">&bull;</span>
+                                                <span>{p}</span>
+                                              </li>
+                                            ))}
+                                          </ul>
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* All Departments | Top Contacts */}
+                          <div className="border-t border-slate-200 pt-5 space-y-4">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1 w-fit">
+                                <button
+                                  type="button"
+                                  onClick={() => setStakeholderViewMode('departments')}
+                                  className={`px-3 py-1.5 rounded-md text-xs font-semibold transition ${
+                                    stakeholderViewMode === 'departments' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'
+                                  }`}
+                                >
+                                  All Departments
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setStakeholderViewMode('top_contacts')}
+                                  className={`px-3 py-1.5 rounded-md text-xs font-semibold transition ${
+                                    stakeholderViewMode === 'top_contacts' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'
+                                  }`}
+                                >
+                                  Top Contacts
+                                </button>
+                              </div>
+                              {getClassificationBadge('derived')}
+                            </div>
+
+                            {stakeholderViewMode === 'departments' && (
+                              <div className="space-y-2">
+                                {departmentGroups.map((g: any) => {
+                                  const surfaced = (g.surfaced_contact_ids || []).map((id: string) => byId[id]).filter((c: any) => c && filteredIds.has(c.contact_id));
+                                  const lower = (g.lower_relevance_contact_ids || []).map((id: string) => byId[id]).filter((c: any) => c && filteredIds.has(c.contact_id));
+                                  if (surfaced.length === 0 && lower.length === 0) return null;
+                                  const isOpen = expandedDepts[g.department] || false;
+                                  const showLow = expandedDepts[`${g.department}__low`] || false;
+                                  return (
+                                    <div key={g.department} className="space-y-2">
+                                      <button
+                                        type="button"
+                                        onClick={() => setExpandedDepts(prev => ({ ...prev, [g.department]: !prev[g.department] }))}
+                                        className="flex items-center gap-2 text-left group"
+                                      >
+                                        <h5 className="text-sm font-bold text-slate-800 group-hover:text-hp-navy transition">{g.department}</h5>
+                                        <span className="text-[11px] font-normal text-slate-500 bg-slate-100 px-2 py-0.5 rounded"
+                                              title="HP-relevant contacts (Priority Contacts plus High/Medium HP fit) vs. total roster in this department">
+                                          {g.hp_relevant_count} HP-relevant &middot; {g.total_count} total
+                                        </span>
+                                        {isOpen
+                                          ? <ChevronUp className="w-4 h-4 text-slate-400" />
+                                          : <ChevronDown className="w-4 h-4 text-slate-400" />}
+                                      </button>
+
+                                      {isOpen && (
+                                        <div className="space-y-2 pb-2">
+                                          {surfaced.length === 0 ? (
+                                            <p className="text-[11px] text-slate-400 italic">
+                                              No high or medium HP-relevance contacts in this department &mdash; see lower-relevance contacts below.
+                                            </p>
+                                          ) : (
+                                            surfaced.map((c: any) => renderExpandableCard(c))
+                                          )}
+
+                                          {lower.length > 0 && (
+                                            <div className="pt-1">
+                                              <button
+                                                type="button"
+                                                onClick={() => setExpandedDepts(prev => ({ ...prev, [`${g.department}__low`]: !prev[`${g.department}__low`] }))}
+                                                className="text-[11px] font-semibold text-slate-500 hover:text-slate-800 flex items-center gap-1"
+                                              >
+                                                {showLow ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                                                <span>{showLow ? 'Hide' : 'Show'} {lower.length} lower-relevance contact{lower.length === 1 ? '' : 's'}</span>
+                                                <span className="text-slate-400 font-normal">(limited fit for an HP hardware conversation)</span>
+                                              </button>
+                                              {showLow && (
+                                                <div className="opacity-80 space-y-2 mt-2">
+                                                  {lower.map((c: any) => renderExpandableCard(c))}
+                                                </div>
+                                              )}
+                                            </div>
+                                          )}
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+
+                            {stakeholderViewMode === 'top_contacts' && (
+                              <div className="space-y-2">
+                                {topContacts.length === 0 ? (
+                                  <p className="text-xs text-slate-400 italic py-4">No high HP-relevance contacts match the current filters.</p>
+                                ) : (
+                                  topContacts.map((c: any) => renderExpandableCard(c))
+                                )}
                               </div>
                             )}
                           </div>
                         </div>
-
-                        <span className="text-[11px] text-slate-400 font-medium hidden sm:inline">
-                          Showing active employees only
-                        </span>
-                      </div>
-
-                      {/* View 1: Stakeholder Grid (Contact Cards) */}
-                      {stakeholderSubTab === 'grid' && (
-                        <div className="space-y-6">
-                          
-                          {/* Filter Controls Bar */}
-                          <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
-                            <div className="relative flex-1 max-w-md">
-                              <Search className="w-3.5 h-3.5 text-gray-400 absolute left-3 top-2.5" />
-                              <input
-                                type="text"
-                                value={stakeholderSearch}
-                                onChange={(e) => setStakeholderSearch(e.target.value)}
-                                placeholder="Search name, title, or department..."
-                                className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-hp-navy"
-                              />
-                            </div>
-
-                            <div className="flex flex-wrap items-center gap-2 text-xs font-bold">
-                              <Filter className="w-3.5 h-3.5 text-slate-400 mr-1" />
-                              <select
-                                value={stakeholderDeptFilter}
-                                onChange={(e) => setStakeholderDeptFilter(e.target.value)}
-                                className="px-3 py-1.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-700 focus:outline-none"
-                              >
-                                <option value="ALL">All Departments ({contactsList.length})</option>
-                                {Object.entries(deptDist).map(([dept, count]) => (
-                                  <option key={dept} value={dept}>
-                                    {dept} ({String(count)})
-                                  </option>
-                                ))}
-                              </select>
-                            </div>
-                          </div>
-
-                          {/* Contacts Cards Grid (Matching Images 1 & 2 Layout) */}
-                          {filteredContacts.length === 0 ? (
-                            <div className="bg-white rounded-2xl p-12 text-center border border-slate-200 shadow-sm">
-                              <Users className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-                              <h3 className="text-base font-bold text-slate-800">
-                                {contactsList.length === 0 ? 'No Prospect Contacts Uploaded Yet' : 'No Contacts Match Filter'}
-                              </h3>
-                              <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
-                                {contactsList.length === 0 
-                                  ? 'Upload 14_prospect_contacts.csv in Admin Data tab to populate stakeholders.'
-                                  : 'Try clearing the search query or selecting All Departments.'}
-                              </p>
-                            </div>
-                          ) : (
-                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                              {filteredContacts.map((contact: any, idx: number) => {
-                                const initials = contact.full_name
-                                  ? contact.full_name.split(' ').map((n: string) => n[0]).join('').substring(0, 2).toUpperCase()
-                                  : 'U';
-
-                                return (
-                                  <div key={idx} className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-4 hover:border-slate-300 transition flex flex-col justify-between">
-                                    
-                                    <div className="space-y-3">
-                                      {/* Top Contact Header */}
-                                      <div className="flex items-start space-x-3">
-                                        <div className="w-11 h-11 bg-blue-50 text-hp-navy font-black rounded-full flex items-center justify-center text-xs flex-shrink-0 border border-blue-200">
-                                          {initials}
-                                        </div>
-
-                                        <div className="flex-1 truncate">
-                                          <div className="flex items-center space-x-2">
-                                            <h3 className="text-sm font-extrabold text-slate-900 truncate">{contact.full_name}</h3>
-                                            {contact.linkedin_url && (
-                                              <a
-                                                href={contact.linkedin_url.startsWith('http') ? contact.linkedin_url : `https://${contact.linkedin_url}`}
-                                                target="_blank"
-                                                rel="noreferrer"
-                                                className="text-hp-navy hover:text-hp-blue flex-shrink-0"
-                                                title="LinkedIn Profile"
-                                              >
-                                                <Globe className="w-3.5 h-3.5" />
-                                              </a>
-                                            )}
-                                          </div>
-                                          <p className="text-xs text-slate-600 font-semibold leading-snug line-clamp-2 mt-0.5">{contact.title || 'Title Unspecified'}</p>
-                                          <p className="text-[11px] text-slate-400 font-medium truncate mt-0.5">{contact.department || 'General'}</p>
-                                        </div>
-                                      </div>
-
-                                      {/* Badges Row */}
-                                      <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                                        {contact.seniority && (
-                                          <span className="px-2 py-0.5 rounded text-[10px] font-extrabold bg-slate-100 text-slate-700 border border-slate-200 uppercase">
-                                            {contact.seniority}
-                                          </span>
-                                        )}
-
-                                        {/* Persona Badge (Rendered ONLY when present in raw data; absent for Apollo contacts) */}
-                                        {contact.buying_committee_persona && (
-                                          <span className="px-2 py-0.5 rounded text-[10px] font-extrabold bg-red-50 text-red-700 border border-red-200">
-                                            {contact.buying_committee_persona.replace(/[\[\]"]/g, '')}
-                                          </span>
-                                        )}
-
-                                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200">
-                                          Priority: Derived TBD
-                                        </span>
-
-                                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-gray-50 text-slate-500 border border-slate-200 font-mono">
-                                          {contact.source}
-                                        </span>
-                                      </div>
-
-                                      {/* Contact Methods */}
-                                      <div className="bg-slate-50 p-3 rounded-xl border border-slate-200/80 space-y-1 text-xs text-slate-700 font-medium">
-                                        {contact.email ? (
-                                          <div className="flex items-center justify-between font-mono text-[11px]">
-                                            <span className="truncate text-hp-navy font-bold">{contact.email}</span>
-                                            {contact.email_status && (
-                                              <span className="text-[9px] font-bold px-1.5 py-0.2 bg-emerald-100 text-emerald-800 rounded">
-                                                {contact.email_status}
-                                              </span>
-                                            )}
-                                          </div>
-                                        ) : (
-                                          <span className="text-[11px] text-slate-400 italic">Email: Not provided</span>
-                                        )}
-
-                                        {contact.phone && (
-                                          <div className="text-[11px] font-mono text-slate-600">
-                                            Phone: {contact.phone}
-                                          </div>
-                                        )}
-                                      </div>
-
-                                      {/* Entry Path / How to Open (Inferred TBD Placeholder) */}
-                                      <div className="bg-blue-50/70 border border-blue-200/80 rounded-xl p-3.5 text-xs text-blue-950 space-y-2">
-                                        <div>
-                                          <span className="font-extrabold text-hp-navy text-[10px] uppercase block">
-                                            HOW TO OPEN:
-                                          </span>
-                                          <p className="text-[11px] leading-relaxed text-slate-600 italic">
-                                            AI-synthesized person-specific talking points TBD for future runtime generation in Step 8.
-                                          </p>
-                                        </div>
-
-                                        <div className="pt-2 border-t border-blue-200/60 space-y-1 text-[11px]">
-                                          <div className="flex justify-between text-slate-600 font-medium">
-                                            <span className="font-bold text-slate-500 uppercase text-[9px]">HP PLAY FOCUS:</span>
-                                            <span className="text-purple-700 font-bold bg-purple-50 px-1.5 py-0.5 rounded text-[10px]">Inferred TBD</span>
-                                          </div>
-                                          <div className="flex justify-between text-slate-600 font-medium">
-                                            <span className="font-bold text-slate-500 uppercase text-[9px]">DECISION POWER:</span>
-                                            <span className="text-purple-700 font-bold bg-purple-50 px-1.5 py-0.5 rounded text-[10px]">Inferred TBD</span>
-                                          </div>
-                                        </div>
-                                      </div>
-
-                                    </div>
-
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          )}
-
-                        </div>
                       )}
 
-                      {/* View 2: Entry Path Ranked List View (Matching Image 2) */}
                       {stakeholderSubTab === 'entry_path' && (
-                        <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-4">
-                          <div className="border-b border-slate-100 pb-3">
-                            <h3 className="text-sm font-extrabold text-slate-900 flex items-center gap-2">
-                              <Layers className="w-4 h-4 text-hp-navy" />
-                              <span>Entry Path Stakeholder Sequence</span>
-                            </h3>
-                            <p className="text-xs text-slate-500 mt-0.5">
-                              Dynamically ranked by seniority (25%), sector (20%), persona (25%), pain points (15%), priority (15%) — <strong className="text-amber-700 font-bold">Derived TBD</strong>
-                            </p>
-                          </div>
-
-                          <div className="divide-y divide-slate-100">
-                            {filteredContacts.map((contact: any, idx: number) => (
-                              <div key={idx} className="py-3.5 flex items-center justify-between hover:bg-slate-50/80 transition px-3 rounded-xl">
-                                <div className="flex items-center space-x-3.5">
-                                  <span className="w-7 h-7 rounded-full bg-blue-50 text-hp-navy font-extrabold text-xs flex items-center justify-center border border-blue-200">
-                                    {idx + 1}
-                                  </span>
-                                  <div>
-                                    <div className="flex items-center space-x-2">
-                                      <span className="text-sm font-bold text-slate-900">{contact.full_name}</span>
-                                      {contact.seniority && (
-                                        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200 uppercase">
-                                          {contact.seniority}
-                                        </span>
-                                      )}
-                                    </div>
-                                    <p className="text-xs text-slate-500 font-medium">{contact.title || 'Title Unspecified'} • <span className="text-slate-400">{contact.department || 'General'}</span></p>
+                        <div className="space-y-3">
+                          <p className="text-xs text-slate-500 font-normal">
+                            Ranked by seniority (25%), HP relevance (25%), influence (20%), data completeness (15%) and priority (15%).
+                          </p>
+                          <div className="bg-white rounded-xl border border-slate-200 shadow-xs divide-y divide-slate-100">
+                            {rankedEntryPath.filter((s: any) => filteredIds.has(s.contact_id)).map((step: any) => (
+                              <div key={step.contact_id} className="p-4">
+                                <div className="flex items-start gap-3">
+                                  <div className="w-6 h-6 rounded-full bg-hp-navy text-white flex items-center justify-center text-[11px] font-semibold flex-shrink-0">
+                                    {step.order}
                                   </div>
-                                </div>
-
-                                <div className="flex items-center space-x-2">
-                                  <span className="text-xs font-mono font-bold text-slate-400 bg-slate-100 px-2.5 py-1 rounded-lg border border-slate-200">
-                                    Derived TBD / 100
+                                  <div className="min-w-0 flex-1">
+                                    <p className="text-sm font-semibold text-slate-900">{step.full_name}</p>
+                                    <p className="text-xs text-slate-500 font-normal">{step.title} &middot; <span className="text-slate-400">{step.department}</span></p>
+                                  </div>
+                                  <span className="text-xs font-semibold text-slate-700 flex-shrink-0">
+                                    {step.stakeholder_score}<span className="text-slate-400 font-normal">/100</span>
                                   </span>
+                                </div>
+                                <div className="mt-2.5 space-y-1.5 pl-9">
+                                  {Object.entries(step.score_components || {}).map(([dim, val]: [string, any]) => (
+                                    <div key={dim} className="flex items-center gap-2">
+                                      <span className="text-[10px] text-slate-400 font-medium w-32 capitalize flex-shrink-0">{dim.replace(/_/g, ' ')}</span>
+                                      <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                                        <div className="h-1.5 bg-hp-navy/60 rounded-full" style={{ width: `${val}%` }}></div>
+                                      </div>
+                                      <span className="text-[10px] font-mono text-slate-400 w-10 text-right flex-shrink-0">{val}/100</span>
+                                    </div>
+                                  ))}
                                 </div>
                               </div>
                             ))}
@@ -2482,26 +2982,19 @@ export default function UserDashboardPage() {
                         </div>
                       )}
 
-                      {/* Dynamic Department Breakdown Cards Section (Bottom of Images 1 & 2) */}
-                      <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-4">
-                        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                          <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700 flex items-center gap-2">
-                            <Building2 className="w-4 h-4 text-hp-navy" />
-                            <span>DYNAMIC DEPARTMENT BREAKDOWN ({Object.keys(deptDist).length} Departments)</span>
-                          </h3>
-                          <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-50 text-hp-navy border border-blue-200">
-                            Calculated Runtime
-                          </span>
+                      {/* Department distribution, straight from the uploaded file */}
+                      <div className="bg-white rounded-xl border border-slate-200 shadow-xs p-4 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                            Raw department distribution ({Object.keys(deptDist).length})
+                          </h4>
+                          {getClassificationBadge('deterministic')}
                         </div>
-
-                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-                          {Object.entries(deptDist).map(([dept, count]) => (
-                            <div key={dept} className="bg-slate-50 p-3.5 rounded-xl border border-slate-200/80 flex items-center justify-between text-xs">
-                              <span className="font-bold text-slate-800 truncate pr-2">{dept}</span>
-                              <span className="font-mono text-hp-navy font-black bg-white px-2 py-0.5 rounded border border-slate-200">
-                                {String(count)}
-                              </span>
-                            </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {Object.entries(deptDist).map(([dept, count]: [string, any]) => (
+                            <span key={dept} className="text-[11px] font-medium text-slate-600 bg-slate-50 border border-slate-200 px-2 py-0.5 rounded-full">
+                              {dept} <span className="text-slate-400">{count}</span>
+                            </span>
                           ))}
                         </div>
                       </div>

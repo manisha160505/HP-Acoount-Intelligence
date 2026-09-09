@@ -9,6 +9,10 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 120
     CORS_ORIGINS: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
     DATA_STORAGE_DIR: str = "data/accounts"
+    
+    OPENAI_API_KEY: str = ""
+    OPENAI_ENDPOINT: str = "https://accurix-foundry-resource.cognitiveservices.azure.com/openai/v1/"
+    OPENAI_MODEL_NAME: str = "gpt-4o"
 
     class Config:
         env_file = ".env"
