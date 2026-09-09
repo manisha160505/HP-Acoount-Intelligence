@@ -49,6 +49,7 @@ venv/
 
 # Media & Reference Codebase Directories
 *.mp4
+*.png
 hp-sea-abm-dev-main/
 
 # OS Files

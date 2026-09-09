@@ -30,7 +30,9 @@ import {
   Shield,
   Clock,
   FileText,
+  Package,
   MessageSquare,
+  HelpCircle,
   CheckSquare,
   Megaphone,
   TrendingUp,
@@ -331,8 +333,12 @@ export default function UserDashboardPage() {
 
   // Live Signals Filter Drawer State
   const [isFilterDrawerOpen, setIsFilterDrawerOpen] = useState(false);
-  const [signalTypeFilter, setSignalTypeFilter] = useState('ALL');
   const [dateRangeFilter, setDateRangeFilter] = useState('All time');
+  const [signalTypes, setSignalTypes] = useState<Set<string>>(new Set());
+  const [minSignalScore, setMinSignalScore] = useState(0);
+  const [expandedSignalId, setExpandedSignalId] = useState<string | null>(null);
+  const [expandedSignalDetailId, setExpandedSignalDetailId] = useState<string | null>(null);
+  const [expandedObjectionId, setExpandedObjectionId] = useState<string | null>(null);
 
   // Intent Topics Filter State
   const [intentSearch, setIntentSearch] = useState('');
@@ -1307,259 +1313,458 @@ export default function UserDashboardPage() {
                 {/* Live Signals View (Feature Key: recent_news_signals) */}
                 {activeFeatureKey === 'recent_news_signals' && (() => {
                   const feedWidget = widgets.find(w => w.widget_key === 'news_signals_feed');
-                  const feedData = (feedWidget && feedWidget.status === 'available' && feedWidget.data) ? feedWidget.data : null;
-                  const signals = feedData?.signals || [];
+                  const scoreWidget = widgets.find(w => w.widget_key === 'news_relevance_summary');
 
-                  const getCleanCategoryBadge = (rawType: string) => {
-                    const typeClean = (rawType || '').toLowerCase().trim();
-                    if (['launch', 'launches', 'is_developing', 'product', 'technology'].includes(typeClean)) {
-                      return <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">Technology</span>;
-                    }
-                    if (['partners_with', 'leadership', 'attends_event', 'strategic'].includes(typeClean)) {
-                      return <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200">Strategic</span>;
-                    }
-                    if (['has_earnings', 'financing_type', 'funding', 'invests_into', 'financial'].includes(typeClean)) {
-                      return <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">Financial</span>;
-                    }
-                    if (['identified_as_competitor_of', 'competitive'].includes(typeClean)) {
-                      return <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">Competitive</span>;
-                    }
-                    if (['acquires', 'sells_assets_to', 'm&a'].includes(typeClean)) {
-                      return <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-red-50 text-red-700 border border-red-200">Strategic M&A</span>;
-                    }
-                    return <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200 capitalize">{typeClean || 'Signal'}</span>;
+                  const feedData = (feedWidget && feedWidget.status === 'available' && feedWidget.data) ? feedWidget.data : null;
+                  const scoreData: any = scoreWidget?.data || {};
+                  const scores: Record<string, any> = scoreData.scores || {};
+                  const scoreWeights: Record<string, number> = scoreData.score_weights || {};
+                  const isScored = Object.keys(scores).length > 0;
+
+                  const signals: any[] = feedData?.signals || [];
+
+                  // Northstar thresholds: Critical 8+, High 6+, Medium 4+, else Low.
+                  const urgencyOf = (score: number | null) => {
+                    if (score === null || score === undefined) return null;
+                    if (score >= 8.0) return { label: 'Critical', cls: 'bg-red-100 text-red-700 border-red-200', pulse: true };
+                    if (score >= 6.0) return { label: 'High', cls: 'bg-orange-100 text-orange-700 border-orange-200', pulse: false };
+                    if (score >= 4.0) return { label: 'Medium', cls: 'bg-yellow-100 text-yellow-700 border-yellow-200', pulse: false };
+                    return { label: 'Low', cls: 'bg-gray-100 text-gray-600 border-gray-200', pulse: false };
                   };
 
-                  const filteredSignals = signals.filter((sig: any) => {
-                    // 1. Signal Type Filter
-                    if (signalTypeFilter !== 'ALL') {
-                      const rawT = (sig.event_type || '').toLowerCase();
-                      if (signalTypeFilter === 'Technology' && !['launch', 'launches', 'is_developing', 'product', 'technology'].includes(rawT)) return false;
-                      if (signalTypeFilter === 'Strategic' && !['partners_with', 'leadership', 'attends_event', 'strategic', 'acquires', 'sells_assets_to'].includes(rawT)) return false;
-                      if (signalTypeFilter === 'Financial' && !['has_earnings', 'financing_type', 'funding', 'invests_into', 'financial'].includes(rawT)) return false;
-                      if (signalTypeFilter === 'Competitive' && !['identified_as_competitor_of', 'competitive'].includes(rawT)) return false;
+                  // Source-confidence dot. google_news reports High/Medium/Low,
+                  // news_events a 0-1 float; both map onto the same three states.
+                  // No value in the row means no dot - nothing is assumed.
+                  const confidenceDot = (raw: any) => {
+                    if (raw === null || raw === undefined || raw === '') return null;
+                    const text = String(raw).trim();
+                    const num = Number(text);
+                    let level: 'high' | 'medium' | 'low' | null = null;
+                    if (!isNaN(num) && text !== '') {
+                      level = num >= 0.8 ? 'high' : num >= 0.5 ? 'medium' : 'low';
+                    } else {
+                      const t = text.toLowerCase();
+                      if (t.startsWith('high')) level = 'high';
+                      else if (t.startsWith('med')) level = 'medium';
+                      else if (t.startsWith('low')) level = 'low';
                     }
+                    if (!level) return null;
+                    return {
+                      cls: level === 'high' ? 'bg-emerald-500' : level === 'medium' ? 'bg-amber-500' : 'bg-red-500',
+                      title: `Source confidence: ${text}`,
+                    };
+                  };
 
-                    // 2. Date Range Filter
-                    if (dateRangeFilter !== 'All time' && sig.event_date && sig.event_date !== 'N/A') {
-                      try {
-                        const sigTime = new Date(sig.event_date).getTime();
-                        const validTimes = signals.map((s: any) => (s.event_date && s.event_date !== 'N/A') ? new Date(s.event_date).getTime() : 0).filter((t: number) => !isNaN(t) && t > 0);
-                        const maxTime = validTimes.length > 0 ? Math.max(...validTimes) : Date.now();
-                        
-                        const diffDays = (maxTime - sigTime) / (1000 * 60 * 60 * 24);
+                  // Display-only truncation. The full sentence stays in the DOM
+                  // behind the toggle; the stored value is never altered.
+                  const DETAIL_CLAMP = 160;
+
+                  const typeColors: Record<string, string> = {
+                    Financial: 'bg-green-100 text-green-700',
+                    Technology: 'bg-blue-100 text-blue-700',
+                    Security: 'bg-red-100 text-red-700',
+                    Hiring: 'bg-purple-100 text-purple-700',
+                    Strategic: 'bg-indigo-100 text-indigo-700',
+                    Competitive: 'bg-orange-100 text-orange-700',
+                  };
+                  const dimLabels: Record<string, string> = {
+                    recency: 'Recency',
+                    hp_relevance: 'HP Relevance',
+                    strategic_impact: 'Strategic Impact',
+                    actionability: 'Actionability',
+                    source_reliability: 'Source Reliability',
+                  };
+
+                  // Categories present in the data, never a hardcoded list.
+                  const categoryOptions = Array.from(new Set(signals.map(s => s.category).filter(Boolean))).sort() as string[];
+
+                  const toggleType = (t: string) => {
+                    setSignalTypes(prev => {
+                      const next = new Set(prev);
+                      if (next.has(t)) { next.delete(t); } else { next.add(t); }
+                      return next;
+                    });
+                  };
+
+                  // Date window is measured from the newest signal in the set, not
+                  // from today - the uploaded exports lag real time, and anchoring
+                  // on today would empty the view.
+                  const times = signals
+                    .map(s => new Date(s.event_date).getTime())
+                    .filter(t => !isNaN(t) && t > 0);
+                  const maxTime = times.length > 0 ? Math.max(...times) : Date.now();
+
+                  const filteredSignals = signals.filter((s: any) => {
+                    if (signalTypes.size > 0 && !signalTypes.has(s.category)) return false;
+                    if (minSignalScore > 0) {
+                      if (s.confidence === null || s.confidence === undefined) return false;
+                      if (s.confidence < minSignalScore) return false;
+                    }
+                    if (dateRangeFilter !== 'All time') {
+                      const t = new Date(s.event_date).getTime();
+                      if (!isNaN(t) && t > 0) {
+                        const diffDays = (maxTime - t) / (1000 * 60 * 60 * 24);
                         if (dateRangeFilter === 'Last 7 days' && diffDays > 7) return false;
                         if (dateRangeFilter === 'Last 30 days' && diffDays > 30) return false;
                         if (dateRangeFilter === 'Last 90 days' && diffDays > 90) return false;
-                      } catch (e) {
-                        // Keep if date parse fails
                       }
                     }
-
                     return true;
                   });
 
+                  const urgencyCounts = filteredSignals.reduce((acc: Record<string, number>, s: any) => {
+                    const u = urgencyOf(s.confidence);
+                    if (u) acc[u.label] = (acc[u.label] || 0) + 1;
+                    return acc;
+                  }, {});
+
+                  const fmtDate = (d: string) => {
+                    if (!d) return 'Date N/A';
+                    const dt = new Date(d);
+                    if (isNaN(dt.getTime())) return d;
+                    return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+                  };
+
                   return (
-                    <div className="space-y-6">
-                      
-                      {/* Header Bar */}
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div className="space-y-5 animate-fade-in">
+
+                      {/* Header */}
+                      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
                         <div>
-                          <h2 className="text-xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
+                          <h3 className="text-xl font-bold text-slate-900 flex items-center gap-2">
                             <Newspaper className="w-5 h-5 text-hp-navy" />
                             <span>Live Signals</span>
-                          </h2>
-                          <p className="text-xs text-slate-500 mt-0.5">
-                            Real-time intelligence triggers for {selectedAccount.name}
+                          </h3>
+                          <p className="text-sm text-slate-500 mt-0.5">
+                            Real-time intelligence triggers for {selectedAccount?.name}
                           </p>
                         </div>
+                        <button
+                          type="button"
+                          onClick={() => setIsFilterDrawerOpen(!isFilterDrawerOpen)}
+                          className={`flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg border transition ${
+                            isFilterDrawerOpen
+                              ? 'bg-blue-50 text-hp-navy border-blue-200'
+                              : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                          }`}
+                        >
+                          <Filter className="w-3.5 h-3.5" />
+                          <span>Filters</span>
+                        </button>
+                      </div>
 
-                        <div className="flex items-center space-x-3">
-                          <span className="px-3 py-1 bg-white border border-slate-200 shadow-xs rounded-full text-slate-700 font-bold text-xs">
-                            {filteredSignals.length} Signals
+                      {/* Summary bar */}
+                      <div className="flex flex-wrap items-center gap-2 text-xs">
+                        <span className="font-semibold text-slate-700">{filteredSignals.length} Signals</span>
+                        {['Critical', 'High', 'Medium', 'Low'].map(lvl => urgencyCounts[lvl] ? (
+                          <span key={lvl} className={`px-2 py-0.5 rounded-full font-medium ${
+                            lvl === 'Critical' ? 'bg-red-100 text-red-700'
+                            : lvl === 'High' ? 'bg-orange-100 text-orange-700'
+                            : lvl === 'Medium' ? 'bg-yellow-100 text-yellow-700'
+                            : 'bg-gray-100 text-gray-600'}`}>
+                            {urgencyCounts[lvl]} {lvl}
                           </span>
+                        ) : null)}
+                        {feedData?.raw_signal_count !== undefined && (
+                          <span className="text-[11px] text-slate-400">
+                            from {feedData.raw_signal_count} raw &middot;{' '}
+                            {(() => {
+                              // These are ordinary Gate 0 exclusions, not validation
+                              // failures - name the actual reason.
+                              const summary: Record<string, number> = feedData.gate_rejection_summary || {};
+                              const reasons = Object.entries(summary);
+                              if (reasons.length === 1 && reasons[0][0].startsWith('older than')) {
+                                return `${reasons[0][1]} outside the 12-month window`;
+                              }
+                              if (reasons.length > 0) {
+                                return reasons.map(([r, n]) => `${n} ${r}`).join(', ');
+                              }
+                              return `${feedData.gate_rejected_count} excluded`;
+                            })()}
+                          </span>
+                        )}
+                        {getClassificationBadge(isScored ? 'inferred' : 'deterministic')}
+                      </div>
+
+                      {!isScored && (
+                        <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-800">
+                          Relevance scoring has not run for this account, so signals are shown in date order and score filters are inactive. No scores are invented.
+                        </div>
+                      )}
+
+                      {/* Filter panel */}
+                      {isFilterDrawerOpen && (
+                        <div className="bg-white rounded-xl border border-slate-200 shadow-xs p-4 space-y-4">
+                          <div>
+                            <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-2">Signal Type</p>
+                            <div className="flex flex-wrap gap-1.5">
+                              {categoryOptions.map(t => (
+                                <button
+                                  key={t}
+                                  type="button"
+                                  onClick={() => toggleType(t)}
+                                  className={`text-[11px] px-2.5 py-1 rounded-full font-medium border transition ${
+                                    signalTypes.has(t)
+                                      ? `${typeColors[t] || 'bg-slate-100 text-slate-700'} border-transparent`
+                                      : 'bg-white text-slate-400 border-slate-200'
+                                  }`}
+                                >
+                                  {t}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div>
+                            <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-2">Minimum Score</p>
+                            <div className="flex flex-wrap gap-1.5">
+                              {[0, 4, 6, 8].map(v => (
+                                <button
+                                  key={v}
+                                  type="button"
+                                  disabled={!isScored}
+                                  onClick={() => setMinSignalScore(v)}
+                                  title={!isScored ? 'Available once relevance scoring has run' : undefined}
+                                  className={`text-[11px] px-2.5 py-1 rounded-full font-medium border transition disabled:opacity-40 disabled:cursor-not-allowed ${
+                                    minSignalScore === v
+                                      ? 'bg-hp-navy text-white border-hp-navy'
+                                      : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'
+                                  }`}
+                                >
+                                  {v === 0 ? 'All' : `${v}+`}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div>
+                            <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-2">Date Range</p>
+                            <div className="flex flex-wrap gap-1.5">
+                              {['All time', 'Last 7 days', 'Last 30 days', 'Last 90 days'].map(r => (
+                                <button
+                                  key={r}
+                                  type="button"
+                                  onClick={() => setDateRangeFilter(r)}
+                                  className={`text-[11px] px-2.5 py-1 rounded-full font-medium border transition ${
+                                    dateRangeFilter === r
+                                      ? 'bg-hp-navy text-white border-hp-navy'
+                                      : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'
+                                  }`}
+                                >
+                                  {r}
+                                </button>
+                              ))}
+                            </div>
+                            <p className="text-[10px] text-slate-400 mt-1.5">
+                              Measured from the most recent signal in this account&apos;s data, not from today.
+                            </p>
+                          </div>
 
                           <button
                             type="button"
-                            onClick={() => setIsFilterDrawerOpen(!isFilterDrawerOpen)}
-                            className={`inline-flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl border text-xs font-bold transition shadow-xs ${
-                              isFilterDrawerOpen
-                                ? 'bg-hp-navy text-white border-hp-navy shadow-sm'
-                                : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
-                            }`}
+                            onClick={() => { setSignalTypes(new Set()); setMinSignalScore(0); setDateRangeFilter('All time'); }}
+                            className="text-xs font-medium text-slate-500 hover:text-slate-800"
                           >
-                            <Filter className="w-3.5 h-3.5" />
-                            <span>Filters</span>
-                            <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isFilterDrawerOpen ? 'rotate-180' : ''}`} />
+                            Clear filters
                           </button>
                         </div>
-                      </div>
-
-                      {/* Expanded Interactive Filter Drawer (Matching Image 1) */}
-                      {isFilterDrawerOpen && (
-                        <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-5 animate-fade-in text-xs font-medium">
-                          {/* SIGNAL TYPE */}
-                          <div className="space-y-2">
-                            <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 block">
-                              SIGNAL TYPE
-                            </span>
-                            <div className="flex flex-wrap items-center gap-2">
-                              {['ALL', 'Financial', 'Technology', 'Strategic', 'Competitive'].map((st) => (
-                                <button
-                                  key={st}
-                                  type="button"
-                                  onClick={() => setSignalTypeFilter(st)}
-                                  className={`px-3 py-1 rounded-full border font-bold text-xs transition ${
-                                    signalTypeFilter === st
-                                      ? 'bg-hp-navy text-white border-hp-navy shadow-xs'
-                                      : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
-                                  }`}
-                                >
-                                  {st}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-
-                          {/* MINIMUM SCORE */}
-                          <div className="space-y-2">
-                            <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 block">
-                              MINIMUM SCORE (Derived TBD)
-                            </span>
-                            <div className="flex flex-wrap items-center gap-2">
-                              {['All', '4+', '6+', '8+'].map((score) => (
-                                <button
-                                  key={score}
-                                  type="button"
-                                  className="px-3 py-1 rounded-lg border font-bold text-xs bg-slate-50 text-slate-400 border-slate-200 cursor-not-allowed"
-                                  title="Score filtering will be enabled when derived scoring runs in Step 8"
-                                >
-                                  {score}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-
-                          {/* DATE RANGE */}
-                          <div className="space-y-2">
-                            <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 block">
-                              DATE RANGE
-                            </span>
-                            <div className="flex flex-wrap items-center gap-2">
-                              {['All time', 'Last 7 days', 'Last 30 days', 'Last 90 days'].map((range) => (
-                                <button
-                                  key={range}
-                                  type="button"
-                                  onClick={() => setDateRangeFilter(range)}
-                                  className={`px-3 py-1 rounded-lg border font-bold text-xs transition ${
-                                    dateRangeFilter === range
-                                      ? 'bg-hp-navy text-white border-hp-navy shadow-xs'
-                                      : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
-                                  }`}
-                                >
-                                  {range}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                        </div>
                       )}
 
-                      {/* Signals Stream (Full Width Cards) */}
+                      {/* Signal cards */}
                       {filteredSignals.length === 0 ? (
-                        <div className="bg-white rounded-2xl p-12 text-center border border-slate-200 shadow-sm">
-                          <Newspaper className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-                          <h3 className="text-base font-bold text-slate-800">No Live Signals Match Filter</h3>
-                          <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
-                            Try adjusting or resetting the signal type and date range filters above.
-                          </p>
+                        <div className="bg-white rounded-xl border border-slate-200 shadow-xs p-8 text-center">
+                          <p className="text-slate-400 text-sm">No signals match the current filters.</p>
                         </div>
                       ) : (
-                        <div className="space-y-4">
-                          {filteredSignals.map((sig: any, idx: number) => (
-                            <div key={idx} className="bg-white rounded-2xl p-6 border border-slate-200/90 shadow-sm space-y-3.5 hover:border-slate-300 transition">
-                              
-                              {/* Top Meta Row */}
-                              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2.5">
-                                <div className="flex items-center space-x-2">
-                                  {getCleanCategoryBadge(sig.event_type)}
-                                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200">
-                                    Impact: Derived TBD
-                                  </span>
-                                  <span className="text-xs font-mono text-slate-400">
-                                    {sig.event_date || 'Date N/A'}
-                                  </span>
-                                </div>
+                        <div className="space-y-3">
+                          {filteredSignals.map((s: any) => {
+                            const sc = scores[s.signal_id];
+                            const urgency = urgencyOf(s.confidence);
+                            const isOpen = expandedSignalId === s.signal_id;
+                            return (
+                              <div
+                                key={s.signal_id}
+                                className={`bg-white rounded-xl border shadow-xs overflow-hidden ${
+                                  s.confidence !== null && s.confidence >= 8.0 ? 'border-red-200' : 'border-slate-200'
+                                }`}
+                              >
+                                <div className="p-4">
+                                  {/* badges + date + score */}
+                                  <div className="flex flex-wrap items-center gap-2 mb-2">
+                                    <span className={`text-[11px] px-2 py-0.5 rounded-full font-semibold ${typeColors[s.category] || 'bg-slate-100 text-slate-700'}`}>
+                                      {s.category}
+                                    </span>
+                                    {urgency && (
+                                      <span className={`text-[11px] px-2 py-0.5 rounded-full font-semibold border ${urgency.cls} ${urgency.pulse ? 'animate-pulse' : ''}`}>
+                                        {urgency.label}
+                                      </span>
+                                    )}
+                                    <span className="text-xs text-slate-400">{fmtDate(s.event_date)}</span>
+                                    {s.publication_date && s.publication_date !== s.event_date && (
+                                      <span className="text-[10px] text-slate-400" title="Publication date, where it differs from the event date">
+                                        published {fmtDate(s.publication_date)}
+                                      </span>
+                                    )}
+                                    <span className="ml-auto flex items-center gap-2 text-xs font-semibold text-slate-600">
+                                      {s.confidence !== null && s.confidence !== undefined ? (
+                                        <>{s.confidence.toFixed(1)}<span className="text-slate-400 font-normal">/10</span></>
+                                      ) : (
+                                        <span className="text-slate-400 font-normal">unscored</span>
+                                      )}
+                                      {s.tier && (
+                                        <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">{s.tier}</span>
+                                      )}
+                                      {(() => {
+                                        const dot = confidenceDot(s.source_confidence);
+                                        return dot ? (
+                                          <span className={`inline-block w-2 h-2 rounded-full ${dot.cls}`} title={dot.title} />
+                                        ) : null;
+                                      })()}
+                                    </span>
+                                  </div>
 
-                                <div className="flex items-center space-x-1.5">
-                                  <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
-                                    Relevance: Derived TBD
-                                  </span>
+                                  {/* WHAT'S NEW - a single clipped line, as the reference card */}
+                                  <div className="flex items-baseline gap-2 min-w-0">
+                                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex-shrink-0">
+                                      What&apos;s new:
+                                    </span>
+                                    <span
+                                      title={s.headline}
+                                      className="text-sm font-semibold text-slate-900 truncate min-w-0"
+                                    >
+                                      {s.headline}
+                                    </span>
+                                  </div>
+
+                                  {s.amount && (
+                                    <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                                      <span className="text-[10px] font-medium text-slate-600 bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded">
+                                        {s.amount}
+                                      </span>
+                                    </div>
+                                  )}
+
+                                  {/* Implication for HP */}
+                                  {sc?.sales_angle && (
+                                    <div className="mt-2 text-xs text-sky-800 bg-sky-50 border border-sky-200 rounded-lg px-2.5 py-1.5">
+                                      {sc.hp_play && (
+                                        <span className="inline-block mb-1 text-[10px] font-bold uppercase tracking-wider text-sky-700 bg-sky-100 border border-sky-200 px-1.5 py-0.5 rounded">
+                                          {sc.hp_play}
+                                        </span>
+                                      )}
+                                      <p>
+                                        <span className="font-semibold">Implication for HP: </span>{sc.sales_angle}
+                                      </p>
+                                    </div>
+                                  )}
+
+                                  {/* Detail paragraph, then its own toggle line. Absent when the
+                                      export gave no text beyond the headline. */}
+                                  {(() => {
+                                    const detail: string = s.evidence_sentence || '';
+                                    // Some exports repeat the headline in the body column; the
+                                    // extractor blanks those, so there is simply nothing to add.
+                                    if (!detail) return null;
+                                    const needsClamp = detail.length > DETAIL_CLAMP;
+                                    const detailOpen = expandedSignalDetailId === s.signal_id;
+                                    const shown = (needsClamp && !detailOpen)
+                                      ? detail.slice(0, DETAIL_CLAMP).trimEnd() + '…'
+                                      : detail;
+                                    return (
+                                      <>
+                                        <p className="mt-2 text-xs text-slate-500 leading-relaxed">{shown}</p>
+                                        {needsClamp && (
+                                          <button
+                                            type="button"
+                                            onClick={() => setExpandedSignalDetailId(detailOpen ? null : s.signal_id)}
+                                            className="mt-1 flex items-center gap-1 text-[11px] font-medium text-hp-navy hover:underline"
+                                          >
+                                            {detailOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                                            <span>{detailOpen ? 'Show less' : 'Read more'}</span>
+                                          </button>
+                                        )}
+                                      </>
+                                    );
+                                  })()}
+
+                                  {/* Source chip, directly below the implication block */}
+                                  <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                                    {s.source_url ? (
+                                      <a
+                                        href={s.source_url}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full hover:bg-emerald-100 transition"
+                                      >
+                                        <FileText className="w-3 h-3" />
+                                        <span>{s.source_publisher || 'Source'}</span>
+                                        <ExternalLink className="w-3 h-3" />
+                                      </a>
+                                    ) : (
+                                      <span className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-500 bg-slate-50 border border-slate-200 px-2 py-0.5 rounded-full">
+                                        <FileText className="w-3 h-3" />
+                                        <span>Source link not available</span>
+                                      </span>
+                                    )}
+                                    {s.supporting_source_count > 1 && (
+                                      <span className="text-[10px] font-medium text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">
+                                        {s.supporting_source_count} supporting sources
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  {sc && (
+                                    <div className="mt-2 flex justify-end">
+                                      <button
+                                        type="button"
+                                        onClick={() => setExpandedSignalId(isOpen ? null : s.signal_id)}
+                                        className="text-[11px] text-hp-navy hover:underline font-medium flex items-center gap-1"
+                                      >
+                                        {isOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                                        <span>{isOpen ? 'Hide' : 'Score'} breakdown</span>
+                                      </button>
+                                    </div>
+                                  )}
+
+                                  {/* expanded score breakdown */}
+                                  {isOpen && sc && (
+                                    <div className="mt-3 bg-slate-50 rounded-lg p-3 border border-slate-200 space-y-2">
+                                      <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Score breakdown</p>
+                                      {Object.entries(dimLabels).map(([dim, label]) => {
+                                        const val = sc.scores?.[dim];
+                                        if (val === undefined) return null;
+                                        const weight = scoreWeights[dim];
+                                        return (
+                                          <div key={dim} className="space-y-0.5">
+                                            <div className="flex items-center gap-2">
+                                              <span className="text-[10px] text-slate-500 font-medium w-32 flex-shrink-0">
+                                                {label}{weight ? ` (${Math.round(weight * 100)}%)` : ''}
+                                              </span>
+                                              <div className="flex-1 h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                                                <div className="h-1.5 bg-hp-navy/60 rounded-full" style={{ width: `${val * 10}%` }}></div>
+                                              </div>
+                                              <span className="text-[10px] font-mono text-slate-400 w-9 text-right flex-shrink-0">{val}/10</span>
+                                            </div>
+                                            {sc.rationales?.[dim] && (
+                                              <p className="text-[10px] text-slate-400 pl-[8.5rem] leading-relaxed">{sc.rationales[dim]}</p>
+                                            )}
+                                          </div>
+                                        );
+                                      })}
+                                      <p className="text-[10px] text-slate-500 pt-1 border-t border-slate-200">
+                                        Weighted total <span className="font-semibold text-slate-700">{s.confidence?.toFixed(2)}</span> /10 &middot; tier {s.tier}
+                                      </p>
+                                    </div>
+                                  )}
                                 </div>
                               </div>
-
-                              {/* Headline */}
-                              <div>
-                                <span className="text-[11px] font-extrabold text-slate-400 uppercase tracking-wider block mb-1">
-                                  WHAT'S NEW:
-                                </span>
-                                <h3 className="text-sm font-extrabold text-slate-900 leading-snug">
-                                  {sig.event_headline}
-                                </h3>
-                              </div>
-
-                              {/* Implication for HP Box */}
-                              <div className="bg-blue-50/70 border border-blue-200/80 rounded-xl p-3.5 text-xs text-blue-950 space-y-1">
-                                <div className="flex items-center space-x-2">
-                                  <span className="font-extrabold text-hp-navy text-[11px]">
-                                    Implication for HP:
-                                  </span>
-                                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-200">
-                                    Inferred TBD
-                                  </span>
-                                </div>
-                                <p className="text-[11px] leading-relaxed text-slate-500 italic">
-                                  AI-synthesized HP sales angle and portfolio implication TBD for future runtime generation.
-                                </p>
-                              </div>
-
-                              {/* Article Excerpt Paragraph */}
-                              {sig.article_detail && (
-                                <p className="text-xs text-slate-600 leading-relaxed font-normal pt-1">
-                                  {sig.article_detail}
-                                </p>
-                              )}
-
-                              {/* Source Button */}
-                              {sig.source_url ? (
-                                <div className="pt-1">
-                                  <a
-                                    href={sig.source_url}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 transition"
-                                  >
-                                    <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
-                                    <span className="truncate max-w-xs">{selectedAccount.name} Source Article</span>
-                                    <ExternalLink className="w-3 h-3 ml-0.5" />
-                                  </a>
-                                </div>
-                              ) : (
-                                <div className="pt-1 text-[11px] text-slate-400 font-medium italic">
-                                  Source: Source B News Events dataset (No external article URL provided)
-                                </div>
-                              )}
-
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       )}
-
                     </div>
                   );
                 })()}
-
-                {/* Intent & Demand Signals View (Feature Key: intent_demand_signals) */}
                 {activeFeatureKey === 'intent_demand_signals' && (() => {
                   const topicsWidget = widgets.find(w => w.widget_key === 'intent_topics_table');
                   const hiringWidget = widgets.find(w => w.widget_key === 'intent_hiring_demand');
@@ -2106,6 +2311,9 @@ export default function UserDashboardPage() {
                   const playsWidget = widgets.find(w => w.widget_key === 'opportunity_narrative_plays');
                   const playsData = playsWidget?.data || {};
                   const generatedPlays: any[] = playsData.opportunity_plays || [];
+                  // Plays failing the HP-fit check are not opportunities; they are
+                  // retained separately as discovery gaps, with no sales narrative.
+                  const discoveryAreas: any[] = playsData.discovery_areas || [];
                   const isAvailable = playsWidget?.status === 'available' && generatedPlays.length > 0;
 
                   return (
@@ -2119,13 +2327,24 @@ export default function UserDashboardPage() {
                             <span>Opportunity Map</span>
                           </h2>
                           <p className="text-xs text-slate-500 mt-0.5">
-                            5 HP opportunities mapped for {selectedAccount?.name} — business outcome, HP products, entry path, and evidence in one view.
+                            {isAvailable ? generatedPlays.length : 0} HP {isAvailable && generatedPlays.length === 1 ? 'opportunity' : 'opportunities'} mapped for {selectedAccount?.name} &mdash; business outcome, HP products, entry path, and evidence in one view.
+                          </p>
+                          {discoveryAreas.length > 0 && (
+                            <p className="text-xs text-slate-500 mt-0.5">
+                              {discoveryAreas.length} additional discovery {discoveryAreas.length === 1 ? 'area' : 'areas'} identified &mdash; listed separately below, not presented as HP opportunities.
+                            </p>
+                          )}
+                          {/* Stated once here rather than repeated on every card. */}
+                          <p className="text-[11px] text-slate-400 mt-1 max-w-3xl leading-relaxed">
+                            HP proof points and case studies are not shown: no HP proof-point source is
+                            connected to this system. The HP links on each play are product reference
+                            pages, not evidence about this account.
                           </p>
                         </div>
 
                         <div className="flex items-center space-x-2 text-xs font-bold">
                           <span className="px-3 py-1 bg-white border border-slate-200 shadow-xs rounded-full text-slate-700">
-                            {isAvailable ? generatedPlays.length : 5} HP Plays
+                            {isAvailable ? generatedPlays.length : 0} HP Plays
                           </span>
                           <span className={`px-3 py-1 rounded-full ${isAvailable ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 'bg-purple-50 text-purple-800 border border-purple-200'}`}>
                             {isAvailable ? 'GPT-4o Generated' : 'Inferred TBD'}
@@ -2138,7 +2357,7 @@ export default function UserDashboardPage() {
                         <div className="flex items-center justify-between">
                           <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700 flex items-center gap-2">
                             <span>HP OPPORTUNITY PLAYS</span>
-                            <span className="text-slate-400">({isAvailable ? generatedPlays.length : 5} PRODUCT LINES)</span>
+                            <span className="text-slate-400">({isAvailable ? generatedPlays.length : 0} PRODUCT LINES)</span>
                           </h3>
                           {getClassificationBadge('inferred')}
                         </div>
@@ -2160,59 +2379,55 @@ export default function UserDashboardPage() {
                                     </span>
                                   </div>
 
-                                  {/* Card Body */}
+                                  {/* Card Body - laid out to match the Northstar reference card */}
                                   <div className={`bg-white rounded-xl border border-slate-200 border-l-4 shadow-xs p-5 space-y-3.5 ${
-                                    play.severity === 'Critical' ? 'border-l-red-500' : play.severity === 'High' ? 'border-l-orange-400' : 'border-l-amber-400'
+                                    play.checks_met === 3 ? 'border-l-emerald-500'
+                                      : play.checks_met === 2 ? 'border-l-amber-400'
+                                      : 'border-l-slate-300'
                                   }`}>
-                                    
-                                    {/* Card Header */}
-                                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-2.5">
-                                      <div className="flex items-center space-x-2">
+
+                                    {/* Header: title left, evidence-checks pill right */}
+                                    <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2">
+                                      <div className="flex items-center space-x-2 min-w-0">
                                         <Compass className="w-4 h-4 text-slate-400 flex-shrink-0" />
                                         <h4 className="text-base font-bold text-slate-900">{play.title || 'HP Opportunity Play'}</h4>
-                                        <Info className="w-3.5 h-3.5 text-slate-400" />
+                                        <Info className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
                                       </div>
 
-                                      <div className="flex items-center gap-2">
-                                        {play.severity === 'Critical' && (
-                                          <span className="text-[11px] font-semibold text-red-700 bg-red-100 border border-red-200 px-2 py-0.5 rounded">
-                                            Critical
-                                          </span>
-                                        )}
-                                        {play.severity === 'High' && (
-                                          <span className="text-[11px] font-semibold text-orange-700 bg-orange-100 border border-orange-200 px-2 py-0.5 rounded">
-                                            High
-                                          </span>
-                                        )}
-                                        {play.severity === 'Medium' && (
-                                          <span className="text-[11px] font-semibold text-amber-700 bg-yellow-100 border border-yellow-200 px-2 py-0.5 rounded">
-                                            Medium
+                                      <div className="flex flex-col items-start sm:items-end gap-0.5 flex-shrink-0">
+                                        <span className={`text-[11px] font-semibold px-2 py-0.5 rounded border ${
+                                          play.checks_met === 3 ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
+                                            : play.checks_met === 2 ? 'text-amber-700 bg-amber-50 border-amber-200'
+                                            : 'text-slate-600 bg-slate-100 border-slate-200'
+                                        }`}>
+                                          {play.severity || `${play.checks_met ?? 0} of 3 checks`}
+                                        </span>
+                                        {play.missing_checks?.length > 0 && (
+                                          <span className="text-[10px] text-amber-700">
+                                            missing: {play.missing_checks.map((m: string) => m.replace(/_/g, ' ')).join(', ')}
                                           </span>
                                         )}
                                       </div>
                                     </div>
 
-                                    {/* Summary Paragraph */}
-                                    {play.summary && (
-                                      <p className="text-sm text-slate-700 leading-relaxed font-normal">
-                                        {play.summary}
-                                      </p>
+                                    {/* Lead paragraph - the AI reading of the evidence below */}
+                                    {play.inference && (
+                                      <p className="text-sm text-slate-700 leading-relaxed">{play.inference}</p>
                                     )}
 
-                                    {/* HOW HP ENABLES */}
-                                    {play.how_hp_enables && (
+                                    {/* HOW HP ENABLES - general product capability, never an account fact */}
+                                    {play.hp_capability && (
                                       <div className="space-y-1">
                                         <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">
                                           HOW HP ENABLES
+                                          <span className="normal-case font-normal text-slate-400"> &middot; general HP capability</span>
                                         </span>
-                                        <p className="text-xs text-slate-600 leading-relaxed font-normal">
-                                          {play.how_hp_enables}
-                                        </p>
+                                        <p className="text-sm text-slate-700 leading-relaxed">{play.hp_capability}</p>
                                       </div>
                                     )}
 
-                                    {/* HP PRODUCTS & RESOURCE BUTTON */}
-                                    <div className="flex flex-wrap items-center justify-between gap-3 pt-0.5">
+                                    {/* HP PRODUCTS + HP PROOF / RESOURCE */}
+                                    <div className="flex flex-wrap items-start justify-between gap-3">
                                       {play.hp_products?.length > 0 && (
                                         <div className="space-y-1">
                                           <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">
@@ -2231,115 +2446,166 @@ export default function UserDashboardPage() {
                                       {play.hp_resource_url && (
                                         <div className="space-y-1">
                                           <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">
-                                            HP PROOF / RESOURCE
+                                            HP RESOURCE
+                                            <span className="normal-case font-normal text-slate-400"> &middot; HP product page</span>
                                           </span>
-                                          <a
-                                            href={play.hp_resource_url}
-                                            target="_blank"
-                                            rel="noreferrer"
-                                            className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 font-semibold text-[11px] hover:bg-emerald-100 transition"
-                                          >
-                                            <Globe className="w-3 h-3 text-emerald-600" />
-                                            <span>HP ↗</span>
-                                          </a>
-                                        </div>
-                                      )}
-                                    </div>
-
-                                    {/* QUANTIFIED IMPACT BOX (Soft Blue/Purple) */}
-                                    <div className="bg-indigo-50/70 border border-indigo-100 rounded-lg p-3.5 space-y-1.5">
-                                      <div className="flex flex-wrap items-center justify-between gap-2">
-                                        <div className="flex items-center gap-1.5 text-indigo-600 font-semibold text-[10px] uppercase tracking-wider">
-                                          <Target className="w-3.5 h-3.5 text-indigo-500" />
-                                          <span>QUANTIFIED IMPACT - HP-MODELED</span>
-                                        </div>
-                                        <span className="text-[9px] font-medium text-indigo-700 bg-indigo-100/80 px-1.5 py-0.5 rounded">
-                                          Internal projection - not an external source
-                                        </span>
-                                      </div>
-
-                                      <p className="text-sm font-semibold text-slate-900 leading-snug">
-                                        {play.quantified_impact ? `Quantified Impact: ${play.quantified_impact}` : (play.quantified_impact_title || play.title)}
-                                      </p>
-
-                                      {play.how_hp_calculated_this && (
-                                        <div className="pt-0.5">
-                                          <button
-                                            type="button"
-                                            onClick={() => setExpandedCalc(prev => ({ ...prev, [pKey]: !prev[pKey] }))}
-                                            className="text-[10px] font-semibold text-indigo-600 hover:underline flex items-center gap-1"
-                                          >
-                                            {isCalcExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                                            <span>How HP calculated this</span>
-                                          </button>
-
-                                          {isCalcExpanded && (
-                                            <p className="text-xs text-slate-600 font-normal leading-relaxed bg-white p-2.5 rounded-md border border-indigo-100 mt-1.5">
-                                              {play.how_hp_calculated_this}
-                                            </p>
-                                          )}
-                                        </div>
-                                      )}
-                                    </div>
-
-                                    {/* SUPPORTING SIGNAL - SOURCED BOX (Soft Green) */}
-                                    {play.proof_point && (
-                                      <div className="bg-emerald-50/70 border border-emerald-100 rounded-lg p-3.5 space-y-1.5">
-                                        <div className="flex items-center justify-between gap-2">
-                                          <div className="flex items-center gap-1.5 text-emerald-700 font-semibold text-[10px] uppercase tracking-wider">
-                                            <Shield className="w-3.5 h-3.5 text-emerald-600" />
-                                            <span>SUPPORTING SIGNAL - SOURCED</span>
-                                          </div>
-
-                                          {play.source_url ? (
+                                          <div className="flex flex-wrap items-center gap-2">
                                             <a
-                                              href={play.source_url}
+                                              href={play.hp_resource_url}
                                               target="_blank"
                                               rel="noreferrer"
-                                              className="text-[10px] font-semibold text-emerald-700 bg-white border border-emerald-200 px-2 py-0.5 rounded-full flex items-center gap-1 hover:bg-emerald-100 transition"
+                                              className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 font-semibold text-[11px] hover:bg-emerald-100 transition"
                                             >
-                                              <span>{play.source_type || 'Source'} ↗</span>
+                                              <Globe className="w-3 h-3 text-emerald-600" />
+                                              <span>HP &#8599;</span>
                                             </a>
-                                          ) : (
-                                            <span className="text-[10px] font-medium text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded">
-                                              {play.source_type || 'Source Signal'}
+                                            {/* An HP proof point, when one can ever be sourced. No HP
+                                                proof corpus is connected, so this stays empty and the
+                                                reason is stated once in the section header instead of
+                                                repeated on every card. */}
+                                            {play.hp_proof_point && (
+                                              <span className="text-[11px] text-slate-600">{play.hp_proof_point}</span>
+                                            )}
+                                          </div>
+                                        </div>
+                                      )}
+                                    </div>
+
+                                    <div className="border-t border-slate-100"></div>
+
+                                    {/* QUANTIFIED IMPACT - composed in Python from named
+                                        source fields. No source field, no box. */}
+                                    {(play.scale_statement || (play.quantified_impact && play.quantified_impact_state !== 'none')) && (
+                                      <div className="bg-indigo-50/70 border border-indigo-100 rounded-lg p-3.5 space-y-1.5">
+                                        <div className="flex flex-wrap items-center justify-between gap-2">
+                                          <div className="flex items-center gap-1.5 text-indigo-600 font-semibold text-[10px] uppercase tracking-wider">
+                                            <Target className="w-3.5 h-3.5 text-indigo-500" />
+                                            <span>
+                                              {play.quantified_impact_state === 'hp_modeled'
+                                                ? 'Quantified impact - HP-modeled'
+                                                : 'Quantified impact - derived from account data'}
                                             </span>
-                                          )}
+                                          </div>
+                                          <span className="text-[9px] font-medium text-indigo-700 bg-indigo-100/80 px-1.5 py-0.5 rounded">
+                                            {play.quantified_impact_state === 'hp_modeled'
+                                              ? 'Internal projection - not an external source'
+                                              : 'Composed from named source fields - not an HP projection'}
+                                          </span>
                                         </div>
 
-                                        <p className="text-xs text-emerald-800 italic font-normal leading-relaxed">
-                                          &quot;{play.proof_point}&quot;
-                                        </p>
+                                        {play.scale_statement && (
+                                          <p className="text-sm font-semibold text-slate-900 leading-snug">
+                                            {play.scale_statement}
+                                          </p>
+                                        )}
+
+                                        {play.quantified_impact && play.quantified_impact_state !== 'none' && (
+                                          <p className="text-xs text-indigo-900">
+                                            <span className="font-semibold">{play.quantified_impact}</span>
+                                            {play.quantified_impact_source && (
+                                              <span className="text-indigo-700/70"> &middot; {play.quantified_impact_source}</span>
+                                            )}
+                                          </p>
+                                        )}
+
+                                        {play.calculation_basis && (
+                                          <div className="pt-0.5">
+                                            <button
+                                              type="button"
+                                              onClick={() => setExpandedCalc(prev => ({ ...prev, [pKey]: !prev[pKey] }))}
+                                              className="text-[10px] font-semibold text-indigo-600 hover:underline flex items-center gap-1"
+                                            >
+                                              {isCalcExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                                              <span>How this was derived</span>
+                                            </button>
+                                            {isCalcExpanded && (
+                                              <p className="text-xs text-slate-600 font-normal leading-relaxed bg-white p-2.5 rounded-md border border-indigo-100 mt-1.5">
+                                                {play.calculation_basis}
+                                              </p>
+                                            )}
+                                          </div>
+                                        )}
                                       </div>
                                     )}
 
-                                    {/* ENTRY PATH BOX (Soft Sky Blue) */}
-                                    <div className="bg-sky-50/50 border border-sky-100 rounded-lg p-3.5 space-y-2.5">
+                                    {/* SUPPORTING SIGNAL - SOURCED. Every item quotes a cell of this
+                                        account's own uploaded data, with the column it came from. */}
+                                    {(play.account_evidence?.length > 0 || play.proof_point) && (
+                                      <div className="bg-emerald-50/60 border border-emerald-200 rounded-lg p-3.5 space-y-2.5">
+                                        <div className="flex items-center gap-1.5 text-emerald-700 font-semibold text-[10px] uppercase tracking-wider">
+                                          <CheckCircle2 className="w-3.5 h-3.5" />
+                                          <span>Supporting signal - sourced</span>
+                                        </div>
+
+                                        {play.account_evidence?.map((ev: any, i: number) => (
+                                          <div key={i} className="space-y-1">
+                                            <div className="flex flex-wrap items-center gap-1.5">
+                                              <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-800 bg-white border border-emerald-200 px-1.5 py-0.5 rounded">
+                                                <FileText className="w-3 h-3" />
+                                                {ev.dataset} &rarr; {ev.field}
+                                              </span>
+                                              {ev.kind && (
+                                                <span className="text-[10px] text-emerald-700/70">{ev.kind}</span>
+                                              )}
+                                            </div>
+                                            <p className="text-[11px] text-emerald-900/90 font-mono leading-relaxed break-words">
+                                              &ldquo;{ev.quote}&rdquo;
+                                            </p>
+                                            {ev.statement && (
+                                              <p className="text-xs text-emerald-800 italic leading-relaxed">{ev.statement}</p>
+                                            )}
+                                          </div>
+                                        ))}
+
+                                        {play.proof_point && (
+                                          <p className="text-xs text-emerald-800 italic leading-relaxed">
+                                            &quot;{play.proof_point}&quot;
+                                          </p>
+                                        )}
+                                      </div>
+                                    )}
+
+                                    <div className="border-t border-slate-100"></div>
+
+                                    {/* ENTRY PATH */}
+                                    <div className="space-y-2.5">
                                       <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 block">
                                         ENTRY PATH
                                       </span>
 
                                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                                        <div className="flex items-center gap-2">
-                                          <Clock className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+                                        <div className="flex items-start gap-2">
+                                          <Clock className="w-3.5 h-3.5 text-slate-400 flex-shrink-0 mt-0.5" />
                                           <div>
                                             <span className="text-[10px] text-slate-400 font-semibold uppercase block">TIMELINE</span>
                                             <span className="font-semibold text-slate-800">{play.entry_path?.timeline || '0-90 days'}</span>
                                           </div>
                                         </div>
 
-                                        <div className="flex items-center gap-2">
-                                          <Users className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
-                                          <div>
+                                        <div className="flex items-start gap-2">
+                                          <Users className="w-3.5 h-3.5 text-slate-400 flex-shrink-0 mt-0.5" />
+                                          <div className="min-w-0">
                                             <span className="text-[10px] text-slate-400 font-semibold uppercase block">TARGET BUYERS</span>
-                                            <span className="font-semibold text-slate-800">{play.entry_path?.target_buyers?.join(', ') || 'IT Leadership'}</span>
+                                            {play.entry_path?.target_contacts?.length > 0 ? (
+                                              <div className="space-y-0.5">
+                                                {play.entry_path.target_contacts.map((c: any) => (
+                                                  <div key={c.contact_id}>
+                                                    <span className="font-semibold text-slate-800">{c.name}</span>
+                                                    <span className="text-slate-500"> &mdash; {c.title}</span>
+                                                  </div>
+                                                ))}
+                                              </div>
+                                            ) : (
+                                              <span className="text-slate-500 font-normal">
+                                                {play.entry_path?.no_contact_note || 'No matching contact identified in supplied data.'}
+                                              </span>
+                                            )}
                                           </div>
                                         </div>
                                       </div>
 
-                                      {/* RECOMMENDED CTA BOX */}
                                       {play.entry_path?.recommended_cta && (
-                                        <div className="bg-sky-100/60 border border-sky-200/80 rounded-lg p-2.5 space-y-0.5">
+                                        <div className="bg-sky-50/60 border border-sky-100 rounded-lg p-2.5 space-y-0.5">
                                           <span className="text-[10px] font-semibold text-sky-800 uppercase tracking-wider block">
                                             RECOMMENDED CTA
                                           </span>
@@ -2348,7 +2614,18 @@ export default function UserDashboardPage() {
                                           </p>
                                         </div>
                                       )}
+
+                                      {play.checks && (
+                                        <div className="flex flex-wrap gap-x-4 gap-y-1 pt-1">
+                                          {Object.entries(play.checks).map(([name, passed]: [string, any]) => (
+                                            <span key={name} className={`text-[10px] ${passed ? 'text-emerald-700' : 'text-amber-700'}`}>
+                                              {passed ? '\u2713' : '\u2717'} {name.replace(/_/g, ' ')}
+                                            </span>
+                                          ))}
+                                        </div>
+                                      )}
                                     </div>
+
 
                                   </div>
                                 </div>
@@ -2394,6 +2671,74 @@ export default function UserDashboardPage() {
                           </div>
                         )}
                       </div>
+
+                      {/* Discovery / evidence gaps - areas the data raises but does not
+                          support as an HP opportunity. Deliberately reduced: no HP
+                          capability, no products, no CTA. */}
+                      {discoveryAreas.length > 0 && (
+                        <div className="space-y-3 pt-2">
+                          <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-600 flex items-center gap-2">
+                            <Compass className="w-3.5 h-3.5 text-slate-400" />
+                            <span>Discovery / evidence gaps</span>
+                            <span className="text-slate-400">({discoveryAreas.length})</span>
+                          </h3>
+                          <p className="text-[11px] text-slate-400 max-w-3xl leading-relaxed">
+                            The data raises these areas but does not support them as HP
+                            opportunities. They carry no recommendation &mdash; only what the
+                            evidence shows, what is missing, and what to confirm.
+                          </p>
+
+                          {discoveryAreas.map((area: any, i: number) => (
+                            <div key={area.play_key || i} className="bg-slate-50 rounded-xl border border-dashed border-slate-300 p-4 space-y-2.5">
+                              <div className="flex flex-wrap items-start justify-between gap-2">
+                                <p className="text-sm font-semibold text-slate-700">{area.title}</p>
+                                <span className="text-[11px] font-semibold text-slate-600 bg-white border border-slate-200 px-2 py-0.5 rounded flex-shrink-0">
+                                  {area.severity}
+                                </span>
+                              </div>
+
+                              {area.missing_checks?.length > 0 && (
+                                <p className="text-[11px] text-amber-700">
+                                  Failed checks: {area.missing_checks.map((m: string) => m.replace(/_/g, ' ')).join(', ')}
+                                </p>
+                              )}
+
+                              {area.scale_statement && (
+                                <div>
+                                  <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">What the data shows</span>
+                                  <p className="text-xs text-slate-600 leading-relaxed">{area.scale_statement}</p>
+                                </div>
+                              )}
+
+                              {area.account_evidence?.length > 0 && (
+                                <div className="space-y-1">
+                                  {area.account_evidence.map((ev: any, j: number) => (
+                                    <p key={j} className="text-[11px] text-slate-500 font-mono leading-relaxed break-words">
+                                      [{ev.dataset} &rarr; {ev.field}] &ldquo;{ev.quote}&rdquo;
+                                    </p>
+                                  ))}
+                                </div>
+                              )}
+
+                              {area.timing_note && (
+                                <div>
+                                  <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">What to confirm</span>
+                                  <p className="text-xs text-slate-600 leading-relaxed">{area.timing_note}</p>
+                                </div>
+                              )}
+
+                              {area.entry_path?.target_contacts?.length > 0 && (
+                                <div>
+                                  <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">Who to ask</span>
+                                  <p className="text-xs text-slate-600">
+                                    {area.entry_path.target_contacts.map((c: any) => `${c.name} — ${c.title}`).join('; ')}
+                                  </p>
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
 
                     </div>
                   );
@@ -2607,7 +2952,7 @@ export default function UserDashboardPage() {
 
                             {Array.isArray(tp.pain_points) && tp.pain_points.length > 0 && (
                               <div className="space-y-1">
-                                <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">Pain points</span>
+                                <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">Potential pain points <span className="normal-case font-normal text-slate-400">(inferred)</span></span>
                                 <ul className="space-y-0.5">
                                   {tp.pain_points.map((p: string, i: number) => (
                                     <li key={i} className="text-xs text-slate-600 font-normal flex gap-2">
@@ -2648,7 +2993,7 @@ export default function UserDashboardPage() {
                             {contactsList.length} contact{contactsList.length === 1 ? '' : 's'} identified for {selectedAccount?.name}
                           </p>
                           <p className="text-xs text-slate-400 mt-0.5">
-                            {priorityCount} Priority Contact{priorityCount === 1 ? '' : 's'} &middot; {relevanceBreakdown.high} high &middot; {relevanceBreakdown.medium} medium &middot; {relevanceBreakdown.low} lower-relevance HP fit
+                            {priorityCount} Priority Contact{priorityCount === 1 ? '' : 's'} &middot; {relevanceBreakdown.high} High HP Fit &middot; {relevanceBreakdown.medium} Medium HP Fit &middot; {relevanceBreakdown.low} Lower HP Fit
                           </p>
                           {sourceBreakdown['Source A'] !== undefined && (
                             <p className="text-[11px] text-slate-400 mt-0.5">
@@ -2827,7 +3172,7 @@ export default function UserDashboardPage() {
 
                                       {Array.isArray(tp.pain_points) && tp.pain_points.length > 0 && (
                                         <div className="space-y-1">
-                                          <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">Pain points</span>
+                                          <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">Potential pain points <span className="normal-case font-normal">(inferred)</span></span>
                                           <ul className="space-y-0.5">
                                             {tp.pain_points.map((p: string, i: number) => (
                                               <li key={i} className="text-[11px] text-slate-600 font-normal flex gap-1.5">
@@ -3980,6 +4325,9 @@ Are you available for a brief 10-minute briefing next Thursday to review how pee
                   const businessContext = contextData.business_context || {};
                   const totalIncumbentsCount = contextData.total_incumbents_count ?? incumbentTechs.length;
 
+                  const objectionCards: any[] = reframesData.cards || [];
+                  const objectionsReady = reframesWidget?.status === 'available' && objectionCards.length > 0;
+
                   return (
                     <div className="space-y-6 animate-fade-in">
                       {/* Top Header */}
@@ -3990,7 +4338,12 @@ Are you available for a brief 10-minute briefing next Thursday to review how pee
                             <span>Objection Playbook</span>
                           </h3>
                           <p className="text-xs text-slate-500 mt-0.5">
-                            Incumbent technology evidence &amp; objection reframe contracts for {selectedAccount?.name || 'Target Account'}
+                            {objectionCards.length} objection reframes for {selectedAccount?.name || 'Target Account'}
+                          </p>
+                          <p className="text-[11px] text-slate-400 mt-1 max-w-2xl leading-relaxed">
+                            Anticipated push-back a seller should be ready for, generated from this
+                            account&apos;s technographics evidence. These are not statements made by
+                            any contact.
                           </p>
                         </div>
 
@@ -4001,38 +4354,102 @@ Are you available for a brief 10-minute briefing next Thursday to review how pee
                         </div>
                       </div>
 
-                      {/* Section 2: Competitor Reframes & Proof Points (Inferred - Left as TBD) */}
-                      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
-                        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                          <div>
-                            <h4 className="text-sm font-black text-slate-900 flex items-center gap-2">
-                              <Sparkles className="w-4 h-4 text-purple-600" />
-                              <span>Competitor Reframes &amp; Proof Points</span>
-                              {getClassificationBadge('inferred')}
-                            </h4>
-                            <p className="text-xs text-slate-500 mt-0.5">
-                              AI-generated objection statements, competitive reframes, counter questions, and likely raisers
-                            </p>
-                          </div>
-
-                          <span className="text-[11px] font-mono font-extrabold text-amber-800 bg-amber-50 px-3 py-1 rounded-full border border-amber-200">
-                            Inferred TBD
-                          </span>
-                        </div>
-
-                        {/* Inferred TBD Banner Box */}
+                      {/* Objection accordion */}
+                      {!objectionsReady ? (
                         <div className="bg-amber-50/60 border border-amber-200/80 rounded-2xl p-6 text-center space-y-3">
                           <div className="w-10 h-10 rounded-full bg-amber-100 text-amber-800 flex items-center justify-center mx-auto border border-amber-300">
                             <Sparkles className="w-5 h-5 text-amber-600" />
                           </div>
-                          <h4 className="text-xs font-black text-amber-900 uppercase tracking-wider">
-                            Objection Reframe Generation — Inferred TBD
+                          <h4 className="text-xs font-bold text-amber-900 uppercase tracking-wider">
+                            No objections generated
                           </h4>
                           <p className="text-xs text-amber-800 max-w-xl mx-auto leading-relaxed">
-                            AI-synthesized objection statements, likely raisers, competitive reframes, and strategic counter-questions based on incumbent technology evidence will be generated in Step 8 (AI Generation Layer).
+                            {reframesData.notice || 'Objection generation has not run for this account. The incumbent evidence below is shown as extracted; no objections are invented.'}
                           </p>
                         </div>
-                      </div>
+                      ) : (
+                        <div className="space-y-3">
+                          {objectionCards.map((card: any) => {
+                            const isOpen = expandedObjectionId === card.card_id;
+                            const raiserIsContact = card.likely_raiser_source === 'prospect_contacts';
+                            return (
+                              <div key={card.card_id} className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
+                                <button
+                                  type="button"
+                                  className="w-full flex items-start gap-3 p-4 text-left hover:bg-slate-50 transition-colors"
+                                  onClick={() => setExpandedObjectionId(isOpen ? null : card.card_id)}
+                                >
+                                  <MessageSquare className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-sm font-semibold text-slate-900">
+                                      &ldquo;{card.objection.replace(/^["“]|["”]$/g, '')}&rdquo;
+                                    </p>
+                                    <p className="text-xs text-slate-400 mt-0.5">
+                                      Could be raised by: <span className="font-medium text-slate-600">{card.likely_raiser}</span>
+                                      {!raiserIsContact && (
+                                        <span className="text-slate-400"> (owning function)</span>
+                                      )}
+                                    </p>
+                                  </div>
+                                  <span className="text-[10px] font-medium text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded flex-shrink-0 mt-0.5">
+                                    {card.area}
+                                  </span>
+                                  {isOpen
+                                    ? <ChevronUp className="w-4 h-4 text-slate-400 flex-shrink-0 mt-1" />
+                                    : <ChevronDown className="w-4 h-4 text-slate-400 flex-shrink-0 mt-1" />}
+                                </button>
+
+                                {isOpen && (
+                                  <div className="border-t border-slate-100 p-4 bg-slate-50 space-y-4">
+                                    <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                                      <div className="flex items-center gap-2 mb-2">
+                                        <Shield className="w-4 h-4 text-green-600" />
+                                        <p className="text-xs font-semibold text-green-700 uppercase tracking-wider">Reframe</p>
+                                      </div>
+                                      <p className="text-sm text-green-900 leading-relaxed">{card.reframe}</p>
+                                    </div>
+
+                                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                                      <p className="text-xs font-semibold text-blue-700 uppercase tracking-wider mb-2">Evidence</p>
+                                      <p className="text-xs text-blue-900 font-mono leading-relaxed break-words">{card.evidence}</p>
+                                      {card.not_in_technographics && (
+                                        <p className="text-[11px] text-blue-700/80 mt-2 leading-relaxed">
+                                          No vendor for this area appears in this account&apos;s technographics
+                                          export. That is a limit of what this dataset reports &mdash; it is not
+                                          evidence that no such vendor or process exists.
+                                        </p>
+                                      )}
+                                    </div>
+
+                                    <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
+                                      <div className="flex items-center gap-2 mb-2">
+                                        <HelpCircle className="w-4 h-4 text-purple-600" />
+                                        <p className="text-xs font-semibold text-purple-700 uppercase tracking-wider">Counter Question</p>
+                                      </div>
+                                      <p className="text-sm text-purple-900 italic">&ldquo;{card.counter_question}&rdquo;</p>
+                                    </div>
+
+                                    <div className="bg-slate-100 border border-slate-200 rounded-lg p-3 flex items-start gap-2">
+                                      <User className="w-4 h-4 text-slate-500 flex-shrink-0 mt-0.5" />
+                                      <p className="text-xs text-slate-600 leading-relaxed">
+                                        <span className="font-semibold">
+                                          {raiserIsContact ? 'Topic owner: ' : 'Owning function: '}
+                                        </span>
+                                        {card.likely_raiser}
+                                        <span className="text-slate-400">
+                                          {raiserIsContact
+                                            ? ' \u2014 a title in this account\u2019s contacts who would own this subject. They have not raised this objection.'
+                                            : ' \u2014 no contact in this account\u2019s data clearly owns this area, so the area itself is named.'}
+                                        </span>
+                                      </p>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
 
                     </div>
                   );

@@ -135,11 +135,83 @@ FEATURE_MAPPINGS = {
             {
                 "field_key": "source_url",
                 "display_name": "Source URL (LiveSignal.sourceUrl)",
-                "purpose": "Link to original news source",
+                "purpose": "Link to original news source. google_news only - news_events carries no URL column, so those signals show no link rather than a fabricated one",
                 "dataset_key": "google_news",
                 "source_sheet": "google_news_rss_data (Primary) / news_events (Add-on)",
-                "source_column": "link, source_url",
+                "source_column": "event_url",
                 "data_type": "DETERMINISTIC"
+            },
+            {
+                "field_key": "evidence_sentence",
+                "display_name": "Evidence Sentence (verbatim)",
+                "purpose": "The exact sentence supporting the event, stored byte-identical to the source cell and never rewritten",
+                "dataset_key": "news_events",
+                "source_sheet": "news_events / google_news_rss_data",
+                "source_column": "article_sentence, news_announcements",
+                "data_type": "DETERMINISTIC"
+            },
+            {
+                "field_key": "publication_date",
+                "display_name": "Publication Date (distinct from event date)",
+                "purpose": "When the item was found, kept separate from when the event occurred",
+                "dataset_key": "news_events",
+                "source_sheet": "news_events",
+                "source_column": "found_at",
+                "data_type": "DETERMINISTIC"
+            },
+            {
+                "field_key": "source_publisher",
+                "display_name": "Publisher",
+                "purpose": "The outlet that published the item. Google News headlines carry the outlet as a trailing ' - Publisher', so the name is split off the headline structurally and the cleaned title is what the card shows. Falls back to the source_publisher column when no suffix is present; source_publisher_derived records which of the two applied. news_events carries no publisher column, so its signals show none rather than a guessed one",
+                "dataset_key": "google_news",
+                "source_sheet": "google_news_rss_data",
+                "source_column": "event_headline (trailing suffix), else source_publisher",
+                "data_type": "DERIVED"
+            },
+            {
+                "field_key": "source_confidence",
+                "display_name": "Source Confidence",
+                "purpose": "The exporter's own confidence in the extraction; feeds the D5 source-reliability dimension",
+                "dataset_key": "google_news",
+                "source_sheet": "google_news_rss_data / news_events",
+                "source_column": "relevance_confidence, confidence",
+                "data_type": "DETERMINISTIC"
+            },
+            {
+                "field_key": "supporting_source_count",
+                "display_name": "Supporting Sources",
+                "purpose": "Number of rows merged into one card by deduplication; every merged URL and publisher is preserved",
+                "dataset_key": "google_news",
+                "source_sheet": "google_news_rss_data",
+                "source_column": "coverage_depth_events_per_account_last_12mo",
+                "data_type": "DETERMINISTIC"
+            },
+            {
+                "field_key": "confidence",
+                "display_name": "Weighted Relevance Score and Tier",
+                "purpose": "25% recency + 30% HP relevance + 20% strategic impact + 15% actionability + 10% source reliability. Computed in Python from the five model-supplied dimension scores; tier S >= 8.0, A >= 6.0, B >= 4.0, C >= 2.0",
+                "dataset_key": "google_news",
+                "source_sheet": "google_news_rss_data / news_events",
+                "source_column": "All signal fields above",
+                "data_type": "DETERMINISTIC"
+            },
+            {
+                "field_key": "sales_angle",
+                "display_name": "D1-D5 Dimension Scores and Sales Angle",
+                "purpose": "The five relevance dimension scores with rationales, and the implication for an HP seller. Synthesized from the signal's own headline and evidence plus account context; introduces no fact absent from that evidence",
+                "dataset_key": None,
+                "source_sheet": None,
+                "source_column": None,
+                "data_type": "INFERRED / SYNTHESIZED"
+            },
+            {
+                "field_key": "hp_play",
+                "display_name": "HP Product Line",
+                "purpose": "The single HP line the signal most supports, chosen by the model from a fixed enum (Z by HP Workstations, HP Elite / Pro PCs, HP Wolf Security, Poly Collaboration, HP Enterprise Print / MPS, HP Anyware / DaaS) or left null. Anything outside the enum is discarded rather than stored, so no product name is ever invented",
+                "dataset_key": None,
+                "source_sheet": None,
+                "source_column": None,
+                "data_type": "INFERRED / SYNTHESIZED"
             }
         ]
     },
@@ -242,11 +314,11 @@ FEATURE_MAPPINGS = {
             {
                 "field_key": "influence_type",
                 "display_name": "Influence Type (derived)",
-                "purpose": "Decision Maker / Budget Holder / Technical Evaluator / Influencer. Buying-committee persona leads; procurement and technical title terms override. Scored 100/85/60/50",
+                "purpose": "Decision Maker / Budget Holder / Technical Evaluator / Influencer, resolved by an ordered cascade: procurement title terms, then C-suite, then hands-on technical title terms, then a senior title inside IT or Engineering. The buying-committee persona column is used LAST and is GATED, not taken at face value - it labels most of a roster a Decision Maker, so a 'Business Decision Maker' tag never confers IT authority and an 'IT Decision Maker' tag applies only inside IT, Engineering or Executive. A clearly non-IT title (HR, tax, legal, comms) blocks promotion even when the department column says otherwise. influence_source records the deciding branch. Scored 100/85/60/50",
                 "dataset_key": "prospect_contacts",
                 "source_sheet": "14_Prospect_Contacts",
-                "source_column": "Prospect buying_committee_personas, Prospect job_title",
-                "data_type": "DETERMINISTIC"
+                "source_column": "Prospect buying_committee_personas, Prospect job_title, Prospect job_level_main, Prospect job_department_main",
+                "data_type": "DERIVED"
             },
             {
                 "field_key": "hp_relevance_band",
@@ -299,8 +371,62 @@ FEATURE_MAPPINGS = {
         "feature_key": "solution_narrative_opportunity_map",
         "display_name": "Solution Narrative / Opportunity Map",
         "purpose": "Maps customer triggers and tech environment to HP business outcomes and product opportunities",
-        "dependent_datasets": ["firmographics", "technographics", "intent_score", "google_news", "news_events"],
+        "dependent_datasets": ["firmographics", "technographics", "intent_score", "google_news", "news_events", "prospect_contacts"],
         "mapped_fields": [
+            {
+                "field_key": "account_evidence",
+                "display_name": "Account Evidence (verbatim)",
+                "purpose": "Per play, the supplied cells the play is built on. Each item carries the verbatim quote plus the dataset and column it came from, and is re-verified against the source data in Python - anything that cannot be matched is deleted rather than published. Items are classed 'trigger' (intent_score / news) or 'context' (firmographics / technographics); a play with no trigger is not generated",
+                "dataset_key": "firmographics, technographics, intent_score, google_news, news_events",
+                "source_sheet": "1_Firmographics, 4_Technographics, 11_intent_score, Google News RSS, news_events",
+                "source_column": "Business Description, Full Tech Stack, Topic, event_headline",
+                "data_type": "DETERMINISTIC"
+            },
+            {
+                "field_key": "hp_capability",
+                "display_name": "HP Capability",
+                "purpose": "What the HP product line does. General product capability, true of HP everywhere - never a finding about this account, and rendered in its own block so it cannot read as account evidence",
+                "dataset_key": None,
+                "source_sheet": None,
+                "source_column": None,
+                "data_type": "REFERENCE"
+            },
+            {
+                "field_key": "severity",
+                "display_name": "Play Priority",
+                "purpose": "How many of HP_ABX_v3_final's three checks the play meets - (1) verified account evidence exists, (2) a current timing trigger exists, (3) the HP product/play directly fits the need - shown as '3 of 3 checks'. The spec defines NO numeric opportunity score for this feature, so none is computed: plays meeting all three are ordered first, those missing one follow, tie-broken by trigger recency. A play missing check 2 or 3 is retained and its gap marked in missing_checks rather than dropped; only a play with no traceable evidence chain is withheld. The model never supplies any of this",
+                "dataset_key": None,
+                "source_sheet": None,
+                "source_column": None,
+                "data_type": "DERIVED"
+            },
+            {
+                "field_key": "scale_statement",
+                "display_name": "Quantified Impact (derived)",
+                "purpose": "A qualitative statement of the opportunity's scale, composed in Python from named source fields only - employee range, the technologies detected for that play's area, the highest intent composite the play cites, and a verified news figure where one is cited. calculation_basis lists every field used so the statement can be re-derived by hand. HP_ABX_v3_final requires numeric impact to recalculate from stored inputs and a formula; no HP impact formula exists here, so the impact is kept qualitative as the spec directs. The model is never asked for it and cannot alter it",
+                "dataset_key": "firmographics, technographics, intent_score, google_news",
+                "source_sheet": "1_Firmographics, 4_Technographics, 11_intent_score, Google News RSS",
+                "source_column": "Number Of Employees Range, Full Tech Stack, Topic / Composite Score, event_headline",
+                "data_type": "DERIVED"
+            },
+            {
+                "field_key": "quantified_impact",
+                "display_name": "Quantified Signal",
+                "purpose": "A figure only where it appears verbatim in a supplied cell that this play itself cites and that is topically relevant to the play. Labelled a sourced account signal, never an HP projection. Where no such figure exists no card is rendered - an empty 'HP-modeled' card is never shown",
+                "dataset_key": "google_news, news_events, firmographics",
+                "source_sheet": "Google News RSS, news_events, 1_Firmographics",
+                "source_column": "event_headline, Business Description",
+                "data_type": "DETERMINISTIC"
+            },
+            {
+                "field_key": "target_contacts",
+                "display_name": "Entry Path Contacts",
+                "purpose": "Real contacts from this account's own roster whose title or department matches the play's remit, resolved on word boundaries against stakeholder_contacts_grid. Where none matches the card says so explicitly - a buyer persona is never invented",
+                "dataset_key": "prospect_contacts",
+                "source_sheet": "14_Prospect_Contacts",
+                "source_column": "Prospect job_title, Prospect job_department_main",
+                "data_type": "DERIVED"
+            },
             {
                 "field_key": "narrative_context",
                 "display_name": "Business Outcome Context",
@@ -405,7 +531,7 @@ FEATURE_MAPPINGS = {
         "feature_key": "objection_playbook",
         "display_name": "Objection Playbook",
         "purpose": "Anticipated competitor objections, reframes, proof points, and counter-questions",
-        "dependent_datasets": ["technographics", "firmographics"],
+        "dependent_datasets": ["technographics", "firmographics", "prospect_contacts"],
         "mapped_fields": [
             {
                 "field_key": "incumbent_technology",
@@ -426,9 +552,27 @@ FEATURE_MAPPINGS = {
                 "data_type": "DETERMINISTIC"
             },
             {
+                "field_key": "evidence",
+                "display_name": "Per-Area Technographics Evidence",
+                "purpose": "For each HP contest area, the verbatim technographics cells naming a competing vendor, with the column each came from. Built in Python and never rewritten by the model. Where an area names no vendor the string says so explicitly - that records only what this export reports and is never treated as evidence that no such vendor, capability or process exists at the account",
+                "dataset_key": "technographics",
+                "source_sheet": "4_Technographics",
+                "source_column": "Full Tech Stack, category columns",
+                "data_type": "DETERMINISTIC"
+            },
+            {
+                "field_key": "likely_raiser",
+                "display_name": "Topic Owner",
+                "purpose": "Who at this account would own the subject an objection touches. Resolved against prospect_contacts job titles and departments on word boundaries; falls back to the HP contest area name when no contact clearly owns it. likely_raiser_source records which applied. This names a topic owner, never someone who has raised the objection",
+                "dataset_key": "prospect_contacts",
+                "source_sheet": "3_Prospects",
+                "source_column": "Prospect job_title, Prospect job_department_main",
+                "data_type": "DERIVED"
+            },
+            {
                 "field_key": "objection_synthesis",
-                "display_name": "Objection Reframe & Proof Points",
-                "purpose": "Synthesized counter-arguments and competitive reframes",
+                "display_name": "Objection, Reframe & Counter Question",
+                "purpose": "Anticipated buyer push-back a seller should prepare for, the HP reframe, and the next question to ask. Hypothetical by construction - not statements made by any contact, and never attributed to a person. Grounded strictly in that area's own technographics evidence plus the firmographics Business Description; introduces no vendor, product or fact absent from them",
                 "dataset_key": None,
                 "source_sheet": None,
                 "source_column": None,

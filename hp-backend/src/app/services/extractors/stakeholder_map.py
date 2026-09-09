@@ -1,5 +1,6 @@
 import os
 import io
+import re
 import csv
 import json
 import hashlib
@@ -9,6 +10,9 @@ from datetime import datetime, timezone
 from bson import ObjectId
 from app.database.mongodb import get_db
 from app.core.llm import generate_gpt4o_json_completion
+from app.services.extractors.grounding import (
+    build_corpus, check_text, GroundingReport,
+)
 
 import logging
 
@@ -99,6 +103,19 @@ SENIORITY_BAND_MAP = {
     "manager": "Manager",
     "owner": "Manager",
 }
+# A c_suite tag is only honoured when the title corroborates it. HP_ABX_v3_final
+# Feature 3 rule 4: "If the mapped seniority does not fit the original title,
+# keep the original title and send only the mapped field for review."
+# `office` separates a department name ("CIO Office") from a person
+# ("Chief Operating Officer" - "Officer" is a different word).
+OFFICE_NAME_RE = re.compile(r"\boffice\b", re.I)
+EXECUTIVE_TITLE_RE = re.compile(
+    r"\b(chief\s+\w+(\s+\w+)?\s+officer"
+    r"|ceo|cio|coo|cto|cfo|ciso|president|managing\s+director)\b",
+    re.I,
+)
+SENIORITY_UNCORROBORATED_BAND = "Manager"
+
 SENIORITY_SCORES = {
     "C-Suite": 100,
     "VP": 75,
@@ -117,13 +134,21 @@ HP_RELEVANCE_TIERS = [
           "data center", "cloud", "devops", "security", "developer", "technology"]),
     (40, ["operations", "product", "executive", "business"]),
 ]
+# A department slug suggests relevance but never asserts the top tier on its own -
+# only a title keyword reaches 100. Source A's "Data" label maps to Information
+# Technology, which would otherwise score an HR role in that department at 100.
 HP_RELEVANCE_DEPT_TIERS = {
-    "Information Technology": 100,
+    "Information Technology": 70,
     "Engineering & Technical": 70,
     "Operations": 40,
     "Product Management": 40,
     "Executive": 40,
 }
+# A clearly non-IT title overrides an inflated department and caps the score.
+NON_IT_TITLE_TERMS = ["employment relations", "people experience", "human resources",
+                      "recruitment", "payroll", "tax", "legal", "audit",
+                      "corporate communications", "industrial relations"]
+NON_IT_TITLE_CAP = 40
 HP_RELEVANCE_FLOOR = 20
 HP_SKILL_TERMS = ["sap", "azure", "aws", "autocad", "catia", "vmware", "cisco", "windows"]
 HP_SKILL_BONUS = 10
@@ -145,6 +170,49 @@ TECHNICAL_TITLE_TERMS = ["infrastructure", "engineer", "engineering", "collabora
                          "network", "cloud", "system", "technology", "developer", "software",
                          "application", "architect", "end user", "end-user", "data governance",
                          "technical", "devops", "operations excellence"]
+
+# --- 3b. Play / role plausibility --------------------------------------------
+# Title signals that make an HP line implausible for a contact. Used to hand the
+# model a per-contact "do not propose" list, because a general instruction did
+# not hold. Product semantics only - nothing account-specific.
+PLAY_BLOCKED_BY_TITLE = {
+    "HP Enterprise Printing & MPS": [
+        "cloud", "infrastructure", "network", "data governance", "software",
+        "application", "developer", "devops", "architect", "security",
+        "business intelligence", "analytics", "cio", "engineering", "technology development",
+    ],
+    "Z by HP Workstations": [
+        "employment relations", "people experience", "human resources", "recruitment",
+        "payroll", "tax", "legal", "audit", "corporate communications",
+        "industrial relations", "branch manager",
+    ],
+    "Poly Studio": [
+        "tax", "legal", "audit", "payroll", "procurement",
+    ],
+}
+
+# Canonical phrasings of the decision_power rule itself. The model echoed these
+# back verbatim in v6 instead of writing a role-specific statement.
+DECISION_POWER_ECHOES = [
+    "this role typically participates in or owns decisions of this kind",
+    "evaluation, standards and requirements influence only",
+    "may discuss budget ownership and procurement authority",
+    "advisory input only",
+]
+
+
+def blocked_plays_for(title: str | None) -> list[str]:
+    """HP lines that do not plausibly follow from this contact's remit."""
+    t = (title or "").lower()
+    return [play for play, terms in PLAY_BLOCKED_BY_TITLE.items()
+            if any(term in t for term in terms)]
+
+
+def _is_rule_echo(text: str) -> bool:
+    """True when decision_power just repeats the instruction back."""
+    t = " ".join((text or "").split()).strip().lower().rstrip(".")
+    return any(t == e or t.startswith(e) for e in DECISION_POWER_ECHOES)
+
 
 # --- 4. Data completeness -----------------------------------------------------
 DATA_COMPLETENESS_POINTS = {
@@ -197,7 +265,7 @@ PRIORITY_CONTACT_MIN_COMPOSITE = 60
 
 # Bump when the talking-points prompt changes, so cached output is regenerated
 # rather than served stale against an older set of instructions.
-TALKING_POINTS_PROMPT_VERSION = 5
+TALKING_POINTS_PROMPT_VERSION = 8
 
 
 def normalize_department(raw: str | None) -> str:
@@ -224,11 +292,46 @@ def normalize_department(raw: str | None) -> str:
     return str(raw).strip().title() or UNASSIGNED_DEPT
 
 
-def seniority_band(raw: str | None) -> str:
+def seniority_band(raw: str | None, title: str | None = None) -> tuple[str, bool]:
+    """Returns (band, source_conflict).
+
+    A `c_suite` tag is trusted only when the title names the role. Where it does
+    not - "CIO Office", "CEO Office Taks Force" - the row is office staff
+    attached to an executive rather than the executive, so we band by the title
+    and flag the disagreement. The original title is never altered.
+    """
     if not raw:
-        return "Individual Contributor"
+        return "Individual Contributor", False
     key = str(raw).strip().strip('[]"\' ').lower()
-    return SENIORITY_BAND_MAP.get(key, "Individual Contributor")
+    band = SENIORITY_BAND_MAP.get(key, "Individual Contributor")
+
+    if band == "C-Suite":
+        t = title or ""
+        corroborated = bool(EXECUTIVE_TITLE_RE.search(t)) and not OFFICE_NAME_RE.search(t)
+        if not corroborated:
+            return SENIORITY_UNCORROBORATED_BAND, True
+
+    return band, False
+
+
+def normalize_phone(raw: str | None) -> str | None:
+    """Undo the float typing Excel applies to phone columns during xlsx->CSV.
+
+    "6281293986658.0" -> "+6281293986658". Corrects a type coercion; never
+    invents a number, and no digit regrouping (spacing conventions differ per
+    country and guessing them introduces a different kind of wrong).
+    """
+    if not raw:
+        return None
+    v = str(raw).strip()
+    v = re.sub(r"\.0+$", "", v)
+    plus = v.startswith("+")
+    digits = re.sub(r"\D", "", v)
+    if not digits:
+        return None
+    if plus or 10 <= len(digits) <= 15:
+        return "+" + digits
+    return digits
 
 
 def score_seniority(band: str) -> int:
@@ -246,6 +349,11 @@ def score_hp_relevance(title: str | None, department: str, skills: str | None) -
             break
     if tier == 0:
         tier = HP_RELEVANCE_FLOOR
+
+    t = (title or "").lower()
+    if any(term in t for term in NON_IT_TITLE_TERMS):
+        return min(tier, NON_IT_TITLE_CAP)
+
     if skills:
         s = skills.lower()
         if any(t in s for t in HP_SKILL_TERMS):
@@ -260,9 +368,18 @@ def hp_relevance_band(score: int) -> str:
     return "low"
 
 
+# Departments where an "IT Decision Maker" persona label is credible. Outside
+# these the label is a segment tag, not evidence of authority over IT hardware.
+PERSONA_DECISION_DEPARTMENTS = {
+    "Information Technology",
+    "Engineering & Technical",
+    "Executive",
+}
+
+
 def assign_influence(persona: str | None, title: str | None,
                      band: str = "Individual Contributor",
-                     department: str = UNASSIGNED_DEPT) -> str:
+                     department: str = UNASSIGNED_DEPT) -> tuple[str, str]:
     """ABX Step 4 cascade: procurement -> Budget Holder; C-suite and senior
     IT/Engineering leaders -> Decision Maker; technical roles -> Technical
     Evaluator; otherwise Influencer.
@@ -274,29 +391,49 @@ def assign_influence(persona: str | None, title: str | None,
 
     Champion and Blocker are never assigned: the spec allows Blocker only with
     evidence that someone can stop a purchase, and we hold none.
+
+    Returns (influence_type, influence_source) so the deciding branch stays
+    inspectable.
     """
     t = (title or "").lower()
     if any(term in t for term in BUDGET_HOLDER_TITLE_TERMS):
-        return "Budget Holder"
+        return "Budget Holder", "title_budget_term"
 
     if band == "C-Suite":
-        return "Decision Maker"
+        return "Decision Maker", "c_suite"
 
     # Hands-on technical remit is checked before the seniority rule below.
     # Our seniority column bands every "Head of ..." title as Director, so
     # testing seniority first would classify the entire engineering bench as
     # Decision Makers and leave the buying group with no evaluators.
     if any(term in t for term in TECHNICAL_TITLE_TERMS):
-        return "Technical Evaluator"
+        return "Technical Evaluator", "technical_title"
 
-    if band in ("VP", "Director") and department in ("Information Technology",
-                                                     "Engineering & Technical"):
-        return "Decision Maker"
+    # A clearly non-IT title overrides an IT department label. The department
+    # column is unreliable here - Astra's employment-relations lead is filed
+    # under "Data" - and the same NON_IT_TITLE_TERMS that cap HP relevance must
+    # also stop an HR, tax, legal or comms role inheriting IT authority.
+    non_it_title = any(term in t for term in NON_IT_TITLE_TERMS)
 
-    if "decision maker" in (persona or "").lower():
-        return "Decision Maker"
+    if (not non_it_title and band in ("VP", "Director")
+            and department in ("Information Technology", "Engineering & Technical")):
+        return "Decision Maker", "senior_in_it"
 
-    return "Influencer"
+    # The persona column is a coarse segment tag, not a statement of authority:
+    # 18 of Astra's 23 rows carry a Decision-Maker label, including finance,
+    # sales and product roles. Taken at face value it hands IT purchasing
+    # authority to a tax lead and two product owners, so it is gated.
+    persona_l = (persona or "").lower()
+    if "business decision maker" in persona_l:
+        # Explicitly a BUSINESS decision maker - they decide for their own unit,
+        # which says nothing about authority over IT hardware.
+        return "Influencer", "persona_business_not_it"
+    if "decision maker" in persona_l:
+        if department in PERSONA_DECISION_DEPARTMENTS and not non_it_title:
+            return "Decision Maker", "persona_gated"
+        return "Influencer", "persona_outside_it"
+
+    return "Influencer", "default_influencer"
 
 
 def score_influence(influence_type: str) -> int:
@@ -457,6 +594,16 @@ def generate_stakeholder_talking_points(account_id: str, contacts: list[dict],
 
     account_context, evidence_labels = _build_account_context(account_id)
 
+    # Grounding corpus: every cell of the datasets this feature is allowed to
+    # reason over. A number or URL absent from it never reaches storage.
+    ground = build_corpus({
+        k: _read_dataset_records(account_id, k) for k in
+        ("prospect_contacts", "firmographics", "technographics",
+         "intent_score", "google_news", "news_events")
+    })
+    report = GroundingReport(ground, ["how_to_open", "hp_play_focus",
+                                      "decision_power", "pain_points"])
+
     def _roster_block(subset):
         lines = []
         for c in subset:
@@ -474,6 +621,9 @@ def generate_stakeholder_talking_points(account_id: str, contacts: list[dict],
                 parts.append(f'skills={c["skills"][:180]}')
             if c.get("career_history"):
                 parts.append(f'past_roles={c["career_history"][:180]}')
+            blocked = blocked_plays_for(c.get("title"))
+            if blocked:
+                parts.append("DO_NOT_PROPOSE=" + "; ".join(blocked))
             lines.append("- " + " | ".join(parts))
         return chr(10).join(lines)
 
@@ -490,16 +640,35 @@ CRITICAL RULES:
 1. You represent HP Inc. Never refer to Dell, Lenovo, Huawei, Acer, Canon or Zoom as "our" product.
 2. Ground every statement in that contact's own record or the account evidence above. Invent nothing.
 3. Reference HP products by name (Z by HP Workstations, HP EliteBook/ProBook PCs, HP Wolf Security, Poly Studio, HP Enterprise Printing & MPS, HP DaaS, HP Anyware).
+3a. AN HP PLAY MUST BE EARNED, NOT ASSIGNED. Before naming a product, the whole chain has to hold:
+      this contact's role and department + their buying-committee persona + a relevant account trigger or installed technology -> a plausible HP product.
+    Do NOT start from a product and work backwards to justify it. Do NOT give someone a product merely because every other contact has one.
+    IF THE CHAIN DOES NOT HOLD: set "hp_play_focus" to "Account engagement / discovery", name NO product anywhere in "how_to_open", and open on this contact's own remit and what you want to learn from them. That is a correct answer, not a failure. A forced product match IS a failure.
+    BAD (the product does not follow from the role): a CIO Office or Cloud Operations contact opened on HP Enterprise Printing & MPS.
+3b. ABSOLUTE: where a contact's roster line carries DO_NOT_PROPOSE, those HP lines are forbidden for that contact. Do not name them in "hp_play_focus" and do not mention them anywhere in "how_to_open". If that leaves no product with an honest chain, use "Account engagement / discovery".
+    GOOD (the chain is visible): a technology-development and business-intelligence remit + an analytics/AI account signal -> Z by HP Workstations.
+    GOOD (the chain is visible): a data-governance remit + a security/tokenisation account signal -> HP Wolf Security.
 4. "how_to_open" is written in the first person, as the seller. Go from a specific account trigger or the contact's own remit to a specific HP product line. 1-2 sentences.
-5. "hp_play_focus" is a short category label, e.g. "PC - fleet standardisation" or "Workstation / strategic sourcing". No sentence.
-6. "decision_power" explains why this ROLE can move a purchase. Base it on the remit the title implies, never on the individual. Include it ONLY where the title names a remit that actually carries purchasing or standard-setting authority over IT hardware - a chief officer, a head of procurement, or the head of a technology function. For a product owner, a branch manager, an individual contributor, or any role whose remit does not reach hardware buying, OMIT THE KEY ENTIRELY. Expect to omit it for roughly half the roster.
-7. "pain_points" must be a COMPLETE SENTENCE that does BOTH of these at once: (a) names a specific item from the ACCOUNT EVIDENCE above, and (b) states the operational pressure that item creates for THIS contact's function. Note that an intent research topic is a signal that the account is researching a subject - it is evidence, NOT a pain. You must translate it into a consequence for the role.
-   BAD (this is only a label pasted back, never do this): "product development & qa: research and development / test"
-   BAD (this is only a headline pasted back): "ASII sets IDR 36 trillion capex for 2026, up 10% year on year"
+4a. EVERY CONTACT GETS A DIFFERENT ANGLE. Before writing, count the distinct triggers and technology items in the ACCOUNT EVIDENCE and spread them across the roster. Do not use the same account trigger for more than two contacts, and never pair the same trigger with the same product twice across the roster. Where the evidence runs out, open on the contact's own remit rather than reusing a trigger a third time. Procurement, CIO office, technical evaluator, operations, data governance and engineering must read differently in SUBSTANCE - what the seller is there to do and learn - not merely in the closing clause. If you find yourself writing the same sentence with a different job title, stop and open on that role's own remit instead.
+5. "hp_play_focus" is a short category label, e.g. "PC - fleet standardisation" or "Workstation / strategic sourcing", or "Account engagement / discovery" where no product chain holds. No sentence.
+6. "decision_power" explains what this ROLE can do in a purchase. Base it on the remit the title implies, never on the individual, and NEVER claim more than this contact's supplied influence type allows:
+      influence=Budget Holder      -> may discuss budget ownership and procurement authority.
+      influence=Decision Maker     -> may say the role typically participates in or owns decisions of this kind. Do not overstate it as sole authority.
+      influence=Technical Evaluator -> evaluation, standards and requirements influence ONLY. NEVER describe them as a decision owner, and never say they decide, approve or authorise a purchase.
+      influence=Influencer         -> advisory input only. NEVER imply purchasing authority of any kind.
+    WRITE IT SPECIFICALLY. Name the actual remit in the contact's own title - "As the head of IT project procurement, this role runs the sourcing route any hardware purchase has to pass through." Do NOT repeat the rule text above back to me: "This role typically participates in or owns decisions of this kind" and "Evaluation, standards and requirements influence only" are FAILED answers. Every contact's decision_power must be a different sentence.
+    Include the field ONLY where the title names a remit that actually reaches IT hardware. For a product owner, a branch manager, an individual contributor, or any role whose remit does not reach hardware buying, OMIT THE KEY ENTIRELY. Expect to omit it for roughly half the roster.
+7. "pain_points" are POTENTIAL pain points, INFERRED. The account evidence can establish that a signal exists at the account. It can NEVER establish that this person feels pressure from it, and you do not know their workload, priorities or concerns.
+   Each entry must be a COMPLETE SENTENCE that does BOTH of these at once: (a) names a specific item from the ACCOUNT EVIDENCE above, and (b) states the pressure that item MAY create for THIS contact's FUNCTION. An intent research topic is a signal that the account is researching a subject - it is evidence, NOT a pain. You must translate it into a possible consequence for the role.
+   HEDGE EVERY ENTRY. Use "may", "could", "likely", "suggests" or "points to". Write about the demand on the FUNCTION, never about the individual's experience.
+   BAD (only a label pasted back, never do this): "product development & qa: research and development / test"
+   BAD (only a headline pasted back): "ASII sets IDR 36 trillion capex for 2026, up 10% year on year"
    BAD (generic aspiration, no evidence): "Supporting product innovation"
-   GOOD (shape only - a named signal, then the consequence for the role): "<named intent surge> points to <specific workload> outgrowing <specific part of the estate>, which lands on this <role's> remit first."
-   GOOD (shape only): "<named event> puts <specific consequence> in front of this <role's> remit within <timeframe>."
-   These two GOOD entries show the SHAPE only. Never reuse their wording. Write the sentence fresh from this contact's own role and the evidence above.
+   BAD (asserts a person's internal state as fact): "<signal> increases pressure on this contact to ensure secure and compliant data governance."
+   GOOD (shape only - a named signal, hedged, aimed at the function): "<named signal> may increase demand for <specific capability> in workflows this role owns."
+   GOOD (shape only): "<named event> could bring <specific consequence> into this <role's> remit within <timeframe>."
+   VARY THE SENTENCE SHAPE. Do not end more than one entry across the whole roster with "which could impact this role's remit" or "which could impact this role's function", and do not open more than two with "The account's interest in". Repeating one template across the roster is a failed answer.
+   These GOOD entries show the SHAPE only. Never reuse their wording. Write the sentence fresh from this contact's own role and the evidence above.
    If you cannot write such a sentence for this contact, OMIT THE KEY ENTIRELY. A finance, legal, HR, sales or product role will usually have none.
 7a. Omission is the default for fields 6 and 7. Do not include the key with an empty string or empty array - leave the key out. Never state an individual's private concerns, motivations, opinions or budget.
 8. NEVER state or imply who anyone reports to. No reporting lines, no org structure.
@@ -519,6 +688,7 @@ CRITICAL RULES:
 """
 
     valid_ids = {c["contact_id"] for c in contacts}
+    by_id = {c["contact_id"]: c for c in contacts}
     generated: dict = {}
     rejected: list[str] = []
 
@@ -543,14 +713,41 @@ CRITICAL RULES:
                 opener = str(entry.get("how_to_open") or "").strip()
                 if not opener:
                     continue
+                play_focus = str(entry.get("hp_play_focus") or "").strip() or None
+                dp_raw = str(entry.get("decision_power") or "").strip()
+                pains_raw = [str(x).strip() for x in (entry.get("pain_points") or [])
+                             if str(x).strip()]
+
+                bad_nums, bad_urls = check_text(
+                    ground, report, cid, opener, play_focus or "", dp_raw, *pains_raw)
+                if bad_nums or bad_urls:
+                    # Nothing about a person may carry a figure or link the
+                    # account's own files never held.
+                    rejected.append(f"{cid}: unsourced {bad_nums or ''}{bad_urls or ''}")
+                    continue
+
                 record = {
                     "contact_id": cid,
                     "how_to_open": opener,
-                    "hp_play_focus": str(entry.get("hp_play_focus") or "").strip() or None,
+                    "hp_play_focus": play_focus,
                 }
                 dp = str(entry.get("decision_power") or "").strip()
-                if dp:
+                if dp and not _is_rule_echo(dp):
                     record["decision_power"] = dp
+                elif dp:
+                    rejected.append(f"decision_power echo: {dp}")
+
+                # Enforce the per-contact block list rather than trusting the
+                # prompt: v6 still opened a Cloud Operations lead on Print/MPS.
+                contact = by_id.get(cid)
+                for play in blocked_plays_for(contact.get("title") if contact else None):
+                    needle = play.lower()
+                    if (needle in record["how_to_open"].lower()
+                            or needle in (record["hp_play_focus"] or "").lower()):
+                        rejected.append(f"blocked play {play} proposed for {cid}")
+                        record["hp_play_focus"] = "Account engagement / discovery"
+                        record["play_blocked"] = play
+                        break
                 pains = entry.get("pain_points")
                 if isinstance(pains, list):
                     cleaned = []
@@ -589,6 +786,7 @@ CRITICAL RULES:
                 "contacts_fingerprint": fingerprint,
                 "generated_count": len(generated),
                 "talking_points": generated,
+                "grounding_report": report.as_dict(),
             },
             "source_datasets": ["prospect_contacts", "firmographics", "technographics",
                                 "intent_score", "google_news", "news_events"],
@@ -664,7 +862,7 @@ def extract_stakeholder_map(account_id: str) -> list[dict]:
         seniority = resolve_field(row, ["Prospect job_level_main", "apollo_seniority"])
         email = resolve_field(row, ["Contact professions_email", "Email", "apollo_verified_work_email"])
         email_status = resolve_field(row, ["Contact professional_email_status", "Email Status", "apollo_zerobounce_email_status"])
-        phone = resolve_field(row, ["Contact mobile_phone", "Mobile Phone", "apollo_direct_mobile_phone"])
+        phone = normalize_phone(resolve_field(row, ["Contact mobile_phone", "Mobile Phone", "apollo_direct_mobile_phone"]))
         linkedin_url = resolve_field(row, ["Prospect linkedin", "Prospect linkedin_url_array", "apollo_linkedin_url"])
         buying_persona = resolve_field(row, ["Prospect buying_committee_personas"]) if source == "Source A" else None
 
@@ -677,8 +875,8 @@ def extract_stakeholder_map(account_id: str) -> list[dict]:
         country = resolve_field(row, ["Prospect country_name"])
 
         norm_dept = normalize_department(department)
-        band = seniority_band(seniority)
-        influence_type = assign_influence(persona_raw, title, band, norm_dept)
+        band, seniority_conflict = seniority_band(seniority, title)
+        influence_type, influence_source = assign_influence(persona_raw, title, band, norm_dept)
         priority = assign_priority(norm_dept, band)
 
         components = {
@@ -710,7 +908,9 @@ def extract_stakeholder_map(account_id: str) -> list[dict]:
             "contact_id": contact_id,
             "normalized_department": norm_dept,
             "seniority_band": band,
+            "seniority_source_conflict": seniority_conflict,
             "influence_type": influence_type,
+            "influence_source": influence_source,
             "priority": priority,
             "hp_relevance_score": components["hp_relevance"],
             "hp_relevance_band": hp_relevance_band(components["hp_relevance"]),
