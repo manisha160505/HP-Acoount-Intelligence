@@ -6,13 +6,6 @@ from datetime import datetime, timezone
 from bson import ObjectId
 from app.database.mongodb import get_db
 from app.core.security import get_password_hash
-from app.services.extractors.executive_dashboard import extract_executive_dashboard
-from app.services.extractors.recent_news_signals import extract_recent_news_signals
-from app.services.extractors.intent_demand_signals import extract_intent_demand_signals
-from app.services.extractors.solution_narrative_opportunity_map import extract_solution_narrative_opportunity_map
-from app.services.extractors.stakeholder_map import extract_stakeholder_map
-from app.services.extractors.tech_landscape import extract_tech_landscape
-from app.services.extractors.message_evaluator import extract_message_evaluator
 
 logger = logging.getLogger(__name__)
 
@@ -194,15 +187,30 @@ def seed_database_if_empty():
                     }}
                 )
 
-    # 4. Trigger Extractors to Pre-Populate Widgets
-    try:
-        extract_executive_dashboard(astra_id)
-        extract_recent_news_signals(astra_id)
-        extract_intent_demand_signals(astra_id)
-        extract_solution_narrative_opportunity_map(astra_id)
-        extract_stakeholder_map(astra_id)
-        extract_tech_landscape(astra_id)
-        extract_message_evaluator(astra_id)
-        logger.info(f"Successfully pre-extracted all features including message_evaluator for account {astra_id}")
-    except Exception as e:
-        logger.warning(f"Seeder extraction notice for account {astra_id}: {e}")
+    # 4. Trigger every extractor to pre-populate widgets.
+    #
+    # These used to be seven hand-written calls inside one try, so the first
+    # failure silently skipped the rest, and objection_playbook,
+    # content_messaging, content_studio and strategy_chat were never listed at
+    # all - Objection Playbook was blank on every fresh clone. FEATURE_EXTRACTORS
+    # is the same table the upload trigger and the read-path bootstrap use, so a
+    # feature cannot be wired into one and missed by another.
+    #
+    # Imported here rather than at module scope: widgets.py pulls in the API
+    # layer, which imports this module's package.
+    from app.api.v1.widgets import FEATURE_EXTRACTORS
+
+    succeeded, failed = [], []
+    for feature_key, extractor in FEATURE_EXTRACTORS.items():
+        try:
+            extractor(astra_id)
+            succeeded.append(feature_key)
+        except Exception:
+            failed.append(feature_key)
+            logger.exception("Seeder: extractor for '%s' failed on account %s",
+                             feature_key, astra_id)
+
+    logger.info("Seeder: pre-extracted %d/%d features for account %s",
+                len(succeeded), len(FEATURE_EXTRACTORS), astra_id)
+    if failed:
+        logger.warning("Seeder: these features did not extract: %s", ", ".join(failed))

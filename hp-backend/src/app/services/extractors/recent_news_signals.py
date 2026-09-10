@@ -15,56 +15,25 @@ from app.core.llm import generate_gpt4o_json_completion
 from app.services.extractors.grounding import (
     build_corpus, check_text, GroundingReport,
 )
+from app.services.extractors.datasets import (
+    find_file_path, read_dataset_records, requires_local_datasets,
+)
 
 logger = logging.getLogger(__name__)
 
 
 def _find_file_path(rel_path: str) -> str | None:
-    if not rel_path:
-        return None
-    candidate_paths = [
-        os.path.join(os.getcwd(), rel_path),
-        os.path.join("/app", rel_path),
-        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", rel_path)),
-        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", rel_path)),
-        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", rel_path)),
-    ]
-    for cp in candidate_paths:
-        if os.path.exists(cp):
-            return cp
-    return None
-
+    """Shared implementation - see datasets.py."""
+    return find_file_path(rel_path)
 
 def _read_dataset_records(account_id: str, dataset_key: str) -> list[dict]:
-    db = get_db()
-    file_doc = db["account_data_files"].find_one({
-        "account_id": account_id,
-        "$or": [{"dataset_key": dataset_key}, {"category": dataset_key}],
-        "status": "active"
-    })
+    """Rows for one dataset. Shared implementation - see datasets.py.
 
-    if not file_doc:
-        return []
-
-    rel_path = file_doc.get("file_path", "")
-    full_path = _find_file_path(rel_path)
-
-    if not full_path or not os.path.exists(full_path):
-        return []
-
-    ext = os.path.splitext(full_path)[1].lower()
-    try:
-        if ext in [".xlsx", ".xls"]:
-            df = pd.read_excel(full_path)
-            df = df.fillna("")
-            return df.to_dict(orient="records")
-        else:
-            with open(full_path, "r", encoding="utf-8-sig", errors="replace") as f:
-                reader = csv.DictReader(f)
-                return [row for row in reader]
-    except Exception:
-        return []
-
+    Non-strict: requires_local_datasets on the entry point below has already
+    established that this account's files are present, so a miss here means the
+    dataset simply is not registered for this account.
+    """
+    return read_dataset_records(account_id, dataset_key, strict=False)
 
 def _s(row: dict, *keys: str) -> str:
     """First non-blank value among `keys`, as a clean string."""
@@ -139,7 +108,7 @@ GATE_MAX_AGE_DAYS = 365
 DEDUP_SIMILARITY = 0.85
 
 # Bump when the scoring prompt changes so cached output is regenerated.
-SIGNAL_SCORING_PROMPT_VERSION = 7
+SIGNAL_SCORING_PROMPT_VERSION = 8
 
 # The only product lines a signal may be attributed to. The model picks one of
 # these or returns null; it never names a product of its own invention. Account
@@ -412,6 +381,25 @@ def _angle_fault(angle: str, seen_stems: set) -> str | None:
     return None
 
 
+def _grounded_rationales(ground, report, sid: str,
+                         rationales: dict) -> tuple[dict, dict]:
+    """The rationales that are sourced, and the ones withheld.
+
+    Each dimension is judged on its own: an invented figure in the recency
+    rationale says nothing about the HP-relevance one, so only the offending
+    sentence is dropped. The dimension SCORE always survives - it is the
+    model's judgment of the signal, not a claim about the account.
+    """
+    kept, withheld = {}, {}
+    for dim, text in rationales.items():
+        bad_nums, bad_urls = check_text(ground, report, f"{sid}:{dim}", text)
+        if bad_nums or bad_urls:
+            withheld[dim] = (bad_nums or []) + (bad_urls or [])
+        else:
+            kept[dim] = text
+    return kept, withheld
+
+
 def _grounded_angle(ground, report, sid: str, entry: dict) -> str | None:
     """The sales angle, or None when it carries a figure or link the uploaded
     news never held. Scores are kept either way - only the prose is dropped."""
@@ -550,6 +538,8 @@ Output JSON:
     scored: dict = {}
     angle_stems: set = set()
     angle_faults: dict = {}
+    # dim -> the unsourced tokens that got its rationale withheld, per signal.
+    rationale_faults: dict = {}
     if llm_res and isinstance(llm_res, dict) and isinstance(llm_res.get("signals"), list):
         for entry in llm_res["signals"]:
             if not isinstance(entry, dict):
@@ -576,11 +566,17 @@ Output JSON:
                 continue
 
             confidence = _composite(dims)
+            rationales, withheld = _grounded_rationales(ground, report, sid, rationales)
+            if withheld:
+                rationale_faults[sid] = withheld
             _pending_angle = _grounded_angle(ground, report, sid, entry)
             scored[sid] = {
                 "signal_id": sid,
                 "scores": dims,
                 "rationales": rationales,
+                # Dimensions whose rationale was withheld as unsourced. The
+                # score for those dimensions still stands.
+                "rationales_withheld": sorted(withheld) or None,
                 "confidence": confidence,
                 "tier": _tier(confidence),
                 "sales_angle": None,   # filled below, after the quality guard
@@ -602,6 +598,10 @@ Output JSON:
 
     # Prose-only retry. The five dimension scores, rationales and gate validation
     # already stored are never re-requested - only the sales angle is rewritten.
+    if rationale_faults:
+        logger.warning("live signals: rationale(s) withheld as unsourced on %d signal(s): %s",
+                       len(rationale_faults), rationale_faults)
+
     if angle_faults:
         logger.warning("live signals: %d sales angle(s) rejected for phrasing: %s",
                        len(angle_faults), angle_faults)
@@ -693,6 +693,9 @@ Output JSON:
     return payload
 
 
+@requires_local_datasets(
+    "google_news", "news_events",
+)
 def extract_recent_news_signals(account_id: str) -> list[dict]:
     db = get_db()
     now = datetime.now(timezone.utc)

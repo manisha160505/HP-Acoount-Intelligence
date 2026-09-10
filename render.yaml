@@ -1,0 +1,59 @@
+# Render Blueprint — https://render.com/docs/blueprint-spec
+#
+# Two native services rather than the Dockerfiles. hp-frontend/Dockerfile runs
+# `npm run dev` and hardcodes NEXT_PUBLIC_API_URL=http://localhost:8000, so it
+# is a local-development image and cannot serve production; the native Node
+# runtime sidesteps it entirely.
+#
+# The database is the shared Atlas cluster. Render has no static outbound IP
+# below its paid tiers, so Atlas Network Access must allow 0.0.0.0/0 — the
+# database password is then the only boundary, so keep the generated one.
+
+services:
+  - type: web
+    name: hp-backend
+    runtime: python
+    plan: free
+    rootDir: hp-backend
+    buildCommand: pip install -r requirements.txt
+    # --app-dir puts src on sys.path without changing the working directory,
+    # which stays hp-backend/ so seed_data/ and data/ resolve as they do
+    # locally. $PORT is assigned by Render; nothing in the app reads it, so it
+    # has to be passed here.
+    startCommand: uvicorn app.main:app --app-dir src --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: DB_NAME
+        value: hp_account_db
+      # Secrets: Render prompts for these on first deploy and never stores them
+      # in the repository.
+      - key: MONGODB_URI
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_ENDPOINT
+        sync: false
+      - key: OPENAI_MODEL_NAME
+        value: gpt-4o
+
+  - type: web
+    name: hp-frontend
+    runtime: node
+    plan: free
+    rootDir: hp-frontend
+    buildCommand: npm ci && npm run build
+    startCommand: npm start -- -p $PORT
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      # NEXT_PUBLIC_* is inlined by `next build`, not read at runtime, so this
+      # must be set BEFORE the build and the frontend must be redeployed after
+      # any change to it. Left unsynced because the backend URL is only known
+      # once that service exists — set it in the dashboard after the first
+      # deploy, then trigger a manual redeploy of this service.
+      - key: NEXT_PUBLIC_API_URL
+        sync: false

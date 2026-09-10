@@ -1,7 +1,13 @@
 services:
+  # Opt-in only. The team runs against a shared Atlas cluster, so `docker
+  # compose up` should not start a second, unused database - and must not
+  # wait on one. To work against a local database instead, set MONGODB_URI
+  # to mongodb://mongodb:27017 in .env and start with:
+  #     docker compose --profile local-db up
   mongodb:
     image: mongo:8.0
     container_name: hp_mongodb
+    profiles: ["local-db"]
     ports:
       - "27017:27017"
     volumes:
@@ -15,12 +21,13 @@ services:
       - "8000:8000"
     env_file:
       - .env
-    environment:
-      - MONGODB_URI=mongodb://mongodb:27017
+    # MONGODB_URI intentionally NOT overridden here. It used to be pinned to the
+    # local mongodb service, which silently beat whatever .env said and made it
+    # impossible to point a container at the shared cluster.
     volumes:
       - ./hp-backend/data:/app/data
-    depends_on:
-      - mongodb
+    # No depends_on: mongodb. That service is behind the local-db profile, and
+    # depending on a profiled service makes `docker compose up` fail outright.
     restart: always
 
   frontend:
