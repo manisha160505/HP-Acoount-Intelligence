@@ -74,7 +74,7 @@ def _read_dataset_records(account_id: str, dataset_key: str) -> list[dict]:
 
 NL = chr(10)
 
-OPPORTUNITY_PROMPT_VERSION = 16
+OPPORTUNITY_PROMPT_VERSION = 18
 MAX_PLAYS = 5
 
 # HP_ABX_v3_final defines NO numeric opportunity score for this feature. Plays
@@ -84,6 +84,14 @@ SPEC_CHECKS = ("verified_evidence", "timing_trigger", "hp_fit")
 
 # The spec's exact wording when no official HP proof point can be sourced.
 NO_PROOF_POINT = "No supporting HP proof point available"
+
+# Composed in Python when the model will not return a timing note. It states
+# exactly what the checks already record, so nothing is invented.
+DEFAULT_TIMING_NOTE = ("No timing signal for this play appears in this account's data - "
+                       "confirm current plans and budget timing before positioning.")
+
+# How many rewrites a play gets for a prose fault before it is published anyway.
+MAX_PROSE_REWRITES = 2
 
 # Used to title a discovery area, so it never inherits the model's sales title.
 PLAY_DISPLAY_NAMES = {
@@ -161,12 +169,29 @@ PLAY_EXCLUDE_TOKENS = {
 }
 
 
-# Language that claims more than account evidence can support.
-OVERCLAIM_TERMS = [
-    "require", "requires", "required", "will drive", "will need", "is ready",
-    "are ready", "needs to", "need to", "perfect time", "perfect fit", "perfect",
-    "ideal", "fully compatible", "guarantees", "ensures", "must have",
+# Language that claims a buying moment the evidence cannot establish. Wrong
+# whatever the subject.
+OVERCLAIM_ALWAYS = [
+    "now is the perfect time", "perfect time", "perfect fit", "the right time to",
+    "is ready to", "are ready to", "guarantees", "ensures", "fully compatible",
+    "must have", "ideal time",
 ]
+
+# Wrong only when predicated on THIS ACCOUNT. "Their operations require advanced
+# engineering capability" is an unsupported claim about Astra; "design workloads
+# that require high-performance computing" describes a class of work and is fine.
+# Banning the bare word deleted a valid play three runs in a row.
+OVERCLAIM_IF_ABOUT_ACCOUNT = [
+    "require", "requires", "required", "needs", "need to", "will need",
+]
+
+# Markers that a sentence is talking about the account rather than a workload,
+# a product class or the seller.
+ACCOUNT_SUBJECT_MARKERS = [
+    "their", "they", "the account", "the company", "the organisation",
+    "the organization", "the business", "the client", "the customer",
+]
+
 
 NO_CONTACT_NOTE = "No matching contact identified in supplied data."
 
@@ -185,10 +210,34 @@ def _norm_text(s: str) -> str:
     return " ".join(str(s or "").split()).lower()
 
 
-def _has_overclaim(text: str) -> list[str]:
-    """Overclaiming terms present in a piece of generated prose."""
-    t = _norm_text(text)
-    return [term for term in OVERCLAIM_TERMS if term in t]
+def _has_overclaim(text: str, company_name: str = "") -> list[str]:
+    """Overclaiming terms in generated prose.
+
+    Checked per sentence: a mention of the account in one sentence must not
+    condemn an unrelated sentence elsewhere in the same paragraph.
+    """
+    found: list[str] = []
+    company_tokens = [w for w in _norm_text(company_name).split() if len(w) > 3]
+
+    for sentence in re.split(r"[.;]", str(text or "")):
+        s = _norm_text(sentence)
+        if not s:
+            continue
+
+        for term in OVERCLAIM_ALWAYS:
+            if term in s and term not in found:
+                found.append(term)
+
+        about_account = (
+            any(m in s for m in ACCOUNT_SUBJECT_MARKERS)
+            or any(tok in s for tok in company_tokens)
+        )
+        if about_account:
+            for term in OVERCLAIM_IF_ABOUT_ACCOUNT:
+                if _token_present(term, s) and term not in found:
+                    found.append(term)
+
+    return sorted(found)
 
 
 def _recency_score(event_dt, now) -> float:
@@ -597,6 +646,7 @@ Output JSON:
     cleaned_plays: list[dict] = []
     dropped: list[str] = []
     retry_notes: dict = {}
+    language_attempts: dict = {}
     # The retry asks the model to fix one fault, and it answers with a slimmer
     # object - dropping fields the first pass had already got right. Keep the
     # first answer so those fields survive the correction.
@@ -732,13 +782,27 @@ Output JSON:
             # --- overclaim guard on the generated prose ---------------------
             prose = " ".join([str(p.get("inference") or ""),
                               " ".join(v["statement"] for v in verified)])
-            overclaims = _has_overclaim(prose)
+            overclaims = _has_overclaim(prose, company_name)
             if overclaims:
-                dropped.append(f"{play_key}: overclaim {overclaims} - sent for rewrite")
-                retry_notes[play_key] = (
-                    "you used the banned words " + ", ".join(sorted(set(overclaims)))
-                    + " - rewrite with calibrated language")
-                continue
+                # First and second attempts go back for a rewrite. After that the
+                # play is published anyway with the fault recorded: a wording
+                # problem is a far weaker reason to withhold a play than a failed
+                # evidence check, and silently deleting one was losing valid
+                # opportunities.
+                if language_attempts.get(play_key, 0) < 2:
+                    language_attempts[play_key] = language_attempts.get(play_key, 0) + 1
+                    dropped.append(f"{play_key}: overclaim {overclaims} - sent for rewrite")
+                    retry_notes[play_key] = (
+                        "you used the banned words " + ", ".join(sorted(set(overclaims)))
+                        + " - rewrite with calibrated language")
+                    continue
+                language_warning = overclaims
+                dropped.append(f"{play_key}: overclaim {overclaims} - retained with a "
+                               f"language warning after {language_attempts[play_key]} rewrites")
+                logger.warning("opportunity map: %s kept despite overclaim terms %s",
+                               play_key, overclaims)
+            else:
+                language_warning = None
 
             # --- quantified impact, re-verified ------------------------------
             impact_raw = p.get("quantified_impact")
@@ -794,28 +858,47 @@ Output JSON:
             # A play with no timing signal must say what would need confirming,
             # rather than quietly reading as though timing were established.
             if not has_trigger and not timing_note:
-                dropped.append(f"{play_key}: no timing signal and no timing_note - sent for rewrite")
-                retry_notes.setdefault(play_key, (
-                    "this play has NO TIMING SIGNAL in its evidence. Return a "
-                    "timing_note naming what a seller would need to confirm, and keep "
-                    "the inference exploratory"))
-                continue
+                if language_attempts.get(play_key, 0) < MAX_PROSE_REWRITES:
+                    language_attempts[play_key] = language_attempts.get(play_key, 0) + 1
+                    dropped.append(f"{play_key}: no timing signal and no timing_note - sent for rewrite")
+                    retry_notes.setdefault(play_key, (
+                        "this play has NO TIMING SIGNAL in its evidence. Return a "
+                        "timing_note naming what a seller would need to confirm, and keep "
+                        "the inference exploratory"))
+                    continue
+                # Evidence and fit are sound; only the prose is missing. Publish
+                # with a note Python composes, rather than deleting the play.
+                timing_note = DEFAULT_TIMING_NOTE
+                dropped.append(f"{play_key}: no timing_note returned after "
+                               f"{language_attempts[play_key]} rewrites - default note applied")
+                logger.warning("opportunity map: %s published with the default timing note",
+                               play_key)
 
             if not str(entry_p.get("recommended_cta") or "").strip():
-                dropped.append(f"{play_key}: no recommended_cta - sent for rewrite")
-                retry_notes.setdefault(play_key, (
-                    "entry_path.recommended_cta was missing. Return it: the concrete "
-                    "next action for this play, naming the contact or function to "
-                    "approach"))
-                continue
+                if language_attempts.get(play_key, 0) < MAX_PROSE_REWRITES:
+                    language_attempts[play_key] = language_attempts.get(play_key, 0) + 1
+                    dropped.append(f"{play_key}: no recommended_cta - sent for rewrite")
+                    retry_notes.setdefault(play_key, (
+                        "entry_path.recommended_cta was missing. Return it: the concrete "
+                        "next action for this play, naming the contact or function to "
+                        "approach"))
+                    continue
+                dropped.append(f"{play_key}: no recommended_cta after "
+                               f"{language_attempts[play_key]} rewrites - published without it")
 
             # Where a real owner was resolved, the chain must reach them.
             if (play_contacts.get(play_key) or []) and not owner_angle:
-                dropped.append(f"{play_key}: owners resolved but no owner_angle - sent for rewrite")
-                retry_notes.setdefault(play_key, (
-                    "topic owners were listed for this play. Return an owner_angle "
-                    "saying what that named remit would be weighing"))
-                continue
+                if language_attempts.get(play_key, 0) < MAX_PROSE_REWRITES:
+                    language_attempts[play_key] = language_attempts.get(play_key, 0) + 1
+                    dropped.append(f"{play_key}: owners resolved but no owner_angle - sent for rewrite")
+                    retry_notes.setdefault(play_key, (
+                        "topic owners were listed for this play. Return an owner_angle "
+                        "saying what that named remit would be weighing"))
+                    continue
+                # The contacts are still on the record and still render; only the
+                # sentence about them is absent. That is not worth losing a play.
+                dropped.append(f"{play_key}: no owner_angle returned after "
+                               f"{language_attempts[play_key]} rewrites - published without it")
 
             # ---- grounding gate ------------------------------------------------
             proof_point = str(p.get("proof_point") or "").strip() or None
@@ -870,6 +953,7 @@ Output JSON:
                 "inference": inference,
                 "timing_note": timing_note,
                 "owner_angle": owner_angle,
+                "language_warning": language_warning,
                 "hp_products": products,
                 "hp_resource_url": PLAY_RESOURCE_URLS.get(play_key, DEFAULT_RESOURCE_URL),
                 "quantified_impact": impact_val,
@@ -948,6 +1032,13 @@ Output JSON:
 
     # Spec ordering: all three checks first, then those missing one, tie-broken
     # by how current the cited trigger is.
+    published = {p["play_key"] for p in cleaned_plays} | {a["play_key"] for a in discovery_areas} \
+        if False else {p["play_key"] for p in cleaned_plays}
+    withheld = sorted({d.split(":")[0].strip() for d in dropped} - published)
+    if withheld:
+        logger.warning("opportunity map: %d play(s) withheld entirely: %s",
+                       len(withheld), withheld)
+
     cleaned_plays.sort(key=lambda x: (-x["checks_met"], -x.get("trigger_recency", 0.0)))
     cleaned_plays = cleaned_plays[:MAX_PLAYS]
 

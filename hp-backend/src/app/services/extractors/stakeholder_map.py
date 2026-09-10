@@ -495,9 +495,13 @@ def _is_evidence_label(text: str, evidence_labels: set[str]) -> bool:
     return False
 
 
-def _contacts_fingerprint(contacts: list[dict]) -> str:
-    """Stable hash of the contact facts the talking points are generated from.
-    Regeneration is triggered by a change here, not by every page load."""
+def _contacts_fingerprint(contacts: list[dict], account_context: str = "") -> str:
+    """Stable hash of everything the talking points are generated from.
+
+    The account context belongs here as much as the contacts do: the openers cite
+    news, intent and technology evidence, so hashing contacts alone served stale
+    text whenever the account's news changed but its roster did not.
+    """
     basis = [
         {
             "id": c.get("contact_id"),
@@ -510,7 +514,9 @@ def _contacts_fingerprint(contacts: list[dict]) -> str:
         for c in contacts
     ]
     basis.sort(key=lambda x: str(x["id"]))
-    payload = {"prompt_version": TALKING_POINTS_PROMPT_VERSION, "contacts": basis}
+    payload = {"prompt_version": TALKING_POINTS_PROMPT_VERSION,
+               "contacts": basis,
+               "account_context": account_context}
     return hashlib.sha256(
         json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
     ).hexdigest()
@@ -557,18 +563,34 @@ def _build_account_context(account_id: str) -> tuple[str, set[str]]:
     if topics:
         lines.append("Intent research surges: " + "; ".join(topics))
 
+    # Newest first. Taking the file's first ten rows fed the prompt whatever the
+    # export happened to list first - for this account a 2017 headline and a 2022
+    # press release - while a newly uploaded recent trigger sitting past row ten
+    # was never seen at all.
     triggers = []
     seen = set()
     for r in gnews + events:
         h = str(r.get("event_headline") or r.get("news_announcements")
                 or r.get("summary") or r.get("title") or "").strip()
         d = str(r.get("event_date") or r.get("effective_date") or "").strip()
-        if h and h.lower() not in seen:
-            seen.add(h.lower())
-            triggers.append(f"- {h} ({d})" if d else f"- {h}")
-            labels.add(h.lower())
+        if not h or h.lower() in seen:
+            continue
+        seen.add(h.lower())
+        dt = None
+        for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y", "%Y/%m/%d"):
+            try:
+                dt = datetime.strptime(d[:10], fmt)
+                break
+            except (ValueError, TypeError):
+                continue
+        triggers.append((dt, f"- {h} ({d})" if d else f"- {h}"))
+        labels.add(h.lower())
+
+    # Undated rows sort last rather than being dropped - they are still evidence.
+    triggers.sort(key=lambda t: t[0] or datetime.min, reverse=True)
     if triggers:
-        lines.append("Recent news and trigger events:\n" + "\n".join(triggers[:10]))
+        lines.append("Recent news and trigger events:\n"
+                     + "\n".join(line for _dt, line in triggers[:10]))
 
     context = "\n".join(lines) if lines else "No account-level context available."
     return context, labels
@@ -580,19 +602,20 @@ def generate_stakeholder_talking_points(account_id: str, contacts: list[dict],
     keyed by contact id. Never asked for scores, bands, or contact facts."""
     db = get_db()
     now = datetime.now(timezone.utc)
-    fingerprint = _contacts_fingerprint(contacts)
+    # Built before the fingerprint: it must be covered by it, or a news change
+    # leaves the cached openers citing a trigger that is no longer current.
+    account_context, evidence_labels = _build_account_context(account_id)
+    fingerprint = _contacts_fingerprint(contacts, account_context)
 
     existing = db["account_widgets"].find_one({
         "account_id": account_id,
         "widget_key": "stakeholder_talking_points",
     })
 
-    # Cached: reuse while the contact facts are unchanged.
+    # Cached: reuse while the contacts AND the account evidence are unchanged.
     if (existing and existing.get("status") == "available"
             and existing.get("data", {}).get("contacts_fingerprint") == fingerprint):
         return existing
-
-    account_context, evidence_labels = _build_account_context(account_id)
 
     # Grounding corpus: every cell of the datasets this feature is allowed to
     # reason over. A number or URL absent from it never reaches storage.
