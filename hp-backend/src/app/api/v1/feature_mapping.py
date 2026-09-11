@@ -219,7 +219,11 @@ FEATURE_MAPPINGS = {
         "feature_key": "stakeholder_map",
         "display_name": "Stakeholder Map",
         "purpose": "Org chart mapping, key IT decision makers, contacts, and influence levels",
-        "dependent_datasets": ["prospect_contacts"],
+        # The contact grid is prospect_contacts only, but the AI talking points
+        # are generated against the account context as well, so a change to any
+        # of these must retrigger the feature.
+        "dependent_datasets": ["prospect_contacts", "firmographics", "technographics",
+                               "intent_score", "google_news", "news_events"],
         "mapped_fields": [
             {
                 "field_key": "full_name",

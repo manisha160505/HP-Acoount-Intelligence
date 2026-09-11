@@ -20,6 +20,9 @@ from app.services.extractors.stakeholder_map import (
     normalize_department,
     resolve_field,
 )
+from app.services.extractors.datasets import (
+    find_file_path, read_dataset_records, requires_local_datasets,
+)
 
 TECHNOGRAPHICS_CATEGORY_COLUMNS = [
     "Testing And Qa",
@@ -180,46 +183,13 @@ def _token_present(token: str, text: str) -> bool:
                      text.lower()) is not None
 
 def _read_dataset_records(account_id: str, dataset_key: str) -> list[dict]:
-    db = get_db()
-    file_doc = db["account_data_files"].find_one({
-        "account_id": account_id,
-        "$or": [{"dataset_key": dataset_key}, {"category": dataset_key}],
-        "status": "active"
-    })
-    
-    if not file_doc:
-        return []
-    
-    rel_path = file_doc.get("file_path", "")
-    candidate_paths = [
-        os.path.join(os.getcwd(), rel_path),
-        os.path.join("/app", rel_path),
-        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", rel_path)),
-        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", rel_path)),
-        os.path.join(r"C:\hp-account\HP-Acoount-Intelligence\hp-backend", rel_path)
-    ]
-    
-    full_path = None
-    for cp in candidate_paths:
-        if os.path.exists(cp):
-            full_path = cp
-            break
-            
-    if not full_path:
-        return []
-    
-    ext = os.path.splitext(full_path)[1].lower()
-    try:
-        if ext in [".xlsx", ".xls"]:
-            df = pd.read_excel(full_path)
-            df = df.fillna("")
-            return df.to_dict(orient="records")
-        else:
-            with open(full_path, "r", encoding="utf-8-sig", errors="replace") as f:
-                reader = csv.DictReader(f)
-                return [row for row in reader]
-    except Exception:
-        return []
+    """Rows for one dataset. Shared implementation - see datasets.py.
+
+    Non-strict: requires_local_datasets on the entry point below has already
+    established that this account's files are present, so a miss here means the
+    dataset simply is not registered for this account.
+    """
+    return read_dataset_records(account_id, dataset_key, strict=False)
 
 def _build_area_evidence(techno_row: dict) -> list[dict]:
     """One entry per HP contest area, carrying the verbatim technographics cells
@@ -599,6 +569,9 @@ def generate_objection_cards(account_id: str, areas: list[dict],
     return None
 
 
+@requires_local_datasets(
+    "firmographics", "prospect_contacts", "technographics",
+)
 def extract_objection_playbook(account_id: str) -> list[dict]:
     db = get_db()
     now = datetime.now(timezone.utc)

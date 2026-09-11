@@ -1,7 +1,11 @@
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 from bson import ObjectId
+import logging
+
 from app.database.mongodb import get_db
+
+logger = logging.getLogger(__name__)
 from app.core.deps import require_user_role, require_admin_role
 from app.schemas.widget import WidgetContract, WidgetResponse, ContentGenerateRequest
 from app.services.extractors.executive_dashboard import extract_executive_dashboard
@@ -362,6 +366,23 @@ WIDGET_REGISTRY = {
     ]
 }
 
+# feature_key -> extractor. The same mapping account_data.py uses to decide what
+# an upload retriggers, so a feature cannot be wired into one and not the other.
+FEATURE_EXTRACTORS = {
+    "executive_dashboard": extract_executive_dashboard,
+    "recent_news_signals": extract_recent_news_signals,
+    "intent_demand_signals": extract_intent_demand_signals,
+    "solution_narrative_opportunity_map": extract_solution_narrative_opportunity_map,
+    "stakeholder_map": extract_stakeholder_map,
+    "tech_landscape": extract_tech_landscape,
+    "objection_playbook": extract_objection_playbook,
+    "content_messaging": extract_content_messaging,
+    "content_studio": extract_content_studio,
+    "strategy_chat": extract_strategy_chat,
+    "message_evaluator": extract_message_evaluator,
+}
+
+
 @router.get("/widgets", response_model=list[WidgetContract])
 def list_all_widgets(current_user: dict = Depends(require_user_role)):
     all_widgets = []
@@ -402,52 +423,31 @@ def get_account_feature_widgets(
 
     widget_contracts = WIDGET_REGISTRY[key_clean]
     
-    # Execute deterministic extractors
-    extracted_widgets_map = {}
-    if key_clean == "executive_dashboard":
-        extracted_list = extract_executive_dashboard(account_id)
-        for w in extracted_list:
-            extracted_widgets_map[w["widget_key"]] = w
-    elif key_clean == "recent_news_signals":
-        extracted_list = extract_recent_news_signals(account_id)
-        for w in extracted_list:
-            extracted_widgets_map[w["widget_key"]] = w
-    elif key_clean == "intent_demand_signals":
-        extracted_list = extract_intent_demand_signals(account_id)
-        for w in extracted_list:
-            extracted_widgets_map[w["widget_key"]] = w
-    elif key_clean == "solution_narrative_opportunity_map":
-        extracted_list = extract_solution_narrative_opportunity_map(account_id)
-        for w in extracted_list:
-            extracted_widgets_map[w["widget_key"]] = w
-    elif key_clean == "stakeholder_map":
-        extracted_list = extract_stakeholder_map(account_id)
-        for w in extracted_list:
-            extracted_widgets_map[w["widget_key"]] = w
-    elif key_clean == "tech_landscape":
-        extracted_list = extract_tech_landscape(account_id)
-        for w in extracted_list:
-            extracted_widgets_map[w["widget_key"]] = w
-    elif key_clean == "objection_playbook":
-        extracted_list = extract_objection_playbook(account_id)
-        for w in extracted_list:
-            extracted_widgets_map[w["widget_key"]] = w
-    elif key_clean == "content_messaging":
-        extracted_list = extract_content_messaging(account_id)
-        for w in extracted_list:
-            extracted_widgets_map[w["widget_key"]] = w
-    elif key_clean == "content_studio":
-        extracted_list = extract_content_studio(account_id)
-        for w in extracted_list:
-            extracted_widgets_map[w["widget_key"]] = w
-    elif key_clean == "strategy_chat":
-        extracted_list = extract_strategy_chat(account_id)
-        for w in extracted_list:
-            extracted_widgets_map[w["widget_key"]] = w
-    elif key_clean == "message_evaluator":
-        extracted_list = extract_message_evaluator(account_id)
-        for w in extracted_list:
-            extracted_widgets_map[w["widget_key"]] = w
+    # Read what was stored. Extraction happens when a file is added, updated or
+    # deleted, and on an explicit regenerate - not on a page view. Re-running it
+    # here rewrote every widget on every request, and when the data or a prompt
+    # version had changed it regenerated the AI content inline, so the same
+    # feature could show different content from one view to the next.
+    stored = list(db["account_widgets"].find({
+        "account_id": account_id,
+        "feature_key": key_clean,
+    }))
+
+    # Bootstrap: a fresh account, or a feature added since the last upload, has
+    # nothing stored yet. Extract once. A widget that exists but is "pending"
+    # is NOT retried here - that is recovered by an upload or a regenerate.
+    if not stored and key_clean in FEATURE_EXTRACTORS:
+        try:
+            FEATURE_EXTRACTORS[key_clean](account_id)
+            stored = list(db["account_widgets"].find({
+                "account_id": account_id,
+                "feature_key": key_clean,
+            }))
+        except Exception as exc:
+            logger.warning("first-time extraction failed for %s on account %s: %s",
+                           key_clean, account_id, exc, exc_info=True)
+
+    extracted_widgets_map = {w["widget_key"]: w for w in stored}
 
     responses = []
     
@@ -491,6 +491,44 @@ def get_account_feature_widgets(
             })
 
     return responses
+
+@router.post("/accounts/{account_id}/widgets/{feature_key}/regenerate", response_model=list[WidgetResponse])
+def regenerate_account_feature_widgets(
+    account_id: str,
+    feature_key: str,
+    current_user: dict = Depends(require_user_role)
+):
+    """Force a refresh for one feature.
+
+    The supported way to re-run a feature on demand - including recovering a
+    widget left "pending" by a failed generation - now that a page view no
+    longer re-extracts.
+    """
+    if not ObjectId.is_valid(account_id):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid account ID format")
+
+    db = get_db()
+    if not db["accounts"].find_one({"_id": ObjectId(account_id)}):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company account not found")
+
+    key_clean = feature_key.strip().lower()
+    if key_clean not in WIDGET_REGISTRY:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail=f"Feature '{feature_key}' not found in widget registry.")
+    if key_clean not in FEATURE_EXTRACTORS:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"Feature '{feature_key}' has no extractor to run.")
+
+    try:
+        FEATURE_EXTRACTORS[key_clean](account_id)
+    except Exception as exc:
+        logger.warning("regenerate failed for %s on account %s: %s",
+                       key_clean, account_id, exc, exc_info=True)
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY,
+                            detail=f"Regeneration failed: {type(exc).__name__}: {exc}")
+
+    return get_account_feature_widgets(account_id, key_clean, current_user)
+
 
 @router.post("/accounts/{account_id}/widgets/solution_narrative_opportunity_map/generate", response_model=WidgetResponse)
 def generate_opportunity_map_endpoint(

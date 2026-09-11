@@ -9,9 +9,13 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, s
 from fastapi.responses import FileResponse
 from bson import ObjectId
 from app.database.mongodb import get_db
+import logging
 from app.core.deps import require_admin_role, require_user_role, get_current_user_flexible
 from app.config.settings import settings
 from app.schemas.account_data import DATASET_REGISTRY, AccountDataFileResponse
+from app.api.v1.feature_mapping import FEATURE_MAPPINGS
+
+logger = logging.getLogger(__name__)
 from app.services.extractors.executive_dashboard import extract_executive_dashboard
 from app.services.extractors.recent_news_signals import extract_recent_news_signals
 from app.services.extractors.intent_demand_signals import extract_intent_demand_signals
@@ -63,6 +67,51 @@ def _find_file_path(rel_path: str) -> str | None:
         if os.path.exists(cp):
             return cp
     return None
+
+# feature_key -> extractor. Which datasets each one depends on is read from
+# FEATURE_MAPPINGS rather than repeated here.
+FEATURE_EXTRACTORS = {
+    "executive_dashboard": extract_executive_dashboard,
+    "recent_news_signals": extract_recent_news_signals,
+    "intent_demand_signals": extract_intent_demand_signals,
+    "solution_narrative_opportunity_map": extract_solution_narrative_opportunity_map,
+    "stakeholder_map": extract_stakeholder_map,
+    "tech_landscape": extract_tech_landscape,
+    "objection_playbook": extract_objection_playbook,
+    "content_messaging": extract_content_messaging,
+    "content_studio": extract_content_studio,
+    "strategy_chat": extract_strategy_chat,
+    "message_evaluator": extract_message_evaluator,
+}
+
+
+def _features_for_dataset(dataset_key: str) -> list[str]:
+    """Features that declare this dataset as a dependency, in registry order."""
+    return [
+        fk for fk, spec in FEATURE_MAPPINGS.items()
+        if dataset_key in (spec.get("dependent_datasets") or [])
+        and fk in FEATURE_EXTRACTORS
+    ]
+
+
+def _run_dependent_extractors(account_id: str, dataset_key: str) -> tuple[list, list]:
+    """Re-run every feature that depends on this dataset.
+
+    Returns (regenerated, failed). A failure never blocks the upload - the file
+    is stored either way - but it is logged and returned rather than swallowed,
+    which is how a broken regeneration used to pass as a 201.
+    """
+    regenerated, failed = [], []
+    for feature_key in _features_for_dataset(dataset_key):
+        try:
+            FEATURE_EXTRACTORS[feature_key](account_id)
+            regenerated.append(feature_key)
+        except Exception as exc:
+            logger.warning("re-extraction failed for %s after %s changed: %s",
+                           feature_key, dataset_key, exc, exc_info=True)
+            failed.append({"feature": feature_key, "error": f"{type(exc).__name__}: {exc}"})
+    return regenerated, failed
+
 
 @router.post("", response_model=AccountDataFileResponse, status_code=status.HTTP_201_CREATED)
 async def upload_account_data(
@@ -205,60 +254,15 @@ async def upload_account_data(
         {"$set": {"updated_at": now}}
     )
 
-    # Trigger selective re-extraction for dependent widgets
-    if key_clean in ["firmographics", "company_hierarchy", "job_openings"]:
-        try:
-            extract_executive_dashboard(account_id)
-        except Exception:
-            pass
-    if key_clean in ["google_news", "news_events"]:
-        try:
-            extract_recent_news_signals(account_id)
-        except Exception:
-            pass
-    if key_clean in ["intent_score", "intent_topics", "job_openings"]:
-        try:
-            extract_intent_demand_signals(account_id)
-        except Exception:
-            pass
-    if key_clean in ["firmographics", "technographics", "intent_score", "google_news", "news_events"]:
-        try:
-            extract_solution_narrative_opportunity_map(account_id)
-            generate_opportunity_map_plays_with_gpt4o(account_id)
-        except Exception:
-            pass
-    if key_clean in ["prospect_contacts"]:
-        try:
-            extract_stakeholder_map(account_id)
-        except Exception:
-            pass
-    if key_clean in ["technographics", "technology_detections", "webstack"]:
-        try:
-            extract_tech_landscape(account_id)
-        except Exception:
-            pass
-    if key_clean in ["firmographics", "technographics", "intent_score", "google_news", "news_events"]:
-        try:
-            extract_content_messaging(account_id)
-        except Exception:
-            pass
-    if key_clean in ["prospect_contacts", "job_openings", "firmographics", "google_news", "news_events"]:
-        try:
-            extract_content_studio(account_id)
-        except Exception:
-            pass
-    if key_clean in ["firmographics", "company_hierarchy", "technographics", "webstack", "job_openings", "google_news", "news_events", "intent_score", "technology_detections", "prospect_contacts"]:
-        try:
-            extract_strategy_chat(account_id)
-        except Exception:
-            pass
-    if key_clean in ["prospect_contacts", "job_openings", "firmographics"]:
-        try:
-            extract_message_evaluator(account_id)
-        except Exception:
-            pass
+    # Regenerate every feature that declares this dataset as a dependency. The
+    # table is derived from FEATURE_MAPPINGS, so a feature that gains a dataset
+    # cannot silently fall out of the trigger set the way two of them had.
+    regenerated, failed = _run_dependent_extractors(account_id, key_clean)
 
-    return serialize_data_file(new_metadata)
+    payload = serialize_data_file(new_metadata)
+    payload["regenerated"] = regenerated
+    payload["regeneration_failed"] = failed
+    return payload
 
 @router.get("", response_model=list[AccountDataFileResponse])
 def get_account_data_files(
@@ -316,7 +320,16 @@ def delete_account_data_file(
         {"$set": {"updated_at": now}}
     )
 
-    return {"status": "success", "message": f"File '{file_doc.get('original_filename')}' deleted successfully."}
+    # A widget must stop presenting data derived from a file that is gone.
+    dataset_key = str(file_doc.get("dataset_key") or file_doc.get("category") or "").strip().lower()
+    regenerated, failed = _run_dependent_extractors(account_id, dataset_key)
+
+    return {
+        "status": "success",
+        "message": f"File '{file_doc.get('original_filename')}' deleted successfully.",
+        "regenerated": regenerated,
+        "regeneration_failed": failed,
+    }
 
 @router.get("/download/{dataset_key}")
 def download_account_data_file(

@@ -308,6 +308,23 @@ interface ProvenanceEntry {
   url: string;
 }
 
+// A widget that never generated stores the reason on its payload. Showing it
+// turns an unexplained empty panel into something a reader can act on - most
+// often a missing OPENAI_API_KEY, or source files absent from this machine.
+function PendingNotice({ widget, title }: { widget: any; title: string }) {
+  const notice = widget?.data?.notice;
+  if (!widget || widget.status === 'available' || !notice) return null;
+  return (
+    <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
+      <Sparkles className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
+      <div className="space-y-0.5">
+        <p className="text-xs font-bold uppercase tracking-wider text-amber-900">{title}</p>
+        <p className="text-xs leading-relaxed text-amber-800">{notice}</p>
+      </div>
+    </div>
+  );
+}
+
 export default function UserDashboardPage() {
   const { user, logout } = useAuth();
 
@@ -1432,6 +1449,7 @@ export default function UserDashboardPage() {
 
                   return (
                     <div className="space-y-5 animate-fade-in">
+                      <PendingNotice widget={scoreWidget} title="Signal scoring unavailable" />
 
                       {/* Header */}
                       <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
@@ -2323,6 +2341,7 @@ export default function UserDashboardPage() {
 
                   return (
                     <div className="space-y-6 animate-fade-in">
+                      <PendingNotice widget={playsWidget} title="Opportunity plays unavailable" />
                       
                       {/* Header Banner */}
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 pb-4">
@@ -2485,16 +2504,14 @@ export default function UserDashboardPage() {
                                         <div className="flex flex-wrap items-center justify-between gap-2">
                                           <div className="flex items-center gap-1.5 text-indigo-600 font-semibold text-[10px] uppercase tracking-wider">
                                             <Target className="w-3.5 h-3.5 text-indigo-500" />
-                                            <span>
-                                              {play.quantified_impact_state === 'hp_modeled'
-                                                ? 'Quantified impact - HP-modeled'
-                                                : 'Quantified impact - derived from account data'}
-                                            </span>
+                                            {/* Only two states exist: 'sourced_signal' and
+                                                'none'. There is no HP-modelled state - no
+                                                projection formula is defined, and inventing
+                                                one would be an unsourced number. */}
+                                            <span>Quantified impact - derived from account data</span>
                                           </div>
                                           <span className="text-[9px] font-medium text-indigo-700 bg-indigo-100/80 px-1.5 py-0.5 rounded">
-                                            {play.quantified_impact_state === 'hp_modeled'
-                                              ? 'Internal projection - not an external source'
-                                              : 'Composed from named source fields - not an HP projection'}
+                                            Composed from named source fields - not an HP projection
                                           </span>
                                         </div>
 
@@ -2986,6 +3003,7 @@ export default function UserDashboardPage() {
 
                   return (
                     <div className="space-y-6 animate-fade-in">
+                      <PendingNotice widget={talkingWidget} title="Talking points unavailable" />
 
                       {/* Header */}
                       <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 border-b border-slate-200 pb-4">

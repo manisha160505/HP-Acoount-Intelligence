@@ -1,0 +1,26 @@
+# Secrets must never be baked into an image layer. `COPY . .` was copying
+# hp-backend/.env - Atlas password and OpenAI key included - into the build,
+# where it survives in the layer history of anything pushed to a registry.
+#
+# The container gets its configuration from docker-compose's `env_file: .env`
+# (injected as environment variables) or, on a host like Render, from the
+# dashboard's environment settings. Neither needs the file present.
+.env
+.env.*
+!.env.example
+
+# Uploaded account data is machine-local and does not belong in an image.
+# docker-compose mounts ./hp-backend/data at /app/data instead, and the seeder
+# restores the benchmark CSVs from seed_data/ on startup.
+data/
+
+# Build and tooling noise
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+env/
+*.log
+.git/
+.gitignore
