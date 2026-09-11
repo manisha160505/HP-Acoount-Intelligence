@@ -37,6 +37,7 @@ import {
   Megaphone,
   TrendingUp,
   Sparkles,
+  PenTool,
   Star,
   Linkedin,
   Mail,
@@ -61,6 +62,7 @@ import {
   ArrowRight,
   RotateCcw,
   Copy,
+  Download,
   ShieldCheck,
   UserCheck,
   CheckCircle2
@@ -391,6 +393,9 @@ export default function UserDashboardPage() {
   const [additionalContext, setAdditionalContext] = useState<string>('');
   const [isGeneratingContent, setIsGeneratingContent] = useState<boolean>(false);
   const [hasGeneratedContent, setHasGeneratedContent] = useState<boolean>(false);
+  const [generatedAsset, setGeneratedAsset] = useState<any>(null);
+  const [generateError, setGenerateError] = useState<any>(null);
+  const [copiedAssetId, setCopiedAssetId] = useState<string | null>(null);
   const [isGeneratingOppMap, setIsGeneratingOppMap] = useState<boolean>(false);
   const [expandedCalc, setExpandedCalc] = useState<Record<string, boolean>>({});
 
@@ -4644,10 +4649,10 @@ Are you available for a brief 10-minute briefing next Thursday to review how pee
                   const targetPersonas: any[] = contextData.target_personas || [
                     { id: 'cio_it', title: 'CIO / IT Leadership', subtitle: 'Chief Information Officer and IT decision makers' },
                     { id: 'infra_workplace', title: 'Infrastructure & Workplace IT', subtitle: 'Device fleet owners, infrastructure strategy & commercial teams' },
-                    { id: 'engineering_ai', title: 'Engineering / AI & Compute Leadership', subtitle: 'AI Centre of Excellence, ML and GPU/compute buyers' },
+                    { id: 'engineering_ai', title: 'Engineering / AI & Compute Leadership', subtitle: 'AI, ML and data science leads, GPU/compute buyers' },
                     { id: 'security_wolf', title: 'Security Leadership (Wolf Security)', subtitle: 'Endpoint security and risk decision makers' },
-                    { id: 'procurement_finance', title: 'Procurement / Finance', subtitle: 'Regional IT procurement and budget holders' },
-                    { id: 'operations', title: 'Regional Operations', subtitle: 'New office / expansion leads, print & workplace services' },
+                    { id: 'procurement_finance', title: 'Procurement / Finance', subtitle: 'IT procurement and budget holders' },
+                    { id: 'operations', title: 'Operations & Facilities', subtitle: 'Site and office leads, print & workplace services' },
                     { id: 'hr_workforce', title: 'HR / Workforce Experience', subtitle: 'Device refresh, hybrid work and onboarding programs' }
                   ];
 
@@ -4668,13 +4673,54 @@ Are you available for a brief 10-minute briefing next Thursday to review how pee
                     'HP Enterprise Printing & Managed Print Services'
                   ];
 
-                  const handleGenerateClick = () => {
+                  const handleGenerateClick = async () => {
+                    if (!selectedAccountId) return;
+                    const topicValue = (customTopic.trim() || selectedTopic || '').trim();
+                    if (!topicValue) return;
+                    const personaForRequest = targetPersonas.find(p => p.id === selectedPersona) || targetPersonas[0];
                     setIsGeneratingContent(true);
-                    setTimeout(() => {
+                    setGenerateError(null);
+                    try {
+                      const response = await api.post<WidgetResponse>(
+                        `/accounts/${selectedAccountId}/widgets/content_studio/generate`,
+                        {
+                          persona_id: personaForRequest?.id,
+                          content_type: selectedContentType,
+                          topic: topicValue,
+                          additional_context: additionalContext.trim(),
+                        }
+                      );
+                      const latest = response.data?.data?.latest || null;
+                      const lastError = response.data?.data?.last_error || null;
+                      setWidgets(prev => prev.map(w => (w.widget_key === 'content_generated_assets' ? response.data : w)));
+                      if (latest) {
+                        setGeneratedAsset(latest);
+                        setHasGeneratedContent(true);
+                      } else {
+                        setGeneratedAsset(null);
+                        setHasGeneratedContent(false);
+                        setGenerateError(lastError || { notice: 'Generation did not return an asset.' });
+                      }
+                    } catch (err: any) {
+                      setGenerateError({ notice: err?.response?.data?.detail || err?.message || 'Generation failed.' });
+                    } finally {
                       setIsGeneratingContent(false);
-                      setHasGeneratedContent(true);
-                    }, 600);
+                    }
                   };
+
+                  const downloadHtml = (asset: any) => {
+                    if (!asset?.rendered_html) return;
+                    const blob = new Blob([asset.rendered_html], { type: 'text/html' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `${asset.content_type}-${asset.asset_id}.html`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                  };
+
+                  const personaKindLabel = (kind?: string) =>
+                    kind === 'named' ? 'Named contact' : kind === 'role_proxy' ? 'Hiring proxy' : kind === 'archetype' ? 'Archetype' : null;
 
                   const activePersonaObj = targetPersonas.find(p => p.id === selectedPersona) || targetPersonas[0];
                   const activeFormatObj = contentTypes.find(c => c.id === selectedContentType) || contentTypes[0];
@@ -4688,7 +4734,7 @@ Are you available for a brief 10-minute briefing next Thursday to review how pee
                           <span>Content Studio</span>
                         </h3>
                         <p className="text-xs text-slate-500 mt-0.5">
-                          Generate persona-targeted ABM content for {selectedAccount?.name || 'Target Account'} - powered by Gemini
+                          Generate persona-targeted ABM content for {selectedAccount?.name || 'Target Account'} - grounded in the account's own data, generated with GPT-4o
                         </p>
                       </div>
 
@@ -4720,6 +4766,11 @@ Are you available for a brief 10-minute briefing next Thursday to review how pee
                                   >
                                     <span className={`text-xs font-extrabold ${isSelected ? 'text-hp-navy' : 'text-slate-800'}`}>
                                       {p.title}
+                                      {personaKindLabel(p.kind) && (
+                                        <span className={`ml-1.5 align-middle text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${p.kind === 'named' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : p.kind === 'role_proxy' ? 'bg-amber-50 text-amber-800 border border-amber-200' : 'bg-slate-100 text-slate-500 border border-slate-200'}`}>
+                                          {personaKindLabel(p.kind)}
+                                        </span>
+                                      )}
                                     </span>
                                     <span className="text-[11px] text-slate-500 font-medium mt-0.5">
                                       {p.subtitle}
@@ -4838,77 +4889,236 @@ Are you available for a brief 10-minute briefing next Thursday to review how pee
                         </div>
 
                         {/* Right Output Canvas (7 Cols) */}
-                        <div className="lg:col-span-7 bg-white rounded-2xl border border-slate-200 shadow-sm p-8 min-h-[560px] flex flex-col justify-center items-center text-center">
-                          
-                          {!hasGeneratedContent ? (
-                            <div className="max-w-md space-y-4 animate-fade-in">
-                              <div className="w-14 h-14 rounded-2xl bg-slate-100 border border-slate-200 flex items-center justify-center mx-auto text-slate-400 shadow-xs">
-                                <Sparkles className="w-7 h-7 text-slate-400" />
+                        <div className={`lg:col-span-7 bg-white rounded-2xl border shadow-sm transition-colors ${
+                          isGeneratingContent
+                            ? 'border-sky-200 p-5 text-left'
+                            : 'border-slate-200 p-8 min-h-[320px] flex flex-col justify-center items-center text-center'
+                        }`}>
+
+                          {isGeneratingContent ? (
+                            <div className="w-full space-y-4 animate-fade-in" role="status" aria-live="polite">
+                              <div className="flex items-center gap-2 text-sm font-medium text-blue-600">
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                                <span>
+                                  GPT-4o is crafting your {activeFormatObj?.id === 'linkedin' ? 'LinkedIn post' : (activeFormatObj?.title || 'content').toLowerCase()}...
+                                </span>
+                              </div>
+                              <div className="space-y-3">
+                                {['w-[82%]', 'w-[87%]', 'w-[62%]', 'w-[80%]', 'w-[68%]', 'w-[93%]', 'w-[74%]', 'w-[65%]'].map((w, i) => (
+                                  <div
+                                    key={i}
+                                    className={`cs-skeleton-line h-3.5 ${w} rounded-md`}
+                                    style={{ animationDelay: `${i * 90}ms` }}
+                                  />
+                                ))}
+                              </div>
+                            </div>
+                          ) : generateError && !hasGeneratedContent ? (
+                            <div className="max-w-md space-y-3 animate-fade-in">
+                              <div className="w-14 h-14 rounded-2xl bg-rose-50 border border-rose-200 flex items-center justify-center mx-auto text-rose-500 shadow-xs">
+                                <Sparkles className="w-7 h-7" />
                               </div>
                               <h4 className="text-base font-extrabold text-slate-800">
+                                Draft not published{Array.isArray(generateError.attempts) && generateError.attempts.length > 0 ? ` after ${generateError.attempts.length} attempt${generateError.attempts.length === 1 ? '' : 's'}` : ''}
+                              </h4>
+                              <p className="text-xs text-slate-500 leading-relaxed font-medium">{generateError.notice}</p>
+                              {Array.isArray(generateError.faults) && generateError.faults.length > 0 && (
+                                <ul className="text-left text-[11px] text-rose-800 bg-rose-50 border border-rose-200 rounded-xl p-3 space-y-1">
+                                  {generateError.faults.map((f: string, i: number) => (
+                                    <li key={i}>&bull; {f}</li>
+                                  ))}
+                                </ul>
+                              )}
+                            </div>
+                          ) : !hasGeneratedContent || !generatedAsset ? (
+                            <div className="w-full max-w-md animate-fade-in">
+                              <PenTool className="w-10 h-10 text-slate-400 mx-auto mb-4" />
+                              <h4 className="text-base font-bold text-slate-600 mb-2">
                                 Ready to generate
                               </h4>
-                              <p className="text-xs text-slate-500 leading-relaxed font-medium">
-                                Select a target persona and content type, then click &quot;Generate Content&quot;. Gemini will create personalized ABM content using {selectedAccount?.name || 'Target Account'} account intelligence and HP Inc. product positioning.
+                              <p className="text-sm text-slate-400 leading-relaxed">
+                                Select a target persona and content type, then click &quot;Generate Content&quot;. GPT-4o will create personalized ABM content using {selectedAccount?.name || 'Target Account'} account intelligence and HP Inc. product positioning.
                               </p>
                             </div>
-                          ) : (
-                            <div className="w-full space-y-6 text-left animate-fade-in">
-                              
-                              {/* Generation Selection Summary Bar */}
-                              <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex flex-wrap items-center justify-between gap-3 text-xs">
-                                <div className="space-y-0.5">
-                                  <span className="text-[10px] font-mono font-bold text-slate-400 uppercase">Target Persona &amp; Format:</span>
-                                  <p className="font-extrabold text-slate-900">
-                                    {activePersonaObj.title} &middot; <span className="text-hp-navy">{activeFormatObj.title}</span>
-                                  </p>
-                                </div>
+                          ) : (() => {
+                            const g = generatedAsset.generated || {};
+                            const gr = generatedAsset.grounding_report || {};
+                            const labels: [string, any][] = Object.entries(generatedAsset.evidence_labels || {});
+                            return (
+                            <div className="w-full space-y-5 text-left animate-fade-in">
 
-                                <div className="flex items-center gap-2">
-                                  <span className="text-[10px] font-mono font-extrabold text-amber-800 bg-amber-50 px-2.5 py-1 rounded-full border border-amber-200">
-                                    Inferred TBD
+                              {/* Card header: type and persona, with Copy / Download HTML */}
+                              <div className="flex items-center justify-between gap-3">
+                                <div className="flex items-center gap-2 min-w-0 text-sm font-semibold text-slate-900">
+                                  <PenTool className="w-4 h-4 text-hp-navy shrink-0" />
+                                  <span className="truncate">
+                                    {generatedAsset.content_type_label} - {generatedAsset.persona?.title}
                                   </span>
-                                  <button
-                                    onClick={() => setHasGeneratedContent(false)}
-                                    className="text-[10px] font-bold text-slate-500 underline hover:text-slate-800"
-                                  >
-                                    Reset
-                                  </button>
+                                </div>
+                                <div className="flex items-center gap-4 shrink-0 text-xs">
+                                  {generatedAsset.plain_text && (
+                                    <button
+                                      onClick={async () => {
+                                        try {
+                                          await navigator.clipboard.writeText(generatedAsset.plain_text);
+                                          setCopiedAssetId(generatedAsset.asset_id);
+                                          setTimeout(() => setCopiedAssetId(null), 1500);
+                                        } catch {
+                                          /* clipboard unavailable */
+                                        }
+                                      }}
+                                      className="flex items-center gap-1.5 text-slate-500 hover:text-slate-800 transition"
+                                    >
+                                      <Copy className="w-3.5 h-3.5" />
+                                      {copiedAssetId === generatedAsset.asset_id ? 'Copied' : 'Copy'}
+                                    </button>
+                                  )}
+                                  {generatedAsset.rendered_html && (
+                                    <button
+                                      onClick={() => downloadHtml(generatedAsset)}
+                                      className="flex items-center gap-1.5 text-blue-600 hover:text-blue-800 font-medium transition"
+                                    >
+                                      <Download className="w-3.5 h-3.5" />
+                                      Download HTML
+                                    </button>
+                                  )}
                                 </div>
                               </div>
 
-                              {/* Inferred TBD Banner Box */}
-                              <div className="bg-amber-50/70 border border-amber-200/80 rounded-2xl p-8 text-center space-y-4">
-                                <div className="w-12 h-12 rounded-full bg-amber-100 text-amber-800 flex items-center justify-center mx-auto border border-amber-300 shadow-xs">
-                                  <Sparkles className="w-6 h-6 text-amber-600" />
-                                </div>
-
-                                <h4 className="text-sm font-black text-amber-900 uppercase tracking-wider">
-                                  ABM Content Generation — Inferred TBD
-                                </h4>
-
-                                <p className="text-xs text-amber-800 max-w-lg mx-auto leading-relaxed font-medium">
-                                  LLM prompt generation for <span className="font-bold text-amber-950">{activeFormatObj.title}</span> tailored to <span className="font-bold text-amber-950">{activePersonaObj.title}</span> for <span className="font-bold text-amber-950">{selectedAccount?.name || 'Target Account'}</span> will be executed in Step 8 (AI Generation Layer).
-                                </p>
-
-                                <div className="bg-white/80 border border-amber-200/60 rounded-xl p-4 text-left text-xs space-y-2 text-slate-700">
-                                  <span className="font-mono font-extrabold text-[10px] text-amber-900 uppercase block tracking-wider">
-                                    Selected Inputs Ready for Step 8 Prompt:
-                                  </span>
-                                  <div className="space-y-1 font-mono text-[11px] text-slate-600">
-                                    <div>&bull; Persona: <span className="font-bold text-slate-900">{activePersonaObj.title}</span> ({activePersonaObj.subtitle})</div>
-                                    <div>&bull; Format: <span className="font-bold text-slate-900">{activeFormatObj.title}</span> ({activeFormatObj.subtitle})</div>
-                                    <div>&bull; Topic: <span className="font-bold text-slate-900">{customTopic.trim() || selectedTopic}</span></div>
-                                    {additionalContext.trim() && (
-                                      <div>&bull; Context: <span className="italic text-slate-800">&quot;{additionalContext}&quot;</span></div>
+                              {/* The asset */}
+                              {generatedAsset.content_type === 'branded_emailer' ? (
+                                <div className="rounded-xl border border-slate-200 overflow-hidden bg-white">
+                                  <div className="bg-slate-50 px-4 py-3 text-[13px] leading-relaxed">
+                                    <p>
+                                      <span className="font-semibold text-slate-800">From:</span>{' '}
+                                      <span className="text-slate-500">Your HP Account Team</span>
+                                    </p>
+                                    <p>
+                                      <span className="font-semibold text-slate-800">To:</span>{' '}
+                                      <span className="text-slate-500">
+                                        {generatedAsset.persona?.kind === 'named' && generatedAsset.persona?.full_name
+                                          ? `${generatedAsset.persona.full_name}, ${generatedAsset.persona.title}`
+                                          : generatedAsset.persona?.title}
+                                      </span>
+                                    </p>
+                                    {g.subject_line && (
+                                      <p>
+                                        <span className="font-semibold text-slate-800">Subject:</span>{' '}
+                                        <span className="text-slate-500">{g.subject_line}</span>
+                                      </p>
                                     )}
                                   </div>
+                                  <div className="h-1.5 bg-gradient-to-r from-[#0096D6] to-[#00629B]" />
+                                  <div className="px-5 py-5 space-y-4 text-[15px] text-slate-700 leading-7">
+                                    <div className="flex items-center gap-2">
+                                      <span className="w-7 h-7 rounded-full bg-[#0096D6] text-white text-xs font-bold italic flex items-center justify-center">
+                                        hp
+                                      </span>
+                                      <span className="text-[11px] font-black text-slate-900">HP</span>
+                                    </div>
+                                    {generatedAsset.greeting && <p>{generatedAsset.greeting}</p>}
+                                    {g.opening && <p>{g.opening}</p>}
+                                    {(g.body_sections || []).map((sec: any, i: number) => (
+                                      <p key={i}>{sec.text}</p>
+                                    ))}
+                                    {g.cta && <p>{g.cta}</p>}
+                                  </div>
                                 </div>
+                              ) : generatedAsset.rendered_html ? (
+                                <iframe
+                                  title="Branded preview"
+                                  srcDoc={generatedAsset.rendered_html}
+                                  sandbox=""
+                                  className="w-full h-[640px] rounded-xl border border-slate-200 bg-white"
+                                />
+                              ) : generatedAsset.content_type === 'linkedin' ? (
+                                <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-3 text-sm text-slate-800 leading-relaxed">
+                                  <div className="flex items-center gap-3 pb-3 border-b border-slate-100">
+                                    <div className="w-10 h-10 rounded-full bg-hp-navy text-white text-xs font-black flex items-center justify-center">
+                                      HP
+                                    </div>
+                                    <div>
+                                      <p className="text-sm font-bold text-slate-900">HP Seller</p>
+                                      <p className="text-[11px] text-slate-500">LinkedIn post preview</p>
+                                    </div>
+                                  </div>
+                                  {g.headline && <p className="font-semibold text-slate-900">{g.headline}</p>}
+                                  {g.opening && <p>{g.opening}</p>}
+                                  {(g.body_sections || []).map((sec: any, i: number) => (
+                                    <p key={i} className="whitespace-pre-line">{sec.text}</p>
+                                  ))}
+                                  {g.cta && <p>{String(g.cta).replace(/\s*#\w+/g, '').trim()}</p>}
+                                  {(() => {
+                                    const tags: string[] = (g.hashtags && g.hashtags.length > 0)
+                                      ? g.hashtags
+                                      : (String(g.cta || '').match(/#\w+/g) || []);
+                                    return tags.length > 0 ? (
+                                      <p className="text-hp-navy font-semibold">{tags.join(' ')}</p>
+                                    ) : null;
+                                  })()}
+                                </div>
+                              ) : generatedAsset.plain_text && (generatedAsset.content_type === 'email' || generatedAsset.content_type === 'follow_up') ? (
+                                <pre className="bg-white border border-slate-200 rounded-2xl p-6 text-sm text-slate-800 leading-relaxed whitespace-pre-wrap font-sans">
+                                  {generatedAsset.plain_text}
+                                </pre>
+                              ) : (
+                                <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4 text-sm text-slate-800 leading-relaxed">
+                                  {g.subject_line && ['email', 'follow_up', 'branded_emailer'].includes(generatedAsset.content_type) && (
+                                    <div className="border-b border-slate-100 pb-3">
+                                      <span className="text-[10px] font-mono font-bold text-slate-400 uppercase">Subject</span>
+                                      <p className="font-extrabold text-slate-900">{g.subject_line}</p>
+                                    </div>
+                                  )}
+                                  {g.headline && <h4 className="text-lg font-extrabold text-slate-900">{g.headline}</h4>}
+                                  <p>{g.opening}</p>
+                                  {(g.body_sections || []).map((sec: any, i: number) => (
+                                    <div key={i} className="space-y-1">
+                                      {sec.heading && <h5 className="text-xs font-black uppercase tracking-wider text-hp-navy">{sec.heading}</h5>}
+                                      <p>{sec.text}</p>
+                                    </div>
+                                  ))}
+                                  <p className="font-semibold text-slate-900">{g.cta}</p>
+                                </div>
+                              )}
 
+                              {/* Provenance */}
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-[11px]">
+                                <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-1">
+                                  <span className="font-mono font-extrabold text-[10px] text-slate-500 uppercase block">Evidence used</span>
+                                  {labels.length === 0 && <div className="text-slate-500">None cited.</div>}
+                                  {labels.map(([k, v]) => (
+                                    <div key={k}>
+                                      <span className="font-mono font-bold text-hp-navy">[{k}]</span>{' '}
+                                      <span className="text-slate-700">{String(v).slice(0, 160)}{String(v).length > 160 ? '…' : ''}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                                <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-1">
+                                  <span className="font-mono font-extrabold text-[10px] text-slate-500 uppercase block">HP lines &amp; framing</span>
+                                  {generatedAsset.topic && <div className="text-slate-500">Topic: {generatedAsset.topic}</div>}
+                                  <div className="font-semibold text-slate-800">
+                                    {(g.hp_products || []).length > 0 ? g.hp_products.join(', ') : 'No product named — discovery-led'}
+                                  </div>
+                                  {g.persona_framing && <div className="italic text-slate-600">{g.persona_framing}</div>}
+                                  <div className="text-slate-500">
+                                    Grounding: {gr.numbers_checked ?? 0} number(s) checked, {(gr.numbers_rejected || []).length} rejected &middot; {(gr.urls_rejected || []).length} URL(s) stripped
+                                  </div>
+                                  {generatedAsset.persona?.kind === 'role_proxy' && (
+                                    <div className="text-amber-800">Role-type proxy from open hiring — no individual is known to hold this role.</div>
+                                  )}
+                                  {Array.isArray(generatedAsset.style_warnings) && generatedAsset.style_warnings.length > 0 && (
+                                    <div className="text-amber-800">
+                                      <span className="font-bold">Style to fix before sending:</span>{' '}
+                                      {generatedAsset.style_warnings.join('; ')}
+                                      {generatedAsset.attempts ? ` (kept after ${generatedAsset.attempts} attempts)` : ''}
+                                    </div>
+                                  )}
+                                </div>
                               </div>
 
                             </div>
-                          )}
+                            );
+                          })()}
 
                         </div>
 
