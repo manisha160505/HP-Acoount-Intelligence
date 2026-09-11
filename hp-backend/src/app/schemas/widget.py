@@ -26,3 +26,9 @@ class WidgetResponse(BaseModel):
     source_fields: list[str]
     display_order: int
     updated_at: str | None = None
+
+class ContentGenerateRequest(BaseModel):
+    persona_id: str
+    content_type: str
+    topic: str
+    additional_context: str = ""

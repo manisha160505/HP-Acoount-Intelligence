@@ -1,0 +1,126 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Backend: FastAPI (reload)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": [
+        "app.main:app",
+        "--app-dir", "src",
+        "--host", "127.0.0.1",
+        "--port", "8000",
+        "--reload"
+      ],
+      "cwd": "${workspaceFolder}/hp-backend",
+      "python": "${workspaceFolder}/hp-backend/.venv/bin/python",
+      "envFile": "${workspaceFolder}/.env",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/hp-backend/src",
+        "PYTHONUNBUFFERED": "1"
+      },
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "subProcess": true,
+      "preLaunchTask": "mongo: up"
+    },
+    {
+      "name": "Backend: FastAPI (no reload, best for breakpoints)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": [
+        "app.main:app",
+        "--app-dir", "src",
+        "--host", "127.0.0.1",
+        "--port", "8000"
+      ],
+      "cwd": "${workspaceFolder}/hp-backend",
+      "python": "${workspaceFolder}/hp-backend/.venv/bin/python",
+      "envFile": "${workspaceFolder}/.env",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/hp-backend/src",
+        "PYTHONUNBUFFERED": "1"
+      },
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "preLaunchTask": "mongo: up"
+    },
+    {
+      "name": "Backend: Python current file",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${file}",
+      "cwd": "${workspaceFolder}/hp-backend",
+      "python": "${workspaceFolder}/hp-backend/.venv/bin/python",
+      "envFile": "${workspaceFolder}/.env",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/hp-backend/src",
+        "PYTHONUNBUFFERED": "1"
+      },
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "Frontend: Next.js dev (server-side)",
+      "type": "node",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/hp-frontend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "env": {
+        "NEXT_PUBLIC_API_URL": "http://localhost:8000",
+        "NODE_OPTIONS": "--inspect"
+      },
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**"],
+      "serverReadyAction": {
+        "pattern": "- Local:\\s+(https?://\\S+)",
+        "uriFormat": "%s",
+        "action": "startDebugging",
+        "name": "Frontend: Chrome (client-side)"
+      }
+    },
+    {
+      "name": "Frontend: Chrome (client-side)",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://localhost:3000",
+      "webRoot": "${workspaceFolder}/hp-frontend",
+      "sourceMapPathOverrides": {
+        "webpack://_N_E/*": "${workspaceFolder}/hp-frontend/*",
+        "webpack://*": "${workspaceFolder}/hp-frontend/*"
+      },
+      "userDataDir": "${workspaceFolder}/.vscode/.chrome-profile"
+    },
+    {
+      "name": "Frontend: Attach to Chrome (port 9222)",
+      "type": "chrome",
+      "request": "attach",
+      "port": 9222,
+      "url": "http://localhost:3000/*",
+      "webRoot": "${workspaceFolder}/hp-frontend"
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Full Stack: Backend + Frontend",
+      "configurations": [
+        "Backend: FastAPI (reload)",
+        "Frontend: Next.js dev (server-side)"
+      ],
+      "stopAll": true,
+      "presentation": { "group": "1-fullstack", "order": 1 }
+    },
+    {
+      "name": "Full Stack: Backend (breakpoints) + Frontend",
+      "configurations": [
+        "Backend: FastAPI (no reload, best for breakpoints)",
+        "Frontend: Next.js dev (server-side)"
+      ],
+      "stopAll": true,
+      "presentation": { "group": "1-fullstack", "order": 2 }
+    }
+  ]
+}

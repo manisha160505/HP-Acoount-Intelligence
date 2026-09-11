@@ -65,3 +65,12 @@ hp-sea-abm-dev-main/
 .DS_Store
 Thumbs.db
 *.log
+
+# VS Code debug Chrome profile
+.vscode/.chrome-profile/
+
+# code-review-graph (local knowledge graph + Claude Code MCP config, skills, instructions)
+.code-review-graph/
+.mcp.json
+.claude/
+/CLAUDE.md

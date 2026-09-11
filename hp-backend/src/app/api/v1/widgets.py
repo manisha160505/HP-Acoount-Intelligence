@@ -7,7 +7,7 @@ from app.database.mongodb import get_db
 
 logger = logging.getLogger(__name__)
 from app.core.deps import require_user_role, require_admin_role
-from app.schemas.widget import WidgetContract, WidgetResponse
+from app.schemas.widget import WidgetContract, WidgetResponse, ContentGenerateRequest
 from app.services.extractors.executive_dashboard import extract_executive_dashboard
 from app.services.extractors.recent_news_signals import extract_recent_news_signals
 from app.services.extractors.intent_demand_signals import extract_intent_demand_signals
@@ -16,7 +16,7 @@ from app.services.extractors.stakeholder_map import extract_stakeholder_map
 from app.services.extractors.tech_landscape import extract_tech_landscape
 from app.services.extractors.objection_playbook import extract_objection_playbook
 from app.services.extractors.content_messaging import extract_content_messaging
-from app.services.extractors.content_studio import extract_content_studio
+from app.services.extractors.content_studio import extract_content_studio, generate_content_asset
 from app.services.extractors.strategy_chat import extract_strategy_chat
 from app.services.extractors.message_evaluator import extract_message_evaluator
 
@@ -277,7 +277,7 @@ WIDGET_REGISTRY = {
             "widget_key": "content_generated_assets",
             "widget_name": "Tailored Content Asset Generator",
             "feature_key": "content_studio",
-            "description": "Inferred content generation contract. Executive briefing deck and pitch generation prompts are TBD for future AI generation.",
+            "description": "Persona-targeted ABM content (email, LinkedIn post, one-pager, executive brief, follow-up, branded emailer, landing page) generated on request from firmographics, Stakeholder Map personas and open-hiring role proxies. Grounded against the account's own data; kept as per-account history.",
             "widget_type": "asset_generator",
             "data_classification": "inferred",
             "source_datasets": ["prospect_contacts", "job_openings"],
@@ -570,6 +570,48 @@ def generate_opportunity_map_endpoint(
         "account_id": account_id,
         "feature_key": "solution_narrative_opportunity_map",
         "widget_key": "opportunity_narrative_plays",
+        "widget_name": contract["widget_name"],
+        "description": contract["description"],
+        "widget_type": contract["widget_type"],
+        "data_classification": contract["data_classification"],
+        "status": ext_doc.get("status", "pending"),
+        "data": ext_doc.get("data", {}),
+        "source_datasets": contract["source_datasets"],
+        "source_fields": contract["source_fields"],
+        "display_order": contract["display_order"],
+        "updated_at": updated_at_str
+    }
+
+@router.post("/accounts/{account_id}/widgets/content_studio/generate", response_model=WidgetResponse)
+def generate_content_studio_endpoint(
+    account_id: str,
+    body: ContentGenerateRequest,
+    current_user: dict = Depends(require_user_role)
+):
+    if not ObjectId.is_valid(account_id):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid account ID format")
+
+    db = get_db()
+    account = db["accounts"].find_one({"_id": ObjectId(account_id)})
+    if not account:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company account not found")
+
+    try:
+        ext_doc = generate_content_asset(
+            account_id, body.persona_id, body.content_type, body.topic, body.additional_context)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+    updated_at_val = ext_doc.get("updated_at")
+    updated_at_str = updated_at_val.isoformat() if isinstance(updated_at_val, datetime) else str(updated_at_val or "")
+
+    contract = next(c for c in WIDGET_REGISTRY["content_studio"]
+                    if c["widget_key"] == "content_generated_assets")
+
+    return {
+        "account_id": account_id,
+        "feature_key": "content_studio",
+        "widget_key": "content_generated_assets",
         "widget_name": contract["widget_name"],
         "description": contract["description"],
         "widget_type": contract["widget_type"],
