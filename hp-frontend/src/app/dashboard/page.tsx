@@ -323,6 +323,81 @@ function PendingNotice({ widget, title }: { widget: any; title: string }) {
   );
 }
 
+// One HP recommendation, rendered to match the vendor cards it sits beneath.
+// The product, the confidence and the approved facts are all decided in Python;
+// this only lays them out.
+function HpRecommendationCard({ rec }: { rec: any }) {
+  const withheld: Record<string, number> = rec.withheld_summary || {};
+  const withheldEntries = Object.entries(withheld);
+  const conf = String(rec.confidence || '');
+  const confClass =
+    conf === 'Confirmed' ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+    : conf === 'Likely' ? 'bg-amber-50 text-amber-700 border-amber-200'
+    : 'bg-slate-100 text-slate-600 border-slate-200';
+
+  return (
+    <div className="bg-indigo-50/40 border border-indigo-100 rounded-2xl p-4 space-y-3">
+      <div className="flex flex-wrap items-start justify-between gap-2 border-b border-indigo-100 pb-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-[10px] font-mono font-extrabold uppercase tracking-widest text-indigo-600">
+            HP Recommendation
+          </span>
+          <span className="text-xs font-black text-slate-900">HP {rec.hp_family}</span>
+          {rec.device_type && (
+            <span className="text-[10px] uppercase tracking-wider bg-white text-slate-600 px-1.5 py-0.5 rounded border border-slate-200">
+              {rec.device_type}
+            </span>
+          )}
+          <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border ${confClass}`}>
+            {conf}
+          </span>
+        </div>
+        <span className="text-[10px] font-mono text-slate-400 whitespace-nowrap">
+          Rule {rec.rule_id}
+        </span>
+      </div>
+
+      {rec.rationale && (
+        <p className="text-xs text-slate-700 leading-relaxed">{rec.rationale}</p>
+      )}
+      {rec.why_this_product && (
+        <p className="text-xs text-slate-600 leading-relaxed">{rec.why_this_product}</p>
+      )}
+
+      {(rec.approved_facts || []).length > 0 && (
+        <div className="bg-white border border-slate-100 rounded-xl p-3 space-y-1.5">
+          <span className="text-[10px] font-mono font-extrabold uppercase tracking-widest text-slate-500 block">
+            HP facts approved for this account
+          </span>
+          {(rec.approved_facts || []).slice(0, 6).map((f: any, i: number) => (
+            <div key={i} className="text-xs text-slate-700">
+              <span>&bull; {f.text}</span>
+              {(f.conditions || []).length > 0 && (
+                <span className="block text-[10px] text-slate-500 ml-3 mt-0.5 leading-snug">
+                  {f.conditions[0]}
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {withheldEntries.length > 0 && (
+        <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+          <span className="font-semibold">Withheld for this market or configuration: </span>
+          {withheldEntries.map(([reason, count]) => `${reason} (${count})`).join(', ')}
+        </p>
+      )}
+
+      {rec.discovery_question && (
+        <p className="text-xs text-slate-600 italic border-l-2 border-indigo-200 pl-3">
+          {rec.discovery_question}
+        </p>
+      )}
+    </div>
+  );
+}
+
 export default function UserDashboardPage() {
   const { user, logout } = useAuth();
 
@@ -3371,6 +3446,9 @@ export default function UserDashboardPage() {
                   const matrixWidget = widgets.find(w => w.widget_key === 'tech_stack_matrix');
                   const webstackWidget = widgets.find(w => w.widget_key === 'webstack_breakdown');
                   const detectionsWidget = widgets.find(w => w.widget_key === 'tech_detections_reference');
+                  const hpRecWidget = widgets.find(w => w.widget_key === 'technographic_hp_recommendations');
+                  const hpRecData: any = hpRecWidget?.data || {};
+                  const hpRecs: any[] = hpRecData.recommendations || [];
 
                   const mapData = mapWidget?.data || {};
                   const matrixData = matrixWidget?.data || {};
@@ -3405,6 +3483,7 @@ export default function UserDashboardPage() {
 
                   return (
                     <div className="space-y-6 animate-fade-in">
+
                       {/* Top Header & Opportunities Toggle */}
                       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200 pb-4">
                         <div>
@@ -3441,13 +3520,20 @@ export default function UserDashboardPage() {
                               <span className="text-[10px] font-mono font-extrabold uppercase tracking-widest text-slate-400">
                                 STRATEGIC READ
                               </span>
-                              <span className="text-[10px] font-mono font-extrabold text-amber-700 bg-amber-50 px-2.5 py-0.5 rounded-full border border-amber-200">
-                                [ Strategic Read: Inferred TBD ]
-                              </span>
                             </div>
-                            <p className="text-xs text-slate-700 leading-relaxed font-medium">
-                              {mapData.strategic_read}
-                            </p>
+                            {mapData.strategic_read ? (
+                              <p className="text-xs text-slate-700 leading-relaxed font-medium">
+                                {mapData.strategic_read}
+                              </p>
+                            ) : (
+                              <p className="text-xs text-slate-500 leading-relaxed">
+                                Detected technologies and their HP relationship are shown below.
+                                The sales narrative and product recommendations are in
+                                <span className="font-semibold"> HP Product Recommendations</span>,
+                                where they are grounded in HP product sources and filtered for this
+                                account&apos;s market.
+                              </p>
+                            )}
 
                             {/* 4 Stat Cards */}
                             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
@@ -3516,15 +3602,19 @@ export default function UserDashboardPage() {
                                   </div>
                                 </div>
 
-                                {/* WHAT IT MEANS FOR HP Callout */}
-                                <div className="bg-blue-50/50 border border-blue-100/80 rounded-xl p-4 space-y-1">
-                                  <span className="text-[10px] font-mono font-extrabold uppercase tracking-widest text-blue-600 block">
-                                    WHAT IT MEANS FOR HP
-                                  </span>
-                                  <p className="text-xs text-slate-700 font-medium leading-relaxed">
-                                    {cat.what_it_means}
-                                  </p>
-                                </div>
+                                {/* HP RELATIONSHIP - deterministic, from the ABX
+                                    status rules. The narrative equivalent lives in
+                                    the recommendations widget. */}
+                                {(cat.what_it_means || cat.hp_relationship) && (
+                                  <div className="bg-blue-50/50 border border-blue-100/80 rounded-xl p-4 space-y-1">
+                                    <span className="text-[10px] font-mono font-extrabold uppercase tracking-widest text-blue-600 block">
+                                      {cat.what_it_means ? 'WHAT IT MEANS FOR HP' : 'HP RELATIONSHIP'}
+                                    </span>
+                                    <p className="text-xs text-slate-700 font-medium leading-relaxed">
+                                      {cat.what_it_means || cat.hp_relationship}
+                                    </p>
+                                  </div>
+                                )}
 
                                 {/* Vendor Cards Grid */}
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -3568,31 +3658,29 @@ export default function UserDashboardPage() {
                                           <div className="flex items-center justify-between gap-2 border-b border-slate-100 pb-2 mb-2">
                                             <h5 className="text-xs font-black text-slate-900">{vendor.vendor_name}</h5>
                                             <div>
-                                              {vendor.risk_level === 'High risk' && (
-                                                <span className="text-[10px] font-extrabold text-red-700 bg-red-50 px-2 py-0.5 rounded-md border border-red-200">
-                                                  High risk
-                                                </span>
-                                              )}
-                                              {vendor.risk_level === 'Medium risk' && (
-                                                <span className="text-[10px] font-extrabold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
-                                                  Medium risk
-                                                </span>
-                                              )}
-                                              {vendor.risk_level === 'Low risk' && (
-                                                <span className="text-[10px] font-extrabold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
-                                                  Low risk
-                                                </span>
-                                              )}
-                                              {vendor.risk_level === 'Contextual' && (
-                                                <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200">
-                                                  Contextual
-                                                </span>
-                                              )}
-                                              {vendor.risk_level === 'Inferred TBD' && (
-                                                <span className="text-[10px] font-mono font-extrabold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-200">
-                                                  Inferred TBD
-                                                </span>
-                                              )}
+                                              <div className="flex items-center gap-1.5">
+                                                {vendor.risk_level && (
+                                                  <span
+                                                    className={`text-[10px] font-extrabold px-2 py-0.5 rounded-md border ${
+                                                      vendor.risk_level === 'High risk'
+                                                        ? 'text-red-700 bg-red-50 border-red-200'
+                                                        : vendor.risk_level === 'Medium risk'
+                                                        ? 'text-amber-700 bg-amber-50 border-amber-200'
+                                                        : 'text-emerald-700 bg-emerald-50 border-emerald-200'
+                                                    }`}
+                                                  >
+                                                    {vendor.risk_level}
+                                                  </span>
+                                                )}
+                                                {vendor.hp_relationship_label && (
+                                                  <span
+                                                    title={vendor.hp_relationship || ''}
+                                                    className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200"
+                                                  >
+                                                    {vendor.hp_relationship_label}
+                                                  </span>
+                                                )}
+                                              </div>
                                             </div>
                                           </div>
 
@@ -3613,17 +3701,48 @@ export default function UserDashboardPage() {
 
                                         <div className="text-[9px] font-mono uppercase tracking-wider text-slate-400 border-t border-slate-100 pt-2 flex items-center justify-between">
                                           <span className="truncate pr-2">{vendor.provenance}</span>
-                                          <span className="font-bold text-slate-500">{vendor.confidence === 'TBD' ? 'Confidence: TBD' : vendor.confidence}</span>
+                                          <span
+                                            className="font-bold text-slate-500 whitespace-nowrap"
+                                            title={vendor.evidence_basis || ''}
+                                          >
+                                            {vendor.confidence}
+                                          </span>
                                         </div>
                                       </div>
                                     );
                                   })}
                                 </div>
 
+                                {/* HP recommendations for this category, from
+                                    the deck-usage rules. category_key is
+                                    assigned in Python from the rule's device
+                                    type. */}
+                                {hpRecs
+                                  .filter((rec: any) => rec.category_key === cat.category_key)
+                                  .map((rec: any) => (
+                                    <HpRecommendationCard key={rec.rule_id} rec={rec} />
+                                  ))}
+
                                </div>
                              ))}
                           </div>
+                      {/* Anything the category mapping could not place, plus the
+                          rules that were evaluated and not used - surfaced so a
+                          recommendation is never dropped without explanation. */}
+                      {hpRecs.filter((r: any) => !r.category_key).map((rec: any) => (
+                        <HpRecommendationCard key={rec.rule_id} rec={rec} />
+                      ))}
+
+                      {(hpRecData.rules_blocked || []).length > 0 && (
+                        <div className="text-[11px] text-slate-500 bg-slate-50 border border-slate-200 rounded px-3 py-2">
+                          <span className="font-semibold text-slate-600">Rules evaluated but not used: </span>
+                          {(hpRecData.rules_blocked || [])
+                            .map((b: any) => `rule ${b.rule_id} (${b.blocked})`).join('; ')}
                         </div>
+                      )}
+
+                        </div>
+
 
                     </div>
                   );

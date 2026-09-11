@@ -55,7 +55,92 @@ def _collect(widget_key: str, data: dict):
                 out.append((f"{p.get('play_key')}.{f}", p.get(f)))
             out.append((f"{p.get('play_key')}.recommended_cta",
                         (p.get("entry_path") or {}).get("recommended_cta")))
+    elif widget_key == "technographic_hp_recommendations":
+        # ACCOUNT-FACING FIELDS ONLY.
+        #
+        # `why_this_product` is deliberately excluded: it describes an HP
+        # product, and HP product facts are not in the account's uploads, so
+        # checking it against the account corpus would fail every time. That
+        # field is verified at generation against the approved-fact corpus for
+        # its own recommendation - see the hp_facts_checked / hp_facts_rejected
+        # counters on the widget's grounding_report, and _audit_hp_facts below.
+        for r in (data.get("recommendations") or []):
+            rid = r.get("rule_id")
+            for f in ("rationale", "discovery_question"):
+                out.append((f"rule-{rid}.{f}", r.get(f)))
     return [(k, v) for k, v in out if isinstance(v, str) and v.strip()]
+
+
+def _audit_hp_facts(data: dict):
+    """Second corpus: every HP product claim must resolve to its approved facts.
+
+    Returns (checked, failures). Each recommendation is checked only against
+    the facts approved for THAT recommendation, so a fact belonging to one
+    model can never vouch for prose about another (guardrails 1 and 16).
+    """
+    from app.services.extractors.grounding import corpus_from_texts
+
+    checked, failures = 0, []
+    for rec in (data.get("recommendations") or []):
+        prose = str(rec.get("why_this_product") or "").strip()
+        if not prose:
+            continue
+        facts = rec.get("approved_facts") or []
+        corpus = corpus_from_texts(
+            [f.get("text") for f in facts]
+            + [c for f in facts for c in (f.get("conditions") or [])])
+        checked += 1
+        unsourced = corpus.unsourced_numbers(prose)
+        if unsourced:
+            failures.append(f"rule-{rec.get('rule_id')}: {unsourced}")
+    return checked, failures
+
+
+def _audit_technographic_map(data: dict, techno_row: dict):
+    """Every vendor card must be able to substantiate what it says.
+
+    Two failures this catches, both of which shipped once:
+
+      * a stated provenance naming a column the vendor is not in - the string
+        used to be hardcoded per detection branch, so Symantec / Kaspersky
+        claimed "IT SECURITY" while appearing only in Full Tech Stack;
+      * a description naming a product that was never detected - the Apple card
+        said "macOS / iOS" on a stack containing only "Apple iOS".
+
+    Returns (checked, failures).
+    """
+    checked, failures = 0, []
+    columns = {k.lower(): str(v or "").lower() for k, v in (techno_row or {}).items()}
+
+    for category in (data.get("categories") or []):
+        for vendor in (category.get("vendors") or []):
+            if vendor.get("is_whitespace"):
+                continue
+            checked += 1
+            name = vendor.get("vendor_name")
+            detected = [str(d) for d in (vendor.get("detected_as") or [])]
+
+            # 1. provenance must resolve to somewhere the vendor really is
+            provenance = str(vendor.get("provenance") or "")
+            named = provenance.split("->")[-1]
+            for column in [c.strip() for c in named.split(",") if c.strip()]:
+                haystack = columns.get(column.lower())
+                if haystack is None:
+                    failures.append("%s: provenance names '%s', which is not a "
+                                    "technographics column" % (name, column))
+                elif detected and not any(d.lower() in haystack for d in detected):
+                    failures.append("%s: provenance claims '%s' but no detected "
+                                    "entry appears there" % (name, column))
+
+            # 2. the description may not name a product that was not detected
+            description = str(vendor.get("description") or "").lower()
+            blob = " ".join(detected).lower()
+            for token in ("macos", "ios", "windows", "linux", "android"):
+                if token in description and blob and token not in blob:
+                    failures.append("%s: description says '%s' but it is absent "
+                                    "from the detected entries" % (name, token))
+
+    return checked, failures
 
 
 def main() -> int:
@@ -73,9 +158,22 @@ def main() -> int:
     print(f"Corpus : {corpus.cell_count} cells from {len(ALL_DATASETS)} datasets\n")
 
     widgets = ["stakeholder_talking_points", "news_relevance_summary",
-               "objection_reframe_cards", "opportunity_narrative_plays"]
+               "objection_reframe_cards", "opportunity_narrative_plays",
+               "technographic_hp_recommendations"]
 
     total_strings = bad_numbers = bad_urls = bad_products = 0
+    hp_checked = 0
+    hp_failures = []
+    map_checked = 0
+    map_failures = []
+    techno_rows = _read_dataset_records(aid, "technographics")
+    techno_row = techno_rows[0] if techno_rows else {}
+
+    map_doc = db["account_widgets"].find_one(
+        {"account_id": aid, "widget_key": "technographic_map"})
+    if map_doc and map_doc.get("status") == "available":
+        map_checked, map_failures = _audit_technographic_map(
+            map_doc.get("data") or {}, techno_row)
 
     for wk in widgets:
         doc = db["account_widgets"].find_one({"account_id": aid, "widget_key": wk})
@@ -83,6 +181,10 @@ def main() -> int:
             print(f"  {wk:<34} (not available - skipped)")
             continue
         data = doc.get("data") or {}
+        if wk == "technographic_hp_recommendations":
+            checked, failures = _audit_hp_facts(data)
+            hp_checked += checked
+            hp_failures.extend(failures)
         strings = _collect(wk, data)
         total_strings += len(strings)
 
@@ -110,10 +212,25 @@ def main() -> int:
         print(f"  {wk:<34} {len(strings):>3} strings, {n_bad} bad numbers, "
               f"{u_bad} bad URLs, {p_bad} non-HP products   [{note}]")
 
+    if map_checked or map_failures:
+        print("")
+        print(f"  technographic_map: {map_checked} vendor card(s) checked against "
+              f"their source columns, {len(map_failures)} unsupported")
+        for failure in map_failures:
+            print(f"    UNSUPPORTED CARD     {failure}")
+
+    if hp_checked or hp_failures:
+        print(f"\n  HP product prose: {hp_checked} checked against their own approved "
+              f"facts, {len(hp_failures)} unsourced")
+        for failure in hp_failures:
+            print(f"    UNSOURCED HP FIGURE  {failure}")
+
     print(f"\nTOTAL: {total_strings} generated strings | "
           f"{bad_numbers} unsourced numbers | {bad_urls} unsourced URLs | "
-          f"{bad_products} non-HP products")
-    return 0 if (bad_numbers or bad_urls or bad_products) == 0 else 2
+          f"{bad_products} non-HP products | {len(hp_failures)} unsourced HP figures | "
+          f"{len(map_failures)} unsupported vendor cards")
+    failed = bad_numbers or bad_urls or bad_products or hp_failures or map_failures
+    return 0 if not failed else 2
 
 
 if __name__ == "__main__":

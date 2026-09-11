@@ -15,6 +15,15 @@ google_news_rss_data.xlsx
 11-Features-Sourcing-Reference-Anonymized.docx
 Master Next.js Project Structure.pdf
 Master FastAPI Project Structure.pdf
+# HP product decks. Marked "HP Confidential. For use by HP or Partner with
+# Customers under HP CDA only." on 159 of their 422 slides, and ~1GB of media.
+# The extracted product facts live in the hp_product_knowledge collection on
+# the shared cluster, never in the repository - see scripts/extract_hp_decks.py.
+products/
+*.pptx
+*.ppt
+hp_product_knowledge*.json
+
 *.xlsx
 *.xls
 *.csv

@@ -117,6 +117,20 @@ class Corpus:
                        if _norm(u).rstrip("/") not in {x.rstrip("/") for x in self.urls}})
 
 
+def corpus_from_texts(texts) -> Corpus:
+    """A Corpus over an arbitrary list of strings.
+
+    Used for the HP product-fact corpus, which is built from the approved,
+    guardrail-filtered claims for one recommendation rather than from an
+    account's uploads. It is deliberately kept separate from the account
+    corpus: a figure that exists only in HP marketing may never be used to
+    describe the account, and account data may never be used to justify an HP
+    product claim. That separation is guardrail 13 - "HP decks cannot create
+    account evidence".
+    """
+    return Corpus([str(t) for t in (texts or []) if str(t or "").strip()])
+
+
 def build_corpus(records_by_dataset: dict[str, list[dict]]) -> Corpus:
     """Build a Corpus from already-read dataset records.
 

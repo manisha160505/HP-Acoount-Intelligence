@@ -218,6 +218,23 @@ WIDGET_REGISTRY = {
             "source_datasets": ["webstack"],
             "source_fields": ["website_tech"],
             "display_order": 4
+        },
+        {
+            "widget_key": "technographic_hp_recommendations",
+            "widget_name": "HP Product Recommendations",
+            "feature_key": "tech_landscape",
+            "description": ("HP product-line recommendations derived from the HP deck-usage "
+                            "rules. The rule, the product and the confidence are all decided "
+                            "in Python; the model writes only the rationale. Product facts "
+                            "come from the HP decks and are filtered for this account's "
+                            "market, configuration and embargo rules before use."),
+            "widget_type": "recommendation_cards",
+            "data_classification": "inferred",
+            "source_datasets": ["technographics", "technology_detections", "webstack",
+                                "intent_score", "firmographics"],
+            "source_fields": ["full_tech_stack", "topic_name", "hq_location",
+                              "business_description"],
+            "display_order": 5
         }
     ],
     "objection_playbook": [
