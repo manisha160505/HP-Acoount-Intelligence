@@ -32,3 +32,16 @@ class ContentGenerateRequest(BaseModel):
     content_type: str
     topic: str
     additional_context: str = ""
+
+
+class MessageEvaluateRequest(BaseModel):
+    persona_contact_id: str
+    objective: str
+    format: str
+    message: str
+    mode: str = "DEEP"
+
+
+class MessageRewriteRequest(BaseModel):
+    fingerprint: str
+    selected_recommendations: list[str] = []

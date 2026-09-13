@@ -200,8 +200,26 @@ def seed_database_if_empty():
     # layer, which imports this module's package.
     from app.api.v1.widgets import FEATURE_EXTRACTORS
 
-    succeeded, failed = [], []
+    # Only features with NOTHING stored are extracted here, which is what the
+    # function name has always promised.
+    #
+    # Running every extractor on every startup meant each `--reload` rewrote all
+    # the widgets: a file save restarted uvicorn, the seeder fired, and freshly
+    # generated output was replaced by whatever the reloaded process produced.
+    # On a shared cluster it is worse - any developer restarting overwrites
+    # documents everyone else is looking at.
+    #
+    # Data changes are already covered: upload and delete re-run the dependent
+    # features, the read path bootstraps a feature with nothing stored, and
+    # POST /widgets/{feature}/regenerate forces one on demand.
+    existing_features = set(
+        db["account_widgets"].distinct("feature_key", {"account_id": astra_id}))
+
+    succeeded, failed, skipped = [], [], []
     for feature_key, extractor in FEATURE_EXTRACTORS.items():
+        if feature_key in existing_features:
+            skipped.append(feature_key)
+            continue
         try:
             extractor(astra_id)
             succeeded.append(feature_key)
@@ -210,7 +228,8 @@ def seed_database_if_empty():
             logger.exception("Seeder: extractor for '%s' failed on account %s",
                              feature_key, astra_id)
 
-    logger.info("Seeder: pre-extracted %d/%d features for account %s",
-                len(succeeded), len(FEATURE_EXTRACTORS), astra_id)
+    logger.info("Seeder: %d feature(s) extracted, %d already populated and left "
+                "untouched, for account %s",
+                len(succeeded), len(skipped), astra_id)
     if failed:
         logger.warning("Seeder: these features did not extract: %s", ", ".join(failed))

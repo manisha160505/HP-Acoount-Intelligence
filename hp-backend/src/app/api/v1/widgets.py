@@ -7,7 +7,8 @@ from app.database.mongodb import get_db
 
 logger = logging.getLogger(__name__)
 from app.core.deps import require_user_role, require_admin_role
-from app.schemas.widget import WidgetContract, WidgetResponse, ContentGenerateRequest
+from app.schemas.widget import (WidgetContract, WidgetResponse, ContentGenerateRequest,
+                               MessageEvaluateRequest, MessageRewriteRequest)
 from app.services.extractors.executive_dashboard import extract_executive_dashboard
 from app.services.extractors.recent_news_signals import extract_recent_news_signals
 from app.services.extractors.intent_demand_signals import extract_intent_demand_signals
@@ -19,6 +20,10 @@ from app.services.extractors.content_messaging import extract_content_messaging
 from app.services.extractors.content_studio import extract_content_studio, generate_content_asset
 from app.services.extractors.strategy_chat import extract_strategy_chat
 from app.services.extractors.message_evaluator import extract_message_evaluator
+from app.services.evaluator import scoring as evaluator_scoring
+from app.services.evaluator import formats as evaluator_formats
+from app.services.evaluator import storage as evaluator_storage
+from app.services.evaluator import evaluate as evaluator_evaluate
 
 router = APIRouter(tags=["Widget Contracts & Dashboard Shell"])
 
@@ -623,3 +628,185 @@ def generate_content_studio_endpoint(
         "display_order": contract["display_order"],
         "updated_at": updated_at_str
     }
+
+
+# --- Message Evaluator -------------------------------------------------------
+#
+# Evaluations do not live in a widget. One account produces many of them, per
+# persona and per draft, and they are compared against each other - so they have
+# their own collection and their own endpoints, and the widget carries only a
+# pointer to the latest. See services/evaluator/storage.py.
+
+
+@router.get("/accounts/{account_id}/widgets/message_evaluator/options")
+def message_evaluator_options(
+    account_id: str,
+    current_user: dict = Depends(require_user_role)
+):
+    """The objectives, formats and personas this account may evaluate against.
+
+    Served from the backend so the dropdowns cannot drift from the scoring
+    formulas. The personas are this account's own; no other account's contacts
+    are ever returned.
+    """
+    if not ObjectId.is_valid(account_id):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Invalid account ID format")
+    db = get_db()
+    if not db["accounts"].find_one({"_id": ObjectId(account_id)}):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="Company account not found")
+
+    widget = db["account_widgets"].find_one({
+        "account_id": account_id,
+        "widget_key": "evaluator_persona_context"}) or {}
+    data = widget.get("data") or {}
+    personas = []
+    for p in (data.get("persona_archetypes") or []):
+        personas.append({
+            "persona_id": p.get("persona_id"),
+            "name": p.get("name"),
+            "title": p.get("title"),
+            "department": p.get("department"),
+            "seniority_band": p.get("seniority_band"),
+            "influence_type": p.get("influence_type"),
+            "is_named_person": bool(p.get("is_named_person")),
+            "evidence_note": p.get("evidence_note"),
+            "sources": p.get("sources") or {},
+        })
+
+    # Account context for the persona card. Every value is read from a widget
+    # this account already produced - no template, no generic role priorities.
+    # A section with nothing behind it is reported as absent rather than filled.
+    def _wdata(key):
+        return (db["account_widgets"].find_one(
+            {"account_id": account_id, "widget_key": key}) or {}).get("data") or {}
+
+    exec_card = _wdata("exec_summary_card")
+    recs = _wdata("technographic_hp_recommendations").get("recommendations") or []
+    stack = _wdata("tech_stack_matrix").get("full_tech_stack") or []
+    triggers = _wdata("opportunity_trigger_signals").get("triggers") or []
+
+    COMPETITORS = ("dell", "lenovo", "huawei", "msi", "acer", "asus", "apple",
+                   "samsung", "toshiba", "fujitsu")
+    vendors = []
+    for item in stack:
+        low = str(item).lower()
+        for name in COMPETITORS:
+            if name in low and name.title() not in vendors:
+                vendors.append(name.title())
+
+    hp_opportunity = [{
+        "hp_family": r.get("hp_family"),
+        "device_type": r.get("device_type"),
+        "category_name": r.get("category_name"),
+        "confidence": r.get("confidence"),
+        "confidence_basis": r.get("confidence_basis"),
+        "fact_count": len(r.get("approved_facts") or []),
+    } for r in recs]
+
+    return {
+        "objectives": evaluator_scoring.catalogue(),
+        "formats": evaluator_formats.catalogue(),
+        "modes": list(evaluator_evaluate.MODES),
+        "personas": personas,
+        "persona_source": data.get("persona_source"),
+        "company_name": exec_card.get("company_name") or data.get("company_name"),
+        "account_context": {
+            "business_context": data.get("business_context"),
+            "hp_opportunity": hp_opportunity,
+            "competitive_vendors": vendors,
+            "triggers": [str(t.get("headline") or t.get("text") or "")
+                         for t in triggers][:5],
+        },
+        "context_sources": {
+            "pain_points": "Account evidence (stakeholder talking points)",
+            "opening_angle": "Account evidence (stakeholder talking points)",
+            "hp_opportunity": ("HP deck facts approved by the guardrails for this "
+                               "account" if hp_opportunity else "Not available"),
+            "competitive_vendors": ("Detected in this account's technology data"
+                                    if vendors else "Not available"),
+            "triggers": ("Account signals" if triggers else "Not available"),
+        },
+    }
+
+
+@router.post("/accounts/{account_id}/widgets/message_evaluator/evaluate")
+def evaluate_message_endpoint(
+    account_id: str,
+    body: MessageEvaluateRequest,
+    current_user: dict = Depends(require_user_role)
+):
+    if not ObjectId.is_valid(account_id):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Invalid account ID format")
+    db = get_db()
+    if not db["accounts"].find_one({"_id": ObjectId(account_id)}):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="Company account not found")
+
+    try:
+        return evaluator_evaluate.evaluate_message(
+            account_id=account_id,
+            persona_id=body.persona_contact_id,
+            objective=body.objective,
+            fmt=body.format,
+            message=body.message,
+            mode=body.mode,
+        )
+    except (evaluator_evaluate.EvaluationError,
+            evaluator_scoring.ScoringError,
+            evaluator_formats.FormatError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+
+@router.post("/accounts/{account_id}/widgets/message_evaluator/rewrite")
+def rewrite_message_endpoint(
+    account_id: str,
+    body: MessageRewriteRequest,
+    current_user: dict = Depends(require_user_role)
+):
+    if not ObjectId.is_valid(account_id):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Invalid account ID format")
+    try:
+        return evaluator_evaluate.rewrite_message(
+            account_id, body.fingerprint, body.selected_recommendations)
+    except evaluator_evaluate.EvaluationError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+
+@router.get("/accounts/{account_id}/widgets/message_evaluator/history")
+def message_evaluator_history(
+    account_id: str,
+    persona_contact_id: str = None,
+    limit: int = 20,
+    current_user: dict = Depends(require_user_role)
+):
+    """Past evaluations for this account, newest first.
+
+    Also what the UI offers instead of a sample draft: a real message the seller
+    submitted before, rather than a fabricated one.
+    """
+    if not ObjectId.is_valid(account_id):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Invalid account ID format")
+    return {"evaluations": evaluator_storage.history(
+        account_id, persona_contact_id, min(int(limit or 20), 50))}
+
+
+@router.get("/accounts/{account_id}/widgets/message_evaluator/evaluation/{fingerprint}")
+def message_evaluation_detail(
+    account_id: str,
+    fingerprint: str,
+    current_user: dict = Depends(require_user_role)
+):
+    """One stored evaluation, including its original message text."""
+    if not ObjectId.is_valid(account_id):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Invalid account ID format")
+    found = evaluator_storage.find_existing(account_id, fingerprint)
+    if not found:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="Evaluation not found for this account")
+    return found

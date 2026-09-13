@@ -18,6 +18,137 @@ def _read_dataset_records(account_id: str, dataset_key: str) -> list[dict]:
     """
     return read_dataset_records(account_id, dataset_key, strict=False)
 
+# Titles that carry no useful remit for message targeting.
+_UNUSABLE_TITLE = ("unknown", "n/a", "-", "")
+
+
+def _clean(value) -> str:
+    return " ".join(str(value or "").split())
+
+
+def _personas_from_contacts(db, account_id: str, contacts_records: list) -> list:
+    """Named personas, from this account's roster.
+
+    The Stakeholder Map has already scored these people - seniority band,
+    influence type, normalised department, HP relevance - so that work is
+    reused rather than repeated here. Every field is labelled with where it
+    came from, so the UI can show provenance the way the reference app does
+    instead of implying everything is account intelligence.
+    """
+    grid = db["account_widgets"].find_one(
+        {"account_id": account_id, "widget_key": "stakeholder_contacts_grid"}) or {}
+    scored = {str(c.get("contact_id")): c
+              for c in ((grid.get("data") or {}).get("contacts") or [])}
+
+    talking = db["account_widgets"].find_one(
+        {"account_id": account_id, "widget_key": "stakeholder_talking_points"}) or {}
+    talking_points = (talking.get("data") or {}).get("talking_points") or {}
+
+    personas, seen = [], set()
+    for row in contacts_records:
+        name = _clean(row.get("Prospect full_name") or row.get("full_name"))
+        title = _clean(row.get("Prospect job_title") or row.get("title"))
+        if not name or not title or title.lower() in _UNUSABLE_TITLE:
+            continue
+
+        key = (name.lower(), title.lower())
+        if key in seen:
+            continue
+        seen.add(key)
+
+        contact_id = str(row.get("contact_id") or row.get("Prospect id") or "").strip()
+        enriched = scored.get(contact_id) or next(
+            (c for c in scored.values()
+             if _clean(c.get("full_name")).lower() == name.lower()), {})
+        points = talking_points.get(str(enriched.get("contact_id") or contact_id)) or {}
+
+        department = _clean(row.get("Prospect job_department") or row.get("department"))
+        department_column = "Prospect job_department" if department else None
+        if not department:
+            department = _clean(row.get("Prospect job_department_main"))
+            department_column = "Prospect job_department_main" if department else None
+
+        personas.append({
+            "persona_id": "contact::%s" % (enriched.get("contact_id") or contact_id or name),
+            "is_named_person": True,
+            "name": name,
+            "title": title,
+            # The raw department column, never a tidied-up invention. The
+            # Stakeholder Map's normalised value is carried alongside it.
+            #
+            # `job_department` is populated for only some of the roster, while
+            # `job_department_main` is populated for nearly all of it, so the
+            # second is used when the first is blank. Both are the account's own
+            # columns - this picks a fuller one, it does not fill a gap in.
+            "department": department,
+            "department_column": department_column,
+            "normalized_department": enriched.get("normalized_department"),
+            "seniority_band": enriched.get("seniority_band"),
+            "influence_type": enriched.get("influence_type"),
+            "hp_relevance_band": enriched.get("hp_relevance_band"),
+            "opening_angle": points.get("how_to_open"),
+            "pain_points": points.get("pain_points") or [],
+            "sources": {
+                "name": "account_contact",
+                "title": "account_contact",
+                "department": "account_contact" if department else "not_available",
+                "seniority_band": "account_contact" if enriched.get("seniority_band") else "not_available",
+                "influence_type": "account_contact" if enriched.get("influence_type") else "not_available",
+                "opening_angle": "account_evidence" if points.get("how_to_open") else "not_available",
+                "pain_points": "account_evidence" if points.get("pain_points") else "not_available",
+            },
+        })
+    return personas
+
+
+def _personas_from_hiring(job_records: list) -> list:
+    """Role personas, from open postings. No person is named.
+
+    The fallback the 11-Features reference specifies for accounts whose
+    prospect-contacts export is empty - which it notes was the case "in every
+    verified test". The persona is a role backed by a posting count, so a
+    seller can see exactly how thin the evidence is.
+    """
+    counts, seniority = {}, {}
+    for row in job_records:
+        title = _clean(row.get("normalized_title") or row.get("title"))
+        if not title or title.lower() in _UNUSABLE_TITLE:
+            continue
+        counts[title] = counts.get(title, 0) + 1
+        level = _clean(row.get("seniority"))
+        if level and title not in seniority:
+            seniority[title] = level
+
+    personas = []
+    for title, count in sorted(counts.items(), key=lambda kv: -kv[1])[:8]:
+        personas.append({
+            "persona_id": "role::%s" % title.lower().replace(" ", "_"),
+            "is_named_person": False,
+            "name": None,
+            "title": title,
+            "department": None,
+            "normalized_department": None,
+            "seniority_band": seniority.get(title),
+            "influence_type": None,
+            "hp_relevance_band": None,
+            "opening_angle": None,
+            "pain_points": [],
+            "evidence_note": "role inferred from %d open posting%s; no named contact "
+                             "exists for this account" % (count, "" if count == 1 else "s"),
+            "posting_count": count,
+            "sources": {
+                "title": "hiring_role_proxy",
+                "seniority_band": "hiring_role_proxy" if seniority.get(title) else "not_available",
+                "name": "not_available",
+                "department": "not_available",
+                "influence_type": "not_available",
+                "opening_angle": "not_available",
+                "pain_points": "not_available",
+            },
+        })
+    return personas
+
+
 @requires_local_datasets(
     "firmographics", "job_openings", "prospect_contacts",
 )
@@ -42,34 +173,29 @@ def extract_message_evaluator(account_id: str) -> list[dict]:
         if f_name:
             company_name = f_name
 
-    # 1. Persona Archetypes
-    base_personas = [
-        {"id": "procurement_finance", "title": "Regional IT Procurement / Corporate IT", "default_contact_match": "Stephen Dharma", "department": "IT Procurement"},
-        {"id": "cio_it", "title": "CIO / IT Leadership", "default_contact_match": "Mochamad (ivan) Triawan", "department": "Technology Development"},
-        {"id": "infra_workplace", "title": "Infrastructure & Workplace IT", "subtitle": "Device fleet owners", "department": "IT Operations"},
-        {"id": "security_wolf", "title": "Security Leadership (Wolf Security)", "subtitle": "Endpoint risk decision makers", "department": "Risk Advisory"},
-        {"id": "engineering_ai", "title": "Engineering / AI & Compute Leadership", "subtitle": "AI & GPU compute buyers", "department": "Data Enablement"}
-    ]
+    # 1. Personas - every one of them from this account's own data.
+    #
+    # This used to start from five hardcoded "base personas" that named two real
+    # Astra contacts ("Stephen Dharma", "Mochamad (ivan) Triawan") and attached
+    # departments to them - IT Procurement, Technology Development, IT
+    # Operations, Risk Advisory, Data Enablement - that appear nowhere in the
+    # account. Real people, invented roles, and Astra's names would have been
+    # offered on every other account too.
+    #
+    # The 11-Features sourcing reference defines the correct behaviour:
+    # "persona defaults to Source A (Stakeholder Map), falls back to the
+    # Source B hiring field when no named contact exists". So there are two
+    # paths and neither invents a person.
+    personas = _personas_from_contacts(db, account_id, contacts_records)
+    persona_source = "prospect_contacts"
 
-    sourced_contact_personas = []
-    seen_titles = set()
-    for row in contacts_records:
-        title = str(row.get("Prospect job_title") or row.get("title") or "").strip()
-        name = str(row.get("Prospect full_name") or row.get("full_name") or "").strip()
-        dept = str(row.get("Prospect job_department") or row.get("department") or "").strip()
+    if not personas:
+        # No named contact in this account - build ROLE personas from open
+        # postings. A role, never a name.
+        personas = _personas_from_hiring(_read_dataset_records(account_id, "job_openings"))
+        persona_source = "job_openings"
 
-        if title and title.lower() not in seen_titles and len(title) > 3:
-            seen_titles.add(title.lower())
-            p_id = f"contact_{len(sourced_contact_personas) + 1}"
-            sourced_contact_personas.append({
-                "id": p_id,
-                "title": title.title(),
-                "default_contact_match": name if name else "Target Executive",
-                "department": dept if dept else "Corporate",
-                "is_sourced_contact": True
-            })
-
-    persona_archetypes = base_personas + sourced_contact_personas[:5]
+    persona_archetypes = personas
 
     # 2. Business Context
     business_context = {}
@@ -113,6 +239,8 @@ def extract_message_evaluator(account_id: str) -> list[dict]:
         "data": {
             "company_name": company_name,
             "persona_archetypes": persona_archetypes,
+            "persona_source": persona_source,
+            "persona_count": len(persona_archetypes),
             "business_context": business_context
         },
         "source_datasets": ["prospect_contacts", "job_openings", "firmographics"],

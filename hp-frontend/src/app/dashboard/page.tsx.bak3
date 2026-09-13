@@ -49,7 +49,6 @@ import {
   MapPin,
   Globe,
   User,
-  Edit3,
   Play,
   Check,
   Filter,
@@ -3747,17 +3746,11 @@ export default function UserDashboardPage() {
                               Message Evaluator
                             </h2>
                             <p className="text-xs text-slate-500 font-medium">
-                              Persona-aware message scoring for {evalOptions?.company_name || selectedAccount?.name || 'this account'}.
+                              Scores a draft against a persona from this account. The composite is
+                              calculated in code from the objective&apos;s formula.
                             </p>
                           </div>
                         </div>
-                        {evaluation && (
-                          <div className="pl-12">
-                            <span className={`inline-block rounded-full border px-3 py-1 text-xs font-semibold ${scoreBadge(evaluation.composite)}`}>
-                              V{evaluation.version}: {evaluation.composite_available ? evaluation.composite : '—'}
-                            </span>
-                          </div>
-                        )}
                       </div>
 
                       {/* Stepper */}
@@ -3797,117 +3790,94 @@ export default function UserDashboardPage() {
                         </div>
                       )}
 
-                      {/* ------------------------------------------------ STEP A — INPUTS */}
+                      {/* ---------------------------------------------------------- 1. INPUTS */}
                       {evalOptions && evaluatorStep === 'inputs' && (
-                        <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-5">
-                          <h3 className="text-sm font-semibold text-slate-800">
-                            Step A &mdash; Configure Evaluation
-                          </h3>
-
-                          <div>
-                            <label className="block text-xs font-medium text-slate-600 mb-1.5">Mode</label>
-                            <div className="flex gap-2">
-                              {(evalOptions.modes || ['LITE', 'DEEP']).map((m: string) => (
-                                <button
-                                  key={m}
-                                  type="button"
-                                  onClick={() => setEvaluatorMode(m)}
-                                  className={`px-5 py-2 rounded-lg text-sm font-semibold transition-colors ${
-                                    evaluatorMode === m
-                                      ? 'bg-indigo-600 text-white'
-                                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
-                                >
-                                  {m}
-                                </button>
-                              ))}
+                        <div className="space-y-4">
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                            <div>
+                              <label className="block text-[11px] font-bold uppercase tracking-wide text-slate-500 mb-1">
+                                Objective (funnel stage)
+                              </label>
+                              <select
+                                value={selectedObjective}
+                                onChange={(e) => setSelectedObjective(e.target.value)}
+                                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-800"
+                              >
+                                <option value="">Select objective…</option>
+                                {objectives.map((o: any) => (
+                                  <option key={o.id} value={o.id}>{o.label}</option>
+                                ))}
+                              </select>
+                              {chosenObjective && (
+                                <p className="mt-1 text-[10px] font-medium text-slate-500 leading-snug">
+                                  {chosenObjective.formula}
+                                </p>
+                              )}
                             </div>
-                            <p className="text-xs text-slate-500 mt-1.5">
-                              {evaluatorMode === 'LITE'
-                                ? `Quick evaluation: ${5} phrase chunks, skip behavioral state`
-                                : 'Full evaluation: more phrase chunks, includes the simulated persona reaction'}
-                            </p>
-                          </div>
 
-                          <div>
-                            <label className="block text-xs font-medium text-slate-600 mb-1.5">
-                              Audience (Persona)
-                            </label>
-                            <select
-                              value={selectedPersonaId}
-                              onChange={(e) => setSelectedPersonaId(e.target.value)}
-                              className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm text-slate-800"
-                            >
-                              <option value="">Select persona...</option>
-                              {personas.map((p: any) => (
-                                <option key={p.persona_id} value={p.persona_id}>
-                                  {p.name ? `${p.name} — ${p.title}` : `${p.title} (role type)`}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
+                            <div>
+                              <label className="block text-[11px] font-bold uppercase tracking-wide text-slate-500 mb-1">
+                                Format (content type)
+                              </label>
+                              <select
+                                value={selectedFormat}
+                                onChange={(e) => setSelectedFormat(e.target.value)}
+                                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-800"
+                              >
+                                <option value="">Select format…</option>
+                                {formats.map((f: any) => (
+                                  <option key={f.id} value={f.id}>{f.label}</option>
+                                ))}
+                              </select>
+                              {chosenFormat && (
+                                <p className="mt-1 text-[10px] font-medium text-slate-500 leading-snug">
+                                  {chosenFormat.criteria}
+                                </p>
+                              )}
+                            </div>
 
-                          <div>
-                            <label className="block text-xs font-medium text-slate-600 mb-1.5">
-                              Objective (Funnel Stage)
-                            </label>
-                            <select
-                              value={selectedObjective}
-                              onChange={(e) => setSelectedObjective(e.target.value)}
-                              className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm text-slate-800"
-                            >
-                              <option value="">Select objective...</option>
-                              {objectives.map((o: any) => (
-                                <option key={o.id} value={o.id}>{o.label}</option>
-                              ))}
-                            </select>
-                            {chosenObjective && (
-                              <p className="text-[10px] font-mono text-slate-400 mt-1">
-                                {chosenObjective.formula}
+                            <div>
+                              <label className="block text-[11px] font-bold uppercase tracking-wide text-slate-500 mb-1">
+                                Depth
+                              </label>
+                              <select
+                                value={evaluatorMode}
+                                onChange={(e) => setEvaluatorMode(e.target.value)}
+                                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-800"
+                              >
+                                {(evalOptions.modes || ['LITE', 'DEEP']).map((m: string) => (
+                                  <option key={m} value={m}>{m}</option>
+                                ))}
+                              </select>
+                              <p className="mt-1 text-[10px] font-medium text-slate-500 leading-snug">
+                                LITE caps phrase feedback and skips the simulated reaction. The
+                                scoring formula is identical.
                               </p>
-                            )}
+                            </div>
                           </div>
 
                           <div>
-                            <label className="block text-xs font-medium text-slate-600 mb-1.5">
-                              Format (Content Type)
-                            </label>
-                            <select
-                              value={selectedFormat}
-                              onChange={(e) => setSelectedFormat(e.target.value)}
-                              className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm text-slate-800"
-                            >
-                              <option value="">Select format...</option>
-                              {formats.map((f: any) => (
-                                <option key={f.id} value={f.id}>{f.label}</option>
-                              ))}
-                            </select>
-                            {chosenFormat && (
-                              <p className="text-xs text-slate-500 mt-1">{chosenFormat.criteria}</p>
-                            )}
-                          </div>
-
-                          <div>
-                            <label className="block text-xs font-medium text-slate-600 mb-1.5">
-                              Stimulus (Message Text)
-                            </label>
+                            <div className="flex items-center justify-between mb-1">
+                              <label className="block text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                                Your draft
+                              </label>
+                              <span className="text-[10px] font-semibold text-slate-400">
+                                {stimulusText.trim().split(/\s+/).filter(Boolean).length} words
+                              </span>
+                            </div>
                             <textarea
                               value={stimulusText}
                               onChange={(e) => setStimulusText(e.target.value)}
                               rows={10}
-                              placeholder="Paste or type your sales email, LinkedIn message, campaign copy, or call script here..."
-                              className="w-full rounded-lg border-2 border-indigo-300 px-4 py-3 text-sm text-slate-800 leading-relaxed focus:outline-none focus:border-indigo-500"
+                              placeholder="Paste the message you want evaluated."
+                              className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm text-slate-800 font-medium leading-relaxed"
                             />
-                            <p className="text-xs text-slate-500 mt-1">
-                              {stimulusText.length} characters
-                            </p>
                           </div>
 
-                          {/* Previous real submissions. There is no sample generator: a
-                              plausible-looking specimen draft would have to invent the
-                              kind of claim this feature exists to catch. */}
+                          {/* Previous real submissions - never a fabricated sample. */}
                           {evalHistory.length > 0 && (
-                            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                              <p className="text-xs font-medium text-slate-600 mb-2">
+                            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                              <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500 mb-2">
                                 Load a previous submission
                               </p>
                               <div className="space-y-1">
@@ -3916,162 +3886,136 @@ export default function UserDashboardPage() {
                                     key={h.fingerprint}
                                     type="button"
                                     onClick={() => loadPrevious(h.fingerprint)}
-                                    className="block w-full text-left text-xs text-slate-600 hover:text-indigo-600 truncate"
+                                    className="w-full text-left text-xs font-medium text-slate-600 hover:text-indigo-600 truncate"
                                   >
-                                    V{h.version} &middot; {h.objective_label} &middot; {h.format_label}
-                                    {h.composite != null && ` · ${h.composite}/100`}
+                                    V{h.version} · {h.objective_label} · {h.format_label}
+                                    {h.composite != null && ` · ${h.composite}`}
                                   </button>
                                 ))}
                               </div>
                             </div>
                           )}
 
-                          <button
-                            type="button"
-                            disabled={!selectedPersonaId || !selectedObjective || !selectedFormat || !stimulusText.trim()}
-                            onClick={() => setEvaluatorStep('persona')}
-                            className="inline-flex items-center gap-2 px-5 py-2.5 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:bg-indigo-300 disabled:cursor-not-allowed transition-colors"
-                          >
-                            <User className="w-4 h-4" />
-                            Build Persona
-                          </button>
+                          <div className="flex justify-end">
+                            <button
+                              type="button"
+                              disabled={!stimulusText.trim() || !selectedObjective || !selectedFormat}
+                              onClick={() => setEvaluatorStep('persona')}
+                              className="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-bold text-white disabled:bg-slate-300"
+                            >
+                              Next: choose persona
+                            </button>
+                          </div>
                         </div>
                       )}
 
-                      {/* ----------------------------------------------- STEP B — PERSONA */}
-                      {evalOptions && ['persona', 'confirm'].includes(evaluatorStep) && chosenPersona && (
-                        <div className="space-y-4">
-                          <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-5">
-                            <h3 className="text-sm font-semibold text-slate-800 flex items-center gap-2">
-                              <User className="w-4 h-4 text-indigo-500" />
-                              Persona: {chosenPersona.name || chosenPersona.title}
-                              {evalOptions.company_name ? ` at ${evalOptions.company_name}` : ''}
-                            </h3>
-
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-5">
-                              <div>
-                                <p className="text-sm font-semibold text-slate-700 mb-1.5">Role</p>
-                                <ul className="space-y-1 text-xs text-slate-600">
-                                  <li>&ndash; {chosenPersona.title}</li>
-                                  {chosenPersona.department && <li>&ndash; Department: {chosenPersona.department}</li>}
-                                  {chosenPersona.seniority_band && <li>&ndash; Seniority: {chosenPersona.seniority_band}</li>}
-                                  {chosenPersona.influence_type && <li>&ndash; Influence: {chosenPersona.influence_type}</li>}
-                                  {!chosenPersona.is_named_person && (
-                                    <li className="text-amber-700">&ndash; Role type, not a named person</li>
-                                  )}
-                                </ul>
-                              </div>
-
-                              <div>
-                                <p className="text-sm font-semibold text-slate-700 mb-1.5">Pain Points</p>
-                                {(chosenPersona.pain_points || []).length > 0 ? (
-                                  <ul className="space-y-1 text-xs text-slate-600">
-                                    {chosenPersona.pain_points.map((x: string, i: number) => (
-                                      <li key={i}>&ndash; {x}</li>
-                                    ))}
-                                  </ul>
-                                ) : (
-                                  <p className="text-xs text-slate-400">Not available for this contact</p>
-                                )}
-                              </div>
-
-                              <div>
-                                <p className="text-sm font-semibold text-slate-700 mb-1.5">Opening Angle</p>
-                                {chosenPersona.opening_angle ? (
-                                  <p className="text-xs text-slate-600">{chosenPersona.opening_angle}</p>
-                                ) : (
-                                  <p className="text-xs text-slate-400">Not available</p>
-                                )}
-                              </div>
-
-                              <div>
-                                <p className="text-sm font-semibold text-slate-700 mb-1.5">Account Signals</p>
-                                {(evalOptions.account_context?.triggers || []).length > 0 ? (
-                                  <ul className="space-y-1 text-xs text-slate-600">
-                                    {evalOptions.account_context.triggers.slice(0, 4).map((x: string, i: number) => (
-                                      <li key={i}>&ndash; {x}</li>
-                                    ))}
-                                  </ul>
-                                ) : (
-                                  <p className="text-xs text-slate-400">Not available</p>
-                                )}
-                              </div>
-                            </div>
-
-                            <div>
-                              <p className="text-sm font-semibold text-slate-700 mb-1.5">HP Opportunity</p>
-                              {(evalOptions.account_context?.hp_opportunity || []).length > 0 ? (
-                                <p className="text-xs text-slate-600 leading-relaxed">
-                                  {evalOptions.account_context.hp_opportunity.map((o: any, i: number) => (
-                                    <span key={i}>
-                                      {i > 0 && ' '}
-                                      {o.hp_family}{o.category_name ? ` (${o.category_name})` : ''} &mdash;{' '}
-                                      <span className={o.confidence === 'Confirmed' ? 'text-green-700 font-medium' : 'text-slate-500'}>
-                                        {o.confidence}
-                                      </span>
-                                      , {o.fact_count} approved fact{o.fact_count === 1 ? '' : 's'}.
-                                    </span>
-                                  ))}
-                                  {(evalOptions.account_context?.competitive_vendors || []).length > 0 && (
-                                    <span> Vendors detected in this account&apos;s technology data:{' '}
-                                      {evalOptions.account_context.competitive_vendors.join(', ')}.
-                                    </span>
-                                  )}
-                                </p>
-                              ) : (
-                                <p className="text-xs text-slate-400">
-                                  No HP deck-usage rule matched this account&apos;s verified evidence.
-                                </p>
-                              )}
-                            </div>
-
-                            {/* DATA SOURCES — the honesty panel. Each line is the real
-                                provenance recorded when the persona was built. */}
-                            <div className="border-t border-slate-100 pt-4">
-                              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-2">
-                                Data Sources
-                              </p>
-                              <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-1.5 text-xs">
-                                {Object.entries(chosenPersona.sources || {}).map(([field, src]: any) => (
-                                  <p key={field} className="text-slate-700">
-                                    <span className="font-medium capitalize">{field.replace(/_/g, ' ')}:</span>{' '}
-                                    <span className={src === 'not_available' ? 'text-slate-400' : 'text-indigo-600'}>
-                                      {src === 'account_contact' ? 'This account’s contact record'
-                                        : src === 'account_evidence' ? 'Account evidence'
-                                        : src === 'hiring_role_proxy' ? 'Open job postings (role proxy)'
-                                        : 'Not available'}
-                                    </span>
+                      {/* --------------------------------------------------------- 2. PERSONA */}
+                      {evalOptions && evaluatorStep === 'persona' && (
+                        <div className="space-y-3">
+                          <p className="text-xs font-medium text-slate-500">
+                            {personas.length} persona{personas.length === 1 ? '' : 's'} from this
+                            account&apos;s own data
+                            {evalOptions.persona_source && ` (${evalOptions.persona_source})`}.
+                          </p>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-[420px] overflow-y-auto pr-1">
+                            {personas.map((p: any) => {
+                              const active = p.persona_id === selectedPersonaId;
+                              return (
+                                <button
+                                  key={p.persona_id}
+                                  type="button"
+                                  onClick={() => setSelectedPersonaId(p.persona_id)}
+                                  className={`text-left rounded-xl border p-3 transition ${active
+                                    ? 'border-indigo-400 bg-indigo-50'
+                                    : 'border-slate-200 bg-white hover:border-indigo-200'}`}
+                                >
+                                  <p className="text-sm font-bold text-slate-900">
+                                    {p.name || p.title}
                                   </p>
-                                ))}
-                                {Object.entries(evalOptions.context_sources || {})
-                                  .filter(([f]: any) => ['hp_opportunity', 'competitive_vendors', 'triggers'].includes(f))
-                                  .map(([field, src]: any) => (
-                                    <p key={field} className="text-slate-700">
-                                      <span className="font-medium capitalize">{field.replace(/_/g, ' ')}:</span>{' '}
-                                      <span className={src === 'Not available' ? 'text-slate-400' : 'text-indigo-600'}>{src}</span>
-                                    </p>
-                                  ))}
-                              </div>
-                            </div>
+                                  {p.name && (
+                                    <p className="text-xs font-medium text-slate-600 mt-0.5">{p.title}</p>
+                                  )}
+                                  <div className="flex flex-wrap gap-1 mt-2">
+                                    {p.department && (
+                                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600">
+                                        {p.department}
+                                      </span>
+                                    )}
+                                    {p.seniority_band && (
+                                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600">
+                                        {p.seniority_band}
+                                      </span>
+                                    )}
+                                    {!p.is_named_person && (
+                                      <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700 border border-amber-200">
+                                        Role type
+                                      </span>
+                                    )}
+                                  </div>
+                                  {p.evidence_note && (
+                                    <p className="text-[10px] font-medium text-slate-400 mt-1.5">{p.evidence_note}</p>
+                                  )}
+                                </button>
+                              );
+                            })}
                           </div>
-
-                          <div className="flex flex-wrap gap-3">
-                            <button
-                              type="button"
-                              disabled={isEvaluating}
-                              onClick={runEvaluation}
-                              className="inline-flex items-center gap-2 px-5 py-2.5 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors"
-                            >
-                              <Check className="w-4 h-4" />
-                              {isEvaluating ? 'Evaluating…' : 'Confirm Persona & Evaluate'}
+                          <div className="flex justify-between">
+                            <button type="button" onClick={() => setEvaluatorStep('inputs')}
+                              className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-600">
+                              Back
                             </button>
                             <button
                               type="button"
-                              onClick={() => setEvaluatorStep('inputs')}
-                              className="inline-flex items-center gap-2 px-5 py-2.5 bg-slate-100 text-slate-700 text-sm font-medium rounded-lg hover:bg-slate-200 transition-colors"
+                              disabled={!selectedPersonaId}
+                              onClick={() => setEvaluatorStep('confirm')}
+                              className="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-bold text-white disabled:bg-slate-300"
                             >
-                              <Edit3 className="w-4 h-4" />
-                              Edit Inputs
+                              Next: confirm
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* --------------------------------------------------------- 3. CONFIRM */}
+                      {evalOptions && evaluatorStep === 'confirm' && (
+                        <div className="space-y-4">
+                          <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-2">
+                            {[
+                              ['Persona', chosenPersona ? (chosenPersona.name || chosenPersona.title) : '—'],
+                              ['Role', chosenPersona?.title || '—'],
+                              ['Objective', chosenObjective?.label || '—'],
+                              ['Formula', chosenObjective?.formula || '—'],
+                              ['Format', chosenFormat?.label || '—'],
+                              ['Depth', evaluatorMode],
+                            ].map(([k, v]) => (
+                              <div key={k as string} className="flex justify-between gap-4 text-xs">
+                                <span className="font-bold uppercase tracking-wide text-slate-400">{k}</span>
+                                <span className="font-semibold text-slate-800 text-right">{v}</span>
+                              </div>
+                            ))}
+                          </div>
+
+                          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                            <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500 mb-2">
+                              The message being evaluated
+                            </p>
+                            <pre className="whitespace-pre-wrap text-xs font-medium text-slate-700 leading-relaxed">
+                              {stimulusText}
+                            </pre>
+                          </div>
+
+                          <div className="flex justify-between">
+                            <button type="button" onClick={() => setEvaluatorStep('persona')}
+                              className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-600">
+                              Back
+                            </button>
+                            <button
+                              type="button"
+                              disabled={!canEvaluate || isEvaluating}
+                              onClick={runEvaluation}
+                              className="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-bold text-white disabled:bg-slate-300"
+                            >
+                              {isEvaluating ? 'Evaluating…' : 'Run evaluation'}
                             </button>
                           </div>
                         </div>
@@ -4104,16 +4048,16 @@ export default function UserDashboardPage() {
                                     <span className="text-xs font-medium text-slate-600 w-28 text-right capitalize">
                                       {k.replace(/_/g, ' ')}
                                     </span>
-                                    <div className="flex-1 bg-slate-100 rounded-full h-4 overflow-hidden">
+                                    <div className="flex-1 bg-slate-100 rounded-full h-5 relative overflow-hidden">
                                       <div
                                         className={`${scoreColor(v)} h-full rounded-full transition-all duration-500`}
                                         style={{ width: `${v}%` }}
                                       />
+                                      <span className="absolute inset-0 flex items-center justify-center text-[10px] font-semibold text-white mix-blend-difference">
+                                        {v}
+                                      </span>
                                     </div>
-                                    <span className="text-[11px] font-semibold text-slate-700 w-8 text-right">
-                                      {v}
-                                    </span>
-                                    <span className="text-[10px] text-slate-400 w-16">
+                                    <span className="text-[10px] text-slate-400 w-20">
                                       {scoreLabel(v)}
                                     </span>
                                   </div>
@@ -4439,11 +4383,6 @@ export default function UserDashboardPage() {
                                       <p className="text-sm font-semibold text-slate-900">{evaluation.rewrite.subject_line}</p>
                                     </div>
                                   )}
-                                  {/* Composed in Python, so email and LinkedIn DM greet
-                                      and the public formats never do. */}
-                                  {evaluation.rewrite.greeting && (
-                                    <p className="text-sm text-slate-800">{evaluation.rewrite.greeting}</p>
-                                  )}
                                   {evaluation.rewrite.headline && (
                                     <p className="text-sm font-semibold text-slate-900">{evaluation.rewrite.headline}</p>
                                   )}
@@ -4453,15 +4392,11 @@ export default function UserDashboardPage() {
                                   {(evaluation.rewrite.body_sections || []).map((s: any, i: number) => (
                                     <div key={i}>
                                       {s.heading && <p className="text-sm font-semibold text-slate-800">{s.heading}</p>}
-                                      {/* pre-line keeps a social post's "• " bullet lines apart */}
-                                      <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-line">{s.text}</p>
+                                      <p className="text-sm text-slate-700 leading-relaxed">{s.text}</p>
                                     </div>
                                   ))}
                                   {evaluation.rewrite.cta && (
                                     <p className="text-sm font-medium text-slate-800">{evaluation.rewrite.cta}</p>
-                                  )}
-                                  {evaluation.rewrite.signoff && (
-                                    <p className="text-sm text-slate-700 whitespace-pre-line">{evaluation.rewrite.signoff}</p>
                                   )}
                                   {(evaluation.rewrite.hashtags || []).length > 0 && (
                                     <p className="text-sm font-medium text-indigo-600">

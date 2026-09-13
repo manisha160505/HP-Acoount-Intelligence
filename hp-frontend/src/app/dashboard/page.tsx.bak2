@@ -49,7 +49,6 @@ import {
   MapPin,
   Globe,
   User,
-  Edit3,
   Play,
   Check,
   Filter,
@@ -3704,34 +3703,30 @@ export default function UserDashboardPage() {
                     }
                   };
 
-                  // Score presentation, matching the reference app's bands.
-                  const scoreColor = (n: number) =>
-                    n >= 80 ? 'bg-green-500' : n >= 60 ? 'bg-teal-500'
-                      : n >= 40 ? 'bg-amber-500' : n >= 20 ? 'bg-orange-500' : 'bg-rose-500';
-                  const scoreLabel = (n: number) =>
-                    n >= 80 ? 'Strong' : n >= 60 ? 'Good' : n >= 40 ? 'Fair'
-                      : n >= 20 ? 'Weak' : 'Poor';
-                  const scoreBadge = (n: number | null) =>
-                    n == null ? 'border-slate-200 text-slate-400'
-                      : n >= 80 ? 'border-green-300 text-green-700 bg-green-50'
-                      : n >= 60 ? 'border-teal-300 text-teal-700 bg-teal-50'
-                      : n >= 40 ? 'border-amber-300 text-amber-700 bg-amber-50'
-                      : 'border-rose-300 text-rose-700 bg-rose-50';
-
-                  const resetEvaluator = () => {
-                    setEvaluation(null);
-                    setSelectedRecs([]);
-                    setRewriteError(null);
-                    setEvalError(null);
-                    setStimulusText('');
-                    setEvaluatorStep('inputs');
-                  };
+                  const bandColour = (band: string) =>
+                    band === 'Strong' ? 'text-emerald-600'
+                      : band === 'Good' ? 'text-teal-600'
+                      : band === 'Fair' ? 'text-amber-600'
+                      : band === 'Weak' ? 'text-orange-600'
+                      : 'text-rose-600';
 
                   const verdictChip = (v: string) =>
                     v === 'Keep' ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                       : v === 'Improve' ? 'bg-amber-50 text-amber-700 border-amber-200'
                       : 'bg-rose-50 text-rose-700 border-rose-200';
 
+                  // Every recommendation offered for rewrite comes from the evaluation
+                  // itself - a phrase the model flagged, or a coded check that failed.
+                  const recommendations: string[] = [
+                    ...((evaluation?.phrases || [])
+                      .filter((p: any) => p.verdict !== 'Keep')
+                      .map((p: any) => p.suggestion || p.comment)
+                      .filter(Boolean)),
+                    ...((evaluation?.structure_checks?.checks || [])
+                      .filter((c: any) => !c.passed)
+                      .map((c: any) => `Fix ${c.check.replace(/_/g, ' ')}: ${c.detail}`)),
+                    ...((evaluation?.weaknesses || [])),
+                  ].filter((v, i, arr) => v && arr.indexOf(v) === i);
 
                   return (
                     <div className="space-y-5">
@@ -3747,17 +3742,11 @@ export default function UserDashboardPage() {
                               Message Evaluator
                             </h2>
                             <p className="text-xs text-slate-500 font-medium">
-                              Persona-aware message scoring for {evalOptions?.company_name || selectedAccount?.name || 'this account'}.
+                              Scores a draft against a persona from this account. The composite is
+                              calculated in code from the objective&apos;s formula.
                             </p>
                           </div>
                         </div>
-                        {evaluation && (
-                          <div className="pl-12">
-                            <span className={`inline-block rounded-full border px-3 py-1 text-xs font-semibold ${scoreBadge(evaluation.composite)}`}>
-                              V{evaluation.version}: {evaluation.composite_available ? evaluation.composite : '—'}
-                            </span>
-                          </div>
-                        )}
                       </div>
 
                       {/* Stepper */}
@@ -3797,117 +3786,94 @@ export default function UserDashboardPage() {
                         </div>
                       )}
 
-                      {/* ------------------------------------------------ STEP A — INPUTS */}
+                      {/* ---------------------------------------------------------- 1. INPUTS */}
                       {evalOptions && evaluatorStep === 'inputs' && (
-                        <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-5">
-                          <h3 className="text-sm font-semibold text-slate-800">
-                            Step A &mdash; Configure Evaluation
-                          </h3>
-
-                          <div>
-                            <label className="block text-xs font-medium text-slate-600 mb-1.5">Mode</label>
-                            <div className="flex gap-2">
-                              {(evalOptions.modes || ['LITE', 'DEEP']).map((m: string) => (
-                                <button
-                                  key={m}
-                                  type="button"
-                                  onClick={() => setEvaluatorMode(m)}
-                                  className={`px-5 py-2 rounded-lg text-sm font-semibold transition-colors ${
-                                    evaluatorMode === m
-                                      ? 'bg-indigo-600 text-white'
-                                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
-                                >
-                                  {m}
-                                </button>
-                              ))}
+                        <div className="space-y-4">
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                            <div>
+                              <label className="block text-[11px] font-bold uppercase tracking-wide text-slate-500 mb-1">
+                                Objective (funnel stage)
+                              </label>
+                              <select
+                                value={selectedObjective}
+                                onChange={(e) => setSelectedObjective(e.target.value)}
+                                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-800"
+                              >
+                                <option value="">Select objective…</option>
+                                {objectives.map((o: any) => (
+                                  <option key={o.id} value={o.id}>{o.label}</option>
+                                ))}
+                              </select>
+                              {chosenObjective && (
+                                <p className="mt-1 text-[10px] font-medium text-slate-500 leading-snug">
+                                  {chosenObjective.formula}
+                                </p>
+                              )}
                             </div>
-                            <p className="text-xs text-slate-500 mt-1.5">
-                              {evaluatorMode === 'LITE'
-                                ? `Quick evaluation: ${5} phrase chunks, skip behavioral state`
-                                : 'Full evaluation: more phrase chunks, includes the simulated persona reaction'}
-                            </p>
-                          </div>
 
-                          <div>
-                            <label className="block text-xs font-medium text-slate-600 mb-1.5">
-                              Audience (Persona)
-                            </label>
-                            <select
-                              value={selectedPersonaId}
-                              onChange={(e) => setSelectedPersonaId(e.target.value)}
-                              className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm text-slate-800"
-                            >
-                              <option value="">Select persona...</option>
-                              {personas.map((p: any) => (
-                                <option key={p.persona_id} value={p.persona_id}>
-                                  {p.name ? `${p.name} — ${p.title}` : `${p.title} (role type)`}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
+                            <div>
+                              <label className="block text-[11px] font-bold uppercase tracking-wide text-slate-500 mb-1">
+                                Format (content type)
+                              </label>
+                              <select
+                                value={selectedFormat}
+                                onChange={(e) => setSelectedFormat(e.target.value)}
+                                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-800"
+                              >
+                                <option value="">Select format…</option>
+                                {formats.map((f: any) => (
+                                  <option key={f.id} value={f.id}>{f.label}</option>
+                                ))}
+                              </select>
+                              {chosenFormat && (
+                                <p className="mt-1 text-[10px] font-medium text-slate-500 leading-snug">
+                                  {chosenFormat.criteria}
+                                </p>
+                              )}
+                            </div>
 
-                          <div>
-                            <label className="block text-xs font-medium text-slate-600 mb-1.5">
-                              Objective (Funnel Stage)
-                            </label>
-                            <select
-                              value={selectedObjective}
-                              onChange={(e) => setSelectedObjective(e.target.value)}
-                              className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm text-slate-800"
-                            >
-                              <option value="">Select objective...</option>
-                              {objectives.map((o: any) => (
-                                <option key={o.id} value={o.id}>{o.label}</option>
-                              ))}
-                            </select>
-                            {chosenObjective && (
-                              <p className="text-[10px] font-mono text-slate-400 mt-1">
-                                {chosenObjective.formula}
+                            <div>
+                              <label className="block text-[11px] font-bold uppercase tracking-wide text-slate-500 mb-1">
+                                Depth
+                              </label>
+                              <select
+                                value={evaluatorMode}
+                                onChange={(e) => setEvaluatorMode(e.target.value)}
+                                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-800"
+                              >
+                                {(evalOptions.modes || ['LITE', 'DEEP']).map((m: string) => (
+                                  <option key={m} value={m}>{m}</option>
+                                ))}
+                              </select>
+                              <p className="mt-1 text-[10px] font-medium text-slate-500 leading-snug">
+                                LITE caps phrase feedback and skips the simulated reaction. The
+                                scoring formula is identical.
                               </p>
-                            )}
+                            </div>
                           </div>
 
                           <div>
-                            <label className="block text-xs font-medium text-slate-600 mb-1.5">
-                              Format (Content Type)
-                            </label>
-                            <select
-                              value={selectedFormat}
-                              onChange={(e) => setSelectedFormat(e.target.value)}
-                              className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm text-slate-800"
-                            >
-                              <option value="">Select format...</option>
-                              {formats.map((f: any) => (
-                                <option key={f.id} value={f.id}>{f.label}</option>
-                              ))}
-                            </select>
-                            {chosenFormat && (
-                              <p className="text-xs text-slate-500 mt-1">{chosenFormat.criteria}</p>
-                            )}
-                          </div>
-
-                          <div>
-                            <label className="block text-xs font-medium text-slate-600 mb-1.5">
-                              Stimulus (Message Text)
-                            </label>
+                            <div className="flex items-center justify-between mb-1">
+                              <label className="block text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                                Your draft
+                              </label>
+                              <span className="text-[10px] font-semibold text-slate-400">
+                                {stimulusText.trim().split(/\s+/).filter(Boolean).length} words
+                              </span>
+                            </div>
                             <textarea
                               value={stimulusText}
                               onChange={(e) => setStimulusText(e.target.value)}
                               rows={10}
-                              placeholder="Paste or type your sales email, LinkedIn message, campaign copy, or call script here..."
-                              className="w-full rounded-lg border-2 border-indigo-300 px-4 py-3 text-sm text-slate-800 leading-relaxed focus:outline-none focus:border-indigo-500"
+                              placeholder="Paste the message you want evaluated."
+                              className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm text-slate-800 font-medium leading-relaxed"
                             />
-                            <p className="text-xs text-slate-500 mt-1">
-                              {stimulusText.length} characters
-                            </p>
                           </div>
 
-                          {/* Previous real submissions. There is no sample generator: a
-                              plausible-looking specimen draft would have to invent the
-                              kind of claim this feature exists to catch. */}
+                          {/* Previous real submissions - never a fabricated sample. */}
                           {evalHistory.length > 0 && (
-                            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                              <p className="text-xs font-medium text-slate-600 mb-2">
+                            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                              <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500 mb-2">
                                 Load a previous submission
                               </p>
                               <div className="space-y-1">
@@ -3916,469 +3882,230 @@ export default function UserDashboardPage() {
                                     key={h.fingerprint}
                                     type="button"
                                     onClick={() => loadPrevious(h.fingerprint)}
-                                    className="block w-full text-left text-xs text-slate-600 hover:text-indigo-600 truncate"
+                                    className="w-full text-left text-xs font-medium text-slate-600 hover:text-indigo-600 truncate"
                                   >
-                                    V{h.version} &middot; {h.objective_label} &middot; {h.format_label}
-                                    {h.composite != null && ` · ${h.composite}/100`}
+                                    V{h.version} · {h.objective_label} · {h.format_label}
+                                    {h.composite != null && ` · ${h.composite}`}
                                   </button>
                                 ))}
                               </div>
                             </div>
                           )}
 
-                          <button
-                            type="button"
-                            disabled={!selectedPersonaId || !selectedObjective || !selectedFormat || !stimulusText.trim()}
-                            onClick={() => setEvaluatorStep('persona')}
-                            className="inline-flex items-center gap-2 px-5 py-2.5 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:bg-indigo-300 disabled:cursor-not-allowed transition-colors"
-                          >
-                            <User className="w-4 h-4" />
-                            Build Persona
-                          </button>
+                          <div className="flex justify-end">
+                            <button
+                              type="button"
+                              disabled={!stimulusText.trim() || !selectedObjective || !selectedFormat}
+                              onClick={() => setEvaluatorStep('persona')}
+                              className="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-bold text-white disabled:bg-slate-300"
+                            >
+                              Next: choose persona
+                            </button>
+                          </div>
                         </div>
                       )}
 
-                      {/* ----------------------------------------------- STEP B — PERSONA */}
-                      {evalOptions && ['persona', 'confirm'].includes(evaluatorStep) && chosenPersona && (
-                        <div className="space-y-4">
-                          <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-5">
-                            <h3 className="text-sm font-semibold text-slate-800 flex items-center gap-2">
-                              <User className="w-4 h-4 text-indigo-500" />
-                              Persona: {chosenPersona.name || chosenPersona.title}
-                              {evalOptions.company_name ? ` at ${evalOptions.company_name}` : ''}
-                            </h3>
-
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-5">
-                              <div>
-                                <p className="text-sm font-semibold text-slate-700 mb-1.5">Role</p>
-                                <ul className="space-y-1 text-xs text-slate-600">
-                                  <li>&ndash; {chosenPersona.title}</li>
-                                  {chosenPersona.department && <li>&ndash; Department: {chosenPersona.department}</li>}
-                                  {chosenPersona.seniority_band && <li>&ndash; Seniority: {chosenPersona.seniority_band}</li>}
-                                  {chosenPersona.influence_type && <li>&ndash; Influence: {chosenPersona.influence_type}</li>}
-                                  {!chosenPersona.is_named_person && (
-                                    <li className="text-amber-700">&ndash; Role type, not a named person</li>
-                                  )}
-                                </ul>
-                              </div>
-
-                              <div>
-                                <p className="text-sm font-semibold text-slate-700 mb-1.5">Pain Points</p>
-                                {(chosenPersona.pain_points || []).length > 0 ? (
-                                  <ul className="space-y-1 text-xs text-slate-600">
-                                    {chosenPersona.pain_points.map((x: string, i: number) => (
-                                      <li key={i}>&ndash; {x}</li>
-                                    ))}
-                                  </ul>
-                                ) : (
-                                  <p className="text-xs text-slate-400">Not available for this contact</p>
-                                )}
-                              </div>
-
-                              <div>
-                                <p className="text-sm font-semibold text-slate-700 mb-1.5">Opening Angle</p>
-                                {chosenPersona.opening_angle ? (
-                                  <p className="text-xs text-slate-600">{chosenPersona.opening_angle}</p>
-                                ) : (
-                                  <p className="text-xs text-slate-400">Not available</p>
-                                )}
-                              </div>
-
-                              <div>
-                                <p className="text-sm font-semibold text-slate-700 mb-1.5">Account Signals</p>
-                                {(evalOptions.account_context?.triggers || []).length > 0 ? (
-                                  <ul className="space-y-1 text-xs text-slate-600">
-                                    {evalOptions.account_context.triggers.slice(0, 4).map((x: string, i: number) => (
-                                      <li key={i}>&ndash; {x}</li>
-                                    ))}
-                                  </ul>
-                                ) : (
-                                  <p className="text-xs text-slate-400">Not available</p>
-                                )}
-                              </div>
-                            </div>
-
-                            <div>
-                              <p className="text-sm font-semibold text-slate-700 mb-1.5">HP Opportunity</p>
-                              {(evalOptions.account_context?.hp_opportunity || []).length > 0 ? (
-                                <p className="text-xs text-slate-600 leading-relaxed">
-                                  {evalOptions.account_context.hp_opportunity.map((o: any, i: number) => (
-                                    <span key={i}>
-                                      {i > 0 && ' '}
-                                      {o.hp_family}{o.category_name ? ` (${o.category_name})` : ''} &mdash;{' '}
-                                      <span className={o.confidence === 'Confirmed' ? 'text-green-700 font-medium' : 'text-slate-500'}>
-                                        {o.confidence}
-                                      </span>
-                                      , {o.fact_count} approved fact{o.fact_count === 1 ? '' : 's'}.
-                                    </span>
-                                  ))}
-                                  {(evalOptions.account_context?.competitive_vendors || []).length > 0 && (
-                                    <span> Vendors detected in this account&apos;s technology data:{' '}
-                                      {evalOptions.account_context.competitive_vendors.join(', ')}.
-                                    </span>
-                                  )}
-                                </p>
-                              ) : (
-                                <p className="text-xs text-slate-400">
-                                  No HP deck-usage rule matched this account&apos;s verified evidence.
-                                </p>
-                              )}
-                            </div>
-
-                            {/* DATA SOURCES — the honesty panel. Each line is the real
-                                provenance recorded when the persona was built. */}
-                            <div className="border-t border-slate-100 pt-4">
-                              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-2">
-                                Data Sources
-                              </p>
-                              <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-1.5 text-xs">
-                                {Object.entries(chosenPersona.sources || {}).map(([field, src]: any) => (
-                                  <p key={field} className="text-slate-700">
-                                    <span className="font-medium capitalize">{field.replace(/_/g, ' ')}:</span>{' '}
-                                    <span className={src === 'not_available' ? 'text-slate-400' : 'text-indigo-600'}>
-                                      {src === 'account_contact' ? 'This account’s contact record'
-                                        : src === 'account_evidence' ? 'Account evidence'
-                                        : src === 'hiring_role_proxy' ? 'Open job postings (role proxy)'
-                                        : 'Not available'}
-                                    </span>
+                      {/* --------------------------------------------------------- 2. PERSONA */}
+                      {evalOptions && evaluatorStep === 'persona' && (
+                        <div className="space-y-3">
+                          <p className="text-xs font-medium text-slate-500">
+                            {personas.length} persona{personas.length === 1 ? '' : 's'} from this
+                            account&apos;s own data
+                            {evalOptions.persona_source && ` (${evalOptions.persona_source})`}.
+                          </p>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-[420px] overflow-y-auto pr-1">
+                            {personas.map((p: any) => {
+                              const active = p.persona_id === selectedPersonaId;
+                              return (
+                                <button
+                                  key={p.persona_id}
+                                  type="button"
+                                  onClick={() => setSelectedPersonaId(p.persona_id)}
+                                  className={`text-left rounded-xl border p-3 transition ${active
+                                    ? 'border-indigo-400 bg-indigo-50'
+                                    : 'border-slate-200 bg-white hover:border-indigo-200'}`}
+                                >
+                                  <p className="text-sm font-bold text-slate-900">
+                                    {p.name || p.title}
                                   </p>
-                                ))}
-                                {Object.entries(evalOptions.context_sources || {})
-                                  .filter(([f]: any) => ['hp_opportunity', 'competitive_vendors', 'triggers'].includes(f))
-                                  .map(([field, src]: any) => (
-                                    <p key={field} className="text-slate-700">
-                                      <span className="font-medium capitalize">{field.replace(/_/g, ' ')}:</span>{' '}
-                                      <span className={src === 'Not available' ? 'text-slate-400' : 'text-indigo-600'}>{src}</span>
-                                    </p>
-                                  ))}
-                              </div>
-                            </div>
+                                  {p.name && (
+                                    <p className="text-xs font-medium text-slate-600 mt-0.5">{p.title}</p>
+                                  )}
+                                  <div className="flex flex-wrap gap-1 mt-2">
+                                    {p.department && (
+                                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600">
+                                        {p.department}
+                                      </span>
+                                    )}
+                                    {p.seniority_band && (
+                                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600">
+                                        {p.seniority_band}
+                                      </span>
+                                    )}
+                                    {!p.is_named_person && (
+                                      <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700 border border-amber-200">
+                                        Role type
+                                      </span>
+                                    )}
+                                  </div>
+                                  {p.evidence_note && (
+                                    <p className="text-[10px] font-medium text-slate-400 mt-1.5">{p.evidence_note}</p>
+                                  )}
+                                </button>
+                              );
+                            })}
                           </div>
-
-                          <div className="flex flex-wrap gap-3">
-                            <button
-                              type="button"
-                              disabled={isEvaluating}
-                              onClick={runEvaluation}
-                              className="inline-flex items-center gap-2 px-5 py-2.5 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors"
-                            >
-                              <Check className="w-4 h-4" />
-                              {isEvaluating ? 'Evaluating…' : 'Confirm Persona & Evaluate'}
+                          <div className="flex justify-between">
+                            <button type="button" onClick={() => setEvaluatorStep('inputs')}
+                              className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-600">
+                              Back
                             </button>
                             <button
                               type="button"
-                              onClick={() => setEvaluatorStep('inputs')}
-                              className="inline-flex items-center gap-2 px-5 py-2.5 bg-slate-100 text-slate-700 text-sm font-medium rounded-lg hover:bg-slate-200 transition-colors"
+                              disabled={!selectedPersonaId}
+                              onClick={() => setEvaluatorStep('confirm')}
+                              className="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-bold text-white disabled:bg-slate-300"
                             >
-                              <Edit3 className="w-4 h-4" />
-                              Edit Inputs
+                              Next: confirm
                             </button>
                           </div>
                         </div>
                       )}
 
-                      {/* ------------------------------------- 4-6. RESULTS (Scores/Phrases/Summary)
-                          The reference app shows these three on one screen, with steps D, E and F
-                          highlighted together in the stepper. Paginating them hides the phrase
-                          table behind a click when it is the part a seller acts on. */}
-                      {evaluation && ['scores', 'phrases', 'summary'].includes(evaluatorStep) && (
-                        <div className="space-y-5">
+                      {/* --------------------------------------------------------- 3. CONFIRM */}
+                      {evalOptions && evaluatorStep === 'confirm' && (
+                        <div className="space-y-4">
+                          <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-2">
+                            {[
+                              ['Persona', chosenPersona ? (chosenPersona.name || chosenPersona.title) : '—'],
+                              ['Role', chosenPersona?.title || '—'],
+                              ['Objective', chosenObjective?.label || '—'],
+                              ['Formula', chosenObjective?.formula || '—'],
+                              ['Format', chosenFormat?.label || '—'],
+                              ['Depth', evaluatorMode],
+                            ].map(([k, v]) => (
+                              <div key={k as string} className="flex justify-between gap-4 text-xs">
+                                <span className="font-bold uppercase tracking-wide text-slate-400">{k}</span>
+                                <span className="font-semibold text-slate-800 text-right">{v}</span>
+                              </div>
+                            ))}
+                          </div>
 
+                          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                            <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500 mb-2">
+                              The message being evaluated
+                            </p>
+                            <pre className="whitespace-pre-wrap text-xs font-medium text-slate-700 leading-relaxed">
+                              {stimulusText}
+                            </pre>
+                          </div>
+
+                          <div className="flex justify-between">
+                            <button type="button" onClick={() => setEvaluatorStep('persona')}
+                              className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-600">
+                              Back
+                            </button>
+                            <button
+                              type="button"
+                              disabled={!canEvaluate || isEvaluating}
+                              onClick={runEvaluation}
+                              className="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-bold text-white disabled:bg-slate-300"
+                            >
+                              {isEvaluating ? 'Evaluating…' : 'Run evaluation'}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* ---------------------------------------------------------- 4. SCORES */}
+                      {evaluation && evaluatorStep === 'scores' && (
+                        <div className="space-y-4">
                           {!evaluation.ai_available && (
-                            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                              AI scoring was unavailable. The coded checks below still ran. No
+                            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-semibold text-amber-800">
+                              AI scoring was unavailable. The coded checks below still ran; no
                               dimension scores or composite are shown, rather than estimated ones.
                             </div>
                           )}
 
-                          {/* Step D - dimension scores */}
-                          <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-4">
-                            <h3 className="text-sm font-semibold text-slate-800">
-                              Step D &mdash; Dimension Scores
-                            </h3>
-
-                            {Object.keys(evaluation.dimensions || {}).length > 0 ? (
-                              <div className="space-y-2.5">
-                                {Object.entries(evaluation.dimensions).map(([k, v]: any) => (
-                                  <div key={k} className="flex items-center gap-3">
-                                    <span className="text-xs font-medium text-slate-600 w-28 text-right capitalize">
-                                      {k.replace(/_/g, ' ')}
-                                    </span>
-                                    <div className="flex-1 bg-slate-100 rounded-full h-4 overflow-hidden">
-                                      <div
-                                        className={`${scoreColor(v)} h-full rounded-full transition-all duration-500`}
-                                        style={{ width: `${v}%` }}
-                                      />
-                                    </div>
-                                    <span className="text-[11px] font-semibold text-slate-700 w-8 text-right">
-                                      {v}
-                                    </span>
-                                    <span className="text-[10px] text-slate-400 w-16">
-                                      {scoreLabel(v)}
-                                    </span>
-                                  </div>
-                                ))}
-                              </div>
-                            ) : (
-                              <p className="text-xs text-slate-500">
-                                No dimension scores were published for this evaluation.
+                          <div className="rounded-2xl border border-slate-200 bg-white p-5">
+                            <div className="flex items-baseline gap-3">
+                              <span className={`text-5xl font-extrabold ${bandColour(evaluation.score_band)}`}>
+                                {evaluation.composite_available ? evaluation.composite : '—'}
+                              </span>
+                              <span className="text-sm font-bold text-slate-500">
+                                {evaluation.composite_available ? evaluation.score_band : 'Composite unavailable'}
+                              </span>
+                              <span className="ml-auto text-[10px] font-semibold text-slate-400">
+                                V{evaluation.version}
+                              </span>
+                            </div>
+                            <p className="mt-2 text-[11px] font-medium text-slate-500">
+                              {evaluation.formula_used}
+                            </p>
+                            <p className="text-[10px] font-medium text-slate-400">
+                              Formula source: {evaluation.formula_source}
+                            </p>
+                            {(evaluation.dimension_problems || []).length > 0 && (
+                              <p className="mt-2 text-[11px] font-semibold text-rose-600">
+                                Composite withheld — {evaluation.dimension_problems.join('; ')}
                               </p>
                             )}
+                          </div>
 
-                            <div className="border-t border-slate-100 pt-4 mt-4">
-                              <div className="flex items-center gap-4 flex-wrap">
-                                <div className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border-2 ${scoreBadge(evaluation.composite)}`}>
-                                  <span className="text-2xl font-bold">
-                                    {evaluation.composite_available ? evaluation.composite : '—'}
+                          {Object.keys(evaluation.dimensions || {}).length > 0 && (
+                            <div className="space-y-2">
+                              {Object.entries(evaluation.dimensions).map(([k, v]: any) => (
+                                <div key={k} className="flex items-center gap-3">
+                                  <span className="w-44 text-xs font-bold text-slate-600 capitalize">
+                                    {k.replace(/_/g, ' ')}
                                   </span>
-                                  <div>
-                                    <span className="text-[10px] uppercase tracking-wide font-semibold">/ 100</span>
-                                    <p className="text-xs font-medium">
-                                      {evaluation.composite_available ? evaluation.score_band : 'Unavailable'}
-                                    </p>
+                                  <div className="flex-1 h-2 rounded-full bg-slate-100">
+                                    <div className="h-2 rounded-full bg-indigo-500" style={{ width: `${v}%` }} />
                                   </div>
+                                  <span className="w-10 text-right text-xs font-bold text-slate-800">{v}</span>
                                 </div>
-                                <div className="text-xs text-slate-500">
-                                  <p className="font-medium text-slate-600 mb-0.5">
-                                    Composite ({evaluation.objective_label}) &middot; V{evaluation.version}
-                                  </p>
-                                  <p className="font-mono text-[10px]">{evaluation.formula_used}</p>
-                                  <p className="text-[10px] text-slate-400">
-                                    Formula source: {evaluation.formula_source}
-                                  </p>
-                                </div>
-                              </div>
-                              {(evaluation.dimension_problems || []).length > 0 && (
-                                <p className="mt-3 text-xs font-semibold text-rose-600">
-                                  Composite withheld &mdash; {evaluation.dimension_problems.join('; ')}
-                                </p>
-                              )}
+                              ))}
                             </div>
+                          )}
 
-                            {/* Coded checks: the part that survives an AI failure. */}
-                            <div className="border-t border-slate-100 pt-3 space-y-1.5">
-                              <p className="text-xs font-semibold text-slate-600">
-                                Coded checks ({evaluation.structure_checks?.checks_passed}/{evaluation.structure_checks?.checks_total})
-                                <span className="font-normal text-slate-400"> — computed in code, independent of the AI</span>
-                              </p>
+                          <div className="rounded-xl border border-slate-200 bg-white p-4">
+                            <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500 mb-2">
+                              Coded checks ({evaluation.structure_checks?.checks_passed}/{evaluation.structure_checks?.checks_total})
+                              — computed in code, independent of the AI
+                            </p>
+                            <div className="space-y-1.5">
                               {(evaluation.structure_checks?.checks || []).map((c: any) => (
                                 <div key={c.check} className="flex items-start gap-2 text-xs">
-                                  <span className={c.passed ? 'text-green-500' : 'text-rose-500'}>
+                                  <span className={c.passed ? 'text-emerald-600' : 'text-rose-600'}>
                                     {c.passed ? '✓' : '✕'}
                                   </span>
-                                  <span className="font-medium text-slate-700 capitalize w-36">
+                                  <span className="font-semibold text-slate-700 capitalize w-40">
                                     {c.check.replace(/_/g, ' ')}
                                   </span>
-                                  <span className="text-slate-500 flex-1">{c.detail}</span>
+                                  <span className="font-medium text-slate-500 flex-1">{c.detail}</span>
                                 </div>
                               ))}
                             </div>
                           </div>
 
-                          {/* Simulated reaction - always labelled as a simulation. */}
-                          {evaluation.reaction && (
-                            <div className="bg-white rounded-xl border border-slate-200 p-5">
-                              <h3 className="text-sm font-semibold text-slate-700 mb-2">
-                                Persona Reaction
-                              </h3>
-                              <p className="text-sm text-slate-600 italic leading-relaxed">
-                                &ldquo;{evaluation.reaction.text}&rdquo;
-                              </p>
-                              <p className="text-xs text-slate-400 mt-1.5">
-                                &mdash; {evaluation.reaction.label}
-                              </p>
-                            </div>
-                          )}
-                          {(evaluation.reaction_withheld || []).length > 0 && (
-                            <div className="bg-amber-50 rounded-xl border border-amber-200 p-5">
-                              <h3 className="text-sm font-semibold text-amber-800 mb-1">
-                                Persona Reaction withheld
-                              </h3>
-                              {evaluation.reaction_withheld.map((f: string, i: number) => (
-                                <p key={i} className="text-xs text-amber-800">&bull; {f}</p>
-                              ))}
-                            </div>
-                          )}
-
-                          {/* Step E - phrase table, with the recommendation checkboxes inline. */}
-                          <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-3">
-                            <h3 className="text-sm font-semibold text-slate-800">
-                              Step E &mdash; Phrase-Level Analysis
-                            </h3>
-                            {evaluation.phrases_dropped > 0 && (
-                              <p className="text-xs text-slate-500">
-                                {evaluation.phrases_dropped} returned chunk(s) were dropped because they
-                                could not be located in your message.
-                              </p>
-                            )}
-                            {(evaluation.phrases || []).length === 0 ? (
-                              <p className="text-xs text-slate-500">
-                                No phrase-level feedback was produced for this message.
-                              </p>
-                            ) : (
-                              <div className="overflow-x-auto">
-                                <table className="w-full text-xs">
-                                  <thead>
-                                    <tr className="border-b border-slate-200">
-                                      <th className="text-center py-2 px-2 text-slate-500 font-medium w-10">
-                                        <span className="sr-only">Select</span>
-                                      </th>
-                                      <th className="text-left py-2 px-2 text-slate-500 font-medium">Chunk</th>
-                                      <th className="text-center py-2 px-2 text-slate-500 font-medium w-20">Rating</th>
-                                      <th className="text-center py-2 px-2 text-slate-500 font-medium w-24">Problem</th>
-                                      <th className="text-left py-2 px-2 text-slate-500 font-medium">Reason</th>
-                                      <th className="text-left py-2 px-2 text-slate-500 font-medium">Recommendation</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    {(evaluation.phrases || []).map((p: any, i: number) => {
-                                      const rec = p.suggestion || p.comment;
-                                      const selectable = p.verdict !== 'Keep' && !!rec;
-                                      return (
-                                        <tr key={i} className="border-b border-slate-100 align-top">
-                                          <td className="py-2 px-2 text-center">
-                                            {selectable && (
-                                              <input
-                                                type="checkbox"
-                                                checked={selectedRecs.includes(rec)}
-                                                onChange={(e) => setSelectedRecs(
-                                                  e.target.checked
-                                                    ? [...selectedRecs, rec]
-                                                    : selectedRecs.filter((x: string) => x !== rec))}
-                                              />
-                                            )}
-                                          </td>
-                                          <td className="py-2 px-2 text-slate-700 italic">
-                                            &ldquo;{p.chunk}&rdquo;
-                                            <span className="block text-[10px] text-slate-400 not-italic">
-                                              chars {p.start}&ndash;{p.end}
-                                            </span>
-                                          </td>
-                                          <td className="py-2 px-2 text-center">
-                                            <span className={`inline-block rounded-full border px-2 py-0.5 text-[10px] font-semibold ${verdictChip(p.verdict)}`}>
-                                              {p.verdict}
-                                            </span>
-                                          </td>
-                                          <td className="py-2 px-2 text-center">
-                                            <span className={`text-[10px] font-semibold ${p.problem_type === 'factual_grounding' ? 'text-rose-600' : 'text-slate-400'}`}>
-                                              {p.problem_type === 'factual_grounding' ? 'Factual' : 'Style'}
-                                            </span>
-                                          </td>
-                                          <td className="py-2 px-2 text-slate-600">
-                                            {p.comment}
-                                            {(p.grounding?.reasons || []).map((r: string, j: number) => (
-                                              <span key={j} className="block text-[10px] font-semibold text-rose-600">{r}</span>
-                                            ))}
-                                          </td>
-                                          <td className="py-2 px-2 text-slate-600">{p.suggestion}</td>
-                                        </tr>
-                                      );
-                                    })}
-                                  </tbody>
-                                </table>
-                              </div>
-                            )}
-
-                            {/* Coded checks that failed are also actionable changes. */}
-                            {(evaluation.structure_checks?.checks || []).filter((c: any) => !c.passed).length > 0 && (
-                              <div className="border-t border-slate-100 pt-3 space-y-1.5">
-                                <p className="text-xs font-semibold text-slate-600">Also fixable</p>
-                                {(evaluation.structure_checks?.checks || [])
-                                  .filter((c: any) => !c.passed)
-                                  .map((c: any) => {
-                                    const rec = `Fix ${c.check.replace(/_/g, ' ')}: ${c.detail}`;
-                                    return (
-                                      <label key={c.check} className="flex items-start gap-2 text-xs text-slate-600">
-                                        <input
-                                          type="checkbox"
-                                          checked={selectedRecs.includes(rec)}
-                                          onChange={(e) => setSelectedRecs(
-                                            e.target.checked
-                                              ? [...selectedRecs, rec]
-                                              : selectedRecs.filter((x: string) => x !== rec))}
-                                          className="mt-0.5"
-                                        />
-                                        <span>{rec}</span>
-                                      </label>
-                                    );
-                                  })}
-                              </div>
-                            )}
-                          </div>
-
-                          {/* Step F - summary */}
-                          <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-4">
-                            <h3 className="text-sm font-semibold text-slate-800">
-                              Step F &mdash; Summary
-                            </h3>
-                            {evaluation.summary && (
-                              <p className="text-sm text-slate-600 leading-relaxed">{evaluation.summary}</p>
-                            )}
-
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                              {(evaluation.strengths || []).length > 0 && (
-                                <div>
-                                  <p className="text-xs font-semibold text-slate-600 mb-1">Strengths</p>
-                                  <ul className="space-y-1">
-                                    {evaluation.strengths.map((s: string, i: number) => (
-                                      <li key={i} className="text-xs text-slate-600 flex items-start gap-1.5">
-                                        <Check className="w-3.5 h-3.5 text-green-500 mt-0.5 flex-shrink-0" />{s}
-                                      </li>
-                                    ))}
-                                  </ul>
-                                </div>
-                              )}
-                              {(evaluation.weaknesses || []).length > 0 && (
-                                <div>
-                                  <p className="text-xs font-semibold text-slate-600 mb-1">Weaknesses</p>
-                                  <ul className="space-y-1">
-                                    {evaluation.weaknesses.map((s: string, i: number) => (
-                                      <li key={i} className="text-xs text-slate-600 flex items-start gap-1.5">
-                                        <span className="text-rose-500 mt-0.5">&bull;</span>{s}
-                                      </li>
-                                    ))}
-                                  </ul>
-                                </div>
-                              )}
-                            </div>
-
-                            <div className="flex flex-wrap gap-3 pt-2">
-                              <button
-                                type="button"
-                                onClick={() => { setEvaluatorStep('rewrite'); runRewrite(); }}
-                                disabled={selectedRecs.length === 0 || isRewriting}
-                                className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                              >
-                                <Sparkles className="w-4 h-4" />
-                                Apply &amp; Rewrite ({selectedRecs.length})
-                              </button>
-                              <button
-                                type="button"
-                                onClick={resetEvaluator}
-                                className="inline-flex items-center gap-2 px-4 py-2 bg-slate-100 text-slate-700 text-sm font-medium rounded-lg hover:bg-slate-200 transition-colors"
-                              >
-                                <RotateCcw className="w-4 h-4" />
-                                Start Over
-                              </button>
-                            </div>
-                          </div>
-
-                          {/* Data Sources - which source may establish what. */}
+                          {/* Data Sources panel - which source may establish what. */}
                           {evaluation.data_sources && (
-                            <div className="bg-slate-50 rounded-xl border border-slate-200 p-5">
-                              <h3 className="text-sm font-semibold text-slate-800 mb-2">Data Sources</h3>
+                            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                              <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500 mb-2">
+                                Data sources
+                              </p>
                               <div className="space-y-2">
                                 {(evaluation.data_sources.sources || []).map((s: any) => (
-                                  <div key={s.id} className="text-xs">
+                                  <div key={s.id} className="text-[11px]">
                                     <div className="flex items-center gap-2">
-                                      <span className={s.available ? 'text-green-500' : 'text-slate-300'}>&#9679;</span>
-                                      <span className="font-semibold text-slate-700">{s.label}</span>
-                                      {s.detail && <span className="text-slate-400">&mdash; {s.detail}</span>}
+                                      <span className={s.available ? 'text-emerald-600' : 'text-slate-300'}>●</span>
+                                      <span className="font-bold text-slate-700">{s.label}</span>
+                                      {s.detail && <span className="font-medium text-slate-400">— {s.detail}</span>}
                                     </div>
-                                    <p className="pl-5 text-slate-500">
+                                    <p className="pl-5 font-medium text-slate-500">
                                       Establishes: {(s.may_establish || []).join('; ')}
                                     </p>
-                                    <p className="pl-5 text-slate-400">
+                                    <p className="pl-5 font-medium text-slate-400">
                                       Never: {(s.never_establishes || []).join('; ')}
                                     </p>
                                   </div>
@@ -4386,7 +4113,7 @@ export default function UserDashboardPage() {
                               </div>
                               {(evaluation.data_sources.superlatives_blocked
                                 || evaluation.data_sources.competitor_claims_blocked) && (
-                                <p className="mt-2 text-[11px] font-semibold text-amber-700">
+                                <p className="mt-2 text-[10px] font-semibold text-amber-700">
                                   Market restrictions apply in {evaluation.data_sources.country}:
                                   {evaluation.data_sources.superlatives_blocked && ' superlative claims'}
                                   {evaluation.data_sources.superlatives_blocked
@@ -4397,105 +4124,173 @@ export default function UserDashboardPage() {
                               )}
                             </div>
                           )}
+
+                          <div className="flex justify-end">
+                            <button type="button" onClick={() => setEvaluatorStep('phrases')}
+                              className="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-bold text-white">
+                              Next: phrase feedback
+                            </button>
+                          </div>
                         </div>
                       )}
 
-                      {/* ------------------------------------------------------- 7. REWRITE */}
-                      {evaluation && evaluatorStep === 'rewrite' && (
-                        <div className="space-y-5">
-                          {isRewriting && (
-                            <div className="flex flex-col items-center justify-center py-16 space-y-4">
-                              <div className="w-16 h-16 rounded-full border-4 border-slate-200 border-t-indigo-500 animate-spin" />
-                              <h3 className="text-lg font-semibold text-slate-800">Rewriting Message</h3>
-                            </div>
+                      {/* --------------------------------------------------------- 5. PHRASES */}
+                      {evaluation && evaluatorStep === 'phrases' && (
+                        <div className="space-y-3">
+                          {evaluation.phrases_dropped > 0 && (
+                            <p className="text-[11px] font-semibold text-slate-500">
+                              {evaluation.phrases_dropped} returned chunk(s) were dropped because they
+                              could not be located in your message.
+                            </p>
                           )}
+                          {(evaluation.phrases || []).length === 0 && (
+                            <p className="text-xs font-semibold text-slate-500">
+                              No phrase-level feedback was produced for this message.
+                            </p>
+                          )}
+                          {(evaluation.phrases || []).map((p: any, i: number) => (
+                            <div key={i} className="rounded-xl border border-slate-200 bg-white p-4">
+                              <div className="flex items-center gap-2 mb-2">
+                                <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${verdictChip(p.verdict)}`}>
+                                  {p.verdict}
+                                </span>
+                                <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${p.problem_type === 'factual_grounding'
+                                  ? 'bg-rose-50 text-rose-700' : 'bg-slate-100 text-slate-600'}`}>
+                                  {p.problem_type === 'factual_grounding' ? 'Factual grounding' : 'Style'}
+                                </span>
+                                <span className="ml-auto text-[10px] font-medium text-slate-400">
+                                  chars {p.start}–{p.end}
+                                </span>
+                              </div>
+                              <p className="text-xs font-semibold text-slate-800 italic">&ldquo;{p.chunk}&rdquo;</p>
+                              {p.comment && (
+                                <p className="mt-1.5 text-xs font-medium text-slate-600">{p.comment}</p>
+                              )}
+                              {p.suggestion && (
+                                <p className="mt-1 text-xs font-medium text-indigo-700">→ {p.suggestion}</p>
+                              )}
+                              {(p.grounding?.reasons || []).map((r: string, j: number) => (
+                                <p key={j} className="mt-1 text-[11px] font-semibold text-rose-600">{r}</p>
+                              ))}
+                            </div>
+                          ))}
+                          <div className="flex justify-end">
+                            <button type="button" onClick={() => setEvaluatorStep('summary')}
+                              className="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-bold text-white">
+                              Next: summary
+                            </button>
+                          </div>
+                        </div>
+                      )}
 
-                          {rewriteError && !isRewriting && (
-                            <div className="bg-red-50 border border-red-200 rounded-xl p-4">
-                              <p className="text-sm text-red-700">{rewriteError}</p>
-                              <p className="text-xs text-red-500 mt-1">
-                                Your original message is unchanged.
+                      {/* --------------------------------------------------------- 6. SUMMARY */}
+                      {evaluation && evaluatorStep === 'summary' && (
+                        <div className="space-y-4">
+                          {evaluation.summary && (
+                            <div className="rounded-xl border border-slate-200 bg-white p-4">
+                              <p className="text-xs font-medium text-slate-700 leading-relaxed">
+                                {evaluation.summary}
                               </p>
                             </div>
                           )}
 
-                          {!isRewriting && evaluation.rewrite && (
-                            <>
-                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-3">
-                                  <h3 className="text-sm font-semibold text-slate-800">Original</h3>
-                                  <p className="text-sm text-slate-600 leading-relaxed whitespace-pre-wrap">
-                                    {evaluation.message_text}
-                                  </p>
-                                </div>
-                                <div className="bg-white rounded-xl border border-indigo-200 p-5 space-y-3">
-                                  <h3 className="text-sm font-semibold text-indigo-800">
-                                    Rewritten &mdash; {evaluation.rewrite.format_label}
-                                  </h3>
-                                  {/* Rendered by field so the format is visible, not a blob. */}
-                                  {evaluation.rewrite.subject_line && (
-                                    <div>
-                                      <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Subject</p>
-                                      <p className="text-sm font-semibold text-slate-900">{evaluation.rewrite.subject_line}</p>
-                                    </div>
-                                  )}
-                                  {/* Composed in Python, so email and LinkedIn DM greet
-                                      and the public formats never do. */}
-                                  {evaluation.rewrite.greeting && (
-                                    <p className="text-sm text-slate-800">{evaluation.rewrite.greeting}</p>
-                                  )}
-                                  {evaluation.rewrite.headline && (
-                                    <p className="text-sm font-semibold text-slate-900">{evaluation.rewrite.headline}</p>
-                                  )}
-                                  {evaluation.rewrite.opening && (
-                                    <p className="text-sm text-slate-700 leading-relaxed">{evaluation.rewrite.opening}</p>
-                                  )}
-                                  {(evaluation.rewrite.body_sections || []).map((s: any, i: number) => (
-                                    <div key={i}>
-                                      {s.heading && <p className="text-sm font-semibold text-slate-800">{s.heading}</p>}
-                                      {/* pre-line keeps a social post's "• " bullet lines apart */}
-                                      <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-line">{s.text}</p>
-                                    </div>
-                                  ))}
-                                  {evaluation.rewrite.cta && (
-                                    <p className="text-sm font-medium text-slate-800">{evaluation.rewrite.cta}</p>
-                                  )}
-                                  {evaluation.rewrite.signoff && (
-                                    <p className="text-sm text-slate-700 whitespace-pre-line">{evaluation.rewrite.signoff}</p>
-                                  )}
-                                  {(evaluation.rewrite.hashtags || []).length > 0 && (
-                                    <p className="text-sm font-medium text-indigo-600">
-                                      {evaluation.rewrite.hashtags.join(' ')}
-                                    </p>
-                                  )}
-                                </div>
-                              </div>
-
-                              {(evaluation.rewrite.diff?.applied_recommendations || []).length > 0 && (
-                                <div className="bg-slate-50 rounded-xl border border-slate-200 p-5 space-y-3">
-                                  <h3 className="text-sm font-semibold text-slate-800">Changes Applied</h3>
-                                  <ul className="space-y-1.5">
-                                    {evaluation.rewrite.diff.applied_recommendations.map((change: string, i: number) => (
-                                      <li key={i} className="text-sm text-slate-600 flex items-start gap-2">
-                                        <Check className="w-4 h-4 text-green-500 mt-0.5 flex-shrink-0" />
-                                        {change}
-                                      </li>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            {[['Strengths', evaluation.strengths, 'emerald'],
+                              ['Weaknesses', evaluation.weaknesses, 'rose']].map(([title, items, tone]: any) => (
+                              (items || []).length > 0 && (
+                                <div key={title} className="rounded-xl border border-slate-200 bg-white p-4">
+                                  <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500 mb-2">{title}</p>
+                                  <ul className="space-y-1">
+                                    {items.map((s: string, i: number) => (
+                                      <li key={i} className={`text-xs font-medium text-${tone}-700`}>• {s}</li>
                                     ))}
                                   </ul>
-                                  {(evaluation.rewrite.diff.facts_dropped || []).length > 0 && (
-                                    <p className="text-xs text-slate-500">
-                                      Figures removed: {evaluation.rewrite.diff.facts_dropped.join(', ')}
-                                    </p>
-                                  )}
-                                  {(evaluation.rewrite.diff.facts_added || []).length > 0 && (
-                                    <p className="text-xs text-slate-500">
-                                      Figures added, each checked against the sources: {evaluation.rewrite.diff.facts_added.join(', ')}
-                                    </p>
-                                  )}
                                 </div>
-                              )}
+                              )
+                            ))}
+                          </div>
 
-                              <div className="flex flex-wrap gap-3">
+                          {/* Simulated reaction, always labelled. */}
+                          {evaluation.reaction && (
+                            <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-4">
+                              <p className="text-[10px] font-bold uppercase tracking-wide text-indigo-700 mb-1">
+                                {evaluation.reaction.label}
+                              </p>
+                              <p className="text-xs font-medium text-slate-700 leading-relaxed">
+                                {evaluation.reaction.text}
+                              </p>
+                            </div>
+                          )}
+                          {(evaluation.reaction_withheld || []).length > 0 && (
+                            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+                              <p className="text-[10px] font-bold uppercase tracking-wide text-amber-800 mb-1">
+                                Simulated reaction withheld
+                              </p>
+                              {evaluation.reaction_withheld.map((f: string, i: number) => (
+                                <p key={i} className="text-[11px] font-medium text-amber-800">• {f}</p>
+                              ))}
+                            </div>
+                          )}
+
+                          <div className="flex justify-end">
+                            <button type="button" onClick={() => setEvaluatorStep('rewrite')}
+                              className="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-bold text-white">
+                              Next: rewrite
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* --------------------------------------------------------- 7. REWRITE */}
+                      {evaluation && evaluatorStep === 'rewrite' && (
+                        <div className="space-y-4">
+                          <div className="rounded-xl border border-slate-200 bg-white p-4">
+                            <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500 mb-2">
+                              Select the changes to apply
+                            </p>
+                            {recommendations.length === 0 && (
+                              <p className="text-xs font-medium text-slate-500">
+                                No changes were recommended for this message.
+                              </p>
+                            )}
+                            <div className="space-y-1.5">
+                              {recommendations.map((r, i) => (
+                                <label key={i} className="flex items-start gap-2 text-xs font-medium text-slate-700">
+                                  <input
+                                    type="checkbox"
+                                    checked={selectedRecs.includes(r)}
+                                    onChange={(e) => setSelectedRecs(
+                                      e.target.checked
+                                        ? [...selectedRecs, r]
+                                        : selectedRecs.filter((x: string) => x !== r))}
+                                    className="mt-0.5"
+                                  />
+                                  <span>{r}</span>
+                                </label>
+                              ))}
+                            </div>
+                            <button
+                              type="button"
+                              disabled={selectedRecs.length === 0 || isRewriting}
+                              onClick={runRewrite}
+                              className="mt-3 rounded-lg bg-indigo-600 px-5 py-2 text-sm font-bold text-white disabled:bg-slate-300"
+                            >
+                              {isRewriting ? 'Rewriting…' : `Rewrite applying ${selectedRecs.length} change${selectedRecs.length === 1 ? '' : 's'}`}
+                            </button>
+                          </div>
+
+                          {rewriteError && (
+                            <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs font-semibold text-rose-700">
+                              {rewriteError}
+                            </div>
+                          )}
+
+                          {evaluation.rewrite && (
+                            <div className="rounded-xl border border-emerald-200 bg-white p-4 space-y-3">
+                              <div className="flex items-center justify-between">
+                                <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                                  Rewritten as {evaluation.rewrite.format_label}
+                                </p>
                                 <button
                                   type="button"
                                   onClick={() => {
@@ -4503,51 +4298,73 @@ export default function UserDashboardPage() {
                                     setCopiedRewrite(true);
                                     setTimeout(() => setCopiedRewrite(false), 2500);
                                   }}
-                                  className="inline-flex items-center gap-2 px-4 py-2 bg-slate-100 text-slate-700 text-sm font-medium rounded-lg hover:bg-slate-200 transition-colors"
+                                  className="text-[11px] font-bold text-indigo-600"
                                 >
-                                  <Copy className="w-4 h-4" />
-                                  {copiedRewrite ? 'Copied' : 'Copy to Clipboard'}
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setStimulusText(evaluation.rewrite.plain_text || '');
-                                    setEvaluation(null);
-                                    setSelectedRecs([]);
-                                    setEvaluatorStep('confirm');
-                                  }}
-                                  className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors"
-                                >
-                                  <Sparkles className="w-4 h-4" />
-                                  Evaluate the rewrite
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={resetEvaluator}
-                                  className="inline-flex items-center gap-2 px-4 py-2 bg-slate-100 text-slate-700 text-sm font-medium rounded-lg hover:bg-slate-200 transition-colors"
-                                >
-                                  <RotateCcw className="w-4 h-4" />
-                                  Start Over
+                                  {copiedRewrite ? 'Copied' : 'Copy'}
                                 </button>
                               </div>
-                            </>
-                          )}
 
-                          {!isRewriting && !evaluation.rewrite && !rewriteError && (
-                            <div className="bg-white rounded-xl border border-slate-200 p-5">
-                              <p className="text-sm text-slate-600">
-                                Select at least one recommendation on the results screen, then choose
-                                Apply &amp; Rewrite.
-                              </p>
-                              <button
-                                type="button"
-                                onClick={() => setEvaluatorStep('scores')}
-                                className="mt-3 inline-flex items-center gap-2 px-4 py-2 bg-slate-100 text-slate-700 text-sm font-medium rounded-lg"
-                              >
-                                Back to results
-                              </button>
+                              {evaluation.rewrite.subject_line && (
+                                <div>
+                                  <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Subject</p>
+                                  <p className="text-sm font-bold text-slate-900">{evaluation.rewrite.subject_line}</p>
+                                </div>
+                              )}
+                              {evaluation.rewrite.headline && (
+                                <p className="text-sm font-bold text-slate-900">{evaluation.rewrite.headline}</p>
+                              )}
+                              {evaluation.rewrite.opening && (
+                                <p className="text-xs font-medium text-slate-700 leading-relaxed">
+                                  {evaluation.rewrite.opening}
+                                </p>
+                              )}
+                              {(evaluation.rewrite.body_sections || []).map((s: any, i: number) => (
+                                <div key={i}>
+                                  {s.heading && (
+                                    <p className="text-xs font-bold text-slate-800">{s.heading}</p>
+                                  )}
+                                  <p className="text-xs font-medium text-slate-700 leading-relaxed">{s.text}</p>
+                                </div>
+                              ))}
+                              {evaluation.rewrite.cta && (
+                                <p className="text-xs font-semibold text-slate-800">{evaluation.rewrite.cta}</p>
+                              )}
+                              {(evaluation.rewrite.hashtags || []).length > 0 && (
+                                <p className="text-xs font-semibold text-indigo-600">
+                                  {evaluation.rewrite.hashtags.join(' ')}
+                                </p>
+                              )}
+
+                              {evaluation.rewrite.diff && (
+                                <div className="border-t border-slate-100 pt-2 text-[10px] font-medium text-slate-500">
+                                  <p>Applied: {(evaluation.rewrite.diff.applied_recommendations || []).length} change(s)</p>
+                                  {(evaluation.rewrite.diff.facts_dropped || []).length > 0 && (
+                                    <p>Figures removed: {evaluation.rewrite.diff.facts_dropped.join(', ')}</p>
+                                  )}
+                                  {(evaluation.rewrite.diff.facts_added || []).length > 0 && (
+                                    <p>Figures added (checked against the sources): {evaluation.rewrite.diff.facts_added.join(', ')}</p>
+                                  )}
+                                </div>
+                              )}
                             </div>
                           )}
+
+                          <div className="flex justify-between">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEvaluation(null);
+                                setSelectedRecs([]);
+                                setRewriteError(null);
+                                setEvalError(null);
+                                setStimulusText('');
+                                setEvaluatorStep('inputs');
+                              }}
+                              className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-600"
+                            >
+                              Start new evaluation
+                            </button>
+                          </div>
                         </div>
                       )}
 
