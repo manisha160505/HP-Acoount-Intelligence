@@ -2313,7 +2313,12 @@ export default function UserDashboardPage() {
                                       <span className="text-base font-extrabold text-slate-900 flex-shrink-0">{p.score ?? '—'}/100</span>
                                     </div>
                                   ) : (
-                                    <p className="text-[11px] text-slate-400 font-semibold">No category file score</p>
+                                    // No HP Category Intent file for this account. The card still
+                                    // carries the Bombora research and the HP play, so it is shown
+                                    // rather than collapsed to an empty box.
+                                    <p className="text-[11px] text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5">
+                                      No HP Category Intent file for this account, so there is no category score. The Bombora research below still applies.
+                                    </p>
                                   )}
 
                                   {/* Signal topics as pills, then geo */}
@@ -2366,7 +2371,7 @@ export default function UserDashboardPage() {
                                   )}
 
                                   {/* Supporting Bombora signals, kept visibly apart from the file's own numbers */}
-                                  <details className="pt-3 border-t border-slate-100 group">
+                                  <details open={!p} className="pt-3 border-t border-slate-100 group">
                                     <summary className="text-[10px] font-bold text-slate-400 uppercase tracking-wider cursor-pointer list-none flex items-center gap-1.5 hover:text-slate-600">
                                       <ChevronDown className="w-3.5 h-3.5 transition-transform group-open:rotate-180" />
                                       Supporting Intent Signals (Bombora)
