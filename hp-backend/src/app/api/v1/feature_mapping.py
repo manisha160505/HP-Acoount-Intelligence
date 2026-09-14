@@ -808,9 +808,39 @@ FEATURE_MAPPINGS = {
     "intent_demand_signals": {
         "feature_key": "intent_demand_signals",
         "display_name": "Intent & Demand Signals",
-        "purpose": "Aggregates Bombora intent research topics, composite scores, and hiring-linked demand surges",
-        "dependent_datasets": ["intent_score", "intent_topics", "job_openings"],
+        "purpose": "HP category intent scores (primary), the Bombora signals that support each category with their exact scores, the account technologies that confirm them, and hiring-linked demand",
+        # technographics and webstack are Explorium sheets 4 and 5, read directly
+        # to confirm which supporting signals are backed by technology in use.
+        "dependent_datasets": ["hp_category_intent", "intent_score", "intent_topics", "job_openings",
+                               "technographics", "webstack"],
         "mapped_fields": [
+            {
+                "field_key": "hp_category_score",
+                "display_name": "HP Category Intent Score (Step 1, primary score)",
+                "purpose": "Per HP category (PCs, Workstations, Poly, Printers, 3D Printers): Intent Score, Intent Trend, Buying Stage and Research Volume, shown as received on the graph and cards. The primary HP category is the highest score whose line carries no known noisy keyword",
+                "dataset_key": "hp_category_intent",
+                "source_sheet": "Intent Data (Wide)",
+                "source_column": "Intent Score (/100), Intent Trend, Buying Stage, Research Volume",
+                "data_type": "DETERMINISTIC"
+            },
+            {
+                "field_key": "hp_category_context",
+                "display_name": "Category Topics, Keywords, Geo & Window",
+                "purpose": "Topics Researched, Keywords Matched, Related Technologies, Geo Source and First / Latest Intent Date per category, as received. The row is matched to the account by Domain",
+                "dataset_key": "hp_category_intent",
+                "source_sheet": "Intent Data (Wide)",
+                "source_column": "Topics Researched, Keywords Matched, Related Technologies, Geo Source, First Intent Date, Latest Intent Date",
+                "data_type": "DETERMINISTIC"
+            },
+            {
+                "field_key": "supporting_topics",
+                "display_name": "Supporting Intent Signals (Step 2)",
+                "purpose": "Bombora topics grouped into the signal families that support each category (e.g. GPT / LLMs, AI chips / GPU, data analytics, vector databases, AI / machine learning for Workstation), each with its exact 11_intent_score score. Context only - they never change the category score",
+                "dataset_key": "intent_score",
+                "source_sheet": "11_intent_score",
+                "source_column": "Topic, Composite Score",
+                "data_type": "DETERMINISTIC"
+            },
             {
                 "field_key": "topic_name",
                 "display_name": "Topic Name (IntentTopic.topic)",
@@ -839,12 +869,57 @@ FEATURE_MAPPINGS = {
                 "data_type": "DETERMINISTIC"
             },
             {
+                "field_key": "provider_domain",
+                "display_name": "Account / Domain Match",
+                "purpose": "The intent export's company domain, checked against the account's domain. A different domain is a mismatch and its topics are not attached to the account",
+                "dataset_key": "intent_topics",
+                "source_sheet": "10_Intent_Topics",
+                "source_column": "Company Website",
+                "data_type": "DETERMINISTIC"
+            },
+            {
+                "field_key": "observation_date",
+                "display_name": "Observation Date",
+                "purpose": "Bombora Date Stamp for the export, shown as received. The export does not state its window length",
+                "dataset_key": "intent_topics",
+                "source_sheet": "10_Intent_Topics",
+                "source_column": "Date Stamp",
+                "data_type": "DETERMINISTIC"
+            },
+            {
+                "field_key": "topic_theme",
+                "display_name": "Theme / HP Category per Topic",
+                "purpose": "Each topic mapped to a broad theme and, only where the topic names one, an HP category, by the versioned dictionary in services/hp/intent_topic_map.py. Ambiguous and near-miss topics stay Other / Unmapped and are flagged for review",
+                "dataset_key": "intent_score",
+                "source_sheet": "11_intent_score",
+                "source_column": "Topic",
+                "data_type": "DETERMINISTIC"
+            },
+            {
+                "field_key": "theme_summary",
+                "display_name": "Theme / HP Category Max & Average",
+                "purpose": "Max = highest Composite Score in the group; Average = sum of Composite Scores / number of included topics. Excluded topics never enter the aggregate. Trend is shown only against a prior window from the same provider and scoring definition",
+                "dataset_key": "intent_score",
+                "source_sheet": "11_intent_score",
+                "source_column": "Composite Score",
+                "data_type": "DETERMINISTIC"
+            },
+            {
+                "field_key": "supporting_evidence",
+                "display_name": "Confirming Technologies (Steps 3-4)",
+                "purpose": "Technologies in the account's own stack that confirm a supporting signal (e.g. PyTorch, Keras for AI / machine learning), each with the sheet and column it came from. A signal with no confirming technology is shown as research only; intent never creates a recommendation on its own",
+                "dataset_key": "technographics, webstack",
+                "source_sheet": "4_Technographics, 5_Webstack",
+                "source_column": "Category columns / Full Tech Stack; Technologies Used By Company Website",
+                "data_type": "DETERMINISTIC"
+            },
+            {
                 "field_key": "hiring_linked_demand",
                 "display_name": "Hiring-Linked Intent Category",
-                "purpose": "Job-posting volume and seniority mix as hiring-linked intent signal",
+                "purpose": "Postings seen (every row, the Executive Dashboard figure), open postings (no closing status) and seniority mix as hiring-linked intent signal",
                 "dataset_key": "job_openings",
                 "source_sheet": "job_openings",
-                "source_column": "job_openings volume and seniority mix",
+                "source_column": "status, seniority (row count)",
                 "data_type": "DETERMINISTIC"
             }
         ]

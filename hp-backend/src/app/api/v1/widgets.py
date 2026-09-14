@@ -367,23 +367,34 @@ WIDGET_REGISTRY = {
             "widget_key": "intent_topics_table",
             "widget_name": "Bombora Intent Research Topics",
             "feature_key": "intent_demand_signals",
-            "description": "IT research topics, composite surge scores, and intent category tiers",
+            "description": "Every Bombora research topic and composite score as received, with provider, domain match, observation date and the dictionary theme / HP category for each topic",
             "widget_type": "topic_table",
             "data_classification": "deterministic",
             "source_datasets": ["intent_score", "intent_topics"],
-            "source_fields": ["topic_name", "composite_score", "intent_level"],
+            "source_fields": ["topic_name", "composite_score", "intent_level", "provider_domain", "observation_date", "topic_theme"],
             "display_order": 1
+        },
+        {
+            "widget_key": "intent_category_summary",
+            "widget_name": "HP Category & Theme Intent Summary",
+            "feature_key": "intent_demand_signals",
+            "description": "HP category intent scores from the category file (primary), supporting Bombora signals per category with exact scores, the account technologies that confirm them, and theme max / average from the included topics only",
+            "widget_type": "category_summary",
+            "data_classification": "derived",
+            "source_datasets": ["hp_category_intent", "intent_score", "intent_topics", "technographics", "webstack"],
+            "source_fields": ["hp_category_score", "hp_category_context", "supporting_topics", "topic_theme", "theme_summary", "supporting_evidence"],
+            "display_order": 2
         },
         {
             "widget_key": "intent_hiring_demand",
             "widget_name": "Hiring-Linked Demand Signals",
             "feature_key": "intent_demand_signals",
-            "description": "Job-posting volume and seniority mix as hiring-linked intent demand signal",
+            "description": "Job postings seen, open postings and seniority mix as the hiring-linked intent demand signal",
             "widget_type": "signal_card",
             "data_classification": "deterministic",
             "source_datasets": ["job_openings"],
             "source_fields": ["hiring_linked_demand"],
-            "display_order": 2
+            "display_order": 3
         }
     ]
 }

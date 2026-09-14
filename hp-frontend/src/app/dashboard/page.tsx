@@ -8,7 +8,8 @@ import api from '@/services/api';
 import { CompanyAccount } from '@/types/account';
 import { 
   WidgetResponse, 
-  WidgetClassification 
+  WidgetClassification,
+  IntentTopic
 } from '@/types/widget';
 import { 
   Building2, 
@@ -66,7 +67,9 @@ import {
   Download,
   ShieldCheck,
   UserCheck,
-  CheckCircle2
+  CheckCircle2,
+  TrendingDown,
+  Minus
 } from 'lucide-react';
 
 const ICON_MAP: Record<string, React.FC<{ className?: string }>> = {
@@ -102,7 +105,7 @@ const NORTHSTAR_SIDEBAR_GROUPS: SidebarGroup[] = [
     items: [
       { key: 'executive_dashboard', label: 'Executive Dashboard', subtitle: 'Account profile & key metrics', description: 'Account profile & key metrics', iconName: 'LayoutDashboard' },
       { key: 'recent_news_signals', label: 'Live Signals', subtitle: 'Real-time news & triggers', description: 'Real-time news & triggers', iconName: 'Newspaper' },
-      { key: 'intent_demand_signals', label: 'Intent & Demand Signals', subtitle: 'HP-category & topic-level buying intent', description: 'HP-category & topic-level buying intent', iconName: 'TrendingUp' },
+      { key: 'intent_demand_signals', label: 'Intent & Demand Signals', subtitle: 'HP-category & topic-level research intent', description: 'HP-category & topic-level research intent', iconName: 'TrendingUp' },
       { key: 'stakeholder_map', label: 'Stakeholder Map', subtitle: 'Contacts & influence map', description: 'Contacts & influence map', iconName: 'Users' },
       { key: 'solution_narrative_opportunity_map', label: 'Opportunity Map', subtitle: 'HP plays: outcome, impact & evidence', description: 'HP plays: outcome, impact & evidence', iconName: 'Lightbulb' },
       { key: 'tech_landscape', label: 'Technographic Map', subtitle: 'Tech stack by category & HP fit', description: 'Tech stack by category & HP fit', iconName: 'Cpu' },
@@ -457,7 +460,7 @@ export default function UserDashboardPage() {
       { field_path: 'employee_count', source: '1_firmographics.csv (Number Of Employees Range)', type: 'Firmographics', date: '2026-09-04', confidence: '90%', url: 'data/accounts/' + selectedAccount.id + '/firmographics/firmographics.csv' },
       { field_path: 'revenue', source: '1_firmographics.csv (Yearly Revenue Range)', type: 'Firmographics', date: '2026-09-04', confidence: '90%', url: 'data/accounts/' + selectedAccount.id + '/firmographics/firmographics.csv' },
       { field_path: 'company_hierarchy', source: '2_company_hierarchy.csv (Parent Company Name)', type: 'Hierarchy', date: '2026-09-04', confidence: '90%', url: 'data/accounts/' + selectedAccount.id + '/company_hierarchy/company_hierarchy.csv' },
-      { field_path: 'open_job_count', source: 'job_openings.csv (Active record count)', type: 'Job Openings', date: '2026-09-04', confidence: '85%', url: 'data/accounts/' + selectedAccount.id + '/job_openings/job_openings.csv' },
+      { field_path: 'open_job_count', source: 'job_openings.csv (All postings seen, open and closed)', type: 'Job Openings', date: '2026-09-04', confidence: '85%', url: 'data/accounts/' + selectedAccount.id + '/job_openings/job_openings.csv' },
       { field_path: 'liveSignals', source: 'google_news_rss_data.csv + news_events.csv', type: 'Google News', date: '2026-09-04', confidence: '80%', url: 'data/accounts/' + selectedAccount.id + '/google_news/google_news_rss_data.csv' },
       { field_path: 'technology_stack', source: '4_technographics.csv (Full Tech Stack)', type: 'Technographics', date: '2026-09-04', confidence: '85%', url: 'data/accounts/' + selectedAccount.id + '/technographics/technographics.csv' },
       { field_path: 'intentTopics', source: '11_intent_score.csv (Composite Score)', type: 'Bombora', date: '2026-09-04', confidence: '80%', url: 'data/accounts/' + selectedAccount.id + '/intent_score/intent_score.csv' }
@@ -1003,11 +1006,11 @@ export default function UserDashboardPage() {
                             )}
                           </div>
 
-                          {/* Card 3: Active Open Job Postings */}
+                          {/* Card 3: Job Postings Seen */}
                           <div className="relative bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col justify-between h-28">
-                            <span className="text-[11px] font-semibold text-slate-500 block">Active Open Job Postings</span>
+                            <span className="text-[11px] font-semibold text-slate-500 block">Postings Seen</span>
                             <span className="text-xl font-extrabold text-hp-navy">
-                              {hiringData ? `${hiringData.open_job_count} roles` : 'N/A'}
+                              {hiringData ? `${hiringData.open_job_count} postings` : 'N/A'}
                             </span>
                             <div className="flex items-center space-x-1.5 text-[10px] font-bold">
                               <span className="px-1.5 py-0.5 bg-blue-50 text-hp-navy rounded font-bold border border-blue-200">T1</span>
@@ -1034,7 +1037,7 @@ export default function UserDashboardPage() {
                                   </button>
                                 </div>
                                 <p className="text-slate-700 italic font-serif leading-relaxed text-[11px] mb-2">
-                                  “{hiringData ? hiringData.open_job_count : '100'} active open job postings recorded in job_openings.csv for {displayName}.”
+                                  “{hiringData ? hiringData.open_job_count : 'N/A'} job postings seen in job_openings.csv for {displayName} (open and closed).”
                                 </p>
                                 <a
                                   href={getDownloadUrl('job_openings')}
@@ -1114,10 +1117,10 @@ export default function UserDashboardPage() {
                                 {
                                   id: 'hiring_velocity',
                                   label: 'Hiring Velocity',
-                                  scoreText: hiringData ? `${hiringData.open_job_count} open roles` : 'TBD',
+                                  scoreText: hiringData ? `${hiringData.open_job_count} postings seen` : 'TBD',
                                   progressPct: hiringData ? '80%' : '0%',
                                   barColor: hiringData ? 'bg-hp-navy' : 'bg-slate-300',
-                                  rationale: `Hiring velocity signal: ${hiringData ? `${hiringData.open_job_count} active open job postings extracted from job_openings.csv.` : 'No job openings dataset uploaded yet.'}`
+                                  rationale: `Hiring velocity signal: ${hiringData ? `${hiringData.open_job_count} job postings seen in job_openings.csv (open and closed).` : 'No job openings dataset uploaded yet.'}`
                                 },
                                 {
                                   id: 'expansion_triggers',
@@ -1728,50 +1731,181 @@ export default function UserDashboardPage() {
                 })()}
                 {activeFeatureKey === 'intent_demand_signals' && (() => {
                   const topicsWidget = widgets.find(w => w.widget_key === 'intent_topics_table');
+                  const summaryWidget = widgets.find(w => w.widget_key === 'intent_category_summary');
                   const hiringWidget = widgets.find(w => w.widget_key === 'intent_hiring_demand');
 
                   const topicsData = (topicsWidget && topicsWidget.status === 'available' && topicsWidget.data) ? topicsWidget.data : null;
+                  const summaryData = (summaryWidget && summaryWidget.status === 'available' && summaryWidget.data) ? summaryWidget.data : null;
                   const hiringData = (hiringWidget && hiringWidget.status === 'available' && hiringWidget.data) ? hiringWidget.data : null;
 
-                  const topicsList = topicsData?.topics || [];
-                  const openJobCount = hiringData?.open_job_count || 0;
-                  const seniorityBreakdown = hiringData?.seniority_breakdown || {};
+                  const topicsList: IntentTopic[] = topicsData?.topics || [];
+                  const provider = topicsData?.provider || summaryData?.provider;
+                  const accountMatch = topicsData?.account_match || summaryData?.account_match;
+                  const observation = topicsData?.observation || summaryData?.observation;
+                  const dictionaryVersion: string = topicsData?.dictionary_version || summaryData?.dictionary_version || '';
+                  const categoryFile = summaryData?.category_file || summaryWidget?.data?.category_file;
+                  const categoryFileMatched = categoryFile?.status === 'matched';
+                  const categoryRun: string | null = categoryFile?.source?.run_date || null;
+                  const themes: any[] = summaryData?.themes || [];
+                  // The spec asks for the HP-category view across all supported categories,
+                  // not for one of them to be ranked above the rest. Ordered by the
+                  // category file's own score.
+                  const hpCategories: any[] = [...(summaryData?.hp_categories || [])].sort(
+                    (a: any, b: any) => (b.primary?.score ?? -1) - (a.primary?.score ?? -1)
+                  );
+                  const otherCats = hpCategories;
+                  const chartCats = hpCategories.filter((c: any) => c.primary).sort((a: any, b: any) => (b.primary.score ?? -1) - (a.primary.score ?? -1));
+                  const hiringLinked = summaryData?.hiring_linked;
+                  const staffingTopics = topicsList.filter(t => t.included && t.hiring_linked);
+                  const disclaimer: string = summaryData?.disclaimer || topicsData?.disclaimer || 'Intent indicates research activity, not confirmed purchase intent.';
+                  // Source A that is missing or belongs to another domain is stated, never drawn as zero scores.
+                  const sourceAMessage: string | null = topicsData ? null : (topicsWidget?.data?.message || 'Intent unavailable: no Bombora intent topics have been extracted for this account.');
+                  const otherTheme = themes.find((t: any) => t.theme === 'Other / Unmapped');
+                  const includedCount: number = topicsData?.included_topics_count || 0;
+                  const unmappedPct = includedCount && otherTheme ? Math.round((otherTheme.topic_count / includedCount) * 100) : 0;
 
                   const filteredTopics = topicsList.filter((t: any) => {
-                    if (intentSearch && !t.topic_name.toLowerCase().includes(intentSearch.toLowerCase().trim())) {
-                      return false;
-                    }
-                    if (intentScoreFilter === '70+' && t.composite_score < 70) return false;
-                    if (intentScoreFilter === '85+' && t.composite_score < 85) return false;
+                    if (intentSearch && !t.topic_name.toLowerCase().includes(intentSearch.toLowerCase().trim())) return false;
+                    if (intentScoreFilter === '70+' && (t.composite_score ?? -1) < 70) return false;
+                    if (intentScoreFilter === '85+' && (t.composite_score ?? -1) < 85) return false;
                     return true;
                   });
+                  const topChartTopics = filteredTopics.filter((t: any) => t.included).slice(0, 10);
+                  const excludedTopics = topicsList.filter((t: any) => !t.included);
+                  const duplicatesRemoved: any[] = topicsData?.duplicates_removed || [];
 
-                  // Categorize topics into Northstar Domain Groups
-                  const aiGroup = filteredTopics.filter((t: any) => 
-                    ['ai', 'machine learning', 'data insights', 'analytics', 'chatgpt', 'openai'].some(k => t.topic_name.toLowerCase().includes(k))
-                  );
-                  const secGroup = filteredTopics.filter((t: any) => 
-                    ['security', 'privacy', 'authentication', 'tokenization', 'protection', 'aml', 'risk'].some(k => t.topic_name.toLowerCase().includes(k))
-                  );
-                  const finGroup = filteredTopics.filter((t: any) => 
-                    ['financial', 'visa', 'mastercard', 'mortgage', 'hedging', 'trading', 'investing', 'loan', 'credit', 'payment'].some(k => t.topic_name.toLowerCase().includes(k))
-                  );
-                  const collabGroup = filteredTopics.filter((t: any) => 
-                    ['workplace', 'teams', 'collaboration', 'working', 'hr', 'recruitment', 'talent', 'staffing', 'leadership', 'training', 'employee'].some(k => t.topic_name.toLowerCase().includes(k))
-                  );
-                  const cloudGroup = filteredTopics.filter((t: any) => 
-                    ['cloud', 'data center', 'server', 'postgres', 'aws', 'network', 'hardware', 'ai chips'].some(k => t.topic_name.toLowerCase().includes(k))
+                  const CATEGORY_STYLE: Record<string, { bar: string; chip: string }> = {
+                    'PC': { bar: 'bg-[#0096D6]', chip: 'bg-blue-50 text-hp-navy border-blue-200' },
+                    'Workstation': { bar: 'bg-indigo-500', chip: 'bg-indigo-50 text-indigo-800 border-indigo-200' },
+                    'Poly/Collaboration': { bar: 'bg-emerald-600', chip: 'bg-emerald-50 text-emerald-800 border-emerald-200' },
+                    'Print': { bar: 'bg-amber-500', chip: 'bg-amber-50 text-amber-800 border-amber-200' },
+                    '3D': { bar: 'bg-pink-600', chip: 'bg-pink-50 text-pink-800 border-pink-200' }
+                  };
+                  const THEME_STYLE: Record<string, { chip: string; bar: string; border: string }> = {
+                    'AI & Compute': { chip: 'bg-purple-100 text-purple-800 border-purple-200', bar: 'bg-purple-600', border: 'border-purple-200' },
+                    'Devices & Endpoints': { chip: 'bg-blue-100 text-blue-800 border-blue-200', bar: 'bg-hp-navy', border: 'border-blue-200' },
+                    'Collaboration & Workplace': { chip: 'bg-emerald-100 text-emerald-800 border-emerald-200', bar: 'bg-emerald-600', border: 'border-emerald-200' },
+                    'Print': { chip: 'bg-amber-100 text-amber-800 border-amber-200', bar: 'bg-amber-500', border: 'border-amber-200' },
+                    '3D': { chip: 'bg-pink-100 text-pink-800 border-pink-200', bar: 'bg-pink-500', border: 'border-pink-200' },
+                    'Other / Unmapped': { chip: 'bg-slate-100 text-slate-700 border-slate-200', bar: 'bg-slate-500', border: 'border-slate-200' }
+                  };
+                  const INTENSITY_CHIP: Record<string, string> = {
+                    'High': 'bg-red-50 text-red-700 border-red-200',
+                    'Moderate': 'bg-amber-50 text-amber-800 border-amber-200',
+                    'Low': 'bg-slate-50 text-slate-600 border-slate-200'
+                  };
+                  const categoryLabel = (name: string) => (name === 'Poly/Collaboration' ? 'Poly' : name);
+                  const shortDate = (v?: string | null) => (v ? String(v).slice(0, 10) : null);
+                  const hasSignal = (stage?: string | null) => !!stage && stage.toLowerCase() !== 'no signal';
+
+                  const shortTopic = (name: string) => (name.includes(':') ? name.split(':').slice(1).join(':').trim() : name);
+
+                  // The category file's own detail for one category, shown as received.
+                  const renderFileDetails = (p: any) => (
+                    <div className="space-y-2">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Signal Topics (category file)</span>
+                      {p.topics_researched?.length ? (
+                        <div className="flex flex-wrap gap-1.5">
+                          {p.topics_researched.map((t: string) => (
+                            <span key={t} className="px-2 py-0.5 rounded-full border border-slate-200 text-[11px] text-slate-700 font-medium">{t}</span>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-[11px] text-slate-400 block">None reported</span>
+                      )}
+                      {p.keywords_matched?.length > 0 && (
+                        <p className="text-[10px] text-slate-500"><span className="font-bold text-slate-400 uppercase mr-1">Keywords</span>{p.keywords_matched.join(' · ')}</p>
+                      )}
+                      {p.related_technologies?.length > 0 && (
+                        <p className="text-[10px] text-slate-500"><span className="font-bold text-slate-400 uppercase mr-1">Technologies</span>{p.related_technologies.join(' · ')}</p>
+                      )}
+                      <p className="flex items-center gap-1.5 text-[11px] text-slate-500" title="Geo Source, as supplied by the HP Category Intent file for this category. Bombora topics carry no location.">
+                        <Globe className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+                        <span className="font-bold text-slate-400 uppercase text-[10px]">Geo</span>
+                        {p.geo?.length ? p.geo.join(', ') : 'Not reported for this category'}
+                      </p>
+                      <p className="text-[10px] text-slate-400">
+                        {p.first_intent_date ? `Observed ${p.first_intent_date} → ${p.latest_intent_date || p.first_intent_date}` : 'No intent dates reported'}
+                      </p>
+                      {(p.quality_flags || []).map((q: any) => (
+                        <p key={q.term} className="flex items-start gap-1 text-[10px] text-amber-800 font-semibold bg-amber-50 border border-amber-200 rounded-lg p-2">
+                          <AlertCircle className="w-3 h-3 flex-shrink-0 mt-0.5" />
+                          <span>Noisy keyword &apos;{q.term}&apos; ({q.field}): {q.reason}. Read this category's score with care.</span>
+                        </p>
+                      ))}
+                    </div>
                   );
 
-                  const categorizedKeys = new Set([...aiGroup, ...secGroup, ...finGroup, ...collabGroup, ...cloudGroup].map(t => t.topic_name));
-                  const otherGroup = filteredTopics.filter((t: any) => !categorizedKeys.has(t.topic_name));
+                  // Steps 2-4: Bombora signals with exact scores, and the technologies that confirm them.
+                  const renderSignals = (signals: any[], topicLimit: number) => {
+                    if (!signals?.length) return <p className="text-[11px] text-slate-400">No supporting Bombora research.</p>;
+                    return (
+                      <div className="space-y-2">
+                        {signals.map((sg: any) => (
+                          <div key={sg.signal} className={`rounded-lg border p-2.5 ${sg.confirmed ? 'border-emerald-200 bg-emerald-50/40' : 'border-slate-200 bg-slate-50/50'}`}>
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="flex items-center gap-1.5 text-[11px] font-bold text-slate-800">
+                                {sg.confirmed ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> : <Minus className="w-3.5 h-3.5 text-slate-300" />}
+                                {sg.signal}
+                              </span>
+                              <span className="font-mono text-xs font-extrabold text-slate-900">{sg.max != null ? `${sg.max}/100` : '—'}</span>
+                            </div>
+                            {sg.topics.length > 0 && (
+                              <div className="flex flex-wrap gap-1 mt-1.5">
+                                {sg.topics.slice(0, topicLimit).map((t: any) => (
+                                  <span key={t.topic_name} title={t.topic_name} className="px-1.5 py-0.5 rounded bg-white border border-slate-200 text-[10px] text-slate-700 font-medium">
+                                    {shortTopic(t.topic_name)} <strong className="text-hp-navy">{t.composite_score}</strong>
+                                  </span>
+                                ))}
+                                {sg.topics.length > topicLimit && (
+                                  <span className="text-[10px] text-slate-400 font-bold self-center">+{sg.topics.length - topicLimit} more</span>
+                                )}
+                              </div>
+                            )}
+                            <p className="text-[10px] mt-1.5 text-slate-500">
+                              {sg.technologies.length > 0 ? (
+                                <>
+                                  <span className="font-bold text-slate-400 uppercase mr-1">Technologies</span>
+                                  {sg.technologies.map((t: any) => t.name).join(', ')}
+                                  <span className="text-slate-400"> ({Array.from(new Set(sg.technologies.map((t: any) => `${t.sheet} · ${t.column}`))).join('; ')})</span>
+                                  {sg.topics.length === 0 && <span className="text-slate-400"> · no Bombora signal to score it</span>}
+                                </>
+                              ) : (
+                                'No matching technology in Explorium sheets 4–5'
+                              )}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  };
 
-                  const topChartTopics = filteredTopics.slice(0, 10);
+                  const renderTopicRow = (item: any, idx: number, barClass: string) => (
+                    <div key={item.topic_name} className="flex items-center justify-between text-xs py-1 px-2 rounded-lg hover:bg-slate-50 transition">
+                      <div className="flex items-center space-x-3 font-semibold text-slate-800 truncate pr-2 min-w-0">
+                        <span className="text-slate-400 font-mono text-[11px] w-5 text-right flex-shrink-0">{idx + 1}</span>
+                        <span className="capitalize truncate">{item.topic_name}</span>
+                        {item.hp_category && (
+                          <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-hp-navy border border-blue-200 flex-shrink-0">{categoryLabel(item.hp_category)}</span>
+                        )}
+                        {item.mapping_status === 'flagged' && (
+                          <span title={item.flag_reason || ''} className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200 flex-shrink-0">Review</span>
+                        )}
+                      </div>
+                      <div className="flex items-center space-x-3 flex-shrink-0">
+                        <div className="w-24 bg-slate-200 h-1.5 rounded-full overflow-hidden">
+                          <div className={`${barClass} h-1.5 rounded-full`} style={{ width: `${Math.min(100, Math.max(0, item.composite_score ?? 0))}%` }}></div>
+                        </div>
+                        <span className="font-mono font-bold text-slate-900 w-8 text-right">{item.composite_score}</span>
+                        <span className="text-[10px] text-slate-400 font-medium w-12">{provider?.name || 'Bombora'}</span>
+                      </div>
+                    </div>
+                  );
 
                   return (
                     <div className="space-y-6">
-                      
-                      {/* Header Banner (Matching Image 1) */}
+
+                      {/* Header */}
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                         <div>
                           <h2 className="text-xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
@@ -1779,477 +1913,494 @@ export default function UserDashboardPage() {
                             <span>Intent & Demand Signals</span>
                           </h2>
                           <p className="text-xs text-slate-500 mt-0.5">
-                            5 HP category signals • {topicsList.length} broader Bombora intent topics for {selectedAccount?.name}
+                            {categoryFileMatched ? `${summaryData?.categories_with_signal ?? 0} of ${chartCats.length} HP categories with a signal in the category file • ` : ''}
+                            {topicsList.length} Bombora intent topics for {selectedAccount?.name}
                           </p>
                         </div>
-
                         <div className="flex flex-wrap items-center gap-2 text-xs font-bold">
-                          <span className="px-3 py-1 bg-[#0096D6]/10 text-hp-navy border border-[#0096D6]/20 rounded-full">
-                            Avg HP-category intent: Derived TBD
-                          </span>
-                          <span className="px-3 py-1 bg-slate-100 text-slate-600 border border-slate-200 rounded-full font-mono text-[11px]">
-                            Powered by Bombora
-                          </span>
+                          {categoryRun && (
+                            <span className="px-3 py-1 bg-slate-100 text-slate-600 border border-slate-200 rounded-full text-[11px]">
+                              Category file · run {shortDate(categoryRun)}
+                            </span>
+                          )}
+                          {observation?.as_of && (
+                            <span className="px-3 py-1 bg-slate-100 text-slate-600 border border-slate-200 rounded-full text-[11px]">
+                              {provider ? `${provider.name} ${provider.product}` : 'Bombora'} · as of {observation.as_of}
+                            </span>
+                          )}
+                          {accountMatch && (
+                            <span className={`px-3 py-1 rounded-full text-[11px] border flex items-center gap-1 ${accountMatch.status === 'matched' ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-amber-50 text-amber-800 border-amber-200'}`}>
+                              {accountMatch.status === 'matched' ? <ShieldCheck className="w-3.5 h-3.5" /> : <AlertCircle className="w-3.5 h-3.5" />}
+                              {accountMatch.status === 'matched' ? `${accountMatch.provider_domain} verified` : accountMatch.status === 'mismatch' ? 'Domain mismatch' : 'Domain not verified'}
+                            </span>
+                          )}
                         </div>
                       </div>
 
-                      {/* "So What for HP" Blue Insights Banner */}
-                      <div className="bg-blue-50/80 border border-blue-200/90 rounded-2xl p-6 text-xs text-blue-950 space-y-2 shadow-xs">
-                        <div className="flex items-center justify-between border-b border-blue-200/60 pb-2">
-                          <h3 className="text-xs font-black uppercase tracking-wider text-hp-navy flex items-center gap-2">
-                            <Sparkles className="w-4 h-4 text-hp-navy" />
-                            <span>SO WHAT FOR HP</span>
-                          </h3>
-                          <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-purple-100 text-purple-800 border border-purple-200">
-                            Inferred TBD
-                          </span>
-                        </div>
-                        <p className="text-[11px] leading-relaxed text-slate-700 font-medium">
-                          AI-synthesized intent topic categorization, low-relevance topic filtering, and HP play alignment TBD for future runtime generation in Step 8.
-                        </p>
-                      </div>
-
-                      {/* Section 1: HP Category Intent Scores Vertical Bar Chart (Matching Image 1) */}
-                      <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-4">
-                        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                          <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700 flex items-center gap-2">
-                            <Layers className="w-4 h-4 text-hp-navy" />
-                            <span>HP CATEGORY INTENT SCORES</span>
-                          </h3>
-                          <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200">
-                            Derived Contract TBD
-                          </span>
-                        </div>
-
-                        <div className="flex items-end space-x-8 h-48 pt-6 pb-2 px-8 border-b border-slate-200 relative">
-                          <div className="absolute left-2 top-2 bottom-6 flex flex-col justify-between text-[10px] font-mono text-slate-400">
-                            <span>100</span>
-                            <span>75</span>
-                            <span>50</span>
-                            <span>25</span>
-                            <span>0</span>
+                      {/* Unavailable states: stated, never drawn as zeros */}
+                      {sourceAMessage && (
+                        <div className="bg-white rounded-2xl p-5 border border-amber-200 shadow-sm flex items-start gap-3">
+                          <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                          <div className="space-y-1">
+                            <h3 className="text-sm font-extrabold text-slate-900">
+                              {topicsWidget?.data?.availability === 'no_matched_signal' ? 'No Matched Signal (Source A)' : 'Intent Unavailable (Source A)'}
+                            </h3>
+                            <p className="text-xs text-slate-600 leading-relaxed">{sourceAMessage}</p>
                           </div>
-
-                          {[
-                            { name: 'Print', color: 'bg-amber-500' },
-                            { name: '3D', color: 'bg-pink-500' },
-                            { name: 'PC', color: 'bg-hp-navy' },
-                            { name: 'Workstation', color: 'bg-indigo-600' },
-                            { name: 'Poly', color: 'bg-emerald-500' }
-                          ].map((cat) => (
-                            <div key={cat.name} className="flex-1 flex flex-col items-center h-full justify-end group">
-                              <span className="text-[10px] font-bold text-slate-400 mb-1 opacity-0 group-hover:opacity-100 transition">TBD</span>
-                              <div className="w-12 bg-slate-100 rounded-t-lg h-full flex items-end justify-center border border-dashed border-slate-200 relative">
-                                <div className={`w-full ${cat.color} rounded-t-lg h-2 transition-all duration-300 opacity-60`}></div>
-                              </div>
-                              <span className="text-xs font-bold text-slate-700 mt-2">{cat.name}</span>
-                            </div>
-                          ))}
                         </div>
-                      </div>
+                      )}
+                      {categoryFile && !categoryFileMatched && categoryFile.note && (
+                        <div className="bg-white rounded-2xl p-5 border border-amber-200 shadow-sm flex items-start gap-3">
+                          <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                          <div className="space-y-1">
+                            <h3 className="text-sm font-extrabold text-slate-900">Category file not attached</h3>
+                            <p className="text-xs text-slate-600 leading-relaxed">{categoryFile.note}</p>
+                          </div>
+                        </div>
+                      )}
 
-                      {/* Section 2: 5 HP Category Play Cards Grid */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-                        {[
-                          { 
-                            name: 'Print', 
-                            play: 'HP Enterprise Printing & Managed Print Services', 
-                            keywords: ['launches', 'digitization initiative', 'cost reduction'] 
-                          },
-                          { 
-                            name: '3D', 
-                            play: 'HP Multi Jet Fusion (3D)', 
-                            keywords: ['manufacturing innovation', 'is developing', 'supply chain'] 
-                          },
-                          { 
-                            name: 'PC', 
-                            play: 'HP Elite & Pro PCs', 
-                            keywords: ['fleet management', 'remote work expansion', 'hardware refresh'] 
-                          },
-                          { 
-                            name: 'Workstation', 
-                            play: 'Z by HP Workstations', 
-                            keywords: ['AI/ML expansion', 'data science growth', 'engineering'] 
-                          },
-                          { 
-                            name: 'Poly', 
-                            play: 'Poly Collaboration Hardware', 
-                            keywords: ['UC/collaboration', 'Zoom Rooms deployment', 'conferencing'] 
-                          }
-                        ].map((cat) => (
-                          <div key={cat.name} className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-3.5 flex flex-col justify-between hover:border-slate-300 transition">
-                            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-                              <span className="text-sm font-extrabold text-slate-900">{cat.name}</span>
-                              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200">
-                                Derived TBD
+                      {summaryData && (
+                        <>
+                          {/* So What for HP */}
+                          <div className="bg-blue-50/80 border border-blue-200/90 rounded-2xl p-6 text-xs text-blue-950 space-y-3 shadow-xs">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <h3 className="text-xs font-black uppercase tracking-wider text-hp-navy flex flex-wrap items-center gap-2">
+                                <Lightbulb className="w-4 h-4 text-hp-navy" />
+                                <span>SO WHAT FOR HP</span>
+                                {includedCount > 0 && (
+                                  <span className="normal-case tracking-normal font-medium text-[11px] text-blue-700/80">
+                                    · {includedCount} Bombora topics categorized, {otherTheme?.topic_count ?? 0} ({unmappedPct}%) unmapped and kept out of the theme read below
+                                  </span>
+                                )}
+                              </h3>
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200">
+                                Rule-based · {dictionaryVersion}
                               </span>
                             </div>
-
-                            <div>
-                              <span className="text-2xl font-black text-slate-400 block">TBD</span>
-                              <span className="text-[10px] text-slate-400 font-bold block">/100 Intent Score</span>
+                            <div className="space-y-2.5">
+                              {(summaryData.so_what || []).map((line: string, i: number) => (
+                                <p key={i} className="text-[12px] leading-relaxed text-slate-700 font-medium flex items-start gap-2.5">
+                                  <Target className="w-4 h-4 text-hp-navy flex-shrink-0 mt-0.5" />
+                                  <span>{line}</span>
+                                </p>
+                              ))}
                             </div>
-
-                            <div className="space-y-1.5 pt-1 border-t border-slate-100 text-[10px]">
-                              <span className="text-slate-400 font-bold uppercase block">SIGNAL TOPICS</span>
-                              <div className="flex flex-wrap gap-1">
-                                {cat.keywords.map((kw, i) => (
-                                  <span key={i} className="px-1.5 py-0.5 bg-slate-100 text-slate-700 rounded font-medium">
-                                    {kw}
-                                  </span>
-                                ))}
-                              </div>
-                            </div>
-
-                            <div className="space-y-1 pt-1 border-t border-slate-100 text-[10px]">
-                              <span className="text-slate-400 font-bold uppercase block">MAPPED HP PLAY</span>
-                              <span className="font-bold text-hp-navy block leading-tight">{cat.play}</span>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-
-                      {/* Section 3: Broader Intent Topics Section (Horizontal Bar Chart + Accordions matching Images 1 & 2) */}
-                      <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-6">
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
-                          <div>
-                            <h3 className="text-sm font-extrabold uppercase tracking-wider text-slate-800 flex items-center gap-2">
-                              <Database className="w-4 h-4 text-hp-navy" />
-                              <span>BROADER INTENT TOPICS ({topicsList.length})</span>
-                            </h3>
-                            <p className="text-xs text-slate-500 mt-0.5">
-                              Extracted directly from Bombora intent score export (11_intent_score.csv)
+                            <p className="text-[11px] leading-relaxed text-blue-950 font-bold flex items-start gap-2.5 pt-2 border-t border-blue-200/60">
+                              <Info className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                              <span>{disclaimer}</span>
                             </p>
                           </div>
 
-                          {/* Filter Bar */}
-                          <div className="flex items-center space-x-2 text-xs">
-                            <div className="relative">
-                              <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-2.5" />
-                              <input
-                                type="text"
-                                value={intentSearch}
-                                onChange={(e) => setIntentSearch(e.target.value)}
-                                placeholder="Filter topics..."
-                                className="pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-300 rounded-xl text-xs focus:outline-none focus:ring-1 focus:ring-hp-navy w-44"
-                              />
+                          {/* Step 1 - HP Category Intent Scores, as received from the category file */}
+                          <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-4">
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                              <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700 flex items-center gap-2">
+                                <Layers className="w-4 h-4 text-hp-navy" />
+                                <span>HP CATEGORY INTENT SCORES</span>
+                              </h3>
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-50 text-slate-600 border border-slate-200">
+                                {categoryFileMatched ? `HP Category Intent file · run ${categoryRun}` : 'No category file for this account'}
+                              </span>
                             </div>
-
-                            <div className="flex items-center space-x-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
-                              {['ALL', '70+', '85+'].map((sc) => (
-                                <button
-                                  key={sc}
-                                  type="button"
-                                  onClick={() => setIntentScoreFilter(sc)}
-                                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition ${
-                                    intentScoreFilter === sc
-                                      ? 'bg-hp-navy text-white shadow-xs'
-                                      : 'text-slate-600 hover:text-slate-900'
-                                  }`}
-                                >
-                                  {sc}
-                                </button>
-                              ))}
-                            </div>
+                            {chartCats.length > 0 ? (
+                              <div className="overflow-x-auto">
+                                <div className="min-w-[480px] pl-8 pr-2 pt-3">
+                                  <div className="relative h-52">
+                                    {[0, 25, 50, 75, 100].map(v => (
+                                      <div key={v} className={`absolute left-0 right-0 border-t ${v === 0 ? 'border-slate-300' : 'border-dashed border-slate-200'}`} style={{ bottom: `${v}%` }}>
+                                        <span className="absolute -left-8 -translate-y-1/2 w-6 text-right text-[10px] font-mono text-slate-400">{v}</span>
+                                      </div>
+                                    ))}
+                                    <div className="absolute inset-0 flex items-end justify-around">
+                                      {chartCats.map((c: any) => {
+                                        const pct = Math.min(100, Math.max(0, c.primary.score ?? 0));
+                                        const noisy = (c.primary.quality_flags || []).length > 0;
+                                        return (
+                                          <div key={c.category} className="relative flex flex-col items-center justify-end h-full w-20">
+                                            <div
+                                              className={`w-14 rounded-t-md ${CATEGORY_STYLE[c.category]?.bar || 'bg-slate-400'} ${noisy ? 'opacity-40' : ''}`}
+                                              style={{ height: `${pct}%` }}
+                                            ></div>
+                                            <span className="absolute text-[11px] font-bold text-slate-700" style={{ bottom: `calc(${pct}% + 6px)` }}>{c.primary.score ?? '—'}</span>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                  <div className="flex justify-around pt-2">
+                                    {chartCats.map((c: any) => (
+                                      <div key={c.category} className="w-20 text-center">
+                                        <span className="text-xs block font-semibold text-slate-600">{categoryLabel(c.category)}</span>
+                                        {(c.primary.quality_flags || []).length > 0 && <span className="text-[10px] font-semibold text-amber-700 block">Noisy keyword</span>}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              </div>
+                            ) : (
+                              <p className="text-xs text-slate-500">{categoryFile?.note || 'Upload the HP Category Intent file to see category scores.'}</p>
+                            )}
+                            <p className="text-[11px] text-slate-500">
+                              Scores as received from the HP Category Intent file, shown for every HP category. Faded bars rest on a noisy keyword and should be read with care. Supporting Bombora signals add context and never change these scores.
+                              {categoryFile?.top_check && !categoryFile.top_check.consistent && (
+                                <span className="text-amber-700 font-semibold"> The file&apos;s stated top category ({categoryFile.top_check.stated_category}) does not match its scores ({categoryFile.top_check.recomputed_category}).</span>
+                              )}
+                            </p>
                           </div>
-                        </div>
 
-                        {/* Top Signal Topics Horizontal Bar Chart (Matching Image 1) */}
-                        {topChartTopics.length > 0 && (
-                          <div className="space-y-3 bg-slate-50/60 p-5 rounded-2xl border border-slate-200/80">
-                            <span className="text-[11px] font-bold text-slate-500 block uppercase tracking-wider">
-                              Top Signal Topics (Ranked by Composite Score)
-                            </span>
 
-                            <div className="space-y-2 pt-2">
-                              {topChartTopics.map((item: any, i: number) => (
-                                <div key={i} className="flex items-center space-x-3 text-xs relative group">
-                                  <span className="w-64 text-right truncate font-bold text-slate-800 text-[11px] flex-shrink-0">
-                                    {item.topic_name}
-                                  </span>
-
-                                  <div className="flex-1 bg-slate-200 h-5 rounded-md overflow-hidden relative cursor-pointer"
-                                       onMouseEnter={() => setHoveredBarTopic({ name: item.topic_name, score: item.composite_score })}
-                                       onMouseLeave={() => setHoveredBarTopic(null)}
-                                  >
-                                    <div 
-                                      className="bg-hp-navy h-full rounded-md transition-all duration-300 hover:bg-hp-blue"
-                                      style={{ width: `${Math.min(100, Math.max(0, item.composite_score))}%` }}
-                                    ></div>
+                          {/* Other HP categories */}
+                          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+                            {otherCats.map((cat: any) => {
+                              const p = cat.primary;
+                              const style = CATEGORY_STYLE[cat.category] || { bar: 'bg-slate-400', chip: 'bg-slate-50 text-slate-700 border-slate-200' };
+                              const noisy = (p?.quality_flags || []).length > 0;
+                              const signalTopics: string[] = [
+                                ...(p?.topics_researched || []),
+                                ...(p?.keywords_matched || []),
+                              ];
+                              return (
+                                <div key={cat.category} className={`bg-white p-5 rounded-2xl border shadow-xs flex flex-col gap-4 ${noisy ? 'border-amber-200' : 'border-slate-200'}`}>
+                                  {/* Header: category chip, the file's own direction, buying stage */}
+                                  <div className="flex items-center justify-between gap-2">
+                                    <div className="flex items-center gap-2.5 min-w-0">
+                                      <span className={`px-3 py-0.5 rounded-full text-sm font-extrabold border ${style.chip}`}>{categoryLabel(cat.category)}</span>
+                                      {p?.trend_label && (
+                                        <span
+                                          className="flex items-center gap-1 text-[12px] font-semibold text-slate-400 truncate"
+                                          title={p.trend_basis || "The category file states this direction but supplies no prior window to check it against."}
+                                        >
+                                          <Minus className="w-3.5 h-3.5 text-slate-300 flex-shrink-0" />
+                                          {p.trend_label}
+                                          <span className="text-[10px] text-slate-300">(unverified)</span>
+                                        </span>
+                                      )}
+                                    </div>
+                                    {p && (
+                                      <span title="Buying Stage, as supplied by the category file" className={`text-[11px] font-bold px-2.5 py-1 rounded-md border flex-shrink-0 ${hasSignal(p.stage) ? 'bg-blue-50 text-hp-navy border-blue-200' : 'bg-slate-50 text-slate-500 border-slate-200'}`}>
+                                        {p.stage || 'No stage'}
+                                      </span>
+                                    )}
                                   </div>
 
-                                  {/* Hover Tooltip Card (Matching Image 2) */}
-                                  {hoveredBarTopic?.name === item.topic_name && (
-                                    <div className="absolute right-12 bottom-full mb-1 bg-white border border-slate-300 rounded-xl p-3 shadow-2xl z-50 text-xs font-medium w-64 animate-fade-in pointer-events-none">
-                                      <span className="font-extrabold text-slate-900 block truncate">{item.topic_name}</span>
-                                      <span className="text-[11px] text-hp-navy font-bold block mt-0.5">
-                                        Composite score: {item.composite_score}/100 — Bombora
-                                      </span>
+                                  {/* Score bar */}
+                                  {p ? (
+                                    <div className="flex items-center gap-3">
+                                      <div className="flex-1 bg-slate-100 h-2.5 rounded-full overflow-hidden">
+                                        <div className={`${style.bar} h-2.5 rounded-full ${noisy ? 'opacity-40' : ''}`} style={{ width: `${Math.min(100, Math.max(0, p.score ?? 0))}%` }}></div>
+                                      </div>
+                                      <span className="text-base font-extrabold text-slate-900 flex-shrink-0">{p.score ?? '—'}/100</span>
+                                    </div>
+                                  ) : (
+                                    <p className="text-[11px] text-slate-400 font-semibold">No category file score</p>
+                                  )}
+
+                                  {/* Signal topics as pills, then geo */}
+                                  {p && (
+                                    <div className="space-y-2.5">
+                                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Signal Topics</span>
+                                      {signalTopics.length ? (
+                                        <div className="flex flex-wrap gap-2">
+                                          {signalTopics.map((t: string) => (
+                                            <span key={t} className="px-3 py-1 rounded-full border border-slate-200 bg-white text-[12px] text-slate-700">{t}</span>
+                                          ))}
+                                        </div>
+                                      ) : (
+                                        <p className="text-[11px] text-slate-400">None reported</p>
+                                      )}
+                                      <p className="flex items-center gap-2 text-[12px] text-slate-600" title="Geo Source, as supplied by the HP Category Intent file for this category. Bombora topics carry no location.">
+                                        <Globe className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+                                        {p.geo?.length ? p.geo.join(',  ') : 'Not reported for this category'}
+                                      </p>
+                                      {(p.quality_flags || []).map((q: any) => (
+                                        <p key={q.term} className="flex items-start gap-1.5 text-[10px] text-amber-800 font-semibold bg-amber-50 border border-amber-200 rounded-lg p-2">
+                                          <AlertCircle className="w-3 h-3 flex-shrink-0 mt-0.5" />
+                                          <span>Noisy keyword &apos;{q.term}&apos; ({q.field}): {q.reason}. Read this category&apos;s score with care.</span>
+                                        </p>
+                                      ))}
                                     </div>
                                   )}
+
+                                  {/* Mapped HP play + research volume */}
+                                  <div className="flex items-start justify-between gap-2 pt-3.5 border-t border-slate-100">
+                                    <div className="flex items-start gap-2 min-w-0">
+                                      <Target className="w-4 h-4 text-slate-400 mt-0.5 flex-shrink-0" />
+                                      <div className="min-w-0">
+                                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Mapped HP Play</span>
+                                        <span className="text-sm font-bold text-slate-900 leading-tight block">{cat.hp_play || 'No HP play mapped'}</span>
+                                      </div>
+                                    </div>
+                                    {p?.research_volume && (
+                                      <span title="Research Volume, as supplied by the category file" className="text-[11px] font-bold px-2.5 py-1 rounded-md border bg-slate-50 text-slate-600 border-slate-200 flex-shrink-0">
+                                        {p.research_volume}
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  {/* Observation window */}
+                                  {p?.first_intent_date && (
+                                    <p className="text-[11px] text-slate-400">
+                                      Observed {p.first_intent_date} → {p.latest_intent_date || p.first_intent_date}
+                                    </p>
+                                  )}
+
+                                  {/* Supporting Bombora signals, kept visibly apart from the file's own numbers */}
+                                  <details className="pt-3 border-t border-slate-100 group">
+                                    <summary className="text-[10px] font-bold text-slate-400 uppercase tracking-wider cursor-pointer list-none flex items-center gap-1.5 hover:text-slate-600">
+                                      <ChevronDown className="w-3.5 h-3.5 transition-transform group-open:rotate-180" />
+                                      Supporting Intent Signals (Bombora)
+                                    </summary>
+                                    <div className="mt-2.5">{renderSignals(cat.supporting_signals, 3)}</div>
+                                  </details>
+
+                                  <p className="text-[11px] text-slate-600 leading-relaxed mt-auto">{cat.explanation}</p>
                                 </div>
-                              ))}
+                              );
+                            })}
+                          </div>
+
+                        </>
+                      )}
+
+                      {/* Broader intent topics (Source A raw view) */}
+                      {topicsData && (
+                        <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-6">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+                            <div>
+                              <h3 className="text-sm font-extrabold uppercase tracking-wider text-slate-800 flex items-center gap-2">
+                                <Database className="w-4 h-4 text-hp-navy" />
+                                <span>BROADER INTENT TOPICS ({topicsList.length})</span>
+                              </h3>
+                              <p className="text-xs text-slate-500 mt-0.5">
+                                As received from {provider ? `${provider.name} ${provider.product} (${provider.source})` : 'Bombora'} · {provider?.scoring_definition}
+                              </p>
                             </div>
 
-                            <div className="flex justify-between text-[10px] font-mono text-slate-400 pl-64 pt-2 border-t border-slate-200">
-                              <span>0</span>
-                              <span>25</span>
-                              <span>50</span>
-                              <span>75</span>
-                              <span>100</span>
+                            <div className="flex items-center space-x-2 text-xs">
+                              <div className="relative">
+                                <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-2.5" />
+                                <input
+                                  type="text"
+                                  value={intentSearch}
+                                  onChange={(e) => setIntentSearch(e.target.value)}
+                                  placeholder="Filter topics..."
+                                  className="pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-300 rounded-xl text-xs focus:outline-none focus:ring-1 focus:ring-hp-navy w-44"
+                                />
+                              </div>
+                              <div className="flex items-center space-x-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
+                                {['ALL', '70+', '85+'].map((sc) => (
+                                  <button
+                                    key={sc}
+                                    type="button"
+                                    onClick={() => setIntentScoreFilter(sc)}
+                                    className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition ${
+                                      intentScoreFilter === sc ? 'bg-hp-navy text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                                    }`}
+                                  >
+                                    {sc}
+                                  </button>
+                                ))}
+                              </div>
                             </div>
                           </div>
-                        )}
 
-                        {/* Grouped Intent Topics Category Cards (Matching Images 1 & 2) */}
-                        <div className="space-y-4 pt-2">
-                          
-                          {/* 1. AI & Compute Group */}
-                          {aiGroup.length > 0 && (
-                            <div className="bg-white rounded-2xl p-5 border border-purple-200 shadow-xs space-y-3">
-                              <div className="flex items-center justify-between border-b border-purple-100 pb-2.5">
-                                <div className="flex items-center space-x-2">
-                                  <span className="px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-purple-100 text-purple-800 border border-purple-200">
-                                    AI & Compute
-                                  </span>
-                                  <span className="text-xs font-semibold text-slate-500">
-                                    {aiGroup.length} topics • up to {Math.max(...aiGroup.map((x: any) => x.composite_score))}/100
-                                  </span>
-                                </div>
+                          {/* Provenance for every row below */}
+                          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 text-[11px] bg-slate-50/60 p-4 rounded-xl border border-slate-200/80">
+                            {[
+                              { label: 'Provider', value: provider ? `${provider.name} ${provider.product} (${provider.source})` : 'Not supplied' },
+                              { label: 'Account / domain match', value: accountMatch?.status === 'matched' ? `${accountMatch.provider_domain} = account domain` : (accountMatch?.note || 'Not verified') },
+                              { label: 'Observation date', value: observation?.as_of ? `${observation.as_of} (Date Stamp ${observation.date_stamp})` : (observation?.note || 'Not supplied'), title: observation?.note },
+                              { label: 'Level of intent', value: topicsData.level_of_intent || 'Not supplied' },
+                              { label: 'Refreshed', value: shortDate(observation?.refreshed_at) || 'Not recorded' },
+                              { label: 'Mapping rules', value: dictionaryVersion || 'Not recorded' }
+                            ].map((f) => (
+                              <div key={f.label} className="space-y-0.5 min-w-0" title={f.title || ''}>
+                                <span className="text-slate-400 font-bold uppercase text-[10px] block">{f.label}</span>
+                                <span className="font-semibold text-slate-800 block break-words">{f.value}</span>
                               </div>
+                            ))}
+                          </div>
 
-                              <div className="space-y-2">
-                                {aiGroup.map((item: any, idx: number) => (
-                                  <div key={idx} className="flex items-center justify-between text-xs py-1 px-2 rounded-lg hover:bg-purple-50/50 transition">
-                                    <div className="flex items-center space-x-3 font-semibold text-slate-800 truncate pr-2">
-                                      <span className="text-slate-400 font-mono text-[11px] w-5 text-right">{idx + 1}</span>
-                                      <span className="capitalize truncate">{item.topic_name}</span>
+                          {topChartTopics.length > 0 && (
+                            <div className="space-y-3 bg-slate-50/60 p-5 rounded-2xl border border-slate-200/80">
+                              <span className="text-[11px] font-bold text-slate-500 block uppercase tracking-wider">
+                                Top Signal Topics (Ranked by Composite Score)
+                              </span>
+                              <div className="space-y-2 pt-2">
+                                {topChartTopics.map((item: any) => (
+                                  <div key={item.topic_name} className="flex items-center space-x-3 text-xs relative group">
+                                    <span className="w-64 text-right truncate font-bold text-slate-800 text-[11px] flex-shrink-0">{item.topic_name}</span>
+                                    <div
+                                      className="flex-1 bg-slate-200 h-5 rounded-md overflow-hidden relative cursor-pointer"
+                                      onMouseEnter={() => setHoveredBarTopic({ name: item.topic_name, score: item.composite_score })}
+                                      onMouseLeave={() => setHoveredBarTopic(null)}
+                                    >
+                                      <div
+                                        className={`${THEME_STYLE[item.theme]?.bar || 'bg-hp-navy'} h-full rounded-md transition-all duration-300`}
+                                        style={{ width: `${Math.min(100, Math.max(0, item.composite_score))}%` }}
+                                      ></div>
                                     </div>
-                                    <div className="flex items-center space-x-3 flex-shrink-0">
-                                      <div className="w-24 bg-slate-200 h-1.5 rounded-full overflow-hidden">
-                                        <div className="bg-purple-600 h-1.5 rounded-full" style={{ width: `${item.composite_score}%` }}></div>
+                                    {hoveredBarTopic?.name === item.topic_name && (
+                                      <div className="absolute right-12 bottom-full mb-1 bg-white border border-slate-300 rounded-xl p-3 shadow-2xl z-50 text-xs font-medium w-64 animate-fade-in pointer-events-none">
+                                        <span className="font-extrabold text-slate-900 block truncate">{item.topic_name}</span>
+                                        <span className="text-[11px] text-hp-navy font-bold block mt-0.5">
+                                          Composite score: {item.composite_score}/100 — {provider?.name || 'Bombora'}
+                                        </span>
+                                        <span className="text-[10px] text-slate-500 block mt-0.5">
+                                          {item.theme}{item.hp_category ? ` · ${categoryLabel(item.hp_category)}` : ''}
+                                        </span>
                                       </div>
-                                      <span className="font-mono font-bold text-slate-900 w-8 text-right">{item.composite_score}</span>
-                                      <span className="text-[10px] text-slate-400 font-medium">Bombora</span>
-                                    </div>
+                                    )}
                                   </div>
                                 ))}
+                              </div>
+                              <div className="flex justify-between text-[10px] font-mono text-slate-400 pl-64 pt-2 border-t border-slate-200">
+                                <span>0</span><span>25</span><span>50</span><span>75</span><span>100</span>
                               </div>
                             </div>
                           )}
 
-                          {/* 2. Security & Infrastructure Group */}
-                          {secGroup.length > 0 && (
-                            <div className="bg-white rounded-2xl p-5 border border-red-200 shadow-xs space-y-3">
-                              <div className="flex items-center justify-between border-b border-red-100 pb-2.5">
-                                <div className="flex items-center space-x-2">
-                                  <span className="px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-red-100 text-red-800 border border-red-200">
-                                    Security & Infrastructure
-                                  </span>
-                                  <span className="text-xs font-semibold text-slate-500">
-                                    {secGroup.length} topics • up to {Math.max(...secGroup.map((x: any) => x.composite_score))}/100
-                                  </span>
-                                </div>
-                              </div>
-
-                              <div className="space-y-2">
-                                {secGroup.map((item: any, idx: number) => (
-                                  <div key={idx} className="flex items-center justify-between text-xs py-1 px-2 rounded-lg hover:bg-red-50/50 transition">
-                                    <div className="flex items-center space-x-3 font-semibold text-slate-800 truncate pr-2">
-                                      <span className="text-slate-400 font-mono text-[11px] w-5 text-right">{idx + 1}</span>
-                                      <span className="capitalize truncate">{item.topic_name}</span>
-                                    </div>
-                                    <div className="flex items-center space-x-3 flex-shrink-0">
-                                      <div className="w-24 bg-slate-200 h-1.5 rounded-full overflow-hidden">
-                                        <div className="bg-red-600 h-1.5 rounded-full" style={{ width: `${item.composite_score}%` }}></div>
-                                      </div>
-                                      <span className="font-mono font-bold text-slate-900 w-8 text-right">{item.composite_score}</span>
-                                      <span className="text-[10px] text-slate-400 font-medium">Bombora</span>
+                          {/* Topics grouped by dictionary theme. Group numbers come from the backend summary, so a filter never changes them. */}
+                          <div className="space-y-4 pt-2">
+                            {themes.filter((t: any) => t.theme !== 'Other / Unmapped' && t.topic_count > 0).map((theme: any) => {
+                              const style = THEME_STYLE[theme.theme] || THEME_STYLE['Other / Unmapped'];
+                              const shown = filteredTopics.filter((x: any) => x.included && x.theme === theme.theme);
+                              return (
+                                <div key={theme.theme} className={`bg-white rounded-2xl p-5 border ${style.border} shadow-xs space-y-3`}>
+                                  <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <span className={`px-2.5 py-0.5 rounded-full text-xs font-extrabold border ${style.chip}`}>{theme.theme}</span>
+                                      <span className="text-xs font-semibold text-slate-500">
+                                        {theme.topic_count} topics • max {theme.max} • avg {theme.average}
+                                        {shown.length !== theme.topic_count ? ` • showing ${shown.length}` : ''}
+                                      </span>
                                     </div>
                                   </div>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-
-                          {/* 3. Financial Services Group */}
-                          {finGroup.length > 0 && (
-                            <div className="bg-white rounded-2xl p-5 border border-emerald-200 shadow-xs space-y-3">
-                              <div className="flex items-center justify-between border-b border-emerald-100 pb-2.5">
-                                <div className="flex items-center space-x-2">
-                                  <span className="px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-200">
-                                    Financial Services & Fintech
-                                  </span>
-                                  <span className="text-xs font-semibold text-slate-500">
-                                    {finGroup.length} topics • up to {Math.max(...finGroup.map((x: any) => x.composite_score))}/100
-                                  </span>
-                                </div>
-                              </div>
-
-                              <div className="space-y-2">
-                                {finGroup.map((item: any, idx: number) => (
-                                  <div key={idx} className="flex items-center justify-between text-xs py-1 px-2 rounded-lg hover:bg-emerald-50/50 transition">
-                                    <div className="flex items-center space-x-3 font-semibold text-slate-800 truncate pr-2">
-                                      <span className="text-slate-400 font-mono text-[11px] w-5 text-right">{idx + 1}</span>
-                                      <span className="capitalize truncate">{item.topic_name}</span>
-                                    </div>
-                                    <div className="flex items-center space-x-3 flex-shrink-0">
-                                      <div className="w-24 bg-slate-200 h-1.5 rounded-full overflow-hidden">
-                                        <div className="bg-emerald-600 h-1.5 rounded-full" style={{ width: `${item.composite_score}%` }}></div>
-                                      </div>
-                                      <span className="font-mono font-bold text-slate-900 w-8 text-right">{item.composite_score}</span>
-                                      <span className="text-[10px] text-slate-400 font-medium">Bombora</span>
-                                    </div>
+                                  <div className="space-y-2">
+                                    {shown.map((item: any, idx: number) => renderTopicRow(item, idx, style.bar))}
                                   </div>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-
-                          {/* 4. Collaboration & Workplace Group */}
-                          {collabGroup.length > 0 && (
-                            <div className="bg-white rounded-2xl p-5 border border-green-200 shadow-xs space-y-3">
-                              <div className="flex items-center justify-between border-b border-green-100 pb-2.5">
-                                <div className="flex items-center space-x-2">
-                                  <span className="px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-green-100 text-green-800 border border-green-200">
-                                    Collaboration & Workplace
-                                  </span>
-                                  <span className="text-xs font-semibold text-slate-500">
-                                    {collabGroup.length} topics • up to {Math.max(...collabGroup.map((x: any) => x.composite_score))}/100
-                                  </span>
                                 </div>
-                              </div>
+                              );
+                            })}
 
-                              <div className="space-y-2">
-                                {collabGroup.map((item: any, idx: number) => (
-                                  <div key={idx} className="flex items-center justify-between text-xs py-1 px-2 rounded-lg hover:bg-green-50/50 transition">
-                                    <div className="flex items-center space-x-3 font-semibold text-slate-800 truncate pr-2">
-                                      <span className="text-slate-400 font-mono text-[11px] w-5 text-right">{idx + 1}</span>
-                                      <span className="capitalize truncate">{item.topic_name}</span>
+                            {otherTheme && otherTheme.topic_count > 0 && (() => {
+                              const shown = filteredTopics.filter((x: any) => x.included && x.theme === 'Other / Unmapped');
+                              const flaggedShown = shown.filter((x: any) => x.mapping_status === 'flagged');
+                              const rest = shown.filter((x: any) => x.mapping_status !== 'flagged');
+                              return (
+                                <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs space-y-3">
+                                  <div className="flex items-center justify-between border-b border-slate-100 pb-2.5 gap-2">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <span className="px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-slate-100 text-slate-700 border border-slate-200">Other / Unmapped</span>
+                                      <span className="text-xs font-semibold text-slate-500">
+                                        {otherTheme.topic_count} topics not matched by {dictionaryVersion} • {otherTheme.flagged_count} flagged for review
+                                      </span>
                                     </div>
-                                    <div className="flex items-center space-x-3 flex-shrink-0">
-                                      <div className="w-24 bg-slate-200 h-1.5 rounded-full overflow-hidden">
-                                        <div className="bg-green-600 h-1.5 rounded-full" style={{ width: `${item.composite_score}%` }}></div>
-                                      </div>
-                                      <span className="font-mono font-bold text-slate-900 w-8 text-right">{item.composite_score}</span>
-                                      <span className="text-[10px] text-slate-400 font-medium">Bombora</span>
-                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={() => setIsOtherTopicsExpanded(!isOtherTopicsExpanded)}
+                                      className="text-xs font-bold text-hp-navy hover:underline flex items-center gap-1 flex-shrink-0"
+                                    >
+                                      <span>{isOtherTopicsExpanded ? 'Collapse' : `Expand (${rest.length})`}</span>
+                                      <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isOtherTopicsExpanded ? 'rotate-180' : ''}`} />
+                                    </button>
                                   </div>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-
-                          {/* 5. Cloud & Infrastructure Group */}
-                          {cloudGroup.length > 0 && (
-                            <div className="bg-white rounded-2xl p-5 border border-blue-200 shadow-xs space-y-3">
-                              <div className="flex items-center justify-between border-b border-blue-100 pb-2.5">
-                                <div className="flex items-center space-x-2">
-                                  <span className="px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-blue-100 text-blue-800 border border-blue-200">
-                                    Cloud & Infrastructure
-                                  </span>
-                                  <span className="text-xs font-semibold text-slate-500">
-                                    {cloudGroup.length} topics • up to {Math.max(...cloudGroup.map((x: any) => x.composite_score))}/100
-                                  </span>
+                                  {flaggedShown.length > 0 && (
+                                    <div className="space-y-2 bg-amber-50/60 border border-amber-200 rounded-xl p-3">
+                                      <span className="text-[10px] font-bold uppercase tracking-wider text-amber-800 block">Flagged for review · near-misses the dictionary does not map</span>
+                                      {flaggedShown.map((item: any) => (
+                                        <div key={item.topic_name} className="flex items-start justify-between gap-3 text-xs">
+                                          <div className="min-w-0">
+                                            <span className="font-semibold text-slate-800 capitalize block truncate">{item.topic_name}</span>
+                                            <span className="text-[10px] text-amber-800 block">{item.flag_reason}</span>
+                                          </div>
+                                          <span className="font-mono font-bold text-slate-900 flex-shrink-0">{item.composite_score}</span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                  <div className="space-y-2">
+                                    {(isOtherTopicsExpanded ? rest : rest.slice(0, 5)).map((item: any, idx: number) => renderTopicRow(item, idx, 'bg-slate-500'))}
+                                  </div>
                                 </div>
-                              </div>
+                              );
+                            })()}
 
-                              <div className="space-y-2">
-                                {cloudGroup.map((item: any, idx: number) => (
-                                  <div key={idx} className="flex items-center justify-between text-xs py-1 px-2 rounded-lg hover:bg-blue-50/50 transition">
-                                    <div className="flex items-center space-x-3 font-semibold text-slate-800 truncate pr-2">
-                                      <span className="text-slate-400 font-mono text-[11px] w-5 text-right">{idx + 1}</span>
-                                      <span className="capitalize truncate">{item.topic_name}</span>
-                                    </div>
-                                    <div className="flex items-center space-x-3 flex-shrink-0">
-                                      <div className="w-24 bg-slate-200 h-1.5 rounded-full overflow-hidden">
-                                        <div className="bg-hp-navy h-1.5 rounded-full" style={{ width: `${item.composite_score}%` }}></div>
-                                      </div>
-                                      <span className="font-mono font-bold text-slate-900 w-8 text-right">{item.composite_score}</span>
-                                      <span className="text-[10px] text-slate-400 font-medium">Bombora</span>
-                                    </div>
-                                  </div>
+                            {(excludedTopics.length > 0 || duplicatesRemoved.length > 0) && (
+                              <div className="bg-slate-50 rounded-xl p-4 border border-slate-200 text-[11px] text-slate-600 space-y-1">
+                                <span className="text-slate-500 font-bold uppercase text-[10px] block">Not in any summary</span>
+                                {excludedTopics.map((t: any) => (
+                                  <div key={`x-${t.topic_name}`}><span className="font-semibold capitalize">{t.topic_name}</span>: {t.exclusion_reason}</div>
+                                ))}
+                                {duplicatesRemoved.map((d: any, i: number) => (
+                                  <div key={`d-${i}`}><span className="font-semibold capitalize">{d.topic_name}</span>: duplicate row (score {d.composite_score ?? 'n/a'}) removed; kept score {d.kept_score ?? 'n/a'}</div>
                                 ))}
                               </div>
-                            </div>
-                          )}
-
-                          {/* 6. Other / Low Relevance Group (With Expand / Collapse Toggle matching Image 2) */}
-                          {otherGroup.length > 0 && (
-                            <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs space-y-3">
-                              <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
-                                <div className="flex items-center space-x-2">
-                                  <span className="px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-slate-100 text-slate-700 border border-slate-200">
-                                    Other / Low Relevance
-                                  </span>
-                                  <span className="text-xs font-semibold text-slate-500">
-                                    {otherGroup.length} topics • up to {Math.max(...otherGroup.map((x: any) => x.composite_score))}/100
-                                  </span>
-                                </div>
-
-                                <button
-                                  type="button"
-                                  onClick={() => setIsOtherTopicsExpanded(!isOtherTopicsExpanded)}
-                                  className="text-xs font-bold text-hp-navy hover:underline flex items-center gap-1"
-                                >
-                                  <span>{isOtherTopicsExpanded ? 'Collapse' : 'Expand'}</span>
-                                  <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isOtherTopicsExpanded ? 'rotate-180' : ''}`} />
-                                </button>
-                              </div>
-
-                              <div className="space-y-2">
-                                {(isOtherTopicsExpanded ? otherGroup : otherGroup.slice(0, 5)).map((item: any, idx: number) => (
-                                  <div key={idx} className="flex items-center justify-between text-xs py-1 px-2 rounded-lg hover:bg-slate-50 transition">
-                                    <div className="flex items-center space-x-3 font-semibold text-slate-800 truncate pr-2">
-                                      <span className="text-slate-400 font-mono text-[11px] w-5 text-right">{idx + 1}</span>
-                                      <span className="capitalize truncate">{item.topic_name}</span>
-                                    </div>
-                                    <div className="flex items-center space-x-3 flex-shrink-0">
-                                      <div className="w-24 bg-slate-200 h-1.5 rounded-full overflow-hidden">
-                                        <div className="bg-slate-500 h-1.5 rounded-full" style={{ width: `${item.composite_score}%` }}></div>
-                                      </div>
-                                      <span className="font-mono font-bold text-slate-900 w-8 text-right">{item.composite_score}</span>
-                                      <span className="text-[10px] text-slate-400 font-medium">Bombora</span>
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-
+                            )}
+                          </div>
                         </div>
-                      </div>
+                      )}
 
-                      {/* Hiring-Linked Demand Signals Section (job_openings.csv Extracted Data) */}
+                      {/* Hiring-linked demand (Source B) */}
                       <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-4">
                         <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                           <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700 flex items-center gap-2">
                             <Users className="w-4 h-4 text-hp-navy" />
-                            <span>HIRING-LINKED INTENT DEMAND (job_openings.csv)</span>
+                            <span>HIRING-LINKED INTENT DEMAND</span>
                           </h3>
                           <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-50 text-hp-navy border border-blue-200">
-                            Source B job_openings
+                            Source B job_openings + Source A staffing topics
                           </span>
                         </div>
-
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs font-medium">
-                          <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-1">
-                            <span className="text-slate-400 font-bold uppercase text-[10px] block">Active Job Posting Volume</span>
-                            <span className="text-2xl font-extrabold text-slate-900 block">{openJobCount} open roles</span>
-                            <span className="text-[11px] text-slate-500">Hiring velocity used as staffing demand signal</span>
+                        {hiringData ? (
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs font-medium">
+                            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-1">
+                              <span className="text-slate-400 font-bold uppercase text-[10px] block">Postings Seen</span>
+                              <span className="text-2xl font-extrabold text-slate-900 block">{hiringData.postings_seen ?? hiringData.open_job_count}</span>
+                              <span className="text-[11px] text-slate-500">
+                                Every posting in job_openings, open and closed
+                                {hiringData.first_seen ? ` · first seen ${hiringData.first_seen}, last seen ${hiringData.last_seen}` : ''}
+                              </span>
+                            </div>
+                            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-1">
+                              <span className="text-slate-400 font-bold uppercase text-[10px] block">Open Postings</span>
+                              <span className="text-2xl font-extrabold text-hp-navy block">{hiringData.open_postings ?? '—'}</span>
+                              <span className="text-[11px] text-slate-500">
+                                No closing status recorded
+                                {hiringData.status_breakdown?.closed ? ` · ${hiringData.status_breakdown.closed} marked closed` : ''}
+                              </span>
+                            </div>
+                            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2">
+                              <span className="text-slate-400 font-bold uppercase text-[10px] block">Seniority Mix (all postings seen)</span>
+                              <div className="flex flex-wrap gap-2">
+                                {Object.entries(hiringData.seniority_breakdown || {}).map(([k, v]) => (
+                                  <span key={k} className="px-2.5 py-1 bg-white rounded-lg border border-slate-200 font-bold text-slate-800 text-[11px]">
+                                    <span className="capitalize">{k.replace(/_/g, ' ')}</span>: <strong className="text-hp-navy">{String(v)}</strong>
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
                           </div>
-
-                          <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2">
-                            <span className="text-slate-400 font-bold uppercase text-[10px] block">Seniority Mix Breakdown</span>
-                            <div className="flex flex-wrap gap-2">
-                              {Object.entries(seniorityBreakdown).map(([k, v]) => (
-                                <span key={k} className="px-2.5 py-1 bg-white rounded-lg border border-slate-200 font-bold text-slate-800 text-[11px]">
-                                  <span className="capitalize">{k}</span>: <strong className="text-hp-navy">{String(v)}</strong>
+                        ) : (
+                          <p className="text-xs text-slate-500">No job openings dataset on file for this account.</p>
+                        )}
+                        {staffingTopics.length > 0 && (
+                          <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2 text-xs">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <span className="text-slate-400 font-bold uppercase text-[10px]">Staffing research (Source A · Bombora)</span>
+                              <span className="text-[11px] text-slate-500 font-semibold">
+                                {hiringLinked?.topic_count ?? staffingTopics.length} topics · max {hiringLinked?.max} · avg {hiringLinked?.average}
+                              </span>
+                            </div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {staffingTopics.map(t => (
+                                <span key={t.topic_name} className="px-2 py-0.5 rounded bg-white border border-slate-200 text-[11px] text-slate-700 font-medium capitalize">
+                                  {t.topic_name} <strong className="text-hp-navy">{t.composite_score}</strong>
                                 </span>
                               ))}
                             </div>
                           </div>
-                        </div>
+                        )}
                       </div>
 
                     </div>

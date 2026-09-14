@@ -105,6 +105,35 @@ def read_dataset_records(account_id: str, dataset_key: str,
     return _parse(full_path)
 
 
+def read_dataset_rows(account_id: str, dataset_key: str) -> list[list[str]]:
+    """Raw CSV rows, header rows included, for a file whose header is not one
+    simple row - the HP category intent export has a category row above its
+    field row, which DictReader would collapse into duplicate empty keys.
+
+    Decoded as UTF-8 when it is UTF-8, else as Windows-1252, the encoding Excel
+    exports on Windows: its em dash (0x97) marks an empty cell in that file and
+    must not become a replacement character. Returns [] when nothing is
+    registered or the file is not on this machine.
+    """
+    db = get_db()
+    file_doc = db["account_data_files"].find_one({
+        "account_id": account_id,
+        "$or": [{"dataset_key": dataset_key}, {"category": dataset_key}],
+        "status": "active",
+    })
+    full_path = find_file_path((file_doc or {}).get("file_path", ""))
+    if not full_path:
+        return []
+
+    with open(full_path, "rb") as fh:
+        raw = fh.read()
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = raw.decode("cp1252", errors="replace")
+    return list(csv.reader(text.splitlines()))
+
+
 def missing_local_datasets(account_id: str) -> list[str]:
     """Datasets registered active for this account whose file is not here."""
     db = get_db()
