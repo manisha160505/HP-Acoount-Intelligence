@@ -21,6 +21,7 @@ export type DatasetKey =
   | 'social_media'
   | 'intent_topics'
   | 'intent_score'
+  | 'hp_category_intent'
   | 'news_events'
   | 'prospect_contacts'
   | 'company'
@@ -86,7 +87,8 @@ export const DATASET_REGISTRY_LIST: DatasetRegistryItem[] = [
   { key: 'website_traffic', display_name: 'Website Traffic', canonical_filename: 'website_traffic.csv', type: 'single_file_csv', group: 'Traffic & Intent', description: 'Monthly web visitors, domain authority, and referral sources', allowed_extensions: ['.csv'] },
   { key: 'social_media', display_name: 'Social Media', canonical_filename: 'social_media.csv', type: 'single_file_csv', group: 'Traffic & Intent', description: 'Social profiles, LinkedIn followers, and engagement metrics', allowed_extensions: ['.csv'] },
   { key: 'intent_topics', display_name: 'Intent Topics', canonical_filename: 'intent_topics.csv', type: 'single_file_csv', group: 'Traffic & Intent', description: 'Active IT research topics, content consumption, and Bombora interest signals', allowed_extensions: ['.csv'] },
-  { key: 'intent_score', display_name: 'Intent Score', canonical_filename: 'intent_score.csv', type: 'single_file_csv', group: 'Traffic & Intent', description: 'Buying intent surge scores, urgency indices, and topic intensity', allowed_extensions: ['.csv'] },
+  { key: 'intent_score', display_name: 'Intent Score', canonical_filename: 'intent_score.csv', type: 'single_file_csv', group: 'Traffic & Intent', description: 'Bombora composite surge scores per research topic', allowed_extensions: ['.csv'] },
+  { key: 'hp_category_intent', display_name: 'HP Category Intent', canonical_filename: 'hp_category_intent.csv', type: 'single_file_csv', group: 'Traffic & Intent', description: 'Intent score, trend, stage, topics, keywords and geo per HP category (PCs, Workstations, Poly, Printers, 3D Printers) - wide export', allowed_extensions: ['.csv'] },
   { key: 'connections', display_name: 'Connections', canonical_filename: 'connections.csv', type: 'single_file_csv', group: 'Traffic & Intent', description: 'Partner connections, vendor relationships, and ecosystem links', allowed_extensions: ['.csv'] },
   { key: 'subpages', display_name: 'Subpages', canonical_filename: 'subpages.csv', type: 'single_file_csv', group: 'Traffic & Intent', description: 'Key domain subpages, product landing pages, and career portals', allowed_extensions: ['.csv'] },
 

@@ -83,3 +83,9 @@ transcript.txt
 rag_storage/
 **/rag_storage/
 ingest/
+.crg-venv/
+
+# Private correspondence and bulk reference material kept locally only.
+# Meeting notes under docs/meeting-notes/ are deliberately still tracked.
+docs/mails*.txt
+hp-project-flow.html

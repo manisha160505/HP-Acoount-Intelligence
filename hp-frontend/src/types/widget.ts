@@ -20,6 +20,24 @@ export interface WidgetResponse extends WidgetContract {
   updated_at: string | null;
 }
 
+// One Bombora research topic as published by intent_topics_table. Source A is
+// the topic-level intent source; Source B (job openings) is used only for the
+// hiring-linked demand card.
+export interface IntentTopic {
+  topic_name: string;
+  composite_score: number | null;
+  source: 'Source A' | 'Source B';
+  intensity: 'High' | 'Moderate' | 'Low' | null;
+  theme: string;
+  hp_category: string | null;
+  matched_terms: string[];
+  mapping_status: 'mapped' | 'unmapped' | 'flagged';
+  flag_reason: string | null;
+  hiring_linked: boolean;
+  included: boolean;
+  exclusion_reason: string | null;
+}
+
 export interface FeatureTabDefinition {
   key: string;
   label: string;

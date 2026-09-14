@@ -16,6 +16,7 @@ SEED_FILES = [
     ("webstack", "webstack.csv", "5_Webstack (Web Technologies & Infrastructure)"),
     ("intent_topics", "intent_topics.csv", "10_Intent_Topics (Bombora Topics)"),
     ("intent_score", "intent_score.csv", "11_Intent_Score (Bombora Composite Surge)"),
+    ("hp_category_intent", "hp_category_intent.csv", "HP Category Intent (Intent Data - Wide)"),
     ("job_openings", "job_openings.csv", "Job Openings (Source B)"),
     ("news_events", "news_events.csv", "News Events (Source B Timeline)"),
     ("technology_detections", "technology_detections.csv", "Technology Detections (Source B)"),

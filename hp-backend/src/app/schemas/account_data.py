@@ -75,6 +75,12 @@ DATASET_REGISTRY = {
         "canonical_filename": "intent_score.csv",
         "allowed_extensions": [".csv"]
     },
+    "hp_category_intent": {
+        "display_name": "HP Category Intent",
+        "type": "single_file_csv",
+        "canonical_filename": "hp_category_intent.csv",
+        "allowed_extensions": [".csv"]
+    },
     "news_events": {
         "display_name": "News & Events",
         "type": "multi_file",
