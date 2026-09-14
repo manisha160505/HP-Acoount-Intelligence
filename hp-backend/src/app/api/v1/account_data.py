@@ -206,7 +206,20 @@ async def upload_account_data(
     # 5. Parse Content & Count Rows
     row_count = 0
     try:
-        if file_ext in [".xlsx", ".xls"]:
+        if file_ext == ".pdf":
+            # A filing has pages, not rows. Counting them here doubles as the
+            # validity check the CSV branch gets from parsing: a file PyMuPDF
+            # cannot open is rejected at upload rather than surfacing later as
+            # an index that built from nothing.
+            import fitz
+            with fitz.open(stream=content, filetype="pdf") as pdf_doc:
+                row_count = pdf_doc.page_count
+            if row_count == 0:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="PDF contains no pages."
+                )
+        elif file_ext in [".xlsx", ".xls"]:
             df = pd.read_excel(io.BytesIO(content))
             row_count = len(df)
         else:

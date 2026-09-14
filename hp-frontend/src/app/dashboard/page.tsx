@@ -36,6 +36,7 @@ import {
   CheckSquare,
   Megaphone,
   TrendingUp,
+  TrendingDown,
   Sparkles,
   PenTool,
   Star,
@@ -254,6 +255,7 @@ export default function UserDashboardPage() {
 
   // Key Metrics Source Citation Popover State
   const [activeMetricPopover, setActiveMetricPopover] = useState<string | null>(null);
+  const [expandedPriority, setExpandedPriority] = useState<number | null>(null);
 
   // Live Signals Filter Drawer State
   const [isFilterDrawerOpen, setIsFilterDrawerOpen] = useState(false);
@@ -823,11 +825,34 @@ export default function UserDashboardPage() {
                   const summaryWidget = widgets.find(w => w.widget_key === 'exec_summary_card');
                   const metricsWidget = widgets.find(w => w.widget_key === 'exec_key_metrics');
                   const hiringWidget = widgets.find(w => w.widget_key === 'exec_hiring_velocity');
+                  const prioritiesWidget = widgets.find(w => w.widget_key === 'exec_strategic_priorities');
 
                   const summaryData = (summaryWidget && summaryWidget.status === 'available' && summaryWidget.data) ? summaryWidget.data : null;
                   const metricsData = (metricsWidget && metricsWidget.status === 'available' && metricsWidget.data) ? metricsWidget.data : null;
                   const hiringData = (hiringWidget && hiringWidget.status === 'available' && hiringWidget.data) ? hiringWidget.data : null;
-                  
+                  const prioritiesData = (prioritiesWidget && prioritiesWidget.status === 'available' && prioritiesWidget.data) ? prioritiesWidget.data : null;
+
+                  // Quick Stats. All three come from exec_summary_card, which
+                  // resolves them server-side - `widgets` here holds only the
+                  // ACTIVE feature's widgets, so reading another feature's
+                  // widget from this component returns nothing. Each is null
+                  // when the owning feature has not run, and the card shows a
+                  // dash. Previously "Solution Narratives" was the literal 5
+                  // with no data binding at all (the account has 4), and
+                  // "Active Urgent Signals" was wired to open_job_count - 100
+                  // job postings shown as 100 urgent signals, against 8 real
+                  // ones. A number with no source behind it is worse than a
+                  // blank: it looks checked.
+                  const narrativeCount = summaryData?.solution_narratives_count ?? null;
+                  const stakeholderCount = summaryData?.stakeholders_mapped_count ?? null;
+                  const signalCount = summaryData?.recent_signals_count ?? null;
+
+                  // Figures the company actually filed, as opposed to the
+                  // firmographic bands beside them. Each carries its own period,
+                  // unit and page, so the card can say where it came from.
+                  const reportedMetrics: any[] = (metricsData?.reported_metrics || prioritiesData?.reported_metrics || []) as any[];
+                  const priorityList: any[] = (prioritiesData?.priorities || []) as any[];
+
                   const displayName = summaryData?.company_name || selectedAccount.name;
                   const displayDesc = summaryData?.business_description || `${selectedAccount.name} is an active target company account in the HP Account Intelligence platform. Upload firmographics.csv to view extracted company profile.`;
                   const domainVal = summaryData?.domain || null;
@@ -920,178 +945,152 @@ export default function UserDashboardPage() {
                         </div>
                       </div>
 
-                      {/* Section 3: KEY METRICS GRID (Exact Northstar 5-Column Style with Citation Popovers) */}
+                      {/* Section 3: KEY METRICS GRID
+                          Laid out as in the northstar dashboard: a dense grid of
+                          small cards, each with its label, the figure, its
+                          period-on-period move, a tier badge and a source chip.
+
+                          Two kinds of card sit in this grid and the difference
+                          is deliberate and visible. A FILED card is a number the
+                          company reported, carrying its own reporting period,
+                          unit and page. A BAND card is a bucket a data vendor
+                          assigned. Presenting a band as though it were a filed
+                          figure is exactly the confusion ABX's pre-display check
+                          exists to prevent, so the badge names which it is. */}
                       <div className="space-y-3">
                         <div className="flex items-center space-x-3">
                           <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700">
                             KEY METRICS
                           </h3>
-                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-hp-navy border border-blue-200">
-                            Verified Datasets Sourced
+                          {/* Provenance is stated once, quietly, instead of a
+                              coloured pill on every card. The figures are what
+                              the eye should land on. */}
+                          <span className="text-[10px] text-slate-400">
+                            {reportedMetrics.length > 0 && `${reportedMetrics.length} from filings · `}2 firmographic bands
                           </span>
                         </div>
 
                         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-                          
-                          {/* Card 1: Total Employees */}
-                          <div className="relative bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col justify-between h-28">
-                            <span className="text-[11px] font-semibold text-slate-500 block">Total Employees</span>
-                            <span className="text-xl font-extrabold text-slate-900">
+
+                          {/* The firmographic bands. Kept first and labelled as
+                              bands so the contrast with the filed figures is
+                              immediate rather than buried in a tooltip. */}
+                          <div className="relative bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col justify-between min-h-[7rem]">
+                            <span className="text-[11px] text-slate-500 block">Total Employees</span>
+                            <span className="text-lg font-semibold text-slate-900 leading-tight">
                               {metricsData ? metricsData.employee_count : 'N/A'}
                             </span>
-                            <div className="flex items-center space-x-1.5 text-[10px] font-bold">
-                              <span className="px-1.5 py-0.5 bg-blue-50 text-hp-navy rounded font-bold border border-blue-200">T1</span>
-                              <button
-                                type="button"
-                                onClick={() => setActiveMetricPopover(activeMetricPopover === 'emp' ? null : 'emp')}
-                                className="inline-flex items-center space-x-1 px-2 py-0.5 rounded bg-blue-50/80 hover:bg-blue-100 text-hp-navy border border-blue-200/80 font-bold transition"
-                              >
-                                <FileText className="w-3 h-3 text-hp-navy" />
-                                <span>Firmographics</span>
-                                <ExternalLink className="w-2.5 h-2.5 ml-0.5" />
-                              </button>
-                            </div>
-
-                            {/* Citation Popover Modal */}
-                            {activeMetricPopover === 'emp' && (
-                              <div className="absolute left-0 bottom-full mb-2 w-72 bg-white border border-slate-200 rounded-2xl shadow-2xl p-4 z-50 animate-fade-in text-xs">
-                                <div className="flex items-center justify-between border-b border-slate-100 pb-2 mb-2">
-                                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                                    PRIMARY SOURCE · FIRMOGRAPHICS
-                                  </span>
-                                  <button onClick={() => setActiveMetricPopover(null)} className="text-slate-400 hover:text-slate-600">
-                                    <X className="w-3.5 h-3.5" />
-                                  </button>
-                                </div>
-                                <p className="text-slate-700 italic font-serif leading-relaxed text-[11px] mb-2">
-                                  “Number Of Employees Range: {metricsData ? metricsData.employee_count : '10001+'} extracted from 1_firmographics.csv for {displayName}.”
-                                </p>
-                                <a
-                                  href={getDownloadUrl('firmographics')}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="text-hp-navy font-bold text-[10px] inline-flex items-center hover:underline"
-                                >
-                                  <ExternalLink className="w-3 h-3 mr-1" />
-                                  <span>Open source file</span>
-                                </a>
-                              </div>
-                            )}
+                            <span className="text-[10px] text-slate-400">Band · Firmographics</span>
                           </div>
 
-                          {/* Card 2: Yearly Revenue Range */}
-                          <div className="relative bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col justify-between h-28">
-                            <span className="text-[11px] font-semibold text-slate-500 block">Yearly Revenue Range</span>
-                            <span className="text-xl font-extrabold text-emerald-700">
+                          <div className="relative bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col justify-between min-h-[7rem]">
+                            <span className="text-[11px] text-slate-500 block">Yearly Revenue Range</span>
+                            <span className="text-lg font-semibold text-slate-900 leading-tight">
                               {metricsData ? metricsData.revenue : 'N/A'}
                             </span>
-                            <div className="flex items-center space-x-1.5 text-[10px] font-bold">
-                              <span className="px-1.5 py-0.5 bg-blue-50 text-hp-navy rounded font-bold border border-blue-200">T1</span>
-                              <button
-                                type="button"
-                                onClick={() => setActiveMetricPopover(activeMetricPopover === 'rev' ? null : 'rev')}
-                                className="inline-flex items-center space-x-1 px-2 py-0.5 rounded bg-blue-50/80 hover:bg-blue-100 text-hp-navy border border-blue-200/80 font-bold transition"
-                              >
-                                <FileText className="w-3 h-3 text-hp-navy" />
-                                <span>Firmographics</span>
-                                <ExternalLink className="w-2.5 h-2.5 ml-0.5" />
-                              </button>
-                            </div>
+                            <span className="text-[10px] text-slate-400">Band · Firmographics</span>
+                          </div>
 
-                            {/* Citation Popover Modal */}
-                            {activeMetricPopover === 'rev' && (
-                              <div className="absolute left-0 bottom-full mb-2 w-72 bg-white border border-slate-200 rounded-2xl shadow-2xl p-4 z-50 animate-fade-in text-xs">
-                                <div className="flex items-center justify-between border-b border-slate-100 pb-2 mb-2">
-                                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                                    PRIMARY SOURCE · FIRMOGRAPHICS
-                                  </span>
-                                  <button onClick={() => setActiveMetricPopover(null)} className="text-slate-400 hover:text-slate-600">
-                                    <X className="w-3.5 h-3.5" />
-                                  </button>
-                                </div>
-                                <p className="text-slate-700 italic font-serif leading-relaxed text-[11px] mb-2">
-                                  “Yearly Revenue Range: {metricsData ? metricsData.revenue : '10B-100B'} extracted from 1_firmographics.csv for {displayName}.”
-                                </p>
-                                <a
-                                  href={getDownloadUrl('firmographics')}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="text-hp-navy font-bold text-[10px] inline-flex items-center hover:underline"
-                                >
-                                  <ExternalLink className="w-3 h-3 mr-1" />
-                                  <span>Open source file</span>
-                                </a>
+                          {/* Open job postings - a count, not a band. */}
+                          {hiringData?.open_job_count && (
+                            <div className="relative bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col justify-between min-h-[7rem]">
+                              <span className="text-[11px] text-slate-500 block">Active Open Job Postings</span>
+                              <span className="text-lg font-semibold text-slate-900 leading-tight">
+                                {hiringData.open_job_count}
+                              </span>
+                              <span className="text-[10px] text-slate-400">Count · Job postings</span>
+                            </div>
+                          )}
+
+                          {/* Every figure the account actually filed. */}
+                          {reportedMetrics.map((m: any, i: number) => (
+                            <div key={m.evidence_id || i} className="relative bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col justify-between min-h-[7rem]">
+                              <div className="flex items-start justify-between gap-1">
+                                <span className="text-[11px] text-slate-500 block leading-snug" title={`${m.metric} (${m.period})`}>
+                                  {m.period} {m.metric}
+                                </span>
+                                {/* The arrow carries the direction in colour -
+                                    it is the one place a glance should pick up
+                                    a signal - while everything else on the card
+                                    stays quiet. */}
+                                {m.direction === 'up' && <TrendingUp className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />}
+                                {m.direction === 'down' && <TrendingDown className="w-3.5 h-3.5 text-rose-600 flex-shrink-0" />}
                               </div>
-                            )}
-                          </div>
 
-                          {/* Card 3: Active Open Job Postings */}
-                          <div className="relative bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col justify-between h-28">
-                            <span className="text-[11px] font-semibold text-slate-500 block">Active Open Job Postings</span>
-                            <span className="text-xl font-extrabold text-hp-navy">
-                              {hiringData ? `${hiringData.open_job_count} roles` : 'N/A'}
-                            </span>
-                            <div className="flex items-center space-x-1.5 text-[10px] font-bold">
-                              <span className="px-1.5 py-0.5 bg-blue-50 text-hp-navy rounded font-bold border border-blue-200">T1</span>
-                              <button
-                                type="button"
-                                onClick={() => setActiveMetricPopover(activeMetricPopover === 'jobs' ? null : 'jobs')}
-                                className="inline-flex items-center space-x-1 px-2 py-0.5 rounded bg-blue-50/80 hover:bg-blue-100 text-hp-navy border border-blue-200/80 font-bold transition"
-                              >
-                                <FileText className="w-3 h-3 text-hp-navy" />
-                                <span>Job Openings</span>
-                                <ExternalLink className="w-2.5 h-2.5 ml-0.5" />
-                              </button>
-                            </div>
-
-                            {/* Citation Popover Modal */}
-                            {activeMetricPopover === 'jobs' && (
-                              <div className="absolute left-0 bottom-full mb-2 w-72 bg-white border border-slate-200 rounded-2xl shadow-2xl p-4 z-50 animate-fade-in text-xs">
-                                <div className="flex items-center justify-between border-b border-slate-100 pb-2 mb-2">
-                                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                                    PRIMARY SOURCE · JOB OPENINGS
+                              <span className="text-lg font-semibold text-slate-900 leading-tight break-words">
+                                {m.value_text}
+                                {m.change_text && (
+                                  <span className={`ml-1.5 text-[11px] font-normal ${m.direction === 'up' ? 'text-emerald-700' : m.direction === 'down' ? 'text-rose-700' : 'text-slate-500'}`}>
+                                    {m.change_text}
                                   </span>
-                                  <button onClick={() => setActiveMetricPopover(null)} className="text-slate-400 hover:text-slate-600">
-                                    <X className="w-3.5 h-3.5" />
-                                  </button>
-                                </div>
-                                <p className="text-slate-700 italic font-serif leading-relaxed text-[11px] mb-2">
-                                  “{hiringData ? hiringData.open_job_count : '100'} active open job postings recorded in job_openings.csv for {displayName}.”
-                                </p>
-                                <a
-                                  href={getDownloadUrl('job_openings')}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="text-hp-navy font-bold text-[10px] inline-flex items-center hover:underline"
+                                )}
+                              </span>
+
+                              <div className="flex items-center gap-1 text-[10px] text-slate-400">
+                                <span>Filed ·</span>
+                                <button
+                                  type="button"
+                                  onClick={() => setActiveMetricPopover(activeMetricPopover === `rep${i}` ? null : `rep${i}`)}
+                                  className="inline-flex items-center gap-1 text-slate-500 hover:text-hp-navy hover:underline transition min-w-0"
                                 >
-                                  <ExternalLink className="w-3 h-3 mr-1" />
-                                  <span>Open source file</span>
-                                </a>
+                                  <span className="truncate max-w-[6rem]">p.{m.page}</span>
+                                </button>
                               </div>
-                            )}
-                          </div>
 
-                          {/* Card 4: Revenue Growth (Northstar Metric Placeholder) */}
-                          <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col justify-between h-28 opacity-80">
-                            <span className="text-[11px] font-semibold text-slate-500 block">Revenue Growth (YoY)</span>
-                            <span className="text-sm font-bold text-slate-400 italic">Derived TBD</span>
-                            <div className="flex items-center space-x-1 text-[10px] font-bold text-slate-400">
-                              <span className="px-1.5 py-0.5 bg-slate-100 rounded text-slate-600 border border-slate-200">T1</span>
-                              <span>Future Calc</span>
+                              {activeMetricPopover === `rep${i}` && (
+                                <div className="absolute left-0 bottom-full mb-2 w-80 bg-white border border-slate-200 rounded-2xl shadow-2xl p-4 z-50 animate-fade-in text-xs">
+                                  <div className="flex items-center justify-between border-b border-slate-100 pb-2 mb-2">
+                                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                                      REPORTED FIGURE &middot; COMPANY FILING
+                                    </span>
+                                  </div>
+                                  <p className="text-slate-700 leading-relaxed">
+                                    <strong>{m.metric}</strong> for <strong>{m.period}</strong>: {m.value_text}
+                                  </p>
+                                  {m.change_text && (
+                                    <p className="text-[10px] text-slate-600 mt-1.5">
+                                      {m.change_text} against {m.previous_period} ({m.previous_value_text}). {m.change_basis}.
+                                    </p>
+                                  )}
+                                  {m.series?.length > 1 && (
+                                    <p className="text-[10px] text-slate-500 mt-1.5">
+                                      {m.series.map((s: any) => `${s.period} ${s.value_text}`).join('  ·  ')}
+                                    </p>
+                                  )}
+                                  <p className="text-[10px] text-slate-500 mt-2">
+                                    {m.filing_label}{m.page ? `, page ${m.page}` : ''}
+                                  </p>
+                                  {m.quote && (
+                                    <p className="text-[10px] text-slate-500 mt-2 border-t border-slate-100 pt-2 break-words">
+                                      <span className="font-bold text-slate-600">Row as printed: </span>{m.quote}
+                                    </p>
+                                  )}
+                                </div>
+                              )}
                             </div>
-                          </div>
+                          ))}
 
-                          {/* Card 5: Annual ICT Spend (Northstar Metric Placeholder) */}
-                          <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col justify-between h-28 opacity-80">
-                            <span className="text-[11px] font-semibold text-slate-500 block">Est. Annual ICT Spend</span>
-                            <span className="text-sm font-bold text-slate-400 italic">Derived TBD</span>
-                            <div className="flex items-center space-x-1 text-[10px] font-bold text-slate-400">
-                              <span className="px-1.5 py-0.5 bg-slate-100 rounded text-slate-600 border border-slate-200">T2</span>
-                              <span>Future Calc</span>
+                          {reportedMetrics.length === 0 && (
+                            <div className="bg-white p-4 rounded-2xl border border-dashed border-slate-200 shadow-xs flex flex-col justify-between min-h-[7rem] opacity-80 sm:col-span-2">
+                              <span className="text-[11px] text-slate-500 block">Reported financial figures</span>
+                              <span className="text-xs text-slate-400 italic leading-snug">
+                                No filed figure is available yet
+                              </span>
+                              <span className="text-[10px] text-slate-400 leading-snug">
+                                Upload the account&apos;s annual report or exchange filings under Compliance Filings.
+                              </span>
                             </div>
-                          </div>
+                          )}
 
                         </div>
+
+                        {reportedMetrics.length > 0 && (
+                          <p className="text-[10px] text-slate-400 leading-relaxed">
+                            Filed figures are what {displayName} reported, each with its reporting period, unit and page.
+                            Band figures are buckets assigned by a data vendor, not reported values.
+                            A period-on-period move is shown only where the earlier period was itself reported.
+                          </p>
+                        )}
                       </div>
 
                       {/* Section 4: URGENCY SCORE & QUICK STATS (Two-Column Layout) */}
@@ -1230,7 +1229,9 @@ export default function UserDashboardPage() {
                                 <Lightbulb className="w-4 h-4" />
                               </div>
                               <div>
-                                <span className="text-base font-extrabold text-slate-900 block">5</span>
+                                <span className="text-base font-extrabold text-slate-900 block">
+                                  {narrativeCount ?? <span className="text-slate-300">&mdash;</span>}
+                                </span>
                                 <span className="text-[10px] text-slate-500 font-medium">Solution Narratives</span>
                               </div>
                             </div>
@@ -1241,7 +1242,7 @@ export default function UserDashboardPage() {
                               </div>
                               <div>
                                  <span className="text-base font-extrabold text-slate-900 block">
-                                   {summaryData?.stakeholders_mapped_count ?? 23}
+                                   {stakeholderCount ?? <span className="text-slate-300">&mdash;</span>}
                                  </span>
                                 <span className="text-[10px] text-slate-500 font-medium">Stakeholders Mapped</span>
                               </div>
@@ -1253,9 +1254,12 @@ export default function UserDashboardPage() {
                               </div>
                               <div>
                                 <span className="text-base font-extrabold text-slate-900 block">
-                                  {hiringData ? hiringData.open_job_count : '0'}
+                                  {signalCount ?? <span className="text-slate-300">&mdash;</span>}
                                 </span>
-                                <span className="text-[10px] text-slate-500 font-medium">Active Urgent Signals</span>
+                                {/* "Urgent" was never computed - nothing ranks
+                                    these by urgency - so the label says what
+                                    the number actually counts. */}
+                                <span className="text-[10px] text-slate-500 font-medium">Recent Signals</span>
                               </div>
                             </div>
                           </div>
@@ -1263,29 +1267,225 @@ export default function UserDashboardPage() {
 
                       </div>
 
-                      {/* Section 5: STRATEGIC PRIORITIES (Catalyst Cards Placeholder) */}
-                      <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-4">
+                      {/* Section 5: STRATEGIC PRIORITIES
+                          Catalyst cards grouped by theme, as in the northstar
+                          dashboard: a numbered card per priority, its evidence
+                          line, its source chips, and an expandable panel
+                          carrying the underlying claims.
+
+                          One deliberate difference. The northstar prints an
+                          EVIDENCE STRENGTH out of 100 above those four bars.
+                          ABX weights that score - 40% support frequency, 25%
+                          supporting document sections, 20% recency, 15%
+                          independent external sources - but never defines how
+                          any of the four counts becomes a number on a scale.
+                          Rendering 65/100 would mean inventing four
+                          normalisations and attributing the result to the
+                          specification. So the same four measures are shown as
+                          the counts they actually are, and the composite says
+                          it is undefined. */}
+                      <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-5">
                         <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                           <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700 flex items-center gap-2">
                             <Target className="w-4 h-4 text-hp-navy" />
-                            <span>STRATEGIC PRIORITIES & CATALYSTS</span>
+                            <span>STRATEGIC PRIORITIES</span>
                           </h3>
-                          <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-purple-50 text-purple-800 border border-purple-200">
-                            Inferred Contract TBD
-                          </span>
+                          {priorityList.length > 0 && (
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-hp-navy border border-blue-200 inline-flex items-center gap-1">
+                              <FileText className="w-3 h-3" />
+                              {priorityList.reduce((n: number, p: any) => n + (p.sources?.length || 0), 0)} primary sources
+                            </span>
+                          )}
                         </div>
 
-                        <div className="bg-slate-50 border border-dashed border-slate-200 rounded-xl p-8 text-center space-y-2">
-                          <div className="w-10 h-10 rounded-full bg-purple-100 text-purple-700 flex items-center justify-center mx-auto">
-                            <Sparkles className="w-5 h-5" />
+                        {/* The executive summary is no longer rendered here - it
+                            restated what the cards below already say. It is
+                            still assembled and stored on the widget, because ABX
+                            Feature 1 lists it as required output and Strategy
+                            Chat will read it; it simply has no place at the top
+                            of a list it duplicates. */}
+
+                        {priorityList.length > 0 ? (
+                          <div className="space-y-6">
+                            {Array.from(new Set(priorityList.map((p: any) => p.theme || 'other'))).map((theme: any) => {
+                              const group = priorityList.filter((p: any) => (p.theme || 'other') === theme);
+                              return (
+                                <div key={theme} className="space-y-3">
+                                  {/* Theme divider, as in the northstar layout */}
+                                  <div className="flex items-center gap-3">
+                                    <div className="h-px bg-slate-200 flex-1" />
+                                    <span className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400 whitespace-nowrap">
+                                      {theme}
+                                    </span>
+                                    <div className="h-px bg-slate-200 flex-1" />
+                                  </div>
+
+                                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+                                    {group.map((p: any) => {
+                                      const idx = priorityList.indexOf(p);
+                                      const open = expandedPriority === idx;
+                                      const m = p.measures || {};
+                                      return (
+                                        <div key={idx} className="border border-slate-200 rounded-xl p-4 space-y-3 hover:border-slate-300 transition">
+                                          <div className="flex items-start gap-3">
+                                            <span className="w-6 h-6 rounded-full bg-blue-50 text-hp-navy border border-blue-200 text-[11px] font-extrabold flex items-center justify-center flex-shrink-0 mt-0.5">
+                                              {idx + 1}
+                                            </span>
+                                            <div className="space-y-2 min-w-0">
+                                              <h4 className="text-sm font-extrabold text-slate-900 leading-snug">
+                                                Catalyst {idx + 1} &ndash; {p.title}
+                                              </h4>
+                                              {p.from_news_fallback && (
+                                                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 inline-block" title={p.fallback_note}>
+                                                  From recent events
+                                                </span>
+                                              )}
+                                            </div>
+                                          </div>
+
+                                          {/* The card body is the description -
+                                              what the account is doing and what
+                                              it implies for HP. The raw source
+                                              sentence is evidence, not prose,
+                                              and now lives in the drawer where
+                                              a reader goes to check a claim. */}
+                                          {p.description?.text && (
+                                            <p className="text-xs text-slate-600 leading-relaxed">
+                                              {p.description.text}
+                                            </p>
+                                          )}
+
+                                          {p.why_now && (
+                                            <p className="text-[11px] text-slate-500 leading-relaxed">
+                                              <span className="font-bold text-slate-600">Why now: </span>{p.why_now}
+                                            </p>
+                                          )}
+
+                                          <p className="text-[10px] text-slate-500">
+                                            <span className="font-bold text-slate-600">Evidence: </span>
+                                            {m.support_count} source sentence{m.support_count === 1 ? '' : 's'}
+                                            {' · '}{m.distinct_sections} document section{m.distinct_sections === 1 ? '' : 's'}
+                                            {' · '}{m.independent_source_count} independent source{m.independent_source_count === 1 ? '' : 's'}
+                                          </p>
+
+                                          <div className="flex flex-wrap items-center gap-1.5">
+                                            {(p.sources || []).slice(0, 4).map((s: any, si: number) => (
+                                              s.source_url ? (
+                                                <a
+                                                  key={si}
+                                                  href={s.source_url}
+                                                  target="_blank"
+                                                  rel="noopener noreferrer"
+                                                  title={s.source_text}
+                                                  className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded bg-blue-50 text-hp-navy border border-blue-200 hover:bg-blue-100 transition max-w-full"
+                                                >
+                                                  <FileText className="w-3 h-3 flex-shrink-0" />
+                                                  <span className="truncate max-w-[11rem]">{s.label}</span>
+                                                  <ExternalLink className="w-2.5 h-2.5 flex-shrink-0" />
+                                                </a>
+                                              ) : (
+                                                <span
+                                                  key={si}
+                                                  title={s.source_text}
+                                                  className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded bg-slate-50 text-slate-600 border border-slate-200 max-w-full"
+                                                >
+                                                  <FileText className="w-3 h-3 flex-shrink-0" />
+                                                  <span className="truncate max-w-[11rem]">{s.label}</span>
+                                                </span>
+                                              )
+                                            ))}
+                                          </div>
+
+                                          <button
+                                            type="button"
+                                            onClick={() => setExpandedPriority(open ? null : idx)}
+                                            className="text-[11px] font-bold text-hp-navy hover:underline inline-flex items-center gap-1"
+                                          >
+                                            {open ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                                            {open ? 'Hide evidence' : 'View evidence'}
+                                          </button>
+
+                                          {open && (
+                                            <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-3">
+                                              <div className="space-y-2">
+                                                <div className="flex items-center justify-between">
+                                                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500">
+                                                    Evidence strength
+                                                  </span>
+                                                  <span
+                                                    className="text-[10px] font-bold text-slate-500 cursor-help"
+                                                    title={p.score_unavailable_reason || prioritiesData?.score_unavailable_reason}
+                                                  >
+                                                    weighted score not defined
+                                                  </span>
+                                                </div>
+                                                {[
+                                                  { label: 'Support frequency', weight: '40%', value: m.support_count, unit: 'sentences' },
+                                                  { label: 'Document sections', weight: '25%', value: m.distinct_sections, unit: 'sections' },
+                                                  { label: 'Recency', weight: '20%', value: m.most_recent_date, unit: '' },
+                                                  { label: 'Source diversity', weight: '15%', value: m.independent_source_count, unit: 'sources' },
+                                                ].map((row, ri) => (
+                                                  <div key={ri} className="flex items-center justify-between gap-2 text-[10px]">
+                                                    <span className="text-slate-500 w-32 flex-shrink-0">
+                                                      {row.label} <span className="text-slate-400">({row.weight})</span>
+                                                    </span>
+                                                    <span className={`font-bold ${row.value === null || row.value === undefined || row.value === 0 ? 'text-slate-400 italic' : 'text-slate-700'}`}>
+                                                      {row.value === null || row.value === undefined
+                                                        ? 'not available'
+                                                        : row.value === 0
+                                                          ? 'none'
+                                                          : `${row.value}${row.unit ? ' ' + row.unit : ''}`}
+                                                    </span>
+                                                  </div>
+                                                ))}
+                                                <p className="text-[10px] text-slate-400 leading-relaxed pt-1 border-t border-slate-200">
+                                                  These are the four measures ABX weights. It does not define how any of them becomes a score, so the counts are shown instead of a composite.
+                                                </p>
+                                              </div>
+
+                                              <div className="space-y-1.5 pt-1 border-t border-slate-200">
+                                                <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 block">
+                                                  Supporting claims ({(p.sources || []).length})
+                                                </span>
+                                                {(p.sources || []).map((s: any, si: number) => (
+                                                  <div key={si} className="text-[10px] text-slate-600 leading-relaxed">
+                                                    &ldquo;{s.source_text}&rdquo;
+                                                    <span className="text-slate-400"> — {s.label}</span>
+                                                  </div>
+                                                ))}
+                                                {p.description?.written_by === 'python' && (
+                                                  <p className="text-[10px] text-amber-700 pt-1">
+                                                    The generated description was rejected ({p.description.rejected_reason}); a plain summary is shown instead.
+                                                  </p>
+                                                )}
+                                              </div>
+                                            </div>
+                                          )}
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              );
+                            })}
+
+                            <p className="text-[10px] text-slate-500 leading-relaxed pt-1 border-t border-slate-100">
+                              {prioritiesData?.ordering_basis}
+                            </p>
                           </div>
-                          <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
-                            Strategic Priority Catalyst Generation Placeholder
-                          </h4>
-                          <p className="text-[11px] text-slate-500 max-w-md mx-auto leading-relaxed">
-                            AI-synthesized strategic catalysts, evidence claims, and filing citations for <strong className="text-slate-800">{displayName}</strong> will be generated in Step 7.2+.
-                          </p>
-                        </div>
+                        ) : (
+                          <div className="bg-slate-50 border border-dashed border-slate-200 rounded-xl p-8 text-center space-y-2">
+                            <div className="w-10 h-10 rounded-full bg-purple-100 text-purple-700 flex items-center justify-center mx-auto">
+                              <Sparkles className="w-5 h-5" />
+                            </div>
+                            <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                              No evidenced priority yet
+                            </h4>
+                            <p className="text-[11px] text-slate-500 max-w-md mx-auto leading-relaxed">
+                              Strategic priorities for <strong className="text-slate-800">{displayName}</strong> are read from its filed documents and signals. Upload the account&apos;s annual report or exchange filings under Compliance Filings, and they will be generated automatically.
+                            </p>
+                          </div>
+                        )}
                       </div>
 
                     </div>
@@ -2330,9 +2530,14 @@ export default function UserDashboardPage() {
                           <span className="px-3 py-1 bg-white border border-slate-200 shadow-xs rounded-full text-slate-700">
                             {isAvailable ? generatedPlays.length : 0} HP Plays
                           </span>
-                          <span className={`px-3 py-1 rounded-full ${isAvailable ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 'bg-purple-50 text-purple-800 border border-purple-200'}`}>
-                            {isAvailable ? 'GPT-4o Generated' : 'Inferred TBD'}
-                          </span>
+                          {/* Nothing is badged while it is working. The
+                              "Inferred TBD" state still shows, because that
+                              tells a seller the plays are not ready yet. */}
+                          {!isAvailable && (
+                            <span className="px-3 py-1 rounded-full bg-purple-50 text-purple-800 border border-purple-200">
+                              Inferred TBD
+                            </span>
+                          )}
                         </div>
                       </div>
 
@@ -2347,7 +2552,7 @@ export default function UserDashboardPage() {
                         </div>
 
                         {isAvailable ? (
-                          /* Render Generated Plays from GPT-4o Automatically matching Northstar UI */
+                          /* Render generated plays, matching the Northstar UI */
                           <div className="space-y-8">
                             {generatedPlays.map((play: any, pIdx: number) => {
                               const pKey = play.play_key || `play_${pIdx}`;
@@ -5210,7 +5415,7 @@ export default function UserDashboardPage() {
                           <span>Content Studio</span>
                         </h3>
                         <p className="text-xs text-slate-500 mt-0.5">
-                          Generate persona-targeted ABM content for {selectedAccount?.name || 'Target Account'} - grounded in the account's own data, generated with GPT-4o
+                          Generate persona-targeted ABM content for {selectedAccount?.name || 'Target Account'} - grounded in the account&apos;s own data
                         </p>
                       </div>
 
@@ -5376,7 +5581,7 @@ export default function UserDashboardPage() {
                               <div className="flex items-center gap-2 text-sm font-medium text-blue-600">
                                 <Loader2 className="w-4 h-4 animate-spin" />
                                 <span>
-                                  GPT-4o is crafting your {activeFormatObj?.id === 'linkedin' ? 'LinkedIn post' : (activeFormatObj?.title || 'content').toLowerCase()}...
+                                  Crafting your {activeFormatObj?.id === 'linkedin' ? 'LinkedIn post' : (activeFormatObj?.title || 'content').toLowerCase()}...
                                 </span>
                               </div>
                               <div className="space-y-3">
@@ -5413,7 +5618,7 @@ export default function UserDashboardPage() {
                                 Ready to generate
                               </h4>
                               <p className="text-sm text-slate-400 leading-relaxed">
-                                Select a target persona and content type, then click &quot;Generate Content&quot;. GPT-4o will create personalized ABM content using {selectedAccount?.name || 'Target Account'} account intelligence and HP Inc. product positioning.
+                                Select a target persona and content type, then click &quot;Generate Content&quot;. Personalized ABM content will be created using {selectedAccount?.name || 'Target Account'} account intelligence and HP Inc. product positioning.
                               </p>
                             </div>
                           ) : (() => {
@@ -5773,7 +5978,7 @@ export default function UserDashboardPage() {
                                         Strategy Assistant RAG Grounding — Inferred TBD
                                       </span>
                                       <p className="text-[11px] text-amber-800 leading-relaxed font-medium">
-                                        Conversational RAG response generation using Gemini LLM prompts over {companyName}&apos;s grounded snapshot (23 stakeholders, 220 tech vendors, 10 news events) will be executed in Step 8 (AI Generation Layer).
+                                        Conversational responses grounded in {companyName}&apos;s own account data are not built yet. Strategy Chat is the last feature to be implemented, because it reads the finished output of every other one.
                                       </p>
                                     </div>
 
@@ -5908,7 +6113,7 @@ export default function UserDashboardPage() {
                               <p className="text-[11px] text-slate-500 max-w-sm mx-auto leading-relaxed">
                                 {widget.data_classification === 'deterministic'
                                   ? `No raw CSV data uploaded yet for source datasets (${widget.source_datasets.join(', ')}). Upload datasets in Admin Data tab.`
-                                  : `Calculated or AI generated outputs for ${widget.widget_name} will be enabled in subsequent steps.`}
+                                  : `Derived outputs for ${widget.widget_name} are not built yet.`}
                               </p>
                             </div>
 

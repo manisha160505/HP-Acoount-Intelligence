@@ -127,6 +127,29 @@ def finish_build(account_id: str, index: str, documents: dict, mode: str) -> dic
     return state
 
 
+def record_document(account_id: str, index: str, doc_id: str,
+                    fingerprint: dict) -> None:
+    """Record one document as indexed, the moment it finishes.
+
+    Without this, a build's progress exists only in memory until the whole run
+    completes, and anything that stops the process - the machine running out of
+    memory, a deploy, an operator pressing Ctrl-C - discards every document
+    already extracted. That is expensive in exactly the case where it hurts
+    most: a 19-document filing corpus killed at document 10 would re-extract all
+    ten from scratch.
+
+    Written as a targeted `$set` on the one document's key rather than rewriting
+    the map, so a concurrent reader never sees a half-written state, and the
+    status is deliberately left as BUILDING - one finished document does not
+    make the index queryable.
+    """
+    get_db()[COLLECTION].update_one(
+        {"account_id": account_id, "index": index},
+        {"$set": {"documents.%s" % doc_id: fingerprint,
+                  "updated_at": _now()}},
+        upsert=True)
+
+
 def record_incremental(account_id: str, index: str, documents: dict,
                        applied: dict, damaged=None) -> dict:
     """Record an incremental update, including any document left inconsistent.
@@ -197,6 +220,31 @@ def has_index(account_id: str, index: str) -> bool:
     """Whether anything has ever been built and is still supposed to exist."""
     state = get(account_id, index)
     return bool(state.get("workspace")) and state.get("status") in (READY, STALE)
+
+
+def is_resumable(account_id: str, index: str) -> bool:
+    """Whether a build stopped part-way and its finished documents still stand.
+
+    A build that is interrupted - the machine runs out of memory, the process is
+    deployed over, an operator presses Ctrl-C - leaves the status at BUILDING,
+    because nothing ever reached `finish_build`. The workspace and every
+    document that completed are still there, and `record_document` wrote each
+    one's fingerprint as it landed.
+
+    Without this, `has_index` reads BUILDING as "nothing exists", the next run
+    is promoted to a full rebuild, and the first thing it does is drop the
+    workspace - discarding the finished documents *and* the extraction cache
+    that made them cheap. A 19-document filing corpus killed at document 11
+    would pay for all 19 again.
+
+    Concurrency is not the risk it looks like: index builds are coalesced
+    through the job queue, so two builds of the same index do not run at once.
+    Resuming what is demonstrably present is the better failure mode.
+    """
+    state = get(account_id, index)
+    return (state.get("status") == BUILDING
+            and bool(state.get("workspace"))
+            and bool(state.get("documents")))
 
 
 def workspace(account_id: str, index: str):

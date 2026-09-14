@@ -52,14 +52,38 @@ INDEX_REGISTRY = {
     },
     EXECUTIVE_DASHBOARD: {
         "label": "Executive Dashboard",
-        "enabled": False,
-        "builder": None,
-        "datasets": [],
-        "widgets": [],
-        "required_widgets": [],
+        "enabled": True,
+        "builder": corpus.executive_dashboard_documents,
+        # The datasets the 11-features reference assigns Feature 1 -
+        # firmographics, company hierarchy and job openings - plus the filings
+        # themselves, which are the only source of a reported financial figure
+        # rather than a band, and the datasets behind the cleaned outputs ABX
+        # Step 4 says to reuse.
+        "datasets": ["compliance_filings", "firmographics", "company_hierarchy",
+                     "job_openings", "prospect_contacts", "technographics",
+                     "intent_score", "google_news", "news_events"],
+        # The cleaned feature outputs ABX Step 4 names: "reuse the cleaned
+        # Recent News, Stakeholder Map, Tech Landscape and Intent outputs".
+        "widgets": ["exec_summary_card", "exec_key_metrics",
+                    "exec_hiring_velocity", "news_signals_feed",
+                    "opportunity_trigger_signals", "stakeholder_influence_map",
+                    "technographic_map", "intent_topics_table",
+                    "intent_hiring_demand"],
+        "required_widgets": ["exec_summary_card"],
         "default_mode": "mix",
-        "notice": ("Corpus is the account's compliance / SEC / annual-report "
-                   "documents, which are not in the repository yet."),
+        # `exec_strategic_priorities` is what this index produces, so it is
+        # absent from `widgets` above: a generated widget feeding its own corpus
+        # would change the corpus on every build and trigger the next one.
+        #
+        # `exec_urgency_score` is out of scope. ABX fixes its weights but leaves
+        # the raw-data-to-driver transformation undefined - "The current POC does
+        # not define a reusable raw-data-to-driver formula for all accounts" -
+        # and its own missing-input rule then forbids computing an overall score.
+        "generates": {
+            "feature_key": "executive_dashboard",
+            "widget_key": "exec_strategic_priorities",
+            "generator": "app.services.dashboard.priorities:generate_dashboard_intelligence",
+        },
     },
     STRATEGY: {
         "label": "Strategy",

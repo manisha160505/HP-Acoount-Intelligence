@@ -105,6 +105,42 @@ def read_dataset_records(account_id: str, dataset_key: str,
     return _parse(full_path)
 
 
+def dataset_file_paths(account_id: str, dataset_key: str,
+                       strict: bool = True) -> list[tuple]:
+    """(original_filename, absolute_path) for every active file of a dataset.
+
+    `read_dataset_records` answers a different question - it takes the one
+    active file and parses it into rows. Neither half of that fits a filing
+    library: there are several active documents at once, and a PDF has no rows.
+    So this returns paths and lets the caller decide how to read them.
+
+    Ordered by filename so a corpus built twice from the same library comes out
+    in the same order, which keeps document ids and fingerprints stable.
+    """
+    db = get_db()
+    found, missing = [], []
+    for file_doc in db["account_data_files"].find({
+        "account_id": account_id,
+        "$or": [{"dataset_key": dataset_key}, {"category": dataset_key}],
+        "status": "active",
+    }):
+        rel_path = file_doc.get("file_path", "")
+        full_path = find_file_path(rel_path)
+        if full_path:
+            found.append((file_doc.get("original_filename")
+                          or os.path.basename(full_path), full_path))
+        else:
+            missing.append(rel_path)
+
+    if missing:
+        if strict:
+            raise DatasetFileMissing(dataset_key, missing[0])
+        logger.warning("dataset '%s': %d registered file(s) are not on this "
+                       "machine", dataset_key, len(missing))
+
+    return sorted(found)
+
+
 def missing_local_datasets(account_id: str) -> list[str]:
     """Datasets registered active for this account whose file is not here."""
     db = get_db()

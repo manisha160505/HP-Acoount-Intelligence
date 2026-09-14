@@ -28,7 +28,11 @@ class Settings(BaseSettings):
     DB_NAME: str = "hp_account_db"
     JWT_SECRET: str = "hp-account-intelligence-platform-secret-key-2026-enterprise"
     JWT_ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 120
+    # A working day. Two hours was shorter than a working session on this app -
+    # one index build runs about 40 minutes - so sellers were being signed out
+    # mid-task. Mirrored in both .env files; they are loaded as a sequence with
+    # the backend one last, so a stale value there would silently override this.
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440
     CORS_ORIGINS: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
     DATA_STORAGE_DIR: str = "data/accounts"
     

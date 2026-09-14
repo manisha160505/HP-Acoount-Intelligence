@@ -92,7 +92,15 @@ async def update_index(account_id: str, index: str, full: bool = False,
     fingerprints = corpus.fingerprints(documents)
     by_id = {d.doc_id: d for d in documents}
     delta = index_state.diff(account_id, index, fingerprints)
-    have_index = index_state.has_index(account_id, index)
+    # An interrupted build counts as an index to update, not as nothing. Its
+    # finished documents are recorded and still in the workspace, so the work
+    # left is the ordinary incremental delta - see `index_state.is_resumable`.
+    resuming = index_state.is_resumable(account_id, index)
+    have_index = index_state.has_index(account_id, index) or resuming
+    if resuming:
+        logger.info("retrieval: resuming an interrupted %s build for account %s "
+                    "- %d document(s) already indexed",
+                    index, account_id, len(delta["unchanged"]))
 
     if not full and have_index and not (delta["added"] or delta["changed"]
                                         or delta["removed"]):
@@ -149,6 +157,13 @@ async def update_index(account_id: str, index: str, full: bool = False,
                 evidence.replace_document_evidence(
                     account_id, index, doc.doc_id, doc.evidence_rows)
                 recorded[doc.doc_id] = fingerprints[doc.doc_id]
+                # Committed per document, not only at the end of the run. A
+                # build that dies at document 10 of 19 - out of memory, a
+                # deploy, Ctrl-C - then resumes from document 11 instead of
+                # re-extracting everything. The status stays BUILDING until the
+                # run completes, so a half-built index is still not queryable.
+                index_state.record_document(account_id, index, doc.doc_id,
+                                            fingerprints[doc.doc_id])
                 applied["changed" if is_change else "added"].append(doc.doc_id)
             except BaseException as exc:
                 # One bad document does not abandon the rest. Its fingerprint is
@@ -197,26 +212,41 @@ async def _verify(rag, documents):
 
     A silently-empty graph is the documented failure when the model or key is
     misconfigured - the reference rig warns `ainsert` "can complete
-    'successfully' while producing a near-empty graph". `aget_docs_by_ids` omits
-    ids it has no status for, so a missing id means that document never landed.
+    'successfully' while producing a near-empty graph". A document can also fail
+    on its own: LightRAG catches an extraction timeout internally, logs it,
+    marks that document `failed` and carries on, so the insert call returns
+    perfectly normally with one document missing from the graph.
+
+    Status is read from `rag.doc_status.get_by_id`, which returns a dict with a
+    real `status` and `error_msg`. An earlier version asked `aget_docs_by_ids`
+    instead and checked `status.status` on what it returned - that attribute is
+    always `None` in 1.5.7, so the failed-document branch could never run. It
+    reported "verified 19 document(s) landed" on a build where one had timed
+    out, and the index went READY with a hole in it. Presence was the only thing
+    it ever actually checked.
     """
     doc_ids = [d.doc_id for d in documents]
-    statuses = await rag.aget_docs_by_ids(doc_ids)
-    found = set(statuses or {})
-    missing = [d for d in doc_ids if d not in found]
+    missing, failed = [], []
 
-    failed = []
-    for doc_id, status in (statuses or {}).items():
-        value = getattr(status, "status", None)
-        value = getattr(value, "value", value)
-        if value and str(value).lower() == "failed":
-            failed.append(doc_id)
+    for doc_id in doc_ids:
+        try:
+            record = await rag.doc_status.get_by_id(doc_id)
+        except Exception:
+            record = None
+        if not record:
+            missing.append(doc_id)
+            continue
+        status = record.get("status") if isinstance(record, dict) else None
+        status = getattr(status, "value", status)
+        if str(status or "").lower() == "failed":
+            failed.append("%s (%s)" % (doc_id,
+                                       str(record.get("error_msg") or "")[:120]))
 
     if missing or failed:
         raise RuntimeError(
             "rebuild did not land %d document(s) - %s"
-            % (len(missing) + len(failed), ", ".join((missing + failed)[:3])))
-    logger.info("retrieval: verified %d document(s) landed", len(found))
+            % (len(missing) + len(failed), "; ".join((missing + failed)[:3])))
+    logger.info("retrieval: verified %d document(s) landed", len(doc_ids))
 
 
 # ---------------------------------------------------------------------------

@@ -50,7 +50,9 @@ class EvidenceBuilder:
         self.rows = []
 
     def add(self, source_text, field=None, record_id=None,
-            publisher=None, source_url=None, dataset=None, quote=None) -> str | None:
+            publisher=None, source_url=None, dataset=None, quote=None,
+            period=None, value=None, unit=None, page=None,
+            filing_label=None, filing_period=None) -> str | None:
         """Register one claim and return the id to write beside it in the text.
 
         `publisher` and `source_url` are carried when the evidence genuinely has
@@ -68,6 +70,14 @@ class EvidenceBuilder:
         `quote` is the raw value the derived sentence was built from - the cell
         actually read, like "AutoCAD" - so a reader can see the source, not only
         the sentence written about it.
+
+        `period`, `value`, `unit`, `page` and `filing_label` carry a reported
+        financial figure's provenance. ABX Feature 1 will not let a number be
+        shown without them - *"correct metric, correct reporting period, and
+        correct unit/currency"* - and holding them on the evidence row rather
+        than only in the sentence means the published figure is read back from
+        here, not parsed out of prose. `value` is the number itself, so a card
+        can format it without re-reading the document.
         """
         text = _text(source_text)
         if not text:
@@ -89,14 +99,33 @@ class EvidenceBuilder:
             row["source_url"] = _text(source_url)
         if _text(quote):
             row["quote"] = _text(quote)[:400]
+        if _text(period):
+            row["period"] = _text(period)
+        if value is not None:
+            row["value"] = value
+        if _text(unit):
+            row["unit"] = _text(unit)
+        if page is not None:
+            row["page"] = page
+        if _text(filing_label):
+            row["filing_label"] = _text(filing_label)
+        # The period the SOURCE DOCUMENT reports, as distinct from `period`,
+        # which is the period of a figure. A paragraph has no date of its own,
+        # but the filing it sits in does, and that is what makes a narrative
+        # claim datable at all.
+        if _text(filing_period):
+            row["filing_period"] = _text(filing_period)
         self.rows.append(row)
         return eid
 
     def line(self, source_text, field=None, record_id=None,
-             publisher=None, source_url=None, dataset=None, quote=None) -> str:
+             publisher=None, source_url=None, dataset=None, quote=None,
+             period=None, value=None, unit=None, page=None,
+             filing_label=None, filing_period=None) -> str:
         """A corpus line with its citation appended, or "" when there is nothing."""
         eid = self.add(source_text, field, record_id, publisher, source_url,
-                       dataset, quote)
+                       dataset, quote, period, value, unit, page, filing_label,
+                       filing_period)
         return "" if not eid else "%s [%s]" % (_text(source_text), eid)
 
 
