@@ -26,6 +26,8 @@ import {
   Lightbulb,
   Compass,
   Cpu,
+  Printer,
+  Laptop,
   ShieldAlert,
   Shield,
   Clock,
@@ -331,6 +333,8 @@ export default function UserDashboardPage() {
 
   // Content Messaging
   const [expandedPillar, setExpandedPillar] = useState<string | null>(null);
+  const [cmGenerating, setCmGenerating] = useState<boolean>(false);
+  const [cmError, setCmError] = useState<string | null>(null);
   const [retrievalStatus, setRetrievalStatus] = useState<any>(null);
 
   // Whether an answer is current, stale, or unavailable mid-rebuild is a fact
@@ -349,7 +353,7 @@ export default function UserDashboardPage() {
       }
     })();
     return () => { cancelled = true; };
-  }, [activeFeatureKey, selectedAccountId]);
+  }, [activeFeatureKey, selectedAccountId, cmGenerating]);
 
   // Objectives, formats and personas come from the evaluator endpoints so the
   // dropdowns cannot drift from the scoring formulas that consume them.
@@ -4747,79 +4751,74 @@ export default function UserDashboardPage() {
                   const cmIndex = (retrievalStatus?.indexes || [])
                     .find((i: any) => i.index === 'content_messaging');
 
-
-
-                  // Two evidence rows from the same unlinked source are one chip.
-                  // A row that links somewhere keeps its own, since the links
-                  // genuinely go to different places. The count is shown so
-                  // collapsing never hides how much evidence there was.
-                  const dedupeSources = (sources: any[]) => {
-                    const byKey = new Map<string, any>();
-                    (sources || []).forEach((s: any) => {
-                      const key = `${s.label}::${s.source_url || ''}`;
-                      const seen = byKey.get(key);
-                      if (seen) { seen.count = (seen.count || 1) + 1; }
-                      else { byKey.set(key, { ...s, count: 1 }); }
-                    });
-                    return Array.from(byKey.values());
+                  // Deterministic from the HP lines the pillar names - the same
+                  // pillar always gets the same icon, on every render and account.
+                  const pillarIcon = (p: any) => {
+                    const s = (p.hp_solutions || []).join(' ').toLowerCase();
+                    if (s.includes('wolf')) return Shield;
+                    if (s.includes('poly')) return Users;
+                    if (s.includes('print') || s.includes('mps')) return Printer;
+                    if (s.includes('z by hp') || s.includes('workstation')) return Cpu;
+                    return Laptop;
                   };
 
-                  // The chip reads as provenance, never as a bare identifier; the
-                  // exact evidence_id stays in the tooltip so a claim is still
-                  // traceable to the registry row behind it.
+                  const buildMessageHouse = async () => {
+                    if (!selectedAccountId) return;
+                    setCmGenerating(true);
+                    setCmError(null);
+                    try {
+                      const res = await api.post<WidgetResponse>(
+                        `/accounts/${selectedAccountId}/widgets/content_messaging/generate`, {});
+                      setWidgets(prev => prev.map(w =>
+                        w.widget_key === 'messaging_pillars_output' ? res.data : w));
+                    } catch (err: any) {
+                      setCmError(err?.response?.data?.detail || err?.message || 'Generation failed.');
+                    } finally {
+                      setCmGenerating(false);
+                    }
+                  };
+
                   const SourceChip = ({ s }: { s: any }) => {
-                    // Much of this evidence is a cell in an uploaded CSV, which
-                    // has no web page to open. Rather than render every chip as
-                    // though it were clickable, an unlinkable one is flat and
-                    // carries no external-link mark, so what can be opened is
-                    // obvious before anyone clicks.
-                    const linked = !!s.source_url;
-                    const detail = s.quote
-                      ? `${s.field ? s.field + ' — ' : ''}"${s.quote}"`
-                      : String(s.source_text || '').slice(0, 180);
-                    return (
+                    const body = (
                       <span
-                        title={`${s.evidence_id}${detail ? ` — ${detail}` : ''}`}
-                        className={`inline-flex items-center gap-1 rounded-full border px-2 py-[3px] text-[10px] font-semibold whitespace-nowrap align-middle ${
-                          linked
-                            ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
-                            : 'border-slate-200 bg-slate-50 text-slate-500'}`}
+                        title={s.evidence_id}
+                        className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 whitespace-nowrap"
                       >
-                        <FileText className="w-2.5 h-2.5" />
-                        {linked ? (
-                          <a href={s.source_url} target="_blank" rel="noopener noreferrer"
-                             className="hover:underline">
-                            {s.label}{s.count > 1 ? ' (' + s.count + ')' : ''}
-                          </a>
-                        ) : (
-                          <>{s.label}{s.count > 1 ? ' (' + s.count + ')' : ''}</>
-                        )}
-                        {linked && <ExternalLink className="w-2.5 h-2.5" />}
+                        {s.label}
+                        {s.source_url && <ExternalLink className="w-2.5 h-2.5" />}
                       </span>
                     );
+                    return s.source_url
+                      ? <a href={s.source_url} target="_blank" rel="noopener noreferrer">{body}</a>
+                      : body;
                   };
 
                   return (
                     <div className="space-y-6">
 
-                      {/* No build button. The message house rebuilds itself when a
-                          dataset it depends on is uploaded or replaced, the same
-                          way every other feature does - the upload queues one
-                          index job and that job regenerates this. */}
-                      <div>
-                        <h2 className="text-xl font-extrabold text-slate-900 tracking-tight">
-                          Content Messaging
-                        </h2>
-                        <p className="text-xs text-slate-500 font-medium mt-0.5">
-                          Challenge &rarr; HP benefit &rarr; HP solutions &rarr; sourced proof.
-                          Rebuilt automatically when this account&apos;s data changes.
-                        </p>
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <h2 className="text-xl font-extrabold text-slate-900 tracking-tight">
+                            Content Messaging
+                          </h2>
+                          <p className="text-xs text-slate-500 font-medium mt-0.5">
+                            Challenge &rarr; HP benefit &rarr; HP solutions &rarr; sourced proof.
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={buildMessageHouse}
+                          disabled={cmGenerating || (cmIndex && !['READY', 'STALE'].includes(cmIndex.status))}
+                          className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:bg-slate-300 transition-colors flex-shrink-0"
+                        >
+                          <Sparkles className="w-4 h-4" />
+                          {cmGenerating ? 'Building…' : hasHouse ? 'Rebuild' : 'Build message house'}
+                        </button>
                       </div>
 
                       {cmIndex && (
                         <div className={`rounded-xl border px-4 py-2.5 text-xs ${
                           cmIndex.status === 'READY' ? 'border-slate-200 bg-slate-50 text-slate-600'
-                            : cmIndex.status === 'RETIRED' ? 'border-slate-300 bg-slate-100 text-slate-600'
                             : cmIndex.status === 'STALE' ? 'border-amber-200 bg-amber-50 text-amber-800'
                             : cmIndex.status === 'BUILDING' ? 'border-indigo-200 bg-indigo-50 text-indigo-700'
                             : 'border-rose-200 bg-rose-50 text-rose-700'}`}>
@@ -4828,24 +4827,12 @@ export default function UserDashboardPage() {
                           {cmIndex.status === 'BUILDING' && <span> — unavailable until the rebuild finishes.</span>}
                           {cmIndex.status === 'STALE' && <span> — answering from the last good build.</span>}
                           {cmIndex.status === 'FAILED' && <span> — {cmIndex.last_error}</span>}
-                          {/* Retired is not a fault: the index was dropped on purpose
-                              to free capacity. What is below is the last build, and it
-                              is complete - it simply will not refresh until rebuilt. */}
-                          {cmIndex.status === 'RETIRED' && (
-                            <span> — retired to free capacity. What you see below is the
-                              last published version and will not refresh until this index
-                              is rebuilt.</span>
-                          )}
                         </div>
                       )}
 
-                      {/* The index built but the message house did not regenerate.
-                          Reported separately from the index's own status, because
-                          the index is fine and still answering. */}
-                      {cmIndex?.generation_error && (
-                        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
-                          <span className="font-semibold">The message house could not be rebuilt.</span>{' '}
-                          {cmIndex.generation_error} The version below is the last one that built.
+                      {cmError && (
+                        <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs font-semibold text-rose-700">
+                          {cmError}
                         </div>
                       )}
 
@@ -4895,151 +4882,108 @@ export default function UserDashboardPage() {
                             </div>
 
                             <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
-                              {/* Column headers, as in the reference layout */}
-                              <div className="hidden md:grid grid-cols-[1.5fr_1.6fr_1.9fr_auto] gap-5 px-5 py-2.5 border-b border-slate-200 bg-slate-50/70">
-                                {['Pillar', 'Challenge', 'HP benefit', 'Proof'].map((h, i) => (
-                                  <span key={i} className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">
-                                    {h}
-                                  </span>
+                              {/* Header — hidden on narrow screens, where rows stack */}
+                              <div className="hidden md:grid grid-cols-[1.1fr_1.3fr_1.6fr_auto] gap-4 px-4 py-2 border-b border-slate-200 bg-slate-50">
+                                {['Pillar', 'Challenge', 'HP benefit', ''].map((h, i) => (
+                                  <span key={i} className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{h}</span>
                                 ))}
                               </div>
 
                               {pillars.map((p: any, i: number) => {
                                 const open = expandedPillar === p.pillar_title;
+                                const Icon = pillarIcon(p);
                                 const sourced = p.sourced || { sourced: 0, total: 0 };
                                 return (
                                   <div key={i} className="border-b border-slate-100 last:border-b-0">
                                     <button
                                       type="button"
                                       onClick={() => setExpandedPillar(open ? null : p.pillar_title)}
-                                      className={`w-full text-left grid grid-cols-1 md:grid-cols-[1.5fr_1.6fr_1.9fr_auto] gap-3 md:gap-5 px-5 py-4 transition-colors ${open ? 'bg-slate-50/60' : 'hover:bg-slate-50/60'}`}
+                                      className={`w-full text-left grid grid-cols-1 md:grid-cols-[1.1fr_1.3fr_1.6fr_auto] gap-2 md:gap-4 px-4 py-3.5 transition-colors ${open ? 'bg-indigo-50/40' : 'hover:bg-slate-50'}`}
                                     >
-                                      {/* Pillar: chevron, number, title */}
-                                      <div className="flex items-start gap-2.5">
-                                        {open
-                                          ? <ChevronUp className="w-4 h-4 text-slate-400 mt-1 flex-shrink-0" />
-                                          : <ChevronDown className="w-4 h-4 text-slate-400 mt-1 flex-shrink-0" />}
-                                        <span className="w-5 h-5 rounded-full bg-sky-100 text-sky-700 text-[10px] font-bold flex items-center justify-center flex-shrink-0 mt-0.5">
-                                          {i + 1}
-                                        </span>
-                                        <span className="text-[15px] font-bold text-slate-900 leading-snug">
-                                          {p.pillar_title}
-                                        </span>
+                                      <div className="flex items-start gap-2">
+                                        <Icon className="w-4 h-4 text-indigo-500 mt-0.5 flex-shrink-0" />
+                                        <span className="text-sm font-bold text-slate-900">{p.pillar_title}</span>
                                       </div>
-
-                                      {/* Challenge summary — the reference sets these
-                                          large and dark; they are the row's content,
-                                          not a caption for it. */}
-                                      <p className="text-[14px] font-semibold text-slate-800 leading-snug">
-                                        {p.challenge_summary}
+                                      <p className="text-xs text-slate-600 leading-relaxed">
+                                        {p.challenge_summary || p.challenge}
                                       </p>
-
                                       <div>
-                                        <p className="text-[14px] font-semibold text-slate-800 leading-snug">
-                                          {p.benefit_summary}
+                                        <p className="text-xs text-slate-600 leading-relaxed">
+                                          {p.benefit_summary || p.hp_benefit}
                                         </p>
-                                        <div className="flex flex-wrap gap-1.5 mt-2">
+                                        <div className="flex flex-wrap gap-1 mt-1.5">
                                           {(p.hp_solutions || []).map((sol: string, j: number) => (
-                                            <span key={j} className="rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-[11px] font-semibold text-indigo-700">
+                                            <span key={j} className="rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-semibold text-slate-600">
                                               {sol}
                                             </span>
                                           ))}
                                         </div>
                                       </div>
-
-                                      <div className="flex md:justify-end flex-shrink-0">
-                                        <span className={`rounded-full px-3 py-1 text-[11px] font-semibold whitespace-nowrap h-fit ${
+                                      <div className="flex md:flex-col items-center md:items-end gap-2 flex-shrink-0">
+                                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold whitespace-nowrap ${
                                           sourced.total > 0 && sourced.sourced === sourced.total
-                                            ? 'bg-slate-100 text-slate-600 border border-slate-200'
+                                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                                             : 'bg-amber-50 text-amber-700 border border-amber-200'}`}>
                                           {sourced.sourced}/{sourced.total} sourced
                                         </span>
+                                        {open ? <ChevronUp className="w-4 h-4 text-slate-400" />
+                                              : <ChevronDown className="w-4 h-4 text-slate-400" />}
                                       </div>
                                     </button>
 
                                     {open && (
-                                      <div className="px-5 pb-5 bg-slate-50/40 border-t border-slate-100">
-                                        {/* Challenge and benefit sit side by side */}
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-10 gap-y-5 pt-4">
-                                          <div>
-                                            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400 mb-2">
-                                              Challenge
-                                            </p>
-                                            <p className="text-[13px] text-slate-700 leading-[1.75]">{p.challenge}</p>
-                                            <div className="flex flex-wrap gap-1.5 mt-2.5">
-                                              {dedupeSources(p.challenge_evidence).map((e: any, j: number) => (
-                                                <SourceChip key={j} s={e} />
-                                              ))}
-                                            </div>
-                                          </div>
-
-                                          <div>
-                                            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400 mb-2">
-                                              HP benefit
-                                            </p>
-                                            <p className="text-[13px] text-slate-700 leading-[1.75]">{p.hp_benefit}</p>
-                                            <span className="inline-block mt-2 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500">
-                                              {p.hp_benefit_label || 'HP account analysis'}
-                                            </span>
-                                            {/* The public HP page for what this pillar sells.
-                                                Separate from the proof chips on purpose: the
-                                                proof came from a deck slide, not this page. */}
-                                            {p.hp_resource?.url && (
-                                              <div className="flex items-center gap-2 mt-3">
-                                                <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">
-                                                  HP resource
-                                                </span>
-                                                <a
-                                                  href={p.hp_resource.url}
-                                                  target="_blank"
-                                                  rel="noopener noreferrer"
-                                                  className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-[3px] text-[10px] font-semibold text-emerald-800 hover:underline"
-                                                >
-                                                  <FileText className="w-2.5 h-2.5" />
-                                                  {p.hp_resource.label}
-                                                  <ExternalLink className="w-2.5 h-2.5" />
-                                                </a>
-                                              </div>
-                                            )}
+                                      <div className="px-4 pb-5 space-y-4 bg-indigo-50/20">
+                                        <div>
+                                          <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Challenge</p>
+                                          <p className="text-xs text-slate-700 leading-relaxed">{p.challenge}</p>
+                                          <div className="flex flex-wrap gap-1.5 mt-2">
+                                            {(p.challenge_evidence || []).map((e: any, j: number) => (
+                                              <SourceChip key={j} s={e} />
+                                            ))}
                                           </div>
                                         </div>
 
-                                        <div className="border-t border-slate-200 mt-5 pt-4">
-                                          <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400 mb-2.5">
-                                            Proof points ({sourced.total}, {sourced.sourced} sourced)
+                                        <div>
+                                          <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">HP benefit</p>
+                                          <p className="text-xs text-slate-700 leading-relaxed">{p.hp_benefit}</p>
+                                          <span className="inline-block mt-1 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500">
+                                            {p.hp_benefit_label || 'HP account analysis'}
+                                          </span>
+                                        </div>
+
+                                        <div>
+                                          <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">
+                                            Proof points ({sourced.total} {sourced.total === 1 ? 'source' : 'sources'})
                                           </p>
                                           {sourced.total === 0 ? (
                                             <p className="text-xs text-slate-400">No proof point survived validation.</p>
                                           ) : (
-                                            <ul className="space-y-2">
+                                            <div className="space-y-2">
                                               {(p.proof_points || []).map((pr: any, j: number) => (
-                                                <li key={j} className="flex items-start gap-2.5">
-                                                  <span className="mt-[7px] w-1.5 h-1.5 rounded-full bg-slate-300 flex-shrink-0" />
-                                                  <p className="text-[13px] text-slate-700 leading-[1.7] flex-1">
+                                                <div key={j} className="flex flex-col md:flex-row md:items-start justify-between gap-2 rounded-lg border border-slate-100 bg-white px-3 py-2">
+                                                  <p className="text-xs text-slate-700 leading-relaxed flex-1">
                                                     {pr.proof}
-                                                    {/* Collapsed by label+link: two rows from the
-                                                        same unlinked source rendered as
-                                                        "Account newsAccount news". A distinct
-                                                        link still earns its own chip. */}
-                                                    {dedupeSources(pr.sources).map((s: any, k: number) => (
-                                                      <span key={k}>{' '}<SourceChip s={s} /></span>
-                                                    ))}
                                                     {pr.shared && (
                                                       <span className="ml-1 text-[10px] font-semibold text-amber-700">
                                                         (also supports another pillar)
                                                       </span>
                                                     )}
                                                   </p>
-                                                </li>
+                                                  <div className="flex flex-wrap gap-1 md:justify-end flex-shrink-0">
+                                                    {(pr.sources || []).map((s: any, k: number) => (
+                                                      <SourceChip key={k} s={s} />
+                                                    ))}
+                                                  </div>
+                                                </div>
                                               ))}
-                                            </ul>
+                                            </div>
                                           )}
                                         </div>
 
                                         {(p.target_role || p.next_step) && (
-                                          <div className="border-t border-slate-200 mt-4 pt-3 text-[12px] text-slate-600 space-y-0.5">
-                                            {p.target_role && <p><span className="font-semibold text-slate-700">Target role:</span> {p.target_role}</p>}
-                                            {p.next_step && <p><span className="font-semibold text-slate-700">Next step:</span> {p.next_step}</p>}
+                                          <div className="border-t border-slate-200 pt-3 text-xs text-slate-600 space-y-0.5">
+                                            {p.target_role && <p><span className="font-semibold">Target role:</span> {p.target_role}</p>}
+                                            {p.next_step && <p><span className="font-semibold">Next step:</span> {p.next_step}</p>}
                                           </div>
                                         )}
                                       </div>
@@ -5098,17 +5042,10 @@ export default function UserDashboardPage() {
                       ) : (
                         <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center">
                           <p className="text-sm font-semibold text-slate-700">No message house yet</p>
-                          <p className="text-xs text-slate-500 mt-1 max-w-lg mx-auto leading-relaxed">
-                            It is built from this account&apos;s firmographics, technology, intent
-                            and news evidence, and appears once that data has been indexed.
-                            Uploading or replacing any of those files rebuilds it automatically.
+                          <p className="text-xs text-slate-500 mt-1">
+                            Built from the retrieval index over this account&apos;s firmographics,
+                            technology, intent and news evidence.
                           </p>
-                          {cmIndex && cmIndex.status !== 'READY' && (
-                            <p className="text-xs text-slate-400 mt-2">
-                              Retrieval index: {cmIndex.status}
-                              {cmIndex.blocked_reason ? ` — ${cmIndex.blocked_reason}` : ''}
-                            </p>
-                          )}
                         </div>
                       )}
                     </div>

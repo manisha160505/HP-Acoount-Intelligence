@@ -331,6 +331,8 @@ export default function UserDashboardPage() {
 
   // Content Messaging
   const [expandedPillar, setExpandedPillar] = useState<string | null>(null);
+  const [cmGenerating, setCmGenerating] = useState<boolean>(false);
+  const [cmError, setCmError] = useState<string | null>(null);
   const [retrievalStatus, setRetrievalStatus] = useState<any>(null);
 
   // Whether an answer is current, stale, or unavailable mid-rebuild is a fact
@@ -349,7 +351,7 @@ export default function UserDashboardPage() {
       }
     })();
     return () => { cancelled = true; };
-  }, [activeFeatureKey, selectedAccountId]);
+  }, [activeFeatureKey, selectedAccountId, cmGenerating]);
 
   // Objectives, formats and personas come from the evaluator endpoints so the
   // dropdowns cannot drift from the scoring formulas that consume them.
@@ -4748,6 +4750,21 @@ export default function UserDashboardPage() {
                     .find((i: any) => i.index === 'content_messaging');
 
 
+                  const buildMessageHouse = async () => {
+                    if (!selectedAccountId) return;
+                    setCmGenerating(true);
+                    setCmError(null);
+                    try {
+                      const res = await api.post<WidgetResponse>(
+                        `/accounts/${selectedAccountId}/widgets/content_messaging/generate`, {});
+                      setWidgets(prev => prev.map(w =>
+                        w.widget_key === 'messaging_pillars_output' ? res.data : w));
+                    } catch (err: any) {
+                      setCmError(err?.response?.data?.detail || err?.message || 'Generation failed.');
+                    } finally {
+                      setCmGenerating(false);
+                    }
+                  };
 
                   // Two evidence rows from the same unlinked source are one chip.
                   // A row that links somewhere keeps its own, since the links
@@ -4819,7 +4836,6 @@ export default function UserDashboardPage() {
                       {cmIndex && (
                         <div className={`rounded-xl border px-4 py-2.5 text-xs ${
                           cmIndex.status === 'READY' ? 'border-slate-200 bg-slate-50 text-slate-600'
-                            : cmIndex.status === 'RETIRED' ? 'border-slate-300 bg-slate-100 text-slate-600'
                             : cmIndex.status === 'STALE' ? 'border-amber-200 bg-amber-50 text-amber-800'
                             : cmIndex.status === 'BUILDING' ? 'border-indigo-200 bg-indigo-50 text-indigo-700'
                             : 'border-rose-200 bg-rose-50 text-rose-700'}`}>
@@ -4828,24 +4844,12 @@ export default function UserDashboardPage() {
                           {cmIndex.status === 'BUILDING' && <span> — unavailable until the rebuild finishes.</span>}
                           {cmIndex.status === 'STALE' && <span> — answering from the last good build.</span>}
                           {cmIndex.status === 'FAILED' && <span> — {cmIndex.last_error}</span>}
-                          {/* Retired is not a fault: the index was dropped on purpose
-                              to free capacity. What is below is the last build, and it
-                              is complete - it simply will not refresh until rebuilt. */}
-                          {cmIndex.status === 'RETIRED' && (
-                            <span> — retired to free capacity. What you see below is the
-                              last published version and will not refresh until this index
-                              is rebuilt.</span>
-                          )}
                         </div>
                       )}
 
-                      {/* The index built but the message house did not regenerate.
-                          Reported separately from the index's own status, because
-                          the index is fine and still answering. */}
-                      {cmIndex?.generation_error && (
-                        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
-                          <span className="font-semibold">The message house could not be rebuilt.</span>{' '}
-                          {cmIndex.generation_error} The version below is the last one that built.
+                      {cmError && (
+                        <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs font-semibold text-rose-700">
+                          {cmError}
                         </div>
                       )}
 
@@ -5098,17 +5102,10 @@ export default function UserDashboardPage() {
                       ) : (
                         <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center">
                           <p className="text-sm font-semibold text-slate-700">No message house yet</p>
-                          <p className="text-xs text-slate-500 mt-1 max-w-lg mx-auto leading-relaxed">
-                            It is built from this account&apos;s firmographics, technology, intent
-                            and news evidence, and appears once that data has been indexed.
-                            Uploading or replacing any of those files rebuilds it automatically.
+                          <p className="text-xs text-slate-500 mt-1">
+                            Built from the retrieval index over this account&apos;s firmographics,
+                            technology, intent and news evidence.
                           </p>
-                          {cmIndex && cmIndex.status !== 'READY' && (
-                            <p className="text-xs text-slate-400 mt-2">
-                              Retrieval index: {cmIndex.status}
-                              {cmIndex.blocked_reason ? ` — ${cmIndex.blocked_reason}` : ''}
-                            </p>
-                          )}
                         </div>
                       )}
                     </div>

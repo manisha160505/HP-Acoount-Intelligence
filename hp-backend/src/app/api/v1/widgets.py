@@ -24,6 +24,11 @@ from app.services.evaluator import scoring as evaluator_scoring
 from app.services.evaluator import formats as evaluator_formats
 from app.services.evaluator import storage as evaluator_storage
 from app.services.evaluator import evaluate as evaluator_evaluate
+from app.services.retrieval import ingest as retrieval_ingest
+from app.services.retrieval import jobs as retrieval_jobs
+from app.services.retrieval import query as retrieval_query
+from app.services.retrieval import registry as retrieval_registry
+from app.services.messaging import pillars as messaging_pillars
 
 router = APIRouter(tags=["Widget Contracts & Dashboard Shell"])
 
@@ -810,3 +815,176 @@ def message_evaluation_detail(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
                             detail="Evaluation not found for this account")
     return found
+
+
+# --- Retrieval indexes -------------------------------------------------------
+#
+# Building an index is slow and costs an LLM call per chunk, so nothing here
+# builds inline: the rebuild endpoint queues a job and returns. The status
+# endpoint is how the UI knows whether an answer is current, stale, or
+# unavailable because a rebuild is in progress.
+
+
+@router.get("/accounts/{account_id}/retrieval/status")
+def retrieval_status(
+    account_id: str,
+    current_user: dict = Depends(require_user_role)
+):
+    """State of every declared index for this account."""
+    if not ObjectId.is_valid(account_id):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Invalid account ID format")
+    db = get_db()
+    if not db["accounts"].find_one({"_id": ObjectId(account_id)}):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="Company account not found")
+
+    indexes = []
+    for key in retrieval_registry.INDEX_KEYS:
+        entry = retrieval_query.status(account_id, key)
+        ok, reason = retrieval_registry.preconditions(db, account_id, key)
+        entry["can_build"] = ok
+        entry["blocked_reason"] = None if ok else reason
+        indexes.append(entry)
+
+    return {"indexes": indexes,
+            "jobs": retrieval_jobs.status(account_id)}
+
+
+@router.post("/accounts/{account_id}/retrieval/{index}/rebuild")
+def retrieval_rebuild(
+    account_id: str,
+    index: str,
+    current_user: dict = Depends(require_admin_role)
+):
+    """Queue a FULL rebuild. Admin only, and deliberately not automatic.
+
+    A full rebuild drops the workspace and rebuilds it in place, because the
+    cluster has no room for a second one. That means the index is unavailable
+    while it runs and there is nothing to roll back to if it fails - which is
+    why this is an explicit admin action rather than something the system does
+    on its own. Ordinary data changes take the incremental path instead.
+    """
+    if not ObjectId.is_valid(account_id):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Invalid account ID format")
+    try:
+        retrieval_registry.spec(index)
+    except retrieval_registry.UnknownIndex as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+    if not retrieval_registry.is_enabled(index):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=retrieval_registry.spec(index).get("notice")
+            or "This index is not enabled yet.")
+
+    job = retrieval_ingest.request_update(
+        account_id, index, reason="admin rebuild", full=True)
+    return {"queued": bool(job),
+            "index": index,
+            "warning": ("A full rebuild drops the index and rebuilds it in place. "
+                        "It is unavailable until the rebuild completes, and a "
+                        "failed rebuild leaves no previous copy."),
+            "status": retrieval_query.status(account_id, index)}
+
+
+@router.post("/accounts/{account_id}/retrieval/{index}/retire")
+def retrieval_retire(
+    account_id: str,
+    index: str,
+    current_user: dict = Depends(require_admin_role)
+):
+    """Drop an index's workspace to free Atlas vector-index capacity.
+
+    Admin only, and deliberately explicit: the cluster caps vector search
+    indexes and one workspace consumes three, so retiring one index is how you
+    make room for another.
+
+    The feature keeps rendering its last published output with working source
+    citations - those live outside the workspace. What it loses is the ability
+    to retrieve or regenerate, until someone rebuilds it.
+    """
+    if not ObjectId.is_valid(account_id):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Invalid account ID format")
+    try:
+        retrieval_registry.spec(index)
+    except retrieval_registry.UnknownIndex as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+    result = retrieval_ingest.retire_index(
+        account_id, index, reason="retired by an administrator to free capacity")
+    return {
+        "retired": True,
+        "index": index,
+        "freed": result["dropped"],
+        "note": ("The published output and its source citations are unaffected. "
+                 "Retrieval and regeneration stop until this index is rebuilt."),
+        "status": retrieval_query.status(account_id, index),
+    }
+
+
+@router.post("/accounts/{account_id}/retrieval/{index}/run")
+def retrieval_run_now(
+    account_id: str,
+    index: str,
+    current_user: dict = Depends(require_admin_role)
+):
+    """Drain the queue synchronously. Admin escape hatch for local work.
+
+    The worker normally picks jobs up on its own; this exists so a developer
+    can force one through and see the error rather than watching a queue.
+    """
+    if not ObjectId.is_valid(account_id):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Invalid account ID format")
+    try:
+        results = retrieval_ingest.drain(max_jobs=3)
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail="%s: %s" % (type(exc).__name__, exc))
+    return {"ran": results, "status": retrieval_query.status(account_id, index)}
+
+
+# --- Content Messaging -------------------------------------------------------
+
+
+@router.post("/accounts/{account_id}/widgets/content_messaging/generate",
+             response_model=WidgetResponse)
+def generate_content_messaging(
+    account_id: str,
+    current_user: dict = Depends(require_user_role)
+):
+    """Build the message house from the Content Messaging index."""
+    if not ObjectId.is_valid(account_id):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Invalid account ID format")
+    db = get_db()
+    if not db["accounts"].find_one({"_id": ObjectId(account_id)}):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="Company account not found")
+
+    try:
+        doc = messaging_pillars.generate_messaging_pillars(account_id)
+    except messaging_pillars.PillarError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+    contract = next(c for c in WIDGET_REGISTRY["content_messaging"]
+                    if c["widget_key"] == messaging_pillars.WIDGET_KEY)
+    updated = doc.get("updated_at")
+    return {
+        "account_id": account_id,
+        "feature_key": "content_messaging",
+        "widget_key": messaging_pillars.WIDGET_KEY,
+        "widget_name": contract["widget_name"],
+        "description": contract["description"],
+        "widget_type": contract["widget_type"],
+        "data_classification": contract["data_classification"],
+        "status": doc.get("status", "pending"),
+        "data": doc.get("data", {}),
+        "source_datasets": contract["source_datasets"],
+        "source_fields": contract["source_fields"],
+        "display_order": contract["display_order"],
+        "updated_at": updated.isoformat() if isinstance(updated, datetime) else str(updated or ""),
+    }

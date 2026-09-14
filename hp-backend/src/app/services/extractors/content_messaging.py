@@ -208,29 +208,47 @@ def extract_content_messaging(account_id: str) -> list[dict]:
     )
     results.append(context_payload)
 
-    # 2. Widget: messaging_pillars_output (Inferred - Left as Pending / TBD)
-    pillars_payload = {
-        "account_id": account_id,
-        "feature_key": "content_messaging",
-        "widget_key": "messaging_pillars_output",
-        "data_classification": "inferred",
-        "status": "pending",
-        "data": {
-            "umbrella_message": "Inferred TBD",
-            "pillars": [],
-            "why_hp": [],
-            "notice": "AI campaign message house synthesis (umbrella message, messaging pillars, challenge/benefit pairs, and Why HP positioning) is TBD for Step 8 AI model execution."
-        },
-        "source_datasets": ["firmographics", "technographics", "intent_score"],
-        "extracted_at": now,
-        "updated_at": now
-    }
+    # 2. Widget: messaging_pillars_output
+    #
+    # The message house is generated from the retrieval index by
+    # services/messaging/pillars.py, not here. This extractor only seeds the
+    # placeholder when nothing has been generated yet.
+    #
+    # It must never overwrite a real one. This runs on every data change, and
+    # unconditionally writing the placeholder would replace verified pillars -
+    # with their evidence ids and sourced proof - with "Inferred TBD" every time
+    # a CSV was re-uploaded. The generated widget is left alone; the retrieval
+    # index update queued alongside this run is what refreshes it.
+    existing = db["account_widgets"].find_one(
+        {"account_id": account_id, "widget_key": "messaging_pillars_output"})
+    already_generated = bool(
+        ((existing or {}).get("data") or {}).get("pillars"))
 
-    db["account_widgets"].update_one(
-        {"account_id": account_id, "widget_key": "messaging_pillars_output"},
-        {"$set": pillars_payload},
-        upsert=True
-    )
-    results.append(pillars_payload)
+    if not already_generated:
+        pillars_payload = {
+            "account_id": account_id,
+            "feature_key": "content_messaging",
+            "widget_key": "messaging_pillars_output",
+            "data_classification": "inferred",
+            "status": "pending",
+            "data": {
+                "umbrella_message": "",
+                "pillars": [],
+                "why_hp": [],
+                "notice": "The message house has not been generated yet. It is built "
+                          "from the Content Messaging retrieval index."
+            },
+            "source_datasets": ["firmographics", "technographics", "intent_score"],
+            "extracted_at": now,
+            "updated_at": now
+        }
+        db["account_widgets"].update_one(
+            {"account_id": account_id, "widget_key": "messaging_pillars_output"},
+            {"$set": pillars_payload},
+            upsert=True
+        )
+        results.append(pillars_payload)
+    else:
+        results.append(existing)
 
     return results

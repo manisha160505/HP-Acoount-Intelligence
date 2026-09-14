@@ -35,6 +35,18 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = ""
     OPENAI_ENDPOINT: str = "https://accurix-foundry-resource.cognitiveservices.azure.com/openai/v1/"
     OPENAI_MODEL_NAME: str = "gpt-4o"
+    # The retrieval layer is the only thing that embeds; OPENAI_API_KEY and
+    # OPENAI_ENDPOINT above are reused as-is rather than duplicated for it.
+    # 1536 is the output size of text-embedding-3-small - changing the model
+    # means changing the dimension, and LightRAG refuses to reuse an index
+    # built at a different one.
+    OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
+    OPENAI_EMBEDDING_DIM: int = 1536
+    # The model the retrieval layer uses for entity extraction and answer
+    # synthesis. Left empty it falls back to OPENAI_MODEL_NAME, so the
+    # retrieval layer can be moved to a different deployment without changing
+    # what the other ten features run on.
+    OPENAI_RETRIEVAL_MODEL: str = ""
 
     class Config:
         env_file = ENV_FILES
