@@ -8,8 +8,7 @@ import api from '@/services/api';
 import { CompanyAccount } from '@/types/account';
 import { 
   WidgetResponse, 
-  WidgetClassification,
-  IntentTopic
+  WidgetClassification 
 } from '@/types/widget';
 import { 
   Building2, 
@@ -37,7 +36,6 @@ import {
   CheckSquare,
   Megaphone,
   TrendingUp,
-  TrendingDown,
   Sparkles,
   PenTool,
   Star,
@@ -68,8 +66,7 @@ import {
   Download,
   ShieldCheck,
   UserCheck,
-  CheckCircle2,
-  Minus
+  CheckCircle2
 } from 'lucide-react';
 
 const ICON_MAP: Record<string, React.FC<{ className?: string }>> = {
@@ -105,7 +102,7 @@ const NORTHSTAR_SIDEBAR_GROUPS: SidebarGroup[] = [
     items: [
       { key: 'executive_dashboard', label: 'Executive Dashboard', subtitle: 'Account profile & key metrics', description: 'Account profile & key metrics', iconName: 'LayoutDashboard' },
       { key: 'recent_news_signals', label: 'Live Signals', subtitle: 'Real-time news & triggers', description: 'Real-time news & triggers', iconName: 'Newspaper' },
-      { key: 'intent_demand_signals', label: 'Intent & Demand Signals', subtitle: 'HP-category & topic-level research intent', description: 'HP-category & topic-level research intent', iconName: 'TrendingUp' },
+      { key: 'intent_demand_signals', label: 'Intent & Demand Signals', subtitle: 'HP-category & topic-level buying intent', description: 'HP-category & topic-level buying intent', iconName: 'TrendingUp' },
       { key: 'stakeholder_map', label: 'Stakeholder Map', subtitle: 'Contacts & influence map', description: 'Contacts & influence map', iconName: 'Users' },
       { key: 'solution_narrative_opportunity_map', label: 'Opportunity Map', subtitle: 'HP plays: outcome, impact & evidence', description: 'HP plays: outcome, impact & evidence', iconName: 'Lightbulb' },
       { key: 'tech_landscape', label: 'Technographic Map', subtitle: 'Tech stack by category & HP fit', description: 'Tech stack by category & HP fit', iconName: 'Cpu' },
@@ -257,7 +254,6 @@ export default function UserDashboardPage() {
 
   // Key Metrics Source Citation Popover State
   const [activeMetricPopover, setActiveMetricPopover] = useState<string | null>(null);
-  const [expandedPriority, setExpandedPriority] = useState<number | null>(null);
 
   // Live Signals Filter Drawer State
   const [isFilterDrawerOpen, setIsFilterDrawerOpen] = useState(false);
@@ -332,28 +328,6 @@ export default function UserDashboardPage() {
   const [stimulusText, setStimulusText] = useState<string>('');
   const [copiedRewrite, setCopiedRewrite] = useState<boolean>(false);
   const [evaluatorStep, setEvaluatorStep] = useState<string>('inputs');
-
-  // Content Messaging
-  const [expandedPillar, setExpandedPillar] = useState<string | null>(null);
-  const [retrievalStatus, setRetrievalStatus] = useState<any>(null);
-
-  // Whether an answer is current, stale, or unavailable mid-rebuild is a fact
-  // about the index, not about the widget - so it is read from the retrieval
-  // layer rather than inferred from the widget's own timestamp.
-  useEffect(() => {
-    if (!selectedAccountId) return;
-    if (!['content_messaging'].includes(activeFeatureKey || '')) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await api.get<any>(`/accounts/${selectedAccountId}/retrieval/status`);
-        if (!cancelled) setRetrievalStatus(res.data);
-      } catch {
-        if (!cancelled) setRetrievalStatus(null);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [activeFeatureKey, selectedAccountId]);
 
   // Objectives, formats and personas come from the evaluator endpoints so the
   // dropdowns cannot drift from the scoring formulas that consume them.
@@ -483,7 +457,7 @@ export default function UserDashboardPage() {
       { field_path: 'employee_count', source: '1_firmographics.csv (Number Of Employees Range)', type: 'Firmographics', date: '2026-09-04', confidence: '90%', url: 'data/accounts/' + selectedAccount.id + '/firmographics/firmographics.csv' },
       { field_path: 'revenue', source: '1_firmographics.csv (Yearly Revenue Range)', type: 'Firmographics', date: '2026-09-04', confidence: '90%', url: 'data/accounts/' + selectedAccount.id + '/firmographics/firmographics.csv' },
       { field_path: 'company_hierarchy', source: '2_company_hierarchy.csv (Parent Company Name)', type: 'Hierarchy', date: '2026-09-04', confidence: '90%', url: 'data/accounts/' + selectedAccount.id + '/company_hierarchy/company_hierarchy.csv' },
-      { field_path: 'open_job_count', source: 'job_openings.csv (All postings seen, open and closed)', type: 'Job Openings', date: '2026-09-04', confidence: '85%', url: 'data/accounts/' + selectedAccount.id + '/job_openings/job_openings.csv' },
+      { field_path: 'open_job_count', source: 'job_openings.csv (Active record count)', type: 'Job Openings', date: '2026-09-04', confidence: '85%', url: 'data/accounts/' + selectedAccount.id + '/job_openings/job_openings.csv' },
       { field_path: 'liveSignals', source: 'google_news_rss_data.csv + news_events.csv', type: 'Google News', date: '2026-09-04', confidence: '80%', url: 'data/accounts/' + selectedAccount.id + '/google_news/google_news_rss_data.csv' },
       { field_path: 'technology_stack', source: '4_technographics.csv (Full Tech Stack)', type: 'Technographics', date: '2026-09-04', confidence: '85%', url: 'data/accounts/' + selectedAccount.id + '/technographics/technographics.csv' },
       { field_path: 'intentTopics', source: '11_intent_score.csv (Composite Score)', type: 'Bombora', date: '2026-09-04', confidence: '80%', url: 'data/accounts/' + selectedAccount.id + '/intent_score/intent_score.csv' }
@@ -827,34 +801,11 @@ export default function UserDashboardPage() {
                   const summaryWidget = widgets.find(w => w.widget_key === 'exec_summary_card');
                   const metricsWidget = widgets.find(w => w.widget_key === 'exec_key_metrics');
                   const hiringWidget = widgets.find(w => w.widget_key === 'exec_hiring_velocity');
-                  const prioritiesWidget = widgets.find(w => w.widget_key === 'exec_strategic_priorities');
 
                   const summaryData = (summaryWidget && summaryWidget.status === 'available' && summaryWidget.data) ? summaryWidget.data : null;
                   const metricsData = (metricsWidget && metricsWidget.status === 'available' && metricsWidget.data) ? metricsWidget.data : null;
                   const hiringData = (hiringWidget && hiringWidget.status === 'available' && hiringWidget.data) ? hiringWidget.data : null;
-                  const prioritiesData = (prioritiesWidget && prioritiesWidget.status === 'available' && prioritiesWidget.data) ? prioritiesWidget.data : null;
-
-                  // Quick Stats. All three come from exec_summary_card, which
-                  // resolves them server-side - `widgets` here holds only the
-                  // ACTIVE feature's widgets, so reading another feature's
-                  // widget from this component returns nothing. Each is null
-                  // when the owning feature has not run, and the card shows a
-                  // dash. Previously "Solution Narratives" was the literal 5
-                  // with no data binding at all (the account has 4), and
-                  // "Active Urgent Signals" was wired to open_job_count - 100
-                  // job postings shown as 100 urgent signals, against 8 real
-                  // ones. A number with no source behind it is worse than a
-                  // blank: it looks checked.
-                  const narrativeCount = summaryData?.solution_narratives_count ?? null;
-                  const stakeholderCount = summaryData?.stakeholders_mapped_count ?? null;
-                  const signalCount = summaryData?.recent_signals_count ?? null;
-
-                  // Figures the company actually filed, as opposed to the
-                  // firmographic bands beside them. Each carries its own period,
-                  // unit and page, so the card can say where it came from.
-                  const reportedMetrics: any[] = (metricsData?.reported_metrics || prioritiesData?.reported_metrics || []) as any[];
-                  const priorityList: any[] = (prioritiesData?.priorities || []) as any[];
-
+                  
                   const displayName = summaryData?.company_name || selectedAccount.name;
                   const displayDesc = summaryData?.business_description || `${selectedAccount.name} is an active target company account in the HP Account Intelligence platform. Upload firmographics.csv to view extracted company profile.`;
                   const domainVal = summaryData?.domain || null;
@@ -947,152 +898,178 @@ export default function UserDashboardPage() {
                         </div>
                       </div>
 
-                      {/* Section 3: KEY METRICS GRID
-                          Laid out as in the northstar dashboard: a dense grid of
-                          small cards, each with its label, the figure, its
-                          period-on-period move, a tier badge and a source chip.
-
-                          Two kinds of card sit in this grid and the difference
-                          is deliberate and visible. A FILED card is a number the
-                          company reported, carrying its own reporting period,
-                          unit and page. A BAND card is a bucket a data vendor
-                          assigned. Presenting a band as though it were a filed
-                          figure is exactly the confusion ABX's pre-display check
-                          exists to prevent, so the badge names which it is. */}
+                      {/* Section 3: KEY METRICS GRID (Exact Northstar 5-Column Style with Citation Popovers) */}
                       <div className="space-y-3">
                         <div className="flex items-center space-x-3">
                           <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700">
                             KEY METRICS
                           </h3>
-                          {/* Provenance is stated once, quietly, instead of a
-                              coloured pill on every card. The figures are what
-                              the eye should land on. */}
-                          <span className="text-[10px] text-slate-400">
-                            {reportedMetrics.length > 0 && `${reportedMetrics.length} from filings · `}2 firmographic bands
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-hp-navy border border-blue-200">
+                            Verified Datasets Sourced
                           </span>
                         </div>
 
                         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-
-                          {/* The firmographic bands. Kept first and labelled as
-                              bands so the contrast with the filed figures is
-                              immediate rather than buried in a tooltip. */}
-                          <div className="relative bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col justify-between min-h-[7rem]">
-                            <span className="text-[11px] text-slate-500 block">Total Employees</span>
-                            <span className="text-lg font-semibold text-slate-900 leading-tight">
+                          
+                          {/* Card 1: Total Employees */}
+                          <div className="relative bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col justify-between h-28">
+                            <span className="text-[11px] font-semibold text-slate-500 block">Total Employees</span>
+                            <span className="text-xl font-extrabold text-slate-900">
                               {metricsData ? metricsData.employee_count : 'N/A'}
                             </span>
-                            <span className="text-[10px] text-slate-400">Band · Firmographics</span>
+                            <div className="flex items-center space-x-1.5 text-[10px] font-bold">
+                              <span className="px-1.5 py-0.5 bg-blue-50 text-hp-navy rounded font-bold border border-blue-200">T1</span>
+                              <button
+                                type="button"
+                                onClick={() => setActiveMetricPopover(activeMetricPopover === 'emp' ? null : 'emp')}
+                                className="inline-flex items-center space-x-1 px-2 py-0.5 rounded bg-blue-50/80 hover:bg-blue-100 text-hp-navy border border-blue-200/80 font-bold transition"
+                              >
+                                <FileText className="w-3 h-3 text-hp-navy" />
+                                <span>Firmographics</span>
+                                <ExternalLink className="w-2.5 h-2.5 ml-0.5" />
+                              </button>
+                            </div>
+
+                            {/* Citation Popover Modal */}
+                            {activeMetricPopover === 'emp' && (
+                              <div className="absolute left-0 bottom-full mb-2 w-72 bg-white border border-slate-200 rounded-2xl shadow-2xl p-4 z-50 animate-fade-in text-xs">
+                                <div className="flex items-center justify-between border-b border-slate-100 pb-2 mb-2">
+                                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                                    PRIMARY SOURCE · FIRMOGRAPHICS
+                                  </span>
+                                  <button onClick={() => setActiveMetricPopover(null)} className="text-slate-400 hover:text-slate-600">
+                                    <X className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                                <p className="text-slate-700 italic font-serif leading-relaxed text-[11px] mb-2">
+                                  “Number Of Employees Range: {metricsData ? metricsData.employee_count : '10001+'} extracted from 1_firmographics.csv for {displayName}.”
+                                </p>
+                                <a
+                                  href={getDownloadUrl('firmographics')}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-hp-navy font-bold text-[10px] inline-flex items-center hover:underline"
+                                >
+                                  <ExternalLink className="w-3 h-3 mr-1" />
+                                  <span>Open source file</span>
+                                </a>
+                              </div>
+                            )}
                           </div>
 
-                          <div className="relative bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col justify-between min-h-[7rem]">
-                            <span className="text-[11px] text-slate-500 block">Yearly Revenue Range</span>
-                            <span className="text-lg font-semibold text-slate-900 leading-tight">
+                          {/* Card 2: Yearly Revenue Range */}
+                          <div className="relative bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col justify-between h-28">
+                            <span className="text-[11px] font-semibold text-slate-500 block">Yearly Revenue Range</span>
+                            <span className="text-xl font-extrabold text-emerald-700">
                               {metricsData ? metricsData.revenue : 'N/A'}
                             </span>
-                            <span className="text-[10px] text-slate-400">Band · Firmographics</span>
+                            <div className="flex items-center space-x-1.5 text-[10px] font-bold">
+                              <span className="px-1.5 py-0.5 bg-blue-50 text-hp-navy rounded font-bold border border-blue-200">T1</span>
+                              <button
+                                type="button"
+                                onClick={() => setActiveMetricPopover(activeMetricPopover === 'rev' ? null : 'rev')}
+                                className="inline-flex items-center space-x-1 px-2 py-0.5 rounded bg-blue-50/80 hover:bg-blue-100 text-hp-navy border border-blue-200/80 font-bold transition"
+                              >
+                                <FileText className="w-3 h-3 text-hp-navy" />
+                                <span>Firmographics</span>
+                                <ExternalLink className="w-2.5 h-2.5 ml-0.5" />
+                              </button>
+                            </div>
+
+                            {/* Citation Popover Modal */}
+                            {activeMetricPopover === 'rev' && (
+                              <div className="absolute left-0 bottom-full mb-2 w-72 bg-white border border-slate-200 rounded-2xl shadow-2xl p-4 z-50 animate-fade-in text-xs">
+                                <div className="flex items-center justify-between border-b border-slate-100 pb-2 mb-2">
+                                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                                    PRIMARY SOURCE · FIRMOGRAPHICS
+                                  </span>
+                                  <button onClick={() => setActiveMetricPopover(null)} className="text-slate-400 hover:text-slate-600">
+                                    <X className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                                <p className="text-slate-700 italic font-serif leading-relaxed text-[11px] mb-2">
+                                  “Yearly Revenue Range: {metricsData ? metricsData.revenue : '10B-100B'} extracted from 1_firmographics.csv for {displayName}.”
+                                </p>
+                                <a
+                                  href={getDownloadUrl('firmographics')}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-hp-navy font-bold text-[10px] inline-flex items-center hover:underline"
+                                >
+                                  <ExternalLink className="w-3 h-3 mr-1" />
+                                  <span>Open source file</span>
+                                </a>
+                              </div>
+                            )}
                           </div>
 
-                          {/* Open job postings - a count, not a band. */}
-                          {hiringData?.open_job_count && (
-                            <div className="relative bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col justify-between min-h-[7rem]">
-                              <span className="text-[11px] text-slate-500 block">Active Open Job Postings</span>
-                              <span className="text-lg font-semibold text-slate-900 leading-tight">
-                                {hiringData.open_job_count}
-                              </span>
-                              <span className="text-[10px] text-slate-400">Count · Job postings</span>
+                          {/* Card 3: Active Open Job Postings */}
+                          <div className="relative bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col justify-between h-28">
+                            <span className="text-[11px] font-semibold text-slate-500 block">Active Open Job Postings</span>
+                            <span className="text-xl font-extrabold text-hp-navy">
+                              {hiringData ? `${hiringData.open_job_count} roles` : 'N/A'}
+                            </span>
+                            <div className="flex items-center space-x-1.5 text-[10px] font-bold">
+                              <span className="px-1.5 py-0.5 bg-blue-50 text-hp-navy rounded font-bold border border-blue-200">T1</span>
+                              <button
+                                type="button"
+                                onClick={() => setActiveMetricPopover(activeMetricPopover === 'jobs' ? null : 'jobs')}
+                                className="inline-flex items-center space-x-1 px-2 py-0.5 rounded bg-blue-50/80 hover:bg-blue-100 text-hp-navy border border-blue-200/80 font-bold transition"
+                              >
+                                <FileText className="w-3 h-3 text-hp-navy" />
+                                <span>Job Openings</span>
+                                <ExternalLink className="w-2.5 h-2.5 ml-0.5" />
+                              </button>
                             </div>
-                          )}
 
-                          {/* Every figure the account actually filed. */}
-                          {reportedMetrics.map((m: any, i: number) => (
-                            <div key={m.evidence_id || i} className="relative bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col justify-between min-h-[7rem]">
-                              <div className="flex items-start justify-between gap-1">
-                                <span className="text-[11px] text-slate-500 block leading-snug" title={`${m.metric} (${m.period})`}>
-                                  {m.period} {m.metric}
-                                </span>
-                                {/* The arrow carries the direction in colour -
-                                    it is the one place a glance should pick up
-                                    a signal - while everything else on the card
-                                    stays quiet. */}
-                                {m.direction === 'up' && <TrendingUp className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />}
-                                {m.direction === 'down' && <TrendingDown className="w-3.5 h-3.5 text-rose-600 flex-shrink-0" />}
-                              </div>
-
-                              <span className="text-lg font-semibold text-slate-900 leading-tight break-words">
-                                {m.value_text}
-                                {m.change_text && (
-                                  <span className={`ml-1.5 text-[11px] font-normal ${m.direction === 'up' ? 'text-emerald-700' : m.direction === 'down' ? 'text-rose-700' : 'text-slate-500'}`}>
-                                    {m.change_text}
+                            {/* Citation Popover Modal */}
+                            {activeMetricPopover === 'jobs' && (
+                              <div className="absolute left-0 bottom-full mb-2 w-72 bg-white border border-slate-200 rounded-2xl shadow-2xl p-4 z-50 animate-fade-in text-xs">
+                                <div className="flex items-center justify-between border-b border-slate-100 pb-2 mb-2">
+                                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                                    PRIMARY SOURCE · JOB OPENINGS
                                   </span>
-                                )}
-                              </span>
-
-                              <div className="flex items-center gap-1 text-[10px] text-slate-400">
-                                <span>Filed ·</span>
-                                <button
-                                  type="button"
-                                  onClick={() => setActiveMetricPopover(activeMetricPopover === `rep${i}` ? null : `rep${i}`)}
-                                  className="inline-flex items-center gap-1 text-slate-500 hover:text-hp-navy hover:underline transition min-w-0"
-                                >
-                                  <span className="truncate max-w-[6rem]">p.{m.page}</span>
-                                </button>
-                              </div>
-
-                              {activeMetricPopover === `rep${i}` && (
-                                <div className="absolute left-0 bottom-full mb-2 w-80 bg-white border border-slate-200 rounded-2xl shadow-2xl p-4 z-50 animate-fade-in text-xs">
-                                  <div className="flex items-center justify-between border-b border-slate-100 pb-2 mb-2">
-                                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                                      REPORTED FIGURE &middot; COMPANY FILING
-                                    </span>
-                                  </div>
-                                  <p className="text-slate-700 leading-relaxed">
-                                    <strong>{m.metric}</strong> for <strong>{m.period}</strong>: {m.value_text}
-                                  </p>
-                                  {m.change_text && (
-                                    <p className="text-[10px] text-slate-600 mt-1.5">
-                                      {m.change_text} against {m.previous_period} ({m.previous_value_text}). {m.change_basis}.
-                                    </p>
-                                  )}
-                                  {m.series?.length > 1 && (
-                                    <p className="text-[10px] text-slate-500 mt-1.5">
-                                      {m.series.map((s: any) => `${s.period} ${s.value_text}`).join('  ·  ')}
-                                    </p>
-                                  )}
-                                  <p className="text-[10px] text-slate-500 mt-2">
-                                    {m.filing_label}{m.page ? `, page ${m.page}` : ''}
-                                  </p>
-                                  {m.quote && (
-                                    <p className="text-[10px] text-slate-500 mt-2 border-t border-slate-100 pt-2 break-words">
-                                      <span className="font-bold text-slate-600">Row as printed: </span>{m.quote}
-                                    </p>
-                                  )}
+                                  <button onClick={() => setActiveMetricPopover(null)} className="text-slate-400 hover:text-slate-600">
+                                    <X className="w-3.5 h-3.5" />
+                                  </button>
                                 </div>
-                              )}
-                            </div>
-                          ))}
+                                <p className="text-slate-700 italic font-serif leading-relaxed text-[11px] mb-2">
+                                  “{hiringData ? hiringData.open_job_count : '100'} active open job postings recorded in job_openings.csv for {displayName}.”
+                                </p>
+                                <a
+                                  href={getDownloadUrl('job_openings')}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-hp-navy font-bold text-[10px] inline-flex items-center hover:underline"
+                                >
+                                  <ExternalLink className="w-3 h-3 mr-1" />
+                                  <span>Open source file</span>
+                                </a>
+                              </div>
+                            )}
+                          </div>
 
-                          {reportedMetrics.length === 0 && (
-                            <div className="bg-white p-4 rounded-2xl border border-dashed border-slate-200 shadow-xs flex flex-col justify-between min-h-[7rem] opacity-80 sm:col-span-2">
-                              <span className="text-[11px] text-slate-500 block">Reported financial figures</span>
-                              <span className="text-xs text-slate-400 italic leading-snug">
-                                No filed figure is available yet
-                              </span>
-                              <span className="text-[10px] text-slate-400 leading-snug">
-                                Upload the account&apos;s annual report or exchange filings under Compliance Filings.
-                              </span>
+                          {/* Card 4: Revenue Growth (Northstar Metric Placeholder) */}
+                          <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col justify-between h-28 opacity-80">
+                            <span className="text-[11px] font-semibold text-slate-500 block">Revenue Growth (YoY)</span>
+                            <span className="text-sm font-bold text-slate-400 italic">Derived TBD</span>
+                            <div className="flex items-center space-x-1 text-[10px] font-bold text-slate-400">
+                              <span className="px-1.5 py-0.5 bg-slate-100 rounded text-slate-600 border border-slate-200">T1</span>
+                              <span>Future Calc</span>
                             </div>
-                          )}
+                          </div>
+
+                          {/* Card 5: Annual ICT Spend (Northstar Metric Placeholder) */}
+                          <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col justify-between h-28 opacity-80">
+                            <span className="text-[11px] font-semibold text-slate-500 block">Est. Annual ICT Spend</span>
+                            <span className="text-sm font-bold text-slate-400 italic">Derived TBD</span>
+                            <div className="flex items-center space-x-1 text-[10px] font-bold text-slate-400">
+                              <span className="px-1.5 py-0.5 bg-slate-100 rounded text-slate-600 border border-slate-200">T2</span>
+                              <span>Future Calc</span>
+                            </div>
+                          </div>
 
                         </div>
-
-                        {reportedMetrics.length > 0 && (
-                          <p className="text-[10px] text-slate-400 leading-relaxed">
-                            Filed figures are what {displayName} reported, each with its reporting period, unit and page.
-                            Band figures are buckets assigned by a data vendor, not reported values.
-                            A period-on-period move is shown only where the earlier period was itself reported.
-                          </p>
-                        )}
                       </div>
 
                       {/* Section 4: URGENCY SCORE & QUICK STATS (Two-Column Layout) */}
@@ -1137,10 +1114,10 @@ export default function UserDashboardPage() {
                                 {
                                   id: 'hiring_velocity',
                                   label: 'Hiring Velocity',
-                                  scoreText: hiringData ? `${hiringData.open_job_count} postings seen` : 'TBD',
+                                  scoreText: hiringData ? `${hiringData.open_job_count} open roles` : 'TBD',
                                   progressPct: hiringData ? '80%' : '0%',
                                   barColor: hiringData ? 'bg-hp-navy' : 'bg-slate-300',
-                                  rationale: `Hiring velocity signal: ${hiringData ? `${hiringData.open_job_count} job postings seen in job_openings.csv (open and closed).` : 'No job openings dataset uploaded yet.'}`
+                                  rationale: `Hiring velocity signal: ${hiringData ? `${hiringData.open_job_count} active open job postings extracted from job_openings.csv.` : 'No job openings dataset uploaded yet.'}`
                                 },
                                 {
                                   id: 'expansion_triggers',
@@ -1231,9 +1208,7 @@ export default function UserDashboardPage() {
                                 <Lightbulb className="w-4 h-4" />
                               </div>
                               <div>
-                                <span className="text-base font-extrabold text-slate-900 block">
-                                  {narrativeCount ?? <span className="text-slate-300">&mdash;</span>}
-                                </span>
+                                <span className="text-base font-extrabold text-slate-900 block">5</span>
                                 <span className="text-[10px] text-slate-500 font-medium">Solution Narratives</span>
                               </div>
                             </div>
@@ -1244,7 +1219,7 @@ export default function UserDashboardPage() {
                               </div>
                               <div>
                                  <span className="text-base font-extrabold text-slate-900 block">
-                                   {stakeholderCount ?? <span className="text-slate-300">&mdash;</span>}
+                                   {summaryData?.stakeholders_mapped_count ?? 23}
                                  </span>
                                 <span className="text-[10px] text-slate-500 font-medium">Stakeholders Mapped</span>
                               </div>
@@ -1256,12 +1231,9 @@ export default function UserDashboardPage() {
                               </div>
                               <div>
                                 <span className="text-base font-extrabold text-slate-900 block">
-                                  {signalCount ?? <span className="text-slate-300">&mdash;</span>}
+                                  {hiringData ? hiringData.open_job_count : '0'}
                                 </span>
-                                {/* "Urgent" was never computed - nothing ranks
-                                    these by urgency - so the label says what
-                                    the number actually counts. */}
-                                <span className="text-[10px] text-slate-500 font-medium">Recent Signals</span>
+                                <span className="text-[10px] text-slate-500 font-medium">Active Urgent Signals</span>
                               </div>
                             </div>
                           </div>
@@ -1269,225 +1241,29 @@ export default function UserDashboardPage() {
 
                       </div>
 
-                      {/* Section 5: STRATEGIC PRIORITIES
-                          Catalyst cards grouped by theme, as in the northstar
-                          dashboard: a numbered card per priority, its evidence
-                          line, its source chips, and an expandable panel
-                          carrying the underlying claims.
-
-                          One deliberate difference. The northstar prints an
-                          EVIDENCE STRENGTH out of 100 above those four bars.
-                          ABX weights that score - 40% support frequency, 25%
-                          supporting document sections, 20% recency, 15%
-                          independent external sources - but never defines how
-                          any of the four counts becomes a number on a scale.
-                          Rendering 65/100 would mean inventing four
-                          normalisations and attributing the result to the
-                          specification. So the same four measures are shown as
-                          the counts they actually are, and the composite says
-                          it is undefined. */}
-                      <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-5">
+                      {/* Section 5: STRATEGIC PRIORITIES (Catalyst Cards Placeholder) */}
+                      <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-4">
                         <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                           <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700 flex items-center gap-2">
                             <Target className="w-4 h-4 text-hp-navy" />
-                            <span>STRATEGIC PRIORITIES</span>
+                            <span>STRATEGIC PRIORITIES & CATALYSTS</span>
                           </h3>
-                          {priorityList.length > 0 && (
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-hp-navy border border-blue-200 inline-flex items-center gap-1">
-                              <FileText className="w-3 h-3" />
-                              {priorityList.reduce((n: number, p: any) => n + (p.sources?.length || 0), 0)} primary sources
-                            </span>
-                          )}
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-purple-50 text-purple-800 border border-purple-200">
+                            Inferred Contract TBD
+                          </span>
                         </div>
 
-                        {/* The executive summary is no longer rendered here - it
-                            restated what the cards below already say. It is
-                            still assembled and stored on the widget, because ABX
-                            Feature 1 lists it as required output and Strategy
-                            Chat will read it; it simply has no place at the top
-                            of a list it duplicates. */}
-
-                        {priorityList.length > 0 ? (
-                          <div className="space-y-6">
-                            {Array.from(new Set(priorityList.map((p: any) => p.theme || 'other'))).map((theme: any) => {
-                              const group = priorityList.filter((p: any) => (p.theme || 'other') === theme);
-                              return (
-                                <div key={theme} className="space-y-3">
-                                  {/* Theme divider, as in the northstar layout */}
-                                  <div className="flex items-center gap-3">
-                                    <div className="h-px bg-slate-200 flex-1" />
-                                    <span className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400 whitespace-nowrap">
-                                      {theme}
-                                    </span>
-                                    <div className="h-px bg-slate-200 flex-1" />
-                                  </div>
-
-                                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
-                                    {group.map((p: any) => {
-                                      const idx = priorityList.indexOf(p);
-                                      const open = expandedPriority === idx;
-                                      const m = p.measures || {};
-                                      return (
-                                        <div key={idx} className="border border-slate-200 rounded-xl p-4 space-y-3 hover:border-slate-300 transition">
-                                          <div className="flex items-start gap-3">
-                                            <span className="w-6 h-6 rounded-full bg-blue-50 text-hp-navy border border-blue-200 text-[11px] font-extrabold flex items-center justify-center flex-shrink-0 mt-0.5">
-                                              {idx + 1}
-                                            </span>
-                                            <div className="space-y-2 min-w-0">
-                                              <h4 className="text-sm font-extrabold text-slate-900 leading-snug">
-                                                Catalyst {idx + 1} &ndash; {p.title}
-                                              </h4>
-                                              {p.from_news_fallback && (
-                                                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 inline-block" title={p.fallback_note}>
-                                                  From recent events
-                                                </span>
-                                              )}
-                                            </div>
-                                          </div>
-
-                                          {/* The card body is the description -
-                                              what the account is doing and what
-                                              it implies for HP. The raw source
-                                              sentence is evidence, not prose,
-                                              and now lives in the drawer where
-                                              a reader goes to check a claim. */}
-                                          {p.description?.text && (
-                                            <p className="text-xs text-slate-600 leading-relaxed">
-                                              {p.description.text}
-                                            </p>
-                                          )}
-
-                                          {p.why_now && (
-                                            <p className="text-[11px] text-slate-500 leading-relaxed">
-                                              <span className="font-bold text-slate-600">Why now: </span>{p.why_now}
-                                            </p>
-                                          )}
-
-                                          <p className="text-[10px] text-slate-500">
-                                            <span className="font-bold text-slate-600">Evidence: </span>
-                                            {m.support_count} source sentence{m.support_count === 1 ? '' : 's'}
-                                            {' · '}{m.distinct_sections} document section{m.distinct_sections === 1 ? '' : 's'}
-                                            {' · '}{m.independent_source_count} independent source{m.independent_source_count === 1 ? '' : 's'}
-                                          </p>
-
-                                          <div className="flex flex-wrap items-center gap-1.5">
-                                            {(p.sources || []).slice(0, 4).map((s: any, si: number) => (
-                                              s.source_url ? (
-                                                <a
-                                                  key={si}
-                                                  href={s.source_url}
-                                                  target="_blank"
-                                                  rel="noopener noreferrer"
-                                                  title={s.source_text}
-                                                  className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded bg-blue-50 text-hp-navy border border-blue-200 hover:bg-blue-100 transition max-w-full"
-                                                >
-                                                  <FileText className="w-3 h-3 flex-shrink-0" />
-                                                  <span className="truncate max-w-[11rem]">{s.label}</span>
-                                                  <ExternalLink className="w-2.5 h-2.5 flex-shrink-0" />
-                                                </a>
-                                              ) : (
-                                                <span
-                                                  key={si}
-                                                  title={s.source_text}
-                                                  className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded bg-slate-50 text-slate-600 border border-slate-200 max-w-full"
-                                                >
-                                                  <FileText className="w-3 h-3 flex-shrink-0" />
-                                                  <span className="truncate max-w-[11rem]">{s.label}</span>
-                                                </span>
-                                              )
-                                            ))}
-                                          </div>
-
-                                          <button
-                                            type="button"
-                                            onClick={() => setExpandedPriority(open ? null : idx)}
-                                            className="text-[11px] font-bold text-hp-navy hover:underline inline-flex items-center gap-1"
-                                          >
-                                            {open ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                                            {open ? 'Hide evidence' : 'View evidence'}
-                                          </button>
-
-                                          {open && (
-                                            <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-3">
-                                              <div className="space-y-2">
-                                                <div className="flex items-center justify-between">
-                                                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500">
-                                                    Evidence strength
-                                                  </span>
-                                                  <span
-                                                    className="text-[10px] font-bold text-slate-500 cursor-help"
-                                                    title={p.score_unavailable_reason || prioritiesData?.score_unavailable_reason}
-                                                  >
-                                                    weighted score not defined
-                                                  </span>
-                                                </div>
-                                                {[
-                                                  { label: 'Support frequency', weight: '40%', value: m.support_count, unit: 'sentences' },
-                                                  { label: 'Document sections', weight: '25%', value: m.distinct_sections, unit: 'sections' },
-                                                  { label: 'Recency', weight: '20%', value: m.most_recent_date, unit: '' },
-                                                  { label: 'Source diversity', weight: '15%', value: m.independent_source_count, unit: 'sources' },
-                                                ].map((row, ri) => (
-                                                  <div key={ri} className="flex items-center justify-between gap-2 text-[10px]">
-                                                    <span className="text-slate-500 w-32 flex-shrink-0">
-                                                      {row.label} <span className="text-slate-400">({row.weight})</span>
-                                                    </span>
-                                                    <span className={`font-bold ${row.value === null || row.value === undefined || row.value === 0 ? 'text-slate-400 italic' : 'text-slate-700'}`}>
-                                                      {row.value === null || row.value === undefined
-                                                        ? 'not available'
-                                                        : row.value === 0
-                                                          ? 'none'
-                                                          : `${row.value}${row.unit ? ' ' + row.unit : ''}`}
-                                                    </span>
-                                                  </div>
-                                                ))}
-                                                <p className="text-[10px] text-slate-400 leading-relaxed pt-1 border-t border-slate-200">
-                                                  These are the four measures ABX weights. It does not define how any of them becomes a score, so the counts are shown instead of a composite.
-                                                </p>
-                                              </div>
-
-                                              <div className="space-y-1.5 pt-1 border-t border-slate-200">
-                                                <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 block">
-                                                  Supporting claims ({(p.sources || []).length})
-                                                </span>
-                                                {(p.sources || []).map((s: any, si: number) => (
-                                                  <div key={si} className="text-[10px] text-slate-600 leading-relaxed">
-                                                    &ldquo;{s.source_text}&rdquo;
-                                                    <span className="text-slate-400"> — {s.label}</span>
-                                                  </div>
-                                                ))}
-                                                {p.description?.written_by === 'python' && (
-                                                  <p className="text-[10px] text-amber-700 pt-1">
-                                                    The generated description was rejected ({p.description.rejected_reason}); a plain summary is shown instead.
-                                                  </p>
-                                                )}
-                                              </div>
-                                            </div>
-                                          )}
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
-                                </div>
-                              );
-                            })}
-
-                            <p className="text-[10px] text-slate-500 leading-relaxed pt-1 border-t border-slate-100">
-                              {prioritiesData?.ordering_basis}
-                            </p>
+                        <div className="bg-slate-50 border border-dashed border-slate-200 rounded-xl p-8 text-center space-y-2">
+                          <div className="w-10 h-10 rounded-full bg-purple-100 text-purple-700 flex items-center justify-center mx-auto">
+                            <Sparkles className="w-5 h-5" />
                           </div>
-                        ) : (
-                          <div className="bg-slate-50 border border-dashed border-slate-200 rounded-xl p-8 text-center space-y-2">
-                            <div className="w-10 h-10 rounded-full bg-purple-100 text-purple-700 flex items-center justify-center mx-auto">
-                              <Sparkles className="w-5 h-5" />
-                            </div>
-                            <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
-                              No evidenced priority yet
-                            </h4>
-                            <p className="text-[11px] text-slate-500 max-w-md mx-auto leading-relaxed">
-                              Strategic priorities for <strong className="text-slate-800">{displayName}</strong> are read from its filed documents and signals. Upload the account&apos;s annual report or exchange filings under Compliance Filings, and they will be generated automatically.
-                            </p>
-                          </div>
-                        )}
+                          <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                            Strategic Priority Catalyst Generation Placeholder
+                          </h4>
+                          <p className="text-[11px] text-slate-500 max-w-md mx-auto leading-relaxed">
+                            AI-synthesized strategic catalysts, evidence claims, and filing citations for <strong className="text-slate-800">{displayName}</strong> will be generated in Step 7.2+.
+                          </p>
+                        </div>
                       </div>
 
                     </div>
@@ -1952,181 +1728,50 @@ export default function UserDashboardPage() {
                 })()}
                 {activeFeatureKey === 'intent_demand_signals' && (() => {
                   const topicsWidget = widgets.find(w => w.widget_key === 'intent_topics_table');
-                  const summaryWidget = widgets.find(w => w.widget_key === 'intent_category_summary');
                   const hiringWidget = widgets.find(w => w.widget_key === 'intent_hiring_demand');
 
                   const topicsData = (topicsWidget && topicsWidget.status === 'available' && topicsWidget.data) ? topicsWidget.data : null;
-                  const summaryData = (summaryWidget && summaryWidget.status === 'available' && summaryWidget.data) ? summaryWidget.data : null;
                   const hiringData = (hiringWidget && hiringWidget.status === 'available' && hiringWidget.data) ? hiringWidget.data : null;
 
-                  const topicsList: IntentTopic[] = topicsData?.topics || [];
-                  const provider = topicsData?.provider || summaryData?.provider;
-                  const accountMatch = topicsData?.account_match || summaryData?.account_match;
-                  const observation = topicsData?.observation || summaryData?.observation;
-                  const dictionaryVersion: string = topicsData?.dictionary_version || summaryData?.dictionary_version || '';
-                  const categoryFile = summaryData?.category_file || summaryWidget?.data?.category_file;
-                  const categoryFileMatched = categoryFile?.status === 'matched';
-                  const categoryRun: string | null = categoryFile?.source?.run_date || null;
-                  const themes: any[] = summaryData?.themes || [];
-                  // The spec asks for the HP-category view across all supported categories,
-                  // not for one of them to be ranked above the rest. Ordered by the
-                  // category file's own score.
-                  const hpCategories: any[] = [...(summaryData?.hp_categories || [])].sort(
-                    (a: any, b: any) => (b.primary?.score ?? -1) - (a.primary?.score ?? -1)
-                  );
-                  const otherCats = hpCategories;
-                  const chartCats = hpCategories.filter((c: any) => c.primary).sort((a: any, b: any) => (b.primary.score ?? -1) - (a.primary.score ?? -1));
-                  const hiringLinked = summaryData?.hiring_linked;
-                  const staffingTopics = topicsList.filter(t => t.included && t.hiring_linked);
-                  const disclaimer: string = summaryData?.disclaimer || topicsData?.disclaimer || 'Intent indicates research activity, not confirmed purchase intent.';
-                  // Source A that is missing or belongs to another domain is stated, never drawn as zero scores.
-                  const sourceAMessage: string | null = topicsData ? null : (topicsWidget?.data?.message || 'Intent unavailable: no Bombora intent topics have been extracted for this account.');
-                  const otherTheme = themes.find((t: any) => t.theme === 'Other / Unmapped');
-                  const includedCount: number = topicsData?.included_topics_count || 0;
-                  const unmappedPct = includedCount && otherTheme ? Math.round((otherTheme.topic_count / includedCount) * 100) : 0;
+                  const topicsList = topicsData?.topics || [];
+                  const openJobCount = hiringData?.open_job_count || 0;
+                  const seniorityBreakdown = hiringData?.seniority_breakdown || {};
 
                   const filteredTopics = topicsList.filter((t: any) => {
-                    if (intentSearch && !t.topic_name.toLowerCase().includes(intentSearch.toLowerCase().trim())) return false;
-                    if (intentScoreFilter === '70+' && (t.composite_score ?? -1) < 70) return false;
-                    if (intentScoreFilter === '85+' && (t.composite_score ?? -1) < 85) return false;
+                    if (intentSearch && !t.topic_name.toLowerCase().includes(intentSearch.toLowerCase().trim())) {
+                      return false;
+                    }
+                    if (intentScoreFilter === '70+' && t.composite_score < 70) return false;
+                    if (intentScoreFilter === '85+' && t.composite_score < 85) return false;
                     return true;
                   });
-                  const topChartTopics = filteredTopics.filter((t: any) => t.included).slice(0, 10);
-                  const excludedTopics = topicsList.filter((t: any) => !t.included);
-                  const duplicatesRemoved: any[] = topicsData?.duplicates_removed || [];
 
-                  const CATEGORY_STYLE: Record<string, { bar: string; chip: string }> = {
-                    'PC': { bar: 'bg-[#0096D6]', chip: 'bg-blue-50 text-hp-navy border-blue-200' },
-                    'Workstation': { bar: 'bg-indigo-500', chip: 'bg-indigo-50 text-indigo-800 border-indigo-200' },
-                    'Poly/Collaboration': { bar: 'bg-emerald-600', chip: 'bg-emerald-50 text-emerald-800 border-emerald-200' },
-                    'Print': { bar: 'bg-amber-500', chip: 'bg-amber-50 text-amber-800 border-amber-200' },
-                    '3D': { bar: 'bg-pink-600', chip: 'bg-pink-50 text-pink-800 border-pink-200' }
-                  };
-                  const THEME_STYLE: Record<string, { chip: string; bar: string; border: string }> = {
-                    'AI & Compute': { chip: 'bg-purple-100 text-purple-800 border-purple-200', bar: 'bg-purple-600', border: 'border-purple-200' },
-                    'Devices & Endpoints': { chip: 'bg-blue-100 text-blue-800 border-blue-200', bar: 'bg-hp-navy', border: 'border-blue-200' },
-                    'Collaboration & Workplace': { chip: 'bg-emerald-100 text-emerald-800 border-emerald-200', bar: 'bg-emerald-600', border: 'border-emerald-200' },
-                    'Print': { chip: 'bg-amber-100 text-amber-800 border-amber-200', bar: 'bg-amber-500', border: 'border-amber-200' },
-                    '3D': { chip: 'bg-pink-100 text-pink-800 border-pink-200', bar: 'bg-pink-500', border: 'border-pink-200' },
-                    'Other / Unmapped': { chip: 'bg-slate-100 text-slate-700 border-slate-200', bar: 'bg-slate-500', border: 'border-slate-200' }
-                  };
-                  const INTENSITY_CHIP: Record<string, string> = {
-                    'High': 'bg-red-50 text-red-700 border-red-200',
-                    'Moderate': 'bg-amber-50 text-amber-800 border-amber-200',
-                    'Low': 'bg-slate-50 text-slate-600 border-slate-200'
-                  };
-                  const categoryLabel = (name: string) => (name === 'Poly/Collaboration' ? 'Poly' : name);
-                  const shortDate = (v?: string | null) => (v ? String(v).slice(0, 10) : null);
-                  const hasSignal = (stage?: string | null) => !!stage && stage.toLowerCase() !== 'no signal';
-
-                  const shortTopic = (name: string) => (name.includes(':') ? name.split(':').slice(1).join(':').trim() : name);
-
-                  // The category file's own detail for one category, shown as received.
-                  const renderFileDetails = (p: any) => (
-                    <div className="space-y-2">
-                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Signal Topics (category file)</span>
-                      {p.topics_researched?.length ? (
-                        <div className="flex flex-wrap gap-1.5">
-                          {p.topics_researched.map((t: string) => (
-                            <span key={t} className="px-2 py-0.5 rounded-full border border-slate-200 text-[11px] text-slate-700 font-medium">{t}</span>
-                          ))}
-                        </div>
-                      ) : (
-                        <span className="text-[11px] text-slate-400 block">None reported</span>
-                      )}
-                      {p.keywords_matched?.length > 0 && (
-                        <p className="text-[10px] text-slate-500"><span className="font-bold text-slate-400 uppercase mr-1">Keywords</span>{p.keywords_matched.join(' · ')}</p>
-                      )}
-                      {p.related_technologies?.length > 0 && (
-                        <p className="text-[10px] text-slate-500"><span className="font-bold text-slate-400 uppercase mr-1">Technologies</span>{p.related_technologies.join(' · ')}</p>
-                      )}
-                      <p className="flex items-center gap-1.5 text-[11px] text-slate-500" title="Geo Source, as supplied by the HP Category Intent file for this category. Bombora topics carry no location.">
-                        <Globe className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
-                        <span className="font-bold text-slate-400 uppercase text-[10px]">Geo</span>
-                        {p.geo?.length ? p.geo.join(', ') : 'Not reported for this category'}
-                      </p>
-                      <p className="text-[10px] text-slate-400">
-                        {p.first_intent_date ? `Observed ${p.first_intent_date} → ${p.latest_intent_date || p.first_intent_date}` : 'No intent dates reported'}
-                      </p>
-                      {(p.quality_flags || []).map((q: any) => (
-                        <p key={q.term} className="flex items-start gap-1 text-[10px] text-amber-800 font-semibold bg-amber-50 border border-amber-200 rounded-lg p-2">
-                          <AlertCircle className="w-3 h-3 flex-shrink-0 mt-0.5" />
-                          <span>Noisy keyword &apos;{q.term}&apos; ({q.field}): {q.reason}. Read this category's score with care.</span>
-                        </p>
-                      ))}
-                    </div>
+                  // Categorize topics into Northstar Domain Groups
+                  const aiGroup = filteredTopics.filter((t: any) => 
+                    ['ai', 'machine learning', 'data insights', 'analytics', 'chatgpt', 'openai'].some(k => t.topic_name.toLowerCase().includes(k))
+                  );
+                  const secGroup = filteredTopics.filter((t: any) => 
+                    ['security', 'privacy', 'authentication', 'tokenization', 'protection', 'aml', 'risk'].some(k => t.topic_name.toLowerCase().includes(k))
+                  );
+                  const finGroup = filteredTopics.filter((t: any) => 
+                    ['financial', 'visa', 'mastercard', 'mortgage', 'hedging', 'trading', 'investing', 'loan', 'credit', 'payment'].some(k => t.topic_name.toLowerCase().includes(k))
+                  );
+                  const collabGroup = filteredTopics.filter((t: any) => 
+                    ['workplace', 'teams', 'collaboration', 'working', 'hr', 'recruitment', 'talent', 'staffing', 'leadership', 'training', 'employee'].some(k => t.topic_name.toLowerCase().includes(k))
+                  );
+                  const cloudGroup = filteredTopics.filter((t: any) => 
+                    ['cloud', 'data center', 'server', 'postgres', 'aws', 'network', 'hardware', 'ai chips'].some(k => t.topic_name.toLowerCase().includes(k))
                   );
 
-                  // Steps 2-4: Bombora signals with exact scores, and the technologies that confirm them.
-                  const renderSignals = (signals: any[], topicLimit: number) => {
-                    if (!signals?.length) return <p className="text-[11px] text-slate-400">No supporting Bombora research.</p>;
-                    return (
-                      <div className="space-y-2">
-                        {signals.map((sg: any) => (
-                          <div key={sg.signal} className={`rounded-lg border p-2.5 ${sg.confirmed ? 'border-emerald-200 bg-emerald-50/40' : 'border-slate-200 bg-slate-50/50'}`}>
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="flex items-center gap-1.5 text-[11px] font-bold text-slate-800">
-                                {sg.confirmed ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> : <Minus className="w-3.5 h-3.5 text-slate-300" />}
-                                {sg.signal}
-                              </span>
-                              <span className="font-mono text-xs font-extrabold text-slate-900">{sg.max != null ? `${sg.max}/100` : '—'}</span>
-                            </div>
-                            {sg.topics.length > 0 && (
-                              <div className="flex flex-wrap gap-1 mt-1.5">
-                                {sg.topics.slice(0, topicLimit).map((t: any) => (
-                                  <span key={t.topic_name} title={t.topic_name} className="px-1.5 py-0.5 rounded bg-white border border-slate-200 text-[10px] text-slate-700 font-medium">
-                                    {shortTopic(t.topic_name)} <strong className="text-hp-navy">{t.composite_score}</strong>
-                                  </span>
-                                ))}
-                                {sg.topics.length > topicLimit && (
-                                  <span className="text-[10px] text-slate-400 font-bold self-center">+{sg.topics.length - topicLimit} more</span>
-                                )}
-                              </div>
-                            )}
-                            <p className="text-[10px] mt-1.5 text-slate-500">
-                              {sg.technologies.length > 0 ? (
-                                <>
-                                  <span className="font-bold text-slate-400 uppercase mr-1">Technologies</span>
-                                  {sg.technologies.map((t: any) => t.name).join(', ')}
-                                  <span className="text-slate-400"> ({Array.from(new Set(sg.technologies.map((t: any) => `${t.sheet} · ${t.column}`))).join('; ')})</span>
-                                  {sg.topics.length === 0 && <span className="text-slate-400"> · no Bombora signal to score it</span>}
-                                </>
-                              ) : (
-                                'No matching technology in Explorium sheets 4–5'
-                              )}
-                            </p>
-                          </div>
-                        ))}
-                      </div>
-                    );
-                  };
+                  const categorizedKeys = new Set([...aiGroup, ...secGroup, ...finGroup, ...collabGroup, ...cloudGroup].map(t => t.topic_name));
+                  const otherGroup = filteredTopics.filter((t: any) => !categorizedKeys.has(t.topic_name));
 
-                  const renderTopicRow = (item: any, idx: number, barClass: string) => (
-                    <div key={item.topic_name} className="flex items-center justify-between text-xs py-1 px-2 rounded-lg hover:bg-slate-50 transition">
-                      <div className="flex items-center space-x-3 font-semibold text-slate-800 truncate pr-2 min-w-0">
-                        <span className="text-slate-400 font-mono text-[11px] w-5 text-right flex-shrink-0">{idx + 1}</span>
-                        <span className="capitalize truncate">{item.topic_name}</span>
-                        {item.hp_category && (
-                          <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-hp-navy border border-blue-200 flex-shrink-0">{categoryLabel(item.hp_category)}</span>
-                        )}
-                        {item.mapping_status === 'flagged' && (
-                          <span title={item.flag_reason || ''} className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200 flex-shrink-0">Review</span>
-                        )}
-                      </div>
-                      <div className="flex items-center space-x-3 flex-shrink-0">
-                        <div className="w-24 bg-slate-200 h-1.5 rounded-full overflow-hidden">
-                          <div className={`${barClass} h-1.5 rounded-full`} style={{ width: `${Math.min(100, Math.max(0, item.composite_score ?? 0))}%` }}></div>
-                        </div>
-                        <span className="font-mono font-bold text-slate-900 w-8 text-right">{item.composite_score}</span>
-                        <span className="text-[10px] text-slate-400 font-medium w-12">{provider?.name || 'Bombora'}</span>
-                      </div>
-                    </div>
-                  );
+                  const topChartTopics = filteredTopics.slice(0, 10);
 
                   return (
                     <div className="space-y-6">
-
-                      {/* Header */}
+                      
+                      {/* Header Banner (Matching Image 1) */}
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                         <div>
                           <h2 className="text-xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
@@ -2134,494 +1779,477 @@ export default function UserDashboardPage() {
                             <span>Intent & Demand Signals</span>
                           </h2>
                           <p className="text-xs text-slate-500 mt-0.5">
-                            {categoryFileMatched ? `${summaryData?.categories_with_signal ?? 0} of ${chartCats.length} HP categories with a signal in the category file • ` : ''}
-                            {topicsList.length} Bombora intent topics for {selectedAccount?.name}
+                            5 HP category signals • {topicsList.length} broader Bombora intent topics for {selectedAccount?.name}
                           </p>
                         </div>
+
                         <div className="flex flex-wrap items-center gap-2 text-xs font-bold">
-                          {categoryRun && (
-                            <span className="px-3 py-1 bg-slate-100 text-slate-600 border border-slate-200 rounded-full text-[11px]">
-                              Category file · run {shortDate(categoryRun)}
-                            </span>
-                          )}
-                          {observation?.as_of && (
-                            <span className="px-3 py-1 bg-slate-100 text-slate-600 border border-slate-200 rounded-full text-[11px]">
-                              {provider ? `${provider.name} ${provider.product}` : 'Bombora'} · as of {observation.as_of}
-                            </span>
-                          )}
-                          {accountMatch && (
-                            <span className={`px-3 py-1 rounded-full text-[11px] border flex items-center gap-1 ${accountMatch.status === 'matched' ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-amber-50 text-amber-800 border-amber-200'}`}>
-                              {accountMatch.status === 'matched' ? <ShieldCheck className="w-3.5 h-3.5" /> : <AlertCircle className="w-3.5 h-3.5" />}
-                              {accountMatch.status === 'matched' ? `${accountMatch.provider_domain} verified` : accountMatch.status === 'mismatch' ? 'Domain mismatch' : 'Domain not verified'}
-                            </span>
-                          )}
+                          <span className="px-3 py-1 bg-[#0096D6]/10 text-hp-navy border border-[#0096D6]/20 rounded-full">
+                            Avg HP-category intent: Derived TBD
+                          </span>
+                          <span className="px-3 py-1 bg-slate-100 text-slate-600 border border-slate-200 rounded-full font-mono text-[11px]">
+                            Powered by Bombora
+                          </span>
                         </div>
                       </div>
 
-                      {/* Unavailable states: stated, never drawn as zeros */}
-                      {sourceAMessage && (
-                        <div className="bg-white rounded-2xl p-5 border border-amber-200 shadow-sm flex items-start gap-3">
-                          <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
-                          <div className="space-y-1">
-                            <h3 className="text-sm font-extrabold text-slate-900">
-                              {topicsWidget?.data?.availability === 'no_matched_signal' ? 'No Matched Signal (Source A)' : 'Intent Unavailable (Source A)'}
-                            </h3>
-                            <p className="text-xs text-slate-600 leading-relaxed">{sourceAMessage}</p>
-                          </div>
+                      {/* "So What for HP" Blue Insights Banner */}
+                      <div className="bg-blue-50/80 border border-blue-200/90 rounded-2xl p-6 text-xs text-blue-950 space-y-2 shadow-xs">
+                        <div className="flex items-center justify-between border-b border-blue-200/60 pb-2">
+                          <h3 className="text-xs font-black uppercase tracking-wider text-hp-navy flex items-center gap-2">
+                            <Sparkles className="w-4 h-4 text-hp-navy" />
+                            <span>SO WHAT FOR HP</span>
+                          </h3>
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-purple-100 text-purple-800 border border-purple-200">
+                            Inferred TBD
+                          </span>
                         </div>
-                      )}
-                      {categoryFile && !categoryFileMatched && categoryFile.note && (
-                        <div className="bg-white rounded-2xl p-5 border border-amber-200 shadow-sm flex items-start gap-3">
-                          <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
-                          <div className="space-y-1">
-                            <h3 className="text-sm font-extrabold text-slate-900">Category file not attached</h3>
-                            <p className="text-xs text-slate-600 leading-relaxed">{categoryFile.note}</p>
-                          </div>
-                        </div>
-                      )}
+                        <p className="text-[11px] leading-relaxed text-slate-700 font-medium">
+                          AI-synthesized intent topic categorization, low-relevance topic filtering, and HP play alignment TBD for future runtime generation in Step 8.
+                        </p>
+                      </div>
 
-                      {summaryData && (
-                        <>
-                          {/* So What for HP */}
-                          <div className="bg-blue-50/80 border border-blue-200/90 rounded-2xl p-6 text-xs text-blue-950 space-y-3 shadow-xs">
-                            <div className="flex flex-wrap items-center justify-between gap-2">
-                              <h3 className="text-xs font-black uppercase tracking-wider text-hp-navy flex flex-wrap items-center gap-2">
-                                <Lightbulb className="w-4 h-4 text-hp-navy" />
-                                <span>SO WHAT FOR HP</span>
-                                {includedCount > 0 && (
-                                  <span className="normal-case tracking-normal font-medium text-[11px] text-blue-700/80">
-                                    · {includedCount} Bombora topics categorized, {otherTheme?.topic_count ?? 0} ({unmappedPct}%) unmapped and kept out of the theme read below
-                                  </span>
-                                )}
-                              </h3>
-                              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200">
-                                Rule-based · {dictionaryVersion}
+                      {/* Section 1: HP Category Intent Scores Vertical Bar Chart (Matching Image 1) */}
+                      <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-4">
+                        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                          <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700 flex items-center gap-2">
+                            <Layers className="w-4 h-4 text-hp-navy" />
+                            <span>HP CATEGORY INTENT SCORES</span>
+                          </h3>
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200">
+                            Derived Contract TBD
+                          </span>
+                        </div>
+
+                        <div className="flex items-end space-x-8 h-48 pt-6 pb-2 px-8 border-b border-slate-200 relative">
+                          <div className="absolute left-2 top-2 bottom-6 flex flex-col justify-between text-[10px] font-mono text-slate-400">
+                            <span>100</span>
+                            <span>75</span>
+                            <span>50</span>
+                            <span>25</span>
+                            <span>0</span>
+                          </div>
+
+                          {[
+                            { name: 'Print', color: 'bg-amber-500' },
+                            { name: '3D', color: 'bg-pink-500' },
+                            { name: 'PC', color: 'bg-hp-navy' },
+                            { name: 'Workstation', color: 'bg-indigo-600' },
+                            { name: 'Poly', color: 'bg-emerald-500' }
+                          ].map((cat) => (
+                            <div key={cat.name} className="flex-1 flex flex-col items-center h-full justify-end group">
+                              <span className="text-[10px] font-bold text-slate-400 mb-1 opacity-0 group-hover:opacity-100 transition">TBD</span>
+                              <div className="w-12 bg-slate-100 rounded-t-lg h-full flex items-end justify-center border border-dashed border-slate-200 relative">
+                                <div className={`w-full ${cat.color} rounded-t-lg h-2 transition-all duration-300 opacity-60`}></div>
+                              </div>
+                              <span className="text-xs font-bold text-slate-700 mt-2">{cat.name}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Section 2: 5 HP Category Play Cards Grid */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+                        {[
+                          { 
+                            name: 'Print', 
+                            play: 'HP Enterprise Printing & Managed Print Services', 
+                            keywords: ['launches', 'digitization initiative', 'cost reduction'] 
+                          },
+                          { 
+                            name: '3D', 
+                            play: 'HP Multi Jet Fusion (3D)', 
+                            keywords: ['manufacturing innovation', 'is developing', 'supply chain'] 
+                          },
+                          { 
+                            name: 'PC', 
+                            play: 'HP Elite & Pro PCs', 
+                            keywords: ['fleet management', 'remote work expansion', 'hardware refresh'] 
+                          },
+                          { 
+                            name: 'Workstation', 
+                            play: 'Z by HP Workstations', 
+                            keywords: ['AI/ML expansion', 'data science growth', 'engineering'] 
+                          },
+                          { 
+                            name: 'Poly', 
+                            play: 'Poly Collaboration Hardware', 
+                            keywords: ['UC/collaboration', 'Zoom Rooms deployment', 'conferencing'] 
+                          }
+                        ].map((cat) => (
+                          <div key={cat.name} className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-3.5 flex flex-col justify-between hover:border-slate-300 transition">
+                            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                              <span className="text-sm font-extrabold text-slate-900">{cat.name}</span>
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200">
+                                Derived TBD
                               </span>
                             </div>
-                            <div className="space-y-2.5">
-                              {(summaryData.so_what || []).map((line: string, i: number) => (
-                                <p key={i} className="text-[12px] leading-relaxed text-slate-700 font-medium flex items-start gap-2.5">
-                                  <Target className="w-4 h-4 text-hp-navy flex-shrink-0 mt-0.5" />
-                                  <span>{line}</span>
-                                </p>
+
+                            <div>
+                              <span className="text-2xl font-black text-slate-400 block">TBD</span>
+                              <span className="text-[10px] text-slate-400 font-bold block">/100 Intent Score</span>
+                            </div>
+
+                            <div className="space-y-1.5 pt-1 border-t border-slate-100 text-[10px]">
+                              <span className="text-slate-400 font-bold uppercase block">SIGNAL TOPICS</span>
+                              <div className="flex flex-wrap gap-1">
+                                {cat.keywords.map((kw, i) => (
+                                  <span key={i} className="px-1.5 py-0.5 bg-slate-100 text-slate-700 rounded font-medium">
+                                    {kw}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+
+                            <div className="space-y-1 pt-1 border-t border-slate-100 text-[10px]">
+                              <span className="text-slate-400 font-bold uppercase block">MAPPED HP PLAY</span>
+                              <span className="font-bold text-hp-navy block leading-tight">{cat.play}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Section 3: Broader Intent Topics Section (Horizontal Bar Chart + Accordions matching Images 1 & 2) */}
+                      <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-6">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+                          <div>
+                            <h3 className="text-sm font-extrabold uppercase tracking-wider text-slate-800 flex items-center gap-2">
+                              <Database className="w-4 h-4 text-hp-navy" />
+                              <span>BROADER INTENT TOPICS ({topicsList.length})</span>
+                            </h3>
+                            <p className="text-xs text-slate-500 mt-0.5">
+                              Extracted directly from Bombora intent score export (11_intent_score.csv)
+                            </p>
+                          </div>
+
+                          {/* Filter Bar */}
+                          <div className="flex items-center space-x-2 text-xs">
+                            <div className="relative">
+                              <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-2.5" />
+                              <input
+                                type="text"
+                                value={intentSearch}
+                                onChange={(e) => setIntentSearch(e.target.value)}
+                                placeholder="Filter topics..."
+                                className="pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-300 rounded-xl text-xs focus:outline-none focus:ring-1 focus:ring-hp-navy w-44"
+                              />
+                            </div>
+
+                            <div className="flex items-center space-x-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
+                              {['ALL', '70+', '85+'].map((sc) => (
+                                <button
+                                  key={sc}
+                                  type="button"
+                                  onClick={() => setIntentScoreFilter(sc)}
+                                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition ${
+                                    intentScoreFilter === sc
+                                      ? 'bg-hp-navy text-white shadow-xs'
+                                      : 'text-slate-600 hover:text-slate-900'
+                                  }`}
+                                >
+                                  {sc}
+                                </button>
                               ))}
                             </div>
-                            <p className="text-[11px] leading-relaxed text-blue-950 font-bold flex items-start gap-2.5 pt-2 border-t border-blue-200/60">
-                              <Info className="w-4 h-4 flex-shrink-0 mt-0.5" />
-                              <span>{disclaimer}</span>
-                            </p>
                           </div>
+                        </div>
 
-                          {/* Step 1 - HP Category Intent Scores, as received from the category file */}
-                          <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-4">
-                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                              <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700 flex items-center gap-2">
-                                <Layers className="w-4 h-4 text-hp-navy" />
-                                <span>HP CATEGORY INTENT SCORES</span>
-                              </h3>
-                              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-50 text-slate-600 border border-slate-200">
-                                {categoryFileMatched ? `HP Category Intent file · run ${categoryRun}` : 'No category file for this account'}
-                              </span>
-                            </div>
-                            {chartCats.length > 0 ? (
-                              <div className="overflow-x-auto">
-                                <div className="min-w-[480px] pl-8 pr-2 pt-3">
-                                  <div className="relative h-52">
-                                    {[0, 25, 50, 75, 100].map(v => (
-                                      <div key={v} className={`absolute left-0 right-0 border-t ${v === 0 ? 'border-slate-300' : 'border-dashed border-slate-200'}`} style={{ bottom: `${v}%` }}>
-                                        <span className="absolute -left-8 -translate-y-1/2 w-6 text-right text-[10px] font-mono text-slate-400">{v}</span>
-                                      </div>
-                                    ))}
-                                    <div className="absolute inset-0 flex items-end justify-around">
-                                      {chartCats.map((c: any) => {
-                                        const pct = Math.min(100, Math.max(0, c.primary.score ?? 0));
-                                        const noisy = (c.primary.quality_flags || []).length > 0;
-                                        return (
-                                          <div key={c.category} className="relative flex flex-col items-center justify-end h-full w-20">
-                                            <div
-                                              className={`w-14 rounded-t-md ${CATEGORY_STYLE[c.category]?.bar || 'bg-slate-400'} ${noisy ? 'opacity-40' : ''}`}
-                                              style={{ height: `${pct}%` }}
-                                            ></div>
-                                            <span className="absolute text-[11px] font-bold text-slate-700" style={{ bottom: `calc(${pct}% + 6px)` }}>{c.primary.score ?? '—'}</span>
-                                          </div>
-                                        );
-                                      })}
-                                    </div>
-                                  </div>
-                                  <div className="flex justify-around pt-2">
-                                    {chartCats.map((c: any) => (
-                                      <div key={c.category} className="w-20 text-center">
-                                        <span className="text-xs block font-semibold text-slate-600">{categoryLabel(c.category)}</span>
-                                        {(c.primary.quality_flags || []).length > 0 && <span className="text-[10px] font-semibold text-amber-700 block">Noisy keyword</span>}
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-                              </div>
-                            ) : (
-                              <p className="text-xs text-slate-500">{categoryFile?.note || 'Upload the HP Category Intent file to see category scores.'}</p>
-                            )}
-                            <p className="text-[11px] text-slate-500">
-                              Scores as received from the HP Category Intent file, shown for every HP category. Faded bars rest on a noisy keyword and should be read with care. Supporting Bombora signals add context and never change these scores.
-                              {categoryFile?.top_check && !categoryFile.top_check.consistent && (
-                                <span className="text-amber-700 font-semibold"> The file&apos;s stated top category ({categoryFile.top_check.stated_category}) does not match its scores ({categoryFile.top_check.recomputed_category}).</span>
-                              )}
-                            </p>
-                          </div>
+                        {/* Top Signal Topics Horizontal Bar Chart (Matching Image 1) */}
+                        {topChartTopics.length > 0 && (
+                          <div className="space-y-3 bg-slate-50/60 p-5 rounded-2xl border border-slate-200/80">
+                            <span className="text-[11px] font-bold text-slate-500 block uppercase tracking-wider">
+                              Top Signal Topics (Ranked by Composite Score)
+                            </span>
 
+                            <div className="space-y-2 pt-2">
+                              {topChartTopics.map((item: any, i: number) => (
+                                <div key={i} className="flex items-center space-x-3 text-xs relative group">
+                                  <span className="w-64 text-right truncate font-bold text-slate-800 text-[11px] flex-shrink-0">
+                                    {item.topic_name}
+                                  </span>
 
-                          {/* Other HP categories */}
-                          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
-                            {otherCats.map((cat: any) => {
-                              const p = cat.primary;
-                              const style = CATEGORY_STYLE[cat.category] || { bar: 'bg-slate-400', chip: 'bg-slate-50 text-slate-700 border-slate-200' };
-                              const noisy = (p?.quality_flags || []).length > 0;
-                              const signalTopics: string[] = [
-                                ...(p?.topics_researched || []),
-                                ...(p?.keywords_matched || []),
-                              ];
-                              return (
-                                <div key={cat.category} className={`bg-white p-5 rounded-2xl border shadow-xs flex flex-col gap-4 ${noisy ? 'border-amber-200' : 'border-slate-200'}`}>
-                                  {/* Header: category chip, the file's own direction, buying stage */}
-                                  <div className="flex items-center justify-between gap-2">
-                                    <div className="flex items-center gap-2.5 min-w-0">
-                                      <span className={`px-3 py-0.5 rounded-full text-sm font-extrabold border ${style.chip}`}>{categoryLabel(cat.category)}</span>
-                                      {p?.trend_label && (
-                                        <span
-                                          className="flex items-center gap-1 text-[12px] font-semibold text-slate-400 truncate"
-                                          title={p.trend_basis || "The category file states this direction but supplies no prior window to check it against."}
-                                        >
-                                          <Minus className="w-3.5 h-3.5 text-slate-300 flex-shrink-0" />
-                                          {p.trend_label}
-                                          <span className="text-[10px] text-slate-300">(unverified)</span>
-                                        </span>
-                                      )}
-                                    </div>
-                                    {p && (
-                                      <span title="Buying Stage, as supplied by the category file" className={`text-[11px] font-bold px-2.5 py-1 rounded-md border flex-shrink-0 ${hasSignal(p.stage) ? 'bg-blue-50 text-hp-navy border-blue-200' : 'bg-slate-50 text-slate-500 border-slate-200'}`}>
-                                        {p.stage || 'No stage'}
-                                      </span>
-                                    )}
-                                  </div>
-
-                                  {/* Score bar */}
-                                  {p ? (
-                                    <div className="flex items-center gap-3">
-                                      <div className="flex-1 bg-slate-100 h-2.5 rounded-full overflow-hidden">
-                                        <div className={`${style.bar} h-2.5 rounded-full ${noisy ? 'opacity-40' : ''}`} style={{ width: `${Math.min(100, Math.max(0, p.score ?? 0))}%` }}></div>
-                                      </div>
-                                      <span className="text-base font-extrabold text-slate-900 flex-shrink-0">{p.score ?? '—'}/100</span>
-                                    </div>
-                                  ) : (
-                                    <p className="text-[11px] text-slate-400 font-semibold">No category file score</p>
-                                  )}
-
-                                  {/* Signal topics as pills, then geo */}
-                                  {p && (
-                                    <div className="space-y-2.5">
-                                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Signal Topics</span>
-                                      {signalTopics.length ? (
-                                        <div className="flex flex-wrap gap-2">
-                                          {signalTopics.map((t: string) => (
-                                            <span key={t} className="px-3 py-1 rounded-full border border-slate-200 bg-white text-[12px] text-slate-700">{t}</span>
-                                          ))}
-                                        </div>
-                                      ) : (
-                                        <p className="text-[11px] text-slate-400">None reported</p>
-                                      )}
-                                      <p className="flex items-center gap-2 text-[12px] text-slate-600" title="Geo Source, as supplied by the HP Category Intent file for this category. Bombora topics carry no location.">
-                                        <Globe className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
-                                        {p.geo?.length ? p.geo.join(',  ') : 'Not reported for this category'}
-                                      </p>
-                                      {(p.quality_flags || []).map((q: any) => (
-                                        <p key={q.term} className="flex items-start gap-1.5 text-[10px] text-amber-800 font-semibold bg-amber-50 border border-amber-200 rounded-lg p-2">
-                                          <AlertCircle className="w-3 h-3 flex-shrink-0 mt-0.5" />
-                                          <span>Noisy keyword &apos;{q.term}&apos; ({q.field}): {q.reason}. Read this category&apos;s score with care.</span>
-                                        </p>
-                                      ))}
-                                    </div>
-                                  )}
-
-                                  {/* Mapped HP play + research volume */}
-                                  <div className="flex items-start justify-between gap-2 pt-3.5 border-t border-slate-100">
-                                    <div className="flex items-start gap-2 min-w-0">
-                                      <Target className="w-4 h-4 text-slate-400 mt-0.5 flex-shrink-0" />
-                                      <div className="min-w-0">
-                                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Mapped HP Play</span>
-                                        <span className="text-sm font-bold text-slate-900 leading-tight block">{cat.hp_play || 'No HP play mapped'}</span>
-                                      </div>
-                                    </div>
-                                    {p?.research_volume && (
-                                      <span title="Research Volume, as supplied by the category file" className="text-[11px] font-bold px-2.5 py-1 rounded-md border bg-slate-50 text-slate-600 border-slate-200 flex-shrink-0">
-                                        {p.research_volume}
-                                      </span>
-                                    )}
-                                  </div>
-
-                                  {/* Observation window */}
-                                  {p?.first_intent_date && (
-                                    <p className="text-[11px] text-slate-400">
-                                      Observed {p.first_intent_date} → {p.latest_intent_date || p.first_intent_date}
-                                    </p>
-                                  )}
-
-                                  {/* Supporting Bombora signals, kept visibly apart from the file's own numbers */}
-                                  <details className="pt-3 border-t border-slate-100 group">
-                                    <summary className="text-[10px] font-bold text-slate-400 uppercase tracking-wider cursor-pointer list-none flex items-center gap-1.5 hover:text-slate-600">
-                                      <ChevronDown className="w-3.5 h-3.5 transition-transform group-open:rotate-180" />
-                                      Supporting Intent Signals (Bombora)
-                                    </summary>
-                                    <div className="mt-2.5">{renderSignals(cat.supporting_signals, 3)}</div>
-                                  </details>
-
-                                  <p className="text-[11px] text-slate-600 leading-relaxed mt-auto">{cat.explanation}</p>
-                                </div>
-                              );
-                            })}
-                          </div>
-
-                        </>
-                      )}
-
-                      {/* Broader intent topics (Source A raw view) */}
-                      {topicsData && (
-                        <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-6">
-                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
-                            <div>
-                              <h3 className="text-sm font-extrabold uppercase tracking-wider text-slate-800 flex items-center gap-2">
-                                <Database className="w-4 h-4 text-hp-navy" />
-                                <span>BROADER INTENT TOPICS ({topicsList.length})</span>
-                              </h3>
-                              <p className="text-xs text-slate-500 mt-0.5">
-                                As received from {provider ? `${provider.name} ${provider.product} (${provider.source})` : 'Bombora'} · {provider?.scoring_definition}
-                              </p>
-                            </div>
-
-                            <div className="flex items-center space-x-2 text-xs">
-                              <div className="relative">
-                                <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-2.5" />
-                                <input
-                                  type="text"
-                                  value={intentSearch}
-                                  onChange={(e) => setIntentSearch(e.target.value)}
-                                  placeholder="Filter topics..."
-                                  className="pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-300 rounded-xl text-xs focus:outline-none focus:ring-1 focus:ring-hp-navy w-44"
-                                />
-                              </div>
-                              <div className="flex items-center space-x-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
-                                {['ALL', '70+', '85+'].map((sc) => (
-                                  <button
-                                    key={sc}
-                                    type="button"
-                                    onClick={() => setIntentScoreFilter(sc)}
-                                    className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition ${
-                                      intentScoreFilter === sc ? 'bg-hp-navy text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
-                                    }`}
+                                  <div className="flex-1 bg-slate-200 h-5 rounded-md overflow-hidden relative cursor-pointer"
+                                       onMouseEnter={() => setHoveredBarTopic({ name: item.topic_name, score: item.composite_score })}
+                                       onMouseLeave={() => setHoveredBarTopic(null)}
                                   >
-                                    {sc}
-                                  </button>
-                                ))}
-                              </div>
+                                    <div 
+                                      className="bg-hp-navy h-full rounded-md transition-all duration-300 hover:bg-hp-blue"
+                                      style={{ width: `${Math.min(100, Math.max(0, item.composite_score))}%` }}
+                                    ></div>
+                                  </div>
+
+                                  {/* Hover Tooltip Card (Matching Image 2) */}
+                                  {hoveredBarTopic?.name === item.topic_name && (
+                                    <div className="absolute right-12 bottom-full mb-1 bg-white border border-slate-300 rounded-xl p-3 shadow-2xl z-50 text-xs font-medium w-64 animate-fade-in pointer-events-none">
+                                      <span className="font-extrabold text-slate-900 block truncate">{item.topic_name}</span>
+                                      <span className="text-[11px] text-hp-navy font-bold block mt-0.5">
+                                        Composite score: {item.composite_score}/100 — Bombora
+                                      </span>
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+
+                            <div className="flex justify-between text-[10px] font-mono text-slate-400 pl-64 pt-2 border-t border-slate-200">
+                              <span>0</span>
+                              <span>25</span>
+                              <span>50</span>
+                              <span>75</span>
+                              <span>100</span>
                             </div>
                           </div>
+                        )}
 
-                          {/* Provenance for every row below */}
-                          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 text-[11px] bg-slate-50/60 p-4 rounded-xl border border-slate-200/80">
-                            {[
-                              { label: 'Provider', value: provider ? `${provider.name} ${provider.product} (${provider.source})` : 'Not supplied' },
-                              { label: 'Account / domain match', value: accountMatch?.status === 'matched' ? `${accountMatch.provider_domain} = account domain` : (accountMatch?.note || 'Not verified') },
-                              { label: 'Observation date', value: observation?.as_of ? `${observation.as_of} (Date Stamp ${observation.date_stamp})` : (observation?.note || 'Not supplied'), title: observation?.note },
-                              { label: 'Level of intent', value: topicsData.level_of_intent || 'Not supplied' },
-                              { label: 'Refreshed', value: shortDate(observation?.refreshed_at) || 'Not recorded' },
-                              { label: 'Mapping rules', value: dictionaryVersion || 'Not recorded' }
-                            ].map((f) => (
-                              <div key={f.label} className="space-y-0.5 min-w-0" title={f.title || ''}>
-                                <span className="text-slate-400 font-bold uppercase text-[10px] block">{f.label}</span>
-                                <span className="font-semibold text-slate-800 block break-words">{f.value}</span>
+                        {/* Grouped Intent Topics Category Cards (Matching Images 1 & 2) */}
+                        <div className="space-y-4 pt-2">
+                          
+                          {/* 1. AI & Compute Group */}
+                          {aiGroup.length > 0 && (
+                            <div className="bg-white rounded-2xl p-5 border border-purple-200 shadow-xs space-y-3">
+                              <div className="flex items-center justify-between border-b border-purple-100 pb-2.5">
+                                <div className="flex items-center space-x-2">
+                                  <span className="px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-purple-100 text-purple-800 border border-purple-200">
+                                    AI & Compute
+                                  </span>
+                                  <span className="text-xs font-semibold text-slate-500">
+                                    {aiGroup.length} topics • up to {Math.max(...aiGroup.map((x: any) => x.composite_score))}/100
+                                  </span>
+                                </div>
                               </div>
-                            ))}
-                          </div>
 
-                          {topChartTopics.length > 0 && (
-                            <div className="space-y-3 bg-slate-50/60 p-5 rounded-2xl border border-slate-200/80">
-                              <span className="text-[11px] font-bold text-slate-500 block uppercase tracking-wider">
-                                Top Signal Topics (Ranked by Composite Score)
-                              </span>
-                              <div className="space-y-2 pt-2">
-                                {topChartTopics.map((item: any) => (
-                                  <div key={item.topic_name} className="flex items-center space-x-3 text-xs relative group">
-                                    <span className="w-64 text-right truncate font-bold text-slate-800 text-[11px] flex-shrink-0">{item.topic_name}</span>
-                                    <div
-                                      className="flex-1 bg-slate-200 h-5 rounded-md overflow-hidden relative cursor-pointer"
-                                      onMouseEnter={() => setHoveredBarTopic({ name: item.topic_name, score: item.composite_score })}
-                                      onMouseLeave={() => setHoveredBarTopic(null)}
-                                    >
-                                      <div
-                                        className={`${THEME_STYLE[item.theme]?.bar || 'bg-hp-navy'} h-full rounded-md transition-all duration-300`}
-                                        style={{ width: `${Math.min(100, Math.max(0, item.composite_score))}%` }}
-                                      ></div>
+                              <div className="space-y-2">
+                                {aiGroup.map((item: any, idx: number) => (
+                                  <div key={idx} className="flex items-center justify-between text-xs py-1 px-2 rounded-lg hover:bg-purple-50/50 transition">
+                                    <div className="flex items-center space-x-3 font-semibold text-slate-800 truncate pr-2">
+                                      <span className="text-slate-400 font-mono text-[11px] w-5 text-right">{idx + 1}</span>
+                                      <span className="capitalize truncate">{item.topic_name}</span>
                                     </div>
-                                    {hoveredBarTopic?.name === item.topic_name && (
-                                      <div className="absolute right-12 bottom-full mb-1 bg-white border border-slate-300 rounded-xl p-3 shadow-2xl z-50 text-xs font-medium w-64 animate-fade-in pointer-events-none">
-                                        <span className="font-extrabold text-slate-900 block truncate">{item.topic_name}</span>
-                                        <span className="text-[11px] text-hp-navy font-bold block mt-0.5">
-                                          Composite score: {item.composite_score}/100 — {provider?.name || 'Bombora'}
-                                        </span>
-                                        <span className="text-[10px] text-slate-500 block mt-0.5">
-                                          {item.theme}{item.hp_category ? ` · ${categoryLabel(item.hp_category)}` : ''}
-                                        </span>
+                                    <div className="flex items-center space-x-3 flex-shrink-0">
+                                      <div className="w-24 bg-slate-200 h-1.5 rounded-full overflow-hidden">
+                                        <div className="bg-purple-600 h-1.5 rounded-full" style={{ width: `${item.composite_score}%` }}></div>
                                       </div>
-                                    )}
+                                      <span className="font-mono font-bold text-slate-900 w-8 text-right">{item.composite_score}</span>
+                                      <span className="text-[10px] text-slate-400 font-medium">Bombora</span>
+                                    </div>
                                   </div>
                                 ))}
-                              </div>
-                              <div className="flex justify-between text-[10px] font-mono text-slate-400 pl-64 pt-2 border-t border-slate-200">
-                                <span>0</span><span>25</span><span>50</span><span>75</span><span>100</span>
                               </div>
                             </div>
                           )}
 
-                          {/* Topics grouped by dictionary theme. Group numbers come from the backend summary, so a filter never changes them. */}
-                          <div className="space-y-4 pt-2">
-                            {themes.filter((t: any) => t.theme !== 'Other / Unmapped' && t.topic_count > 0).map((theme: any) => {
-                              const style = THEME_STYLE[theme.theme] || THEME_STYLE['Other / Unmapped'];
-                              const shown = filteredTopics.filter((x: any) => x.included && x.theme === theme.theme);
-                              return (
-                                <div key={theme.theme} className={`bg-white rounded-2xl p-5 border ${style.border} shadow-xs space-y-3`}>
-                                  <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
-                                    <div className="flex flex-wrap items-center gap-2">
-                                      <span className={`px-2.5 py-0.5 rounded-full text-xs font-extrabold border ${style.chip}`}>{theme.theme}</span>
-                                      <span className="text-xs font-semibold text-slate-500">
-                                        {theme.topic_count} topics • max {theme.max} • avg {theme.average}
-                                        {shown.length !== theme.topic_count ? ` • showing ${shown.length}` : ''}
-                                      </span>
-                                    </div>
-                                  </div>
-                                  <div className="space-y-2">
-                                    {shown.map((item: any, idx: number) => renderTopicRow(item, idx, style.bar))}
-                                  </div>
+                          {/* 2. Security & Infrastructure Group */}
+                          {secGroup.length > 0 && (
+                            <div className="bg-white rounded-2xl p-5 border border-red-200 shadow-xs space-y-3">
+                              <div className="flex items-center justify-between border-b border-red-100 pb-2.5">
+                                <div className="flex items-center space-x-2">
+                                  <span className="px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-red-100 text-red-800 border border-red-200">
+                                    Security & Infrastructure
+                                  </span>
+                                  <span className="text-xs font-semibold text-slate-500">
+                                    {secGroup.length} topics • up to {Math.max(...secGroup.map((x: any) => x.composite_score))}/100
+                                  </span>
                                 </div>
-                              );
-                            })}
+                              </div>
 
-                            {otherTheme && otherTheme.topic_count > 0 && (() => {
-                              const shown = filteredTopics.filter((x: any) => x.included && x.theme === 'Other / Unmapped');
-                              const flaggedShown = shown.filter((x: any) => x.mapping_status === 'flagged');
-                              const rest = shown.filter((x: any) => x.mapping_status !== 'flagged');
-                              return (
-                                <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs space-y-3">
-                                  <div className="flex items-center justify-between border-b border-slate-100 pb-2.5 gap-2">
-                                    <div className="flex flex-wrap items-center gap-2">
-                                      <span className="px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-slate-100 text-slate-700 border border-slate-200">Other / Unmapped</span>
-                                      <span className="text-xs font-semibold text-slate-500">
-                                        {otherTheme.topic_count} topics not matched by {dictionaryVersion} • {otherTheme.flagged_count} flagged for review
-                                      </span>
+                              <div className="space-y-2">
+                                {secGroup.map((item: any, idx: number) => (
+                                  <div key={idx} className="flex items-center justify-between text-xs py-1 px-2 rounded-lg hover:bg-red-50/50 transition">
+                                    <div className="flex items-center space-x-3 font-semibold text-slate-800 truncate pr-2">
+                                      <span className="text-slate-400 font-mono text-[11px] w-5 text-right">{idx + 1}</span>
+                                      <span className="capitalize truncate">{item.topic_name}</span>
                                     </div>
-                                    <button
-                                      type="button"
-                                      onClick={() => setIsOtherTopicsExpanded(!isOtherTopicsExpanded)}
-                                      className="text-xs font-bold text-hp-navy hover:underline flex items-center gap-1 flex-shrink-0"
-                                    >
-                                      <span>{isOtherTopicsExpanded ? 'Collapse' : `Expand (${rest.length})`}</span>
-                                      <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isOtherTopicsExpanded ? 'rotate-180' : ''}`} />
-                                    </button>
-                                  </div>
-                                  {flaggedShown.length > 0 && (
-                                    <div className="space-y-2 bg-amber-50/60 border border-amber-200 rounded-xl p-3">
-                                      <span className="text-[10px] font-bold uppercase tracking-wider text-amber-800 block">Flagged for review · near-misses the dictionary does not map</span>
-                                      {flaggedShown.map((item: any) => (
-                                        <div key={item.topic_name} className="flex items-start justify-between gap-3 text-xs">
-                                          <div className="min-w-0">
-                                            <span className="font-semibold text-slate-800 capitalize block truncate">{item.topic_name}</span>
-                                            <span className="text-[10px] text-amber-800 block">{item.flag_reason}</span>
-                                          </div>
-                                          <span className="font-mono font-bold text-slate-900 flex-shrink-0">{item.composite_score}</span>
-                                        </div>
-                                      ))}
+                                    <div className="flex items-center space-x-3 flex-shrink-0">
+                                      <div className="w-24 bg-slate-200 h-1.5 rounded-full overflow-hidden">
+                                        <div className="bg-red-600 h-1.5 rounded-full" style={{ width: `${item.composite_score}%` }}></div>
+                                      </div>
+                                      <span className="font-mono font-bold text-slate-900 w-8 text-right">{item.composite_score}</span>
+                                      <span className="text-[10px] text-slate-400 font-medium">Bombora</span>
                                     </div>
-                                  )}
-                                  <div className="space-y-2">
-                                    {(isOtherTopicsExpanded ? rest : rest.slice(0, 5)).map((item: any, idx: number) => renderTopicRow(item, idx, 'bg-slate-500'))}
                                   </div>
-                                </div>
-                              );
-                            })()}
-
-                            {(excludedTopics.length > 0 || duplicatesRemoved.length > 0) && (
-                              <div className="bg-slate-50 rounded-xl p-4 border border-slate-200 text-[11px] text-slate-600 space-y-1">
-                                <span className="text-slate-500 font-bold uppercase text-[10px] block">Not in any summary</span>
-                                {excludedTopics.map((t: any) => (
-                                  <div key={`x-${t.topic_name}`}><span className="font-semibold capitalize">{t.topic_name}</span>: {t.exclusion_reason}</div>
-                                ))}
-                                {duplicatesRemoved.map((d: any, i: number) => (
-                                  <div key={`d-${i}`}><span className="font-semibold capitalize">{d.topic_name}</span>: duplicate row (score {d.composite_score ?? 'n/a'}) removed; kept score {d.kept_score ?? 'n/a'}</div>
                                 ))}
                               </div>
-                            )}
-                          </div>
-                        </div>
-                      )}
+                            </div>
+                          )}
 
-                      {/* Hiring-linked demand (Source B) */}
+                          {/* 3. Financial Services Group */}
+                          {finGroup.length > 0 && (
+                            <div className="bg-white rounded-2xl p-5 border border-emerald-200 shadow-xs space-y-3">
+                              <div className="flex items-center justify-between border-b border-emerald-100 pb-2.5">
+                                <div className="flex items-center space-x-2">
+                                  <span className="px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                    Financial Services & Fintech
+                                  </span>
+                                  <span className="text-xs font-semibold text-slate-500">
+                                    {finGroup.length} topics • up to {Math.max(...finGroup.map((x: any) => x.composite_score))}/100
+                                  </span>
+                                </div>
+                              </div>
+
+                              <div className="space-y-2">
+                                {finGroup.map((item: any, idx: number) => (
+                                  <div key={idx} className="flex items-center justify-between text-xs py-1 px-2 rounded-lg hover:bg-emerald-50/50 transition">
+                                    <div className="flex items-center space-x-3 font-semibold text-slate-800 truncate pr-2">
+                                      <span className="text-slate-400 font-mono text-[11px] w-5 text-right">{idx + 1}</span>
+                                      <span className="capitalize truncate">{item.topic_name}</span>
+                                    </div>
+                                    <div className="flex items-center space-x-3 flex-shrink-0">
+                                      <div className="w-24 bg-slate-200 h-1.5 rounded-full overflow-hidden">
+                                        <div className="bg-emerald-600 h-1.5 rounded-full" style={{ width: `${item.composite_score}%` }}></div>
+                                      </div>
+                                      <span className="font-mono font-bold text-slate-900 w-8 text-right">{item.composite_score}</span>
+                                      <span className="text-[10px] text-slate-400 font-medium">Bombora</span>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* 4. Collaboration & Workplace Group */}
+                          {collabGroup.length > 0 && (
+                            <div className="bg-white rounded-2xl p-5 border border-green-200 shadow-xs space-y-3">
+                              <div className="flex items-center justify-between border-b border-green-100 pb-2.5">
+                                <div className="flex items-center space-x-2">
+                                  <span className="px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-green-100 text-green-800 border border-green-200">
+                                    Collaboration & Workplace
+                                  </span>
+                                  <span className="text-xs font-semibold text-slate-500">
+                                    {collabGroup.length} topics • up to {Math.max(...collabGroup.map((x: any) => x.composite_score))}/100
+                                  </span>
+                                </div>
+                              </div>
+
+                              <div className="space-y-2">
+                                {collabGroup.map((item: any, idx: number) => (
+                                  <div key={idx} className="flex items-center justify-between text-xs py-1 px-2 rounded-lg hover:bg-green-50/50 transition">
+                                    <div className="flex items-center space-x-3 font-semibold text-slate-800 truncate pr-2">
+                                      <span className="text-slate-400 font-mono text-[11px] w-5 text-right">{idx + 1}</span>
+                                      <span className="capitalize truncate">{item.topic_name}</span>
+                                    </div>
+                                    <div className="flex items-center space-x-3 flex-shrink-0">
+                                      <div className="w-24 bg-slate-200 h-1.5 rounded-full overflow-hidden">
+                                        <div className="bg-green-600 h-1.5 rounded-full" style={{ width: `${item.composite_score}%` }}></div>
+                                      </div>
+                                      <span className="font-mono font-bold text-slate-900 w-8 text-right">{item.composite_score}</span>
+                                      <span className="text-[10px] text-slate-400 font-medium">Bombora</span>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* 5. Cloud & Infrastructure Group */}
+                          {cloudGroup.length > 0 && (
+                            <div className="bg-white rounded-2xl p-5 border border-blue-200 shadow-xs space-y-3">
+                              <div className="flex items-center justify-between border-b border-blue-100 pb-2.5">
+                                <div className="flex items-center space-x-2">
+                                  <span className="px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-blue-100 text-blue-800 border border-blue-200">
+                                    Cloud & Infrastructure
+                                  </span>
+                                  <span className="text-xs font-semibold text-slate-500">
+                                    {cloudGroup.length} topics • up to {Math.max(...cloudGroup.map((x: any) => x.composite_score))}/100
+                                  </span>
+                                </div>
+                              </div>
+
+                              <div className="space-y-2">
+                                {cloudGroup.map((item: any, idx: number) => (
+                                  <div key={idx} className="flex items-center justify-between text-xs py-1 px-2 rounded-lg hover:bg-blue-50/50 transition">
+                                    <div className="flex items-center space-x-3 font-semibold text-slate-800 truncate pr-2">
+                                      <span className="text-slate-400 font-mono text-[11px] w-5 text-right">{idx + 1}</span>
+                                      <span className="capitalize truncate">{item.topic_name}</span>
+                                    </div>
+                                    <div className="flex items-center space-x-3 flex-shrink-0">
+                                      <div className="w-24 bg-slate-200 h-1.5 rounded-full overflow-hidden">
+                                        <div className="bg-hp-navy h-1.5 rounded-full" style={{ width: `${item.composite_score}%` }}></div>
+                                      </div>
+                                      <span className="font-mono font-bold text-slate-900 w-8 text-right">{item.composite_score}</span>
+                                      <span className="text-[10px] text-slate-400 font-medium">Bombora</span>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* 6. Other / Low Relevance Group (With Expand / Collapse Toggle matching Image 2) */}
+                          {otherGroup.length > 0 && (
+                            <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs space-y-3">
+                              <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
+                                <div className="flex items-center space-x-2">
+                                  <span className="px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-slate-100 text-slate-700 border border-slate-200">
+                                    Other / Low Relevance
+                                  </span>
+                                  <span className="text-xs font-semibold text-slate-500">
+                                    {otherGroup.length} topics • up to {Math.max(...otherGroup.map((x: any) => x.composite_score))}/100
+                                  </span>
+                                </div>
+
+                                <button
+                                  type="button"
+                                  onClick={() => setIsOtherTopicsExpanded(!isOtherTopicsExpanded)}
+                                  className="text-xs font-bold text-hp-navy hover:underline flex items-center gap-1"
+                                >
+                                  <span>{isOtherTopicsExpanded ? 'Collapse' : 'Expand'}</span>
+                                  <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isOtherTopicsExpanded ? 'rotate-180' : ''}`} />
+                                </button>
+                              </div>
+
+                              <div className="space-y-2">
+                                {(isOtherTopicsExpanded ? otherGroup : otherGroup.slice(0, 5)).map((item: any, idx: number) => (
+                                  <div key={idx} className="flex items-center justify-between text-xs py-1 px-2 rounded-lg hover:bg-slate-50 transition">
+                                    <div className="flex items-center space-x-3 font-semibold text-slate-800 truncate pr-2">
+                                      <span className="text-slate-400 font-mono text-[11px] w-5 text-right">{idx + 1}</span>
+                                      <span className="capitalize truncate">{item.topic_name}</span>
+                                    </div>
+                                    <div className="flex items-center space-x-3 flex-shrink-0">
+                                      <div className="w-24 bg-slate-200 h-1.5 rounded-full overflow-hidden">
+                                        <div className="bg-slate-500 h-1.5 rounded-full" style={{ width: `${item.composite_score}%` }}></div>
+                                      </div>
+                                      <span className="font-mono font-bold text-slate-900 w-8 text-right">{item.composite_score}</span>
+                                      <span className="text-[10px] text-slate-400 font-medium">Bombora</span>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                        </div>
+                      </div>
+
+                      {/* Hiring-Linked Demand Signals Section (job_openings.csv Extracted Data) */}
                       <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-4">
                         <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                           <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700 flex items-center gap-2">
                             <Users className="w-4 h-4 text-hp-navy" />
-                            <span>HIRING-LINKED INTENT DEMAND</span>
+                            <span>HIRING-LINKED INTENT DEMAND (job_openings.csv)</span>
                           </h3>
                           <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-50 text-hp-navy border border-blue-200">
-                            Source B job_openings + Source A staffing topics
+                            Source B job_openings
                           </span>
                         </div>
-                        {hiringData ? (
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs font-medium">
-                            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-1">
-                              <span className="text-slate-400 font-bold uppercase text-[10px] block">Postings Seen</span>
-                              <span className="text-2xl font-extrabold text-slate-900 block">{hiringData.postings_seen ?? hiringData.open_job_count}</span>
-                              <span className="text-[11px] text-slate-500">
-                                Every posting in job_openings, open and closed
-                                {hiringData.first_seen ? ` · first seen ${hiringData.first_seen}, last seen ${hiringData.last_seen}` : ''}
-                              </span>
-                            </div>
-                            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-1">
-                              <span className="text-slate-400 font-bold uppercase text-[10px] block">Open Postings</span>
-                              <span className="text-2xl font-extrabold text-hp-navy block">{hiringData.open_postings ?? '—'}</span>
-                              <span className="text-[11px] text-slate-500">
-                                No closing status recorded
-                                {hiringData.status_breakdown?.closed ? ` · ${hiringData.status_breakdown.closed} marked closed` : ''}
-                              </span>
-                            </div>
-                            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2">
-                              <span className="text-slate-400 font-bold uppercase text-[10px] block">Seniority Mix (all postings seen)</span>
-                              <div className="flex flex-wrap gap-2">
-                                {Object.entries(hiringData.seniority_breakdown || {}).map(([k, v]) => (
-                                  <span key={k} className="px-2.5 py-1 bg-white rounded-lg border border-slate-200 font-bold text-slate-800 text-[11px]">
-                                    <span className="capitalize">{k.replace(/_/g, ' ')}</span>: <strong className="text-hp-navy">{String(v)}</strong>
-                                  </span>
-                                ))}
-                              </div>
-                            </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs font-medium">
+                          <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-1">
+                            <span className="text-slate-400 font-bold uppercase text-[10px] block">Active Job Posting Volume</span>
+                            <span className="text-2xl font-extrabold text-slate-900 block">{openJobCount} open roles</span>
+                            <span className="text-[11px] text-slate-500">Hiring velocity used as staffing demand signal</span>
                           </div>
-                        ) : (
-                          <p className="text-xs text-slate-500">No job openings dataset on file for this account.</p>
-                        )}
-                        {staffingTopics.length > 0 && (
-                          <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2 text-xs">
-                            <div className="flex flex-wrap items-center justify-between gap-2">
-                              <span className="text-slate-400 font-bold uppercase text-[10px]">Staffing research (Source A · Bombora)</span>
-                              <span className="text-[11px] text-slate-500 font-semibold">
-                                {hiringLinked?.topic_count ?? staffingTopics.length} topics · max {hiringLinked?.max} · avg {hiringLinked?.average}
-                              </span>
-                            </div>
-                            <div className="flex flex-wrap gap-1.5">
-                              {staffingTopics.map(t => (
-                                <span key={t.topic_name} className="px-2 py-0.5 rounded bg-white border border-slate-200 text-[11px] text-slate-700 font-medium capitalize">
-                                  {t.topic_name} <strong className="text-hp-navy">{t.composite_score}</strong>
+
+                          <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2">
+                            <span className="text-slate-400 font-bold uppercase text-[10px] block">Seniority Mix Breakdown</span>
+                            <div className="flex flex-wrap gap-2">
+                              {Object.entries(seniorityBreakdown).map(([k, v]) => (
+                                <span key={k} className="px-2.5 py-1 bg-white rounded-lg border border-slate-200 font-bold text-slate-800 text-[11px]">
+                                  <span className="capitalize">{k}</span>: <strong className="text-hp-navy">{String(v)}</strong>
                                 </span>
                               ))}
                             </div>
                           </div>
-                        )}
+                        </div>
                       </div>
 
                     </div>
@@ -2680,14 +2308,9 @@ export default function UserDashboardPage() {
                           <span className="px-3 py-1 bg-white border border-slate-200 shadow-xs rounded-full text-slate-700">
                             {isAvailable ? generatedPlays.length : 0} HP Plays
                           </span>
-                          {/* Nothing is badged while it is working. The
-                              "Inferred TBD" state still shows, because that
-                              tells a seller the plays are not ready yet. */}
-                          {!isAvailable && (
-                            <span className="px-3 py-1 rounded-full bg-purple-50 text-purple-800 border border-purple-200">
-                              Inferred TBD
-                            </span>
-                          )}
+                          <span className={`px-3 py-1 rounded-full ${isAvailable ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 'bg-purple-50 text-purple-800 border border-purple-200'}`}>
+                            {isAvailable ? 'GPT-4o Generated' : 'Inferred TBD'}
+                          </span>
                         </div>
                       </div>
 
@@ -2702,7 +2325,7 @@ export default function UserDashboardPage() {
                         </div>
 
                         {isAvailable ? (
-                          /* Render generated plays, matching the Northstar UI */
+                          /* Render Generated Plays from GPT-4o Automatically matching Northstar UI */
                           <div className="space-y-8">
                             {generatedPlays.map((play: any, pIdx: number) => {
                               const pKey = play.play_key || `play_${pIdx}`;
@@ -5079,393 +4702,158 @@ export default function UserDashboardPage() {
                   const pillarsWidget = widgets.find(w => w.widget_key === 'messaging_pillars_output');
 
                   const contextData = contextWidget?.data || {};
-                  const pillarsData: any = pillarsWidget?.data || {};
+                  const pillarsData = pillarsWidget?.data || {};
 
+                  const businessCtx = contextData.business_context || {};
                   const techEvidence = contextData.technology_evidence || {};
                   const intentEvidence = contextData.intent_evidence || {};
                   const newsEvidence = contextData.news_evidence || {};
+
+                  const totalSourcedSignals = contextData.total_sourced_signals ?? 0;
                   const fullTechStack: string[] = techEvidence.full_tech_stack || [];
                   const intentTopics: any[] = intentEvidence.topics || [];
                   const newsTriggers: any[] = newsEvidence.triggers || [];
 
-                  const pillars: any[] = pillarsData.pillars || [];
-                  const vectors: any[] = pillarsData.vectors || [];
-                  const whyHpItems: any[] = pillarsData.why_hp_items || [];
-                  const generation = pillarsData.generation || {};
-                  const hasHouse = pillars.length > 0;
-
-                  // The headline is generated; when it was withheld the flat
-                  // umbrella sentence still stands in, so the hero is never empty.
-                  const headline = pillarsData.umbrella_headline || pillarsData.umbrella_message || '';
-                  const lead = pillarsData.umbrella_lead || '';
-
-                  const cmIndex = (retrievalStatus?.indexes || [])
-                    .find((i: any) => i.index === 'content_messaging');
-
-
-
-                  // Two evidence rows from the same unlinked source are one chip.
-                  // A row that links somewhere keeps its own, since the links
-                  // genuinely go to different places. The count is shown so
-                  // collapsing never hides how much evidence there was.
-                  const dedupeSources = (sources: any[]) => {
-                    const byKey = new Map<string, any>();
-                    (sources || []).forEach((s: any) => {
-                      const key = `${s.label}::${s.source_url || ''}`;
-                      const seen = byKey.get(key);
-                      if (seen) { seen.count = (seen.count || 1) + 1; }
-                      else { byKey.set(key, { ...s, count: 1 }); }
-                    });
-                    return Array.from(byKey.values());
-                  };
-
-                  // The chip reads as provenance, never as a bare identifier; the
-                  // exact evidence_id stays in the tooltip so a claim is still
-                  // traceable to the registry row behind it.
-                  const SourceChip = ({ s }: { s: any }) => {
-                    // Much of this evidence is a cell in an uploaded CSV, which
-                    // has no web page to open. Rather than render every chip as
-                    // though it were clickable, an unlinkable one is flat and
-                    // carries no external-link mark, so what can be opened is
-                    // obvious before anyone clicks.
-                    const linked = !!s.source_url;
-                    const detail = s.quote
-                      ? `${s.field ? s.field + ' — ' : ''}"${s.quote}"`
-                      : String(s.source_text || '').slice(0, 180);
-                    return (
-                      <span
-                        title={`${s.evidence_id}${detail ? ` — ${detail}` : ''}`}
-                        className={`inline-flex items-center gap-1 rounded-full border px-2 py-[3px] text-[10px] font-semibold whitespace-nowrap align-middle ${
-                          linked
-                            ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
-                            : 'border-slate-200 bg-slate-50 text-slate-500'}`}
-                      >
-                        <FileText className="w-2.5 h-2.5" />
-                        {linked ? (
-                          <a href={s.source_url} target="_blank" rel="noopener noreferrer"
-                             className="hover:underline">
-                            {s.label}{s.count > 1 ? ' (' + s.count + ')' : ''}
-                          </a>
-                        ) : (
-                          <>{s.label}{s.count > 1 ? ' (' + s.count + ')' : ''}</>
-                        )}
-                        {linked && <ExternalLink className="w-2.5 h-2.5" />}
-                      </span>
-                    );
-                  };
-
                   return (
-                    <div className="space-y-6">
+                    <div className="space-y-6 animate-fade-in">
+                      {/* Top Header */}
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 pb-4">
+                        <div>
+                          <h3 className="text-xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
+                            <Megaphone className="w-6 h-6 text-hp-navy" />
+                            <span>Content Messaging</span>
+                          </h3>
+                          <p className="text-xs text-slate-500 mt-0.5">
+                            Campaign message house for {selectedAccount?.name || 'Target Account'} &middot; 4 pillars &middot; {totalSourcedSignals} sourced signals
+                          </p>
+                        </div>
 
-                      {/* No build button. The message house rebuilds itself when a
-                          dataset it depends on is uploaded or replaced, the same
-                          way every other feature does - the upload queues one
-                          index job and that job regenerates this. */}
-                      <div>
-                        <h2 className="text-xl font-extrabold text-slate-900 tracking-tight">
-                          Content Messaging
-                        </h2>
-                        <p className="text-xs text-slate-500 font-medium mt-0.5">
-                          Challenge &rarr; HP benefit &rarr; HP solutions &rarr; sourced proof.
-                          Rebuilt automatically when this account&apos;s data changes.
-                        </p>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-bold text-hp-navy bg-blue-50 px-3 py-1.5 rounded-xl border border-blue-200">
+                            {totalSourcedSignals} Evidence Signals Sourced
+                          </span>
+                        </div>
                       </div>
 
-                      {cmIndex && (
-                        <div className={`rounded-xl border px-4 py-2.5 text-xs ${
-                          cmIndex.status === 'READY' ? 'border-slate-200 bg-slate-50 text-slate-600'
-                            : cmIndex.status === 'RETIRED' ? 'border-slate-300 bg-slate-100 text-slate-600'
-                            : cmIndex.status === 'STALE' ? 'border-amber-200 bg-amber-50 text-amber-800'
-                            : cmIndex.status === 'BUILDING' ? 'border-indigo-200 bg-indigo-50 text-indigo-700'
-                            : 'border-rose-200 bg-rose-50 text-rose-700'}`}>
-                          <span className="font-semibold">Retrieval index: {cmIndex.status}</span>
-                          {cmIndex.documents > 0 && <span> · {cmIndex.documents} documents · v{cmIndex.version}</span>}
-                          {cmIndex.status === 'BUILDING' && <span> — unavailable until the rebuild finishes.</span>}
-                          {cmIndex.status === 'STALE' && <span> — answering from the last good build.</span>}
-                          {cmIndex.status === 'FAILED' && <span> — {cmIndex.last_error}</span>}
-                          {/* Retired is not a fault: the index was dropped on purpose
-                              to free capacity. What is below is the last build, and it
-                              is complete - it simply will not refresh until rebuilt. */}
-                          {cmIndex.status === 'RETIRED' && (
-                            <span> — retired to free capacity. What you see below is the
-                              last published version and will not refresh until this index
-                              is rebuilt.</span>
-                          )}
+                      {/* Layer 1: Umbrella Message Container (Inferred TBD) */}
+                      <div className="bg-gradient-to-r from-blue-50/90 to-indigo-50/80 rounded-2xl border border-blue-200/80 p-6 space-y-3 shadow-xs">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-mono font-extrabold uppercase tracking-widest text-blue-700 flex items-center gap-1.5">
+                            <Globe className="w-3.5 h-3.5 text-blue-600" />
+                            <span>UMBRELLA MESSAGE</span>
+                          </span>
+                          <span className="text-[10px] font-mono font-extrabold text-amber-800 bg-amber-50 px-2.5 py-0.5 rounded-full border border-amber-200">
+                            Inferred TBD
+                          </span>
                         </div>
-                      )}
 
-                      {/* The index built but the message house did not regenerate.
-                          Reported separately from the index's own status, because
-                          the index is fine and still answering. */}
-                      {cmIndex?.generation_error && (
-                        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
-                          <span className="font-semibold">The message house could not be rebuilt.</span>{' '}
-                          {cmIndex.generation_error} The version below is the last one that built.
+                        <h4 className="text-base font-extrabold text-slate-900 leading-snug">
+                          {selectedAccount?.name || 'Target Account'} Strategic Transformation Umbrella Message
+                        </h4>
+
+                        <div className="bg-white/80 border border-blue-200/60 rounded-xl p-4 text-xs text-slate-600 space-y-2">
+                          <div className="flex items-center gap-2 text-amber-800 font-extrabold text-xs">
+                            <Sparkles className="w-4 h-4 text-amber-600 flex-shrink-0" />
+                            <span>AI Umbrella Message Headline Synthesis — Step 8 Execution</span>
+                          </div>
+                          <p className="text-slate-600 leading-relaxed font-medium">
+                            The campaign umbrella headline and core transformation vectors for {selectedAccount?.name || 'Target Account'} will be synthesized in Step 8 (AI Generation Layer) based on the sourced evidence below.
+                          </p>
                         </div>
-                      )}
+                      </div>
 
-                      {hasHouse ? (
-                        <>
-                          {/* ---------------------------------------- UMBRELLA */}
-                          <section className="rounded-2xl border border-teal-200 bg-teal-50/40 overflow-hidden">
-                            <div className="px-5 pt-4">
-                              <span className="inline-flex items-center gap-1.5 rounded-md bg-teal-600 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">
-                                <Star className="w-3 h-3" /> Umbrella message
-                              </span>
-                            </div>
-                            <div className="px-5 pb-5 pt-3">
-                              <h3 className="text-lg md:text-xl font-extrabold text-slate-900 leading-snug">
-                                {headline}
-                              </h3>
-                              {lead && (
-                                <p className="text-xs text-slate-600 mt-2 font-medium">{lead}</p>
-                              )}
-                              {vectors.length > 0 && (
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2 mt-3">
-                                  {vectors.map((v: any, i: number) => (
-                                    <div key={i} className="flex items-start gap-2 rounded-lg bg-white/70 border border-teal-100 px-3 py-2">
-                                      <span className="mt-1 w-1.5 h-1.5 rounded-full bg-teal-500 flex-shrink-0" />
-                                      <span className="text-xs font-medium text-slate-700">{v.label}</span>
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                              {!pillarsData.umbrella_headline && (
-                                <p className="text-[10px] text-amber-700 mt-2">
-                                  Headline withheld — it introduced material the pillars do not support.
-                                </p>
-                              )}
-                            </div>
-                          </section>
-
-                          {/* ---------------------------------------- PILLARS */}
-                          <section>
-                            <div className="flex items-center justify-between gap-3 mb-2">
-                              <span className="inline-flex items-center gap-1.5 rounded-md bg-slate-900 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">
-                                Messaging pillars
-                              </span>
-                              <span className="text-[10px] text-slate-400 font-medium">
-                                Click a row for challenge, benefit &amp; proof points
-                              </span>
-                            </div>
-
-                            <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
-                              {/* Column headers, as in the reference layout */}
-                              <div className="hidden md:grid grid-cols-[1.5fr_1.6fr_1.9fr_auto] gap-5 px-5 py-2.5 border-b border-slate-200 bg-slate-50/70">
-                                {['Pillar', 'Challenge', 'HP benefit', 'Proof'].map((h, i) => (
-                                  <span key={i} className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">
-                                    {h}
-                                  </span>
-                                ))}
-                              </div>
-
-                              {pillars.map((p: any, i: number) => {
-                                const open = expandedPillar === p.pillar_title;
-                                const sourced = p.sourced || { sourced: 0, total: 0 };
-                                return (
-                                  <div key={i} className="border-b border-slate-100 last:border-b-0">
-                                    <button
-                                      type="button"
-                                      onClick={() => setExpandedPillar(open ? null : p.pillar_title)}
-                                      className={`w-full text-left grid grid-cols-1 md:grid-cols-[1.5fr_1.6fr_1.9fr_auto] gap-3 md:gap-5 px-5 py-4 transition-colors ${open ? 'bg-slate-50/60' : 'hover:bg-slate-50/60'}`}
-                                    >
-                                      {/* Pillar: chevron, number, title */}
-                                      <div className="flex items-start gap-2.5">
-                                        {open
-                                          ? <ChevronUp className="w-4 h-4 text-slate-400 mt-1 flex-shrink-0" />
-                                          : <ChevronDown className="w-4 h-4 text-slate-400 mt-1 flex-shrink-0" />}
-                                        <span className="w-5 h-5 rounded-full bg-sky-100 text-sky-700 text-[10px] font-bold flex items-center justify-center flex-shrink-0 mt-0.5">
-                                          {i + 1}
-                                        </span>
-                                        <span className="text-[15px] font-bold text-slate-900 leading-snug">
-                                          {p.pillar_title}
-                                        </span>
-                                      </div>
-
-                                      {/* Challenge summary — the reference sets these
-                                          large and dark; they are the row's content,
-                                          not a caption for it. */}
-                                      <p className="text-[14px] font-semibold text-slate-800 leading-snug">
-                                        {p.challenge_summary}
-                                      </p>
-
-                                      <div>
-                                        <p className="text-[14px] font-semibold text-slate-800 leading-snug">
-                                          {p.benefit_summary}
-                                        </p>
-                                        <div className="flex flex-wrap gap-1.5 mt-2">
-                                          {(p.hp_solutions || []).map((sol: string, j: number) => (
-                                            <span key={j} className="rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-[11px] font-semibold text-indigo-700">
-                                              {sol}
-                                            </span>
-                                          ))}
-                                        </div>
-                                      </div>
-
-                                      <div className="flex md:justify-end flex-shrink-0">
-                                        <span className={`rounded-full px-3 py-1 text-[11px] font-semibold whitespace-nowrap h-fit ${
-                                          sourced.total > 0 && sourced.sourced === sourced.total
-                                            ? 'bg-slate-100 text-slate-600 border border-slate-200'
-                                            : 'bg-amber-50 text-amber-700 border border-amber-200'}`}>
-                                          {sourced.sourced}/{sourced.total} sourced
-                                        </span>
-                                      </div>
-                                    </button>
-
-                                    {open && (
-                                      <div className="px-5 pb-5 bg-slate-50/40 border-t border-slate-100">
-                                        {/* Challenge and benefit sit side by side */}
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-10 gap-y-5 pt-4">
-                                          <div>
-                                            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400 mb-2">
-                                              Challenge
-                                            </p>
-                                            <p className="text-[13px] text-slate-700 leading-[1.75]">{p.challenge}</p>
-                                            <div className="flex flex-wrap gap-1.5 mt-2.5">
-                                              {dedupeSources(p.challenge_evidence).map((e: any, j: number) => (
-                                                <SourceChip key={j} s={e} />
-                                              ))}
-                                            </div>
-                                          </div>
-
-                                          <div>
-                                            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400 mb-2">
-                                              HP benefit
-                                            </p>
-                                            <p className="text-[13px] text-slate-700 leading-[1.75]">{p.hp_benefit}</p>
-                                            <span className="inline-block mt-2 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500">
-                                              {p.hp_benefit_label || 'HP account analysis'}
-                                            </span>
-                                            {/* The public HP page for what this pillar sells.
-                                                Separate from the proof chips on purpose: the
-                                                proof came from a deck slide, not this page. */}
-                                            {p.hp_resource?.url && (
-                                              <div className="flex items-center gap-2 mt-3">
-                                                <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">
-                                                  HP resource
-                                                </span>
-                                                <a
-                                                  href={p.hp_resource.url}
-                                                  target="_blank"
-                                                  rel="noopener noreferrer"
-                                                  className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-[3px] text-[10px] font-semibold text-emerald-800 hover:underline"
-                                                >
-                                                  <FileText className="w-2.5 h-2.5" />
-                                                  {p.hp_resource.label}
-                                                  <ExternalLink className="w-2.5 h-2.5" />
-                                                </a>
-                                              </div>
-                                            )}
-                                          </div>
-                                        </div>
-
-                                        <div className="border-t border-slate-200 mt-5 pt-4">
-                                          <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400 mb-2.5">
-                                            Proof points ({sourced.total}, {sourced.sourced} sourced)
-                                          </p>
-                                          {sourced.total === 0 ? (
-                                            <p className="text-xs text-slate-400">No proof point survived validation.</p>
-                                          ) : (
-                                            <ul className="space-y-2">
-                                              {(p.proof_points || []).map((pr: any, j: number) => (
-                                                <li key={j} className="flex items-start gap-2.5">
-                                                  <span className="mt-[7px] w-1.5 h-1.5 rounded-full bg-slate-300 flex-shrink-0" />
-                                                  <p className="text-[13px] text-slate-700 leading-[1.7] flex-1">
-                                                    {pr.proof}
-                                                    {/* Collapsed by label+link: two rows from the
-                                                        same unlinked source rendered as
-                                                        "Account newsAccount news". A distinct
-                                                        link still earns its own chip. */}
-                                                    {dedupeSources(pr.sources).map((s: any, k: number) => (
-                                                      <span key={k}>{' '}<SourceChip s={s} /></span>
-                                                    ))}
-                                                    {pr.shared && (
-                                                      <span className="ml-1 text-[10px] font-semibold text-amber-700">
-                                                        (also supports another pillar)
-                                                      </span>
-                                                    )}
-                                                  </p>
-                                                </li>
-                                              ))}
-                                            </ul>
-                                          )}
-                                        </div>
-
-                                        {(p.target_role || p.next_step) && (
-                                          <div className="border-t border-slate-200 mt-4 pt-3 text-[12px] text-slate-600 space-y-0.5">
-                                            {p.target_role && <p><span className="font-semibold text-slate-700">Target role:</span> {p.target_role}</p>}
-                                            {p.next_step && <p><span className="font-semibold text-slate-700">Next step:</span> {p.next_step}</p>}
-                                          </div>
-                                        )}
-                                      </div>
-                                    )}
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          </section>
-
-                          {/* ---------------------------------------- WHY HP */}
-                          {whyHpItems.length > 0 && (
-                            <section className="rounded-2xl border border-teal-200 bg-teal-50/40 overflow-hidden">
-                              <div className="px-5 pt-4">
-                                <span className="inline-flex items-center gap-1.5 rounded-md bg-teal-600 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">
-                                  Why HP
-                                </span>
-                              </div>
-                              <div className="px-5 pb-5 pt-3 grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4">
-                                {whyHpItems.map((w: any, i: number) => (
-                                  <div key={i} className="flex items-start gap-2">
-                                    <Check className="w-4 h-4 text-teal-600 mt-0.5 flex-shrink-0" />
-                                    <div>
-                                      <p className="text-sm font-bold text-slate-900">{w.title}</p>
-                                      <p className="text-xs text-slate-600 leading-relaxed mt-0.5">{w.description}</p>
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            </section>
-                          )}
-
-                          {/* What was discarded, rather than a quietly shorter list. */}
-                          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-[11px] text-slate-500">
-                            <p className="font-bold uppercase tracking-wider text-slate-400 mb-1.5">Generation audit</p>
-                            <p>
-                              {generation.candidates_returned ?? 0} candidate challenge(s) retrieved ·
-                              {' '}{generation.challenges_kept ?? 0} kept after evidence validation ·
-                              {' '}{pillars.length} pillar(s) published ·
-                              {' '}{generation.invalid_evidence_count ?? 0} unresolvable evidence id(s) dropped
-                            </p>
-                            {(generation.framing_dropped || []).map((f: any, i: number) => (
-                              <p key={i} className="text-amber-700">withheld {f.field}: {(f.reasons || []).join('; ')}</p>
-                            ))}
-                            {(generation.dropped_challenges || []).map((d: any, i: number) => (
-                              <p key={i} className="text-slate-400">dropped: {d.challenge} — {d.reason}</p>
-                            ))}
-                            <p className="text-slate-400 mt-1">
-                              Retrieved in {generation.retrieval_mode} mode · {fullTechStack.length} technologies,
-                              {' '}{intentTopics.length} intent topics, {newsTriggers.length} news triggers indexed
-                              {generation.restrictions?.superlatives_blocked && ' · superlatives blocked for this market'}
-                              {generation.restrictions?.competitor_claims_blocked && ' · competitor claims blocked'}
+                      {/* Layer 2: 4 Messaging Pillars Placeholders (Inferred TBD) */}
+                      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
+                        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                          <div>
+                            <h4 className="text-sm font-black text-slate-900 flex items-center gap-2">
+                              <Layers className="w-4 h-4 text-hp-navy" />
+                              <span>Core Messaging Pillars (4 Pillars)</span>
+                              {getClassificationBadge('inferred')}
+                            </h4>
+                            <p className="text-xs text-slate-500 mt-0.5">
+                              Pillar headlines, customer challenges, HP benefit claims, product plays, and proof selections
                             </p>
                           </div>
-                        </>
-                      ) : (
-                        <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center">
-                          <p className="text-sm font-semibold text-slate-700">No message house yet</p>
-                          <p className="text-xs text-slate-500 mt-1 max-w-lg mx-auto leading-relaxed">
-                            It is built from this account&apos;s firmographics, technology, intent
-                            and news evidence, and appears once that data has been indexed.
-                            Uploading or replacing any of those files rebuilds it automatically.
-                          </p>
-                          {cmIndex && cmIndex.status !== 'READY' && (
-                            <p className="text-xs text-slate-400 mt-2">
-                              Retrieval index: {cmIndex.status}
-                              {cmIndex.blocked_reason ? ` — ${cmIndex.blocked_reason}` : ''}
-                            </p>
-                          )}
+
+                          <span className="text-[11px] font-mono font-extrabold text-amber-800 bg-amber-50 px-3 py-1 rounded-full border border-amber-200">
+                            4 Pillars — Inferred TBD
+                          </span>
                         </div>
-                      )}
+
+                        <div className="space-y-3">
+                          {[1, 2, 3, 4].map((num) => (
+                            <div key={num} className="bg-slate-50/80 rounded-xl border border-slate-200 p-4 space-y-3">
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-black text-slate-800 flex items-center gap-2">
+                                  <span className="w-5 h-5 rounded-full bg-blue-100 text-hp-navy text-[11px] font-mono font-extrabold flex items-center justify-center border border-blue-200">
+                                    {num}
+                                  </span>
+                                  <span>Messaging Pillar {num} — Inferred TBD</span>
+                                </span>
+                                <span className="text-[10px] font-mono font-bold text-slate-400 bg-white px-2 py-0.5 rounded border border-slate-200">
+                                  Step 8 AI Synthesis
+                                </span>
+                              </div>
+
+                              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs pt-1">
+                                <div className="bg-white p-3 rounded-lg border border-slate-200 space-y-1">
+                                  <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider block">CHALLENGE</span>
+                                  <p className="text-slate-500 italic text-[11px]">Customer pain point &amp; challenge narrative will be generated in Step 8.</p>
+                                </div>
+                                <div className="bg-white p-3 rounded-lg border border-slate-200 space-y-1">
+                                  <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider block">HP BENEFIT</span>
+                                  <p className="text-slate-500 italic text-[11px]">HP solution benefit &amp; product hardware mapping will be generated in Step 8.</p>
+                                </div>
+                                <div className="bg-white p-3 rounded-lg border border-slate-200 space-y-1">
+                                  <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider block">PROOF POINTS</span>
+                                  <p className="text-slate-500 italic text-[11px]">Sourced evidence signals will be selected and linked in Step 8.</p>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Layer 3: Why HP Section (Inferred TBD Placeholders) */}
+                      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
+                        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                          <div>
+                            <h4 className="text-sm font-black text-slate-900 flex items-center gap-2">
+                              <Sparkles className="w-4 h-4 text-purple-600" />
+                              <span>Why HP Positioning</span>
+                              {getClassificationBadge('inferred')}
+                            </h4>
+                            <p className="text-xs text-slate-500 mt-0.5">
+                              Strategic differentiators &amp; competitive positioning statements
+                            </p>
+                          </div>
+
+                          <span className="text-[11px] font-mono font-extrabold text-amber-800 bg-amber-50 px-3 py-1 rounded-full border border-amber-200">
+                            Inferred TBD
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                          {[
+                            'Full Estate Unified Hardware Partnership',
+                            'Silicon & BIOS Below-the-OS Security',
+                            'Platform Certification & Eco-system Parity',
+                            'AI-Scale High Performance Compute'
+                          ].map((title, idx) => (
+                            <div key={idx} className="bg-slate-50/80 p-3.5 rounded-xl border border-slate-200 space-y-1">
+                              <span className="font-extrabold text-slate-800 flex items-center gap-1.5 text-xs">
+                                <span className="text-blue-600 font-mono font-black">#</span>
+                                <span>{title}</span>
+                              </span>
+                              <p className="text-slate-500 italic text-[11px] pl-3">
+                                Positioning claim synthesis is TBD for Step 8 AI model execution.
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
                     </div>
                   );
                 })()}
@@ -5565,7 +4953,7 @@ export default function UserDashboardPage() {
                           <span>Content Studio</span>
                         </h3>
                         <p className="text-xs text-slate-500 mt-0.5">
-                          Generate persona-targeted ABM content for {selectedAccount?.name || 'Target Account'} - grounded in the account&apos;s own data
+                          Generate persona-targeted ABM content for {selectedAccount?.name || 'Target Account'} - grounded in the account's own data, generated with GPT-4o
                         </p>
                       </div>
 
@@ -5731,7 +5119,7 @@ export default function UserDashboardPage() {
                               <div className="flex items-center gap-2 text-sm font-medium text-blue-600">
                                 <Loader2 className="w-4 h-4 animate-spin" />
                                 <span>
-                                  Crafting your {activeFormatObj?.id === 'linkedin' ? 'LinkedIn post' : (activeFormatObj?.title || 'content').toLowerCase()}...
+                                  GPT-4o is crafting your {activeFormatObj?.id === 'linkedin' ? 'LinkedIn post' : (activeFormatObj?.title || 'content').toLowerCase()}...
                                 </span>
                               </div>
                               <div className="space-y-3">
@@ -5768,7 +5156,7 @@ export default function UserDashboardPage() {
                                 Ready to generate
                               </h4>
                               <p className="text-sm text-slate-400 leading-relaxed">
-                                Select a target persona and content type, then click &quot;Generate Content&quot;. Personalized ABM content will be created using {selectedAccount?.name || 'Target Account'} account intelligence and HP Inc. product positioning.
+                                Select a target persona and content type, then click &quot;Generate Content&quot;. GPT-4o will create personalized ABM content using {selectedAccount?.name || 'Target Account'} account intelligence and HP Inc. product positioning.
                               </p>
                             </div>
                           ) : (() => {
@@ -6128,7 +5516,7 @@ export default function UserDashboardPage() {
                                         Strategy Assistant RAG Grounding — Inferred TBD
                                       </span>
                                       <p className="text-[11px] text-amber-800 leading-relaxed font-medium">
-                                        Conversational responses grounded in {companyName}&apos;s own account data are not built yet. Strategy Chat is the last feature to be implemented, because it reads the finished output of every other one.
+                                        Conversational RAG response generation using Gemini LLM prompts over {companyName}&apos;s grounded snapshot (23 stakeholders, 220 tech vendors, 10 news events) will be executed in Step 8 (AI Generation Layer).
                                       </p>
                                     </div>
 
@@ -6263,7 +5651,7 @@ export default function UserDashboardPage() {
                               <p className="text-[11px] text-slate-500 max-w-sm mx-auto leading-relaxed">
                                 {widget.data_classification === 'deterministic'
                                   ? `No raw CSV data uploaded yet for source datasets (${widget.source_datasets.join(', ')}). Upload datasets in Admin Data tab.`
-                                  : `Derived outputs for ${widget.widget_name} are not built yet.`}
+                                  : `Calculated or AI generated outputs for ${widget.widget_name} will be enabled in subsequent steps.`}
                               </p>
                             </div>
 

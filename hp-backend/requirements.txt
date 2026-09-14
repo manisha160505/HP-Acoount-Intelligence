@@ -11,3 +11,15 @@ python-multipart>=0.0.9
 python-dotenv>=1.0.0
 pandas>=2.2.0
 openai>=1.99.0
+
+# The retrieval layer. Pinned exactly, not floated: LightRAG's storage
+# backends read their own environment variables and its query surface changed
+# shape between releases - 1.5.7 is the version the retrieval layer was written
+# against and verified on, and an unpinned upgrade would rebuild every index.
+lightrag-hku==1.5.7
+
+# Reading compliance filings. PyMuPDF is what services/retrieval/pdf.py rebuilds
+# tables with; python-pptx is what scripts/extract_hp_decks.py reads HP decks
+# with. Both were already relied on and neither was declared.
+pymupdf>=1.26,<2
+python-pptx>=1.0,<2

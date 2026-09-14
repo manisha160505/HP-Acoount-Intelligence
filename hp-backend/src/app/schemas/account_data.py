@@ -143,6 +143,20 @@ DATASET_REGISTRY = {
         "display_name": "Google News",
         "type": "multi_file",
         "allowed_extensions": [".xlsx", ".xls", ".csv"]
+    },
+    # The only dataset that is not a table. These are the account's filed
+    # documents - annual reports, exchange filings, monthly market reports -
+    # and they are where reported financial figures actually come from. Every
+    # other dataset carries a band or a category; this one carries the number a
+    # company published, with the period and unit printed beside it.
+    #
+    # Multi-file because a filing history is several documents, and because
+    # replacing one of them must not disturb the rest. Rows do not apply: it is
+    # measured in pages, and `services/retrieval/pdf.py` does the reading.
+    "compliance_filings": {
+        "display_name": "Compliance Filings",
+        "type": "multi_file",
+        "allowed_extensions": [".pdf"]
     }
 }
 

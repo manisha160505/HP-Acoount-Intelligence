@@ -110,7 +110,48 @@ def _run_dependent_extractors(account_id: str, dataset_key: str) -> tuple[list, 
             logger.warning("re-extraction failed for %s after %s changed: %s",
                            feature_key, dataset_key, exc, exc_info=True)
             failed.append({"feature": feature_key, "error": f"{type(exc).__name__}: {exc}"})
+
+    _queue_retrieval_updates(account_id, dataset_key, regenerated)
     return regenerated, failed
+
+
+def _queue_retrieval_updates(account_id: str, dataset_key: str, regenerated: list):
+    """Queue an index update once the whole regeneration batch has finished.
+
+    Here rather than inside the loop above: one dataset change re-runs several
+    extractors, and enqueueing per extractor would ask for the same index
+    several times. The queue coalesces anyway, but asking once is the point of
+    doing it after the batch - that is the debounce.
+
+    Queued, never run inline. A retrieval build takes minutes and an LLM call
+    per chunk; an upload must not wait on it, and an index that fails to build
+    must not fail the upload.
+    """
+    from app.services.retrieval import registry
+    from app.services.retrieval.ingest import request_update
+
+    for index, spec in registry.INDEX_REGISTRY.items():
+        if not spec.get("enabled"):
+            continue
+        touches = (dataset_key in (spec.get("datasets") or [])
+                   or any(f in regenerated for f in _features_behind(index)))
+        if not touches:
+            continue
+        try:
+            request_update(account_id, index,
+                           reason="%s changed" % dataset_key)
+        except Exception:
+            logger.exception("could not queue a retrieval update for %s", index)
+
+
+def _features_behind(index: str) -> set:
+    """Features whose widgets feed this index."""
+    from app.api.v1.widgets import WIDGET_REGISTRY
+    from app.services.retrieval import registry
+
+    wanted = set(registry.spec(index).get("widgets") or [])
+    return {feature for feature, contracts in WIDGET_REGISTRY.items()
+            if any(c["widget_key"] in wanted for c in contracts)}
 
 
 @router.post("", response_model=AccountDataFileResponse, status_code=status.HTTP_201_CREATED)
@@ -165,7 +206,20 @@ async def upload_account_data(
     # 5. Parse Content & Count Rows
     row_count = 0
     try:
-        if file_ext in [".xlsx", ".xls"]:
+        if file_ext == ".pdf":
+            # A filing has pages, not rows. Counting them here doubles as the
+            # validity check the CSV branch gets from parsing: a file PyMuPDF
+            # cannot open is rejected at upload rather than surfacing later as
+            # an index that built from nothing.
+            import fitz
+            with fitz.open(stream=content, filetype="pdf") as pdf_doc:
+                row_count = pdf_doc.page_count
+            if row_count == 0:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="PDF contains no pages."
+                )
+        elif file_ext in [".xlsx", ".xls"]:
             df = pd.read_excel(io.BytesIO(content))
             row_count = len(df)
         else:

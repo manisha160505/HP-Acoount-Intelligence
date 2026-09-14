@@ -64,8 +64,25 @@ async def lifespan(app: FastAPI):
         logger.exception("Seeding failed. Features that depend on seeded data "
                          "will render empty.")
 
+    # Started only after seeding has finished, so it cannot pick up a job that
+    # seeding would otherwise have queued. Seeding itself runs with retrieval
+    # triggers suppressed, so there should be none - this ordering is the
+    # second guard rather than the first.
+    try:
+        from app.services.retrieval import worker as retrieval_worker
+        retrieval_worker.start()
+    except Exception:
+        logger.exception("Retrieval worker did not start. Indexes will not "
+                         "rebuild until it does; widgets are unaffected.")
+
     _log_readiness()
     yield
+
+    try:
+        from app.services.retrieval import worker as retrieval_worker
+        retrieval_worker.stop()
+    except Exception:
+        logger.exception("Retrieval worker did not stop cleanly.")
     close_mongo_connection()
 
 

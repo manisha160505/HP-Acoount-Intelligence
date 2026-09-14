@@ -28,13 +28,29 @@ class Settings(BaseSettings):
     DB_NAME: str = "hp_account_db"
     JWT_SECRET: str = "hp-account-intelligence-platform-secret-key-2026-enterprise"
     JWT_ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 120
+    # A working day. Two hours was shorter than a working session on this app -
+    # one index build runs about 40 minutes - so sellers were being signed out
+    # mid-task. Mirrored in both .env files; they are loaded as a sequence with
+    # the backend one last, so a stale value there would silently override this.
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440
     CORS_ORIGINS: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
     DATA_STORAGE_DIR: str = "data/accounts"
     
     OPENAI_API_KEY: str = ""
     OPENAI_ENDPOINT: str = "https://accurix-foundry-resource.cognitiveservices.azure.com/openai/v1/"
     OPENAI_MODEL_NAME: str = "gpt-4o"
+    # The retrieval layer is the only thing that embeds; OPENAI_API_KEY and
+    # OPENAI_ENDPOINT above are reused as-is rather than duplicated for it.
+    # 1536 is the output size of text-embedding-3-small - changing the model
+    # means changing the dimension, and LightRAG refuses to reuse an index
+    # built at a different one.
+    OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
+    OPENAI_EMBEDDING_DIM: int = 1536
+    # The model the retrieval layer uses for entity extraction and answer
+    # synthesis. Left empty it falls back to OPENAI_MODEL_NAME, so the
+    # retrieval layer can be moved to a different deployment without changing
+    # what the other ten features run on.
+    OPENAI_RETRIEVAL_MODEL: str = ""
 
     class Config:
         env_file = ENV_FILES

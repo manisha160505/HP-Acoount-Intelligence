@@ -21,6 +21,37 @@ def _read_dataset_csv(account_id: str, dataset_key: str) -> list[dict]:
     """
     return read_dataset_records(account_id, dataset_key, strict=False)
 
+def _cross_feature_counts(db, account_id: str) -> dict:
+    """Counts owned by other features, for the dashboard's Quick Stats.
+
+    Only a key that genuinely resolves is returned. A count that is missing stays
+    missing, so the card renders a dash - a wrong number here reads as though it
+    had been checked, which is exactly how "100 active urgent signals" (really
+    100 job postings, against 8 real signals) survived on the dashboard.
+    """
+    def widget(key):
+        found = db["account_widgets"].find_one(
+            {"account_id": account_id, "widget_key": key})
+        if not found or found.get("status") != "available":
+            return None
+        return found.get("data") or {}
+
+    out = {}
+
+    plays = widget("opportunity_narrative_plays")
+    if plays is not None and isinstance(plays.get("opportunity_plays"), list):
+        out["solution_narratives_count"] = len(plays["opportunity_plays"])
+
+    signals = widget("news_signals_feed")
+    if signals is not None and signals.get("total_signals_count") is not None:
+        try:
+            out["recent_signals_count"] = int(signals["total_signals_count"])
+        except (TypeError, ValueError):
+            pass
+
+    return out
+
+
 @requires_local_datasets(
     "company_hierarchy", "firmographics", "job_openings", "prospect_contacts",
 )
@@ -69,7 +100,21 @@ def extract_executive_dashboard(account_id: str) -> list[dict]:
             "hq_location": hq_location,
             "parent_company": parent_company,
             "ultimate_parent": ultimate_parent,
-            "stakeholders_mapped_count": len(contact_rows)
+            "stakeholders_mapped_count": len(contact_rows),
+            # Counts the dashboard's Quick Stats shows that belong to other
+            # features. They are resolved here, server-side, because the
+            # frontend loads widgets one feature at a time - asking it for
+            # another feature's widget returns nothing, which is how these two
+            # came to be a hardcoded 5 and a mislabelled job-postings count.
+            #
+            # Read from the owning widget rather than recomputed: both are
+            # derived outputs, and the signal count in particular is the result
+            # of a gate (55 raw, 45 rejected, deduped to 8). Recounting the CSV
+            # here would quietly disagree with the feature that owns it.
+            #
+            # Absent when that feature has not run yet, and the card shows a
+            # dash rather than a number.
+            **_cross_feature_counts(db, account_id),
         }
         
         summary_payload = {

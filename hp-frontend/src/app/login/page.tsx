@@ -25,6 +25,17 @@ export default function LoginPage() {
     }
   }, [isAuthenticated, user, router]);
 
+  // Say why you are back here. The API client sends an expired session to
+  // /login?expired=1; without this the screen looks like an ordinary sign-out
+  // and the timeout stays invisible. Read from window.location rather than
+  // useSearchParams, which would need a Suspense boundary for one flag.
+  useEffect(() => {
+    if (typeof window !== 'undefined'
+        && new URLSearchParams(window.location.search).get('expired') === '1') {
+      setError('Your session expired. Please sign in again.');
+    }
+  }, []);
+
   const handleTabSwitch = (tab: 'user' | 'admin') => {
     setActiveTab(tab);
     setError(null);

@@ -74,6 +74,15 @@ Thumbs.db
 .mcp.json
 .claude/
 /CLAUDE.md
+
+# Retrieval engine
+# r-engine.zip ships a live Azure key in its bundled .env; transcript.txt is a
+# raw client meeting recording. Neither belongs in the repository.
+r-engine.zip
+transcript.txt
+rag_storage/
+**/rag_storage/
+ingest/
 .crg-venv/
 
 # Private correspondence and bulk reference material kept locally only.
