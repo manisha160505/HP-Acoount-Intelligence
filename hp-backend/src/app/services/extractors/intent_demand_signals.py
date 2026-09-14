@@ -45,6 +45,7 @@ from bson import ObjectId
 
 from app.database.mongodb import get_db
 from app.services.extractors.datasets import (
+    account_domain,
     find_file_path, read_dataset_records, read_dataset_rows,
     requires_local_datasets,
 )
@@ -620,11 +621,13 @@ def extract_intent_demand_signals(account_id: str) -> list[dict]:
     inventory = _tech_inventory(_read_dataset_records(account_id, "technographics"),
                                 _read_dataset_records(account_id, "webstack"))
 
-    account = (db["accounts"].find_one({"_id": ObjectId(account_id)}, {"domain": 1})
-               if ObjectId.is_valid(account_id) else None) or {}
-    account_match, observation = _match_provider_account(topics_meta_records, account.get("domain"))
+    # Resolved rather than read straight off the account record: nothing
+    # populates `accounts.domain`, so this reported "no domain on file" for every
+    # account while firmographics held one. See datasets.account_domain.
+    domain = account_domain(account_id)
+    account_match, observation = _match_provider_account(topics_meta_records, domain)
     observation["refreshed_at"] = _file_refreshed_at(db, account_id, "intent_score")
-    category_file = _parse_category_file(category_rows, account.get("domain"))
+    category_file = _parse_category_file(category_rows, domain)
     if category_file["source"]:
         category_file["source"]["refreshed_at"] = _file_refreshed_at(db, account_id, "hp_category_intent")
 

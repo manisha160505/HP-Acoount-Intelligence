@@ -170,6 +170,50 @@ def dataset_file_paths(account_id: str, dataset_key: str,
     return sorted(found)
 
 
+def account_domain(account_id: str) -> str:
+    """The account's domain, or "" when genuinely unknown.
+
+    The `accounts` collection has a `domain` field that nothing populates - an
+    account document holds only name, status and timestamps. Anything reading it
+    directly gets `None` and concludes the account has no domain, which is how
+    the HP Category Intent scores came to report "no domain on file" while
+    firmographics held `astra.co.id` and the category file held a matching row
+    for it. The scores were present and simply never matched.
+
+    So the account record is consulted first - it is the right place for this to
+    live if it is ever filled in - and firmographics is the fallback, which is
+    where every other feature already reads a domain from.
+
+    Returns bare lowercase host: "https://www.Astra.co.id/about" -> "astra.co.id".
+    """
+    from bson import ObjectId
+
+    db = get_db()
+    if ObjectId.is_valid(str(account_id)):
+        record = db["accounts"].find_one(
+            {"_id": ObjectId(str(account_id))}, {"domain": 1}) or {}
+        if str(record.get("domain") or "").strip():
+            return _bare_host(record["domain"])
+
+    rows = read_dataset_records(account_id, "firmographics", strict=False)
+    if rows:
+        row = rows[0]
+        for field in ("Company Domain", "Website", "company_domain", "website"):
+            if str(row.get(field) or "").strip():
+                return _bare_host(row[field])
+    return ""
+
+
+def _bare_host(value) -> str:
+    """Strip scheme, path, port and a leading www."""
+    import re
+
+    host = " ".join(str(value or "").split()).lower()
+    host = re.sub(r"^[a-z]+://", "", host)
+    host = host.split("/")[0].split(":")[0].rstrip(".")
+    return host[4:] if host.startswith("www.") else host
+
+
 def missing_local_datasets(account_id: str) -> list[str]:
     """Datasets registered active for this account whose file is not here."""
     db = get_db()
