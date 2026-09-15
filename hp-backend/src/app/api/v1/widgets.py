@@ -8,6 +8,7 @@ from app.database.mongodb import get_db
 logger = logging.getLogger(__name__)
 from app.core.deps import require_user_role, require_admin_role
 from app.schemas.widget import (WidgetContract, WidgetResponse, ContentGenerateRequest,
+                                StrategyChatRequest,
                                MessageEvaluateRequest, MessageRewriteRequest)
 from app.services.extractors.executive_dashboard import extract_executive_dashboard
 from app.services.extractors.recent_news_signals import extract_recent_news_signals
@@ -999,3 +1000,39 @@ def generate_content_messaging(
         "display_order": contract["display_order"],
         "updated_at": updated.isoformat() if isinstance(updated, datetime) else str(updated or ""),
     }
+
+
+@router.post("/accounts/{account_id}/widgets/strategy_chat/ask")
+def strategy_chat_ask(
+    account_id: str,
+    body: StrategyChatRequest,
+    current_user: dict = Depends(require_user_role)
+):
+    """Ask Strategy Chat one question about one account.
+
+    The account is taken from the path and never from the body, so a client
+    cannot ask about one account while carrying another's conversation - ABX
+    requires the conversation to be locked to the selected account.
+
+    A refusal is a 200 with `available: false`, not an error: "the platform does
+    not hold that" is a correct answer and the UI shows it in the thread. Only a
+    genuinely unusable state - no index built yet - is a 400.
+    """
+    if not ObjectId.is_valid(account_id):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Invalid account ID format")
+    db = get_db()
+    if not db["accounts"].find_one({"_id": ObjectId(account_id)}):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="Company account not found")
+
+    from app.services.strategy import chat as strategy_chat_service
+
+    try:
+        return strategy_chat_service.answer(
+            account_id=account_id,
+            messages=[m.model_dump() for m in body.messages],
+            mode=body.mode,
+        )
+    except strategy_chat_service.ChatUnavailable as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))

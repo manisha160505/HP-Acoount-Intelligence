@@ -1,170 +1,206 @@
-import os
-import io
-import csv
-import pandas as pd
-from datetime import datetime, timezone
-from bson import ObjectId
-from app.database.mongodb import get_db
-from app.services.extractors.datasets import (
-    find_file_path, read_dataset_records, requires_local_datasets,
-)
+"""Strategy Chat context - the grounding line above the conversation.
 
-def _read_dataset_records(account_id: str, dataset_key: str) -> list[dict]:
-    """Rows for one dataset. Shared implementation - see datasets.py.
+Two widgets, both deterministic:
 
-    Non-strict: requires_local_datasets on the entry point below has already
-    established that this account's files are present, so a miss here means the
-    dataset simply is not registered for this account.
-    """
-    return read_dataset_records(account_id, dataset_key, strict=False)
+  strategy_snapshot_context  what the chat is grounded in, and the suggested
+                             openers shown before the first question
+  strategy_chat_interface    whether the feature can answer yet, and why not
 
-@requires_local_datasets(
-    "company_hierarchy", "firmographics", "google_news", "intent_score", "job_openings", "news_events", "prospect_contacts", "technographics", "technology_detections", "webstack",
-)
-def extract_strategy_chat(account_id: str) -> list[dict]:
-    db = get_db()
-    now = datetime.now(timezone.utc)
-    
-    # Read datasets
-    firmo_records = _read_dataset_records(account_id, "firmographics")
-    techno_records = _read_dataset_records(account_id, "technographics")
-    gnews_records = _read_dataset_records(account_id, "google_news")
-    events_records = _read_dataset_records(account_id, "news_events")
-    intent_score_records = _read_dataset_records(account_id, "intent_score")
-    contacts_records = _read_dataset_records(account_id, "prospect_contacts")
-    
-    results = []
+**Read from the other features' finished widgets, not from the CSVs.** That is
+the whole design of this feature - the meeting was explicit: *"now these answers
+raw data can't give, because raw data we analyzed and made all the outputs. So
+now we will make this rack the final one on the dashboard outputs."* An earlier
+version of this file read ten raw datasets and recomputed counts that the
+features had already computed differently, so the header disagreed with the
+screens it claimed to summarise.
 
-    # Get dynamic company name
-    account_doc = None
-    if ObjectId.is_valid(account_id):
-        account_doc = db["accounts"].find_one({"_id": ObjectId(account_id)})
-    
-    company_name = account_doc.get("name", "Target Account") if account_doc else "Target Account"
-    
-    if firmo_records and len(firmo_records) > 0:
-        f_name = str(firmo_records[0].get("Company Name") or firmo_records[0].get("company_name") or "").strip()
-        if f_name:
-            company_name = f_name
+**Nothing has a fallback.** The previous version carried five:
 
-    # Full Tech Stack Count
-    full_tech_stack = []
-    if techno_records and len(techno_records) > 0:
-        raw_full = str(techno_records[0].get("Full Tech Stack") or "").strip()
-        if raw_full:
-            full_tech_stack = [s.strip() for s in raw_full.split(",") if s.strip()]
-
-    # Live News Triggers Count
-    seen_headlines = set()
-    for row in gnews_records:
-        h = str(row.get("event_headline") or row.get("news_announcements") or row.get("title") or "").strip()
-        if h:
-            seen_headlines.add(h.lower())
-    for row in events_records:
-        h = str(row.get("event_headline") or row.get("title") or "").strip()
-        if h:
-            seen_headlines.add(h.lower())
-
-    live_signals_count = len(seen_headlines) if seen_headlines else 10
-    stakeholders_count = len(contacts_records) if contacts_records else 23
+    live_signals_count  = len(seen_headlines) if seen_headlines else 10
+    stakeholders_count  = len(contacts_records) if contacts_records else 23
     intent_topics_count = len(intent_score_records) if intent_score_records else 149
     installed_vendors_count = len(full_tech_stack) if full_tech_stack else 220
+    "solutions_count": 5,
 
+Every one of those would print a confident number for an account with no data at
+all - and the 23 and the 5 happened to match Astra, so they looked verified. A
+count with no source is absent here, and the header shows a dash.
+
+It also did `list(seen_headlines)[:5]` over a **set**, so "recent trigger events"
+was whichever five Python happened to hash first and changed between runs.
+"""
+
+from datetime import datetime, timezone
+
+from bson import ObjectId
+
+from app.database.mongodb import get_db
+
+MAX_SNAPSHOT_TOPICS = 5
+MAX_SNAPSHOT_VENDORS = 15
+MAX_SNAPSHOT_SIGNALS = 5
+
+
+def _text(value) -> str:
+    return " ".join(str(value if value is not None else "").split())
+
+
+def _int(value):
+    """An int, or None. Never a guess - widgets store counts as strings."""
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _widget(db, account_id: str, widget_key: str) -> dict:
+    """One widget's data, or {} when it has not been published."""
+    found = db["account_widgets"].find_one(
+        {"account_id": account_id, "widget_key": widget_key})
+    if not found or found.get("status") != "available":
+        return {}
+    return found.get("data") or {}
+
+
+def extract_strategy_chat(account_id: str) -> list[dict]:
+    """Build the two Strategy Chat widgets from the other features' outputs."""
+    db = get_db()
+    now = datetime.now(timezone.utc)
+
+    summary = _widget(db, account_id, "exec_summary_card")
+    contacts = _widget(db, account_id, "stakeholder_contacts_grid")
+    plays = _widget(db, account_id, "opportunity_narrative_plays")
+    techmap = _widget(db, account_id, "technographic_map")
+    intent = _widget(db, account_id, "intent_topics_table")
+    signals = _widget(db, account_id, "news_signals_feed")
+    priorities = _widget(db, account_id, "exec_strategic_priorities")
+
+    account = None
+    if ObjectId.is_valid(account_id):
+        account = db["accounts"].find_one({"_id": ObjectId(account_id)})
+    company_name = (_text(summary.get("company_name"))
+                    or _text((account or {}).get("name")))
+
+    # Each count comes from the widget that owns it, so the header agrees with
+    # the screen a seller can click through to. Absent where that feature has
+    # not run.
     grounding_metadata = {
-        "company_name": company_name,
-        "stakeholders_count": stakeholders_count,
-        "solutions_count": 5,
-        "installed_vendors_count": installed_vendors_count,
-        "live_signals_count": live_signals_count,
-        "intent_topics_count": intent_topics_count
+        "company_name": company_name or None,
+        "stakeholders_count": _int(contacts.get("total_contacts_count")),
+        "solutions_count": (len(plays.get("opportunity_plays") or [])
+                            if plays.get("opportunity_plays") is not None else None),
+        "installed_vendors_count": _int(techmap.get("total_detected_technologies")),
+        "live_signals_count": _int(signals.get("total_signals_count")),
+        "intent_topics_count": _int(intent.get("total_topics_count")),
+        "priorities_count": _int(priorities.get("priority_count")),
     }
 
-    suggested_prompts = [
-        {
-            "id": "entry_point",
-            "title": "Best entry point",
-            "prompt_text": f"What's the strongest entry point for engaging {company_name}? Consider their active IT projects and organizational hierarchy."
-        },
-        {
-            "id": "meeting_prep",
-            "title": "Meeting prep",
-            "prompt_text": f"Help me prepare for a meeting with {company_name}'s security leadership. What below-the-OS value propositions resonate best?"
-        },
-        {
-            "id": "competitive_defense",
-            "title": "Competitive defense",
-            "prompt_text": f"What competitive risks should I prepare for in the deal at {company_name}? Give me counter-strategies for Dell and Lenovo."
-        },
-        {
-            "id": "abm_plan",
-            "title": "90-day ABM plan",
-            "prompt_text": f"Draft a 90-day ABM campaign plan for {company_name}. Include week-by-week stakeholder outreach cadence."
-        },
-        {
-            "id": "objections",
-            "title": "Objections",
-            "prompt_text": f"What objections will {company_name}'s leadership likely raise about adopting HP hardware subscriptions?"
-        },
-        {
-            "id": "device_security",
-            "title": "Device & security posture",
-            "prompt_text": f"Analyze {company_name}'s current device fleet and endpoint security posture based on technographics signals."
-        }
-    ]
+    topics = [_text(t.get("topic_name"))
+              for t in (intent.get("topics") or [])[:MAX_SNAPSHOT_TOPICS]
+              if _text(t.get("topic_name"))]
+
+    vendors = []
+    for category in (techmap.get("categories") or []):
+        for vendor in (category.get("vendors") or []):
+            name = _text(vendor.get("vendor_name"))
+            if name and name not in vendors:
+                vendors.append(name)
+            if len(vendors) >= MAX_SNAPSHOT_VENDORS:
+                break
+        if len(vendors) >= MAX_SNAPSHOT_VENDORS:
+            break
+
+    # In feed order - the feature already ranked and gated these. The previous
+    # version took five arbitrary members of a set and called them recent.
+    recent_events = [_text(s.get("headline"))
+                     for s in (signals.get("signals") or [])[:MAX_SNAPSHOT_SIGNALS]
+                     if _text(s.get("headline"))]
 
     snapshot_context = {
-        "company_name": company_name,
-        "stakeholders_count": stakeholders_count,
-        "installed_vendors": full_tech_stack[:15],
-        "top_intent_topics": [str(r.get("Topic") or r.get("topic_name") or "") for r in intent_score_records[:5] if r.get("Topic") or r.get("topic_name")],
-        "recent_trigger_events": list(seen_headlines)[:5]
+        "company_name": company_name or None,
+        "stakeholders_count": grounding_metadata["stakeholders_count"],
+        "installed_vendors": vendors,
+        "top_intent_topics": topics,
+        "recent_trigger_events": recent_events,
     }
 
-    # Widget 1: strategy_snapshot_context (Deterministic)
     context_payload = {
         "account_id": account_id,
         "feature_key": "strategy_chat",
         "widget_key": "strategy_snapshot_context",
         "data_classification": "deterministic",
-        "status": "available",
+        "status": "available" if company_name else "empty",
         "data": {
             "grounding_metadata": grounding_metadata,
-            "suggested_prompts": suggested_prompts,
-            "snapshot_context": snapshot_context
-        },
-        "source_datasets": ["firmographics", "company_hierarchy", "technographics", "webstack", "job_openings", "google_news", "news_events", "intent_score", "technology_detections", "prospect_contacts"],
+            "snapshot_context": snapshot_context,
+            "suggested_prompts": _suggested_prompts(company_name),
+            "source": ("Built from the finished widgets of the other features, "
+                       "not from the raw uploads."),
+        } if company_name else {},
+        "source_datasets": [],
         "extracted_at": now,
-        "updated_at": now
+        "updated_at": now,
     }
 
-    db["account_widgets"].update_one(
-        {"account_id": account_id, "widget_key": "strategy_snapshot_context"},
-        {"$set": context_payload},
-        upsert=True
-    )
-    results.append(context_payload)
+    # What the chat can actually answer from today. The index state is the
+    # authority on whether a question can be asked at all; this records what the
+    # corpus was built over.
+    grounded_features = sorted(
+        key for key, data in (
+            ("Executive Dashboard", priorities), ("Stakeholder Map", contacts),
+            ("Recent Signals", signals), ("Tech Landscape", techmap),
+            ("Intent & Demand", intent), ("Opportunity Map", plays),
+        ) if data)
 
-    # Widget 2: strategy_chat_interface (Inferred - Left as Pending / TBD)
-    chat_payload = {
+    interface_payload = {
         "account_id": account_id,
         "feature_key": "strategy_chat",
         "widget_key": "strategy_chat_interface",
-        "data_classification": "inferred",
-        "status": "pending",
+        "data_classification": "deterministic",
+        "status": "available" if grounded_features else "empty",
         "data": {
-            "chat_response": "Inferred TBD",
-            "notice": "Conversational RAG grounding and response generation using Gemini LLM prompts are TBD for Step 8 AI model execution."
-        },
-        "source_datasets": ["firmographics", "technographics", "google_news"],
+            "grounded_features": grounded_features,
+            "grounded_feature_count": len(grounded_features),
+        } if grounded_features else {},
+        "source_datasets": [],
         "extracted_at": now,
-        "updated_at": now
+        "updated_at": now,
     }
 
-    db["account_widgets"].update_one(
-        {"account_id": account_id, "widget_key": "strategy_chat_interface"},
-        {"$set": chat_payload},
-        upsert=True
-    )
-    results.append(chat_payload)
-
+    results = [context_payload, interface_payload]
+    for payload in results:
+        db["account_widgets"].update_one(
+            {"account_id": payload["account_id"],
+             "widget_key": payload["widget_key"]},
+            {"$set": payload}, upsert=True)
     return results
+
+
+def _suggested_prompts(company_name: str) -> list:
+    """The openers shown before the first question.
+
+    Matched to the reference's `smartStarters`, and phrased as the questions the
+    meeting actually asked for - *"tell me what to do, what to sell"*, *"there
+    are so many signals, tell me who to act on"*, *"who should I message for
+    AIPCs"*.
+    """
+    name = company_name or "this account"
+    return [
+        {"id": "entry_point", "title": "Best entry point",
+         "prompt_text": "Who is the strongest entry point at %s, and why?" % name},
+        {"id": "what_to_sell", "title": "What to sell",
+         "prompt_text": "Based on %s's own evidence, which HP line has the "
+                        "strongest case right now?" % name},
+        {"id": "who_to_act_on", "title": "Who to act on",
+         "prompt_text": "There are a lot of signals for %s. Which ones should I "
+                        "act on first?" % name},
+        {"id": "ai_pcs", "title": "Who to message for AI PCs",
+         "prompt_text": "Who should I message at %s about AI PCs, and what "
+                        "should I open with?" % name},
+        {"id": "objections", "title": "Objections to expect",
+         "prompt_text": "What objections should I expect from %s, and how do I "
+                        "handle each one?" % name},
+        {"id": "revenue", "title": "Financial picture",
+         "prompt_text": "Tell me about %s's revenue and what it means for our "
+                        "approach." % name},
+    ]

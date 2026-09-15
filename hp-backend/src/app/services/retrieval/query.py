@@ -147,8 +147,14 @@ async def retrieve(account_id: str, index: str, question: str, mode: str = None,
     mode = mode or registry.spec(index).get("default_mode") or "mix"
     stale = state.get("status") in (index_state.STALE, index_state.FAILED)
 
-    rag = await client.build_rag(account_id, index)
-    try:
+    # A warm handle, opened once per process rather than per question. Building
+    # one costs 8.2 seconds - measured - which was more than half the wait on
+    # every question, and more than the vector search and graph reads together.
+    # It is NOT finalised afterwards: the whole point is that the next question
+    # reuses it. `client.forget_query_handle` releases it when the workspace is
+    # dropped or rebuilt.
+    rag = await client.query_handle(account_id, index)
+    if True:
         param = QueryParam(
             mode=mode,
             top_k=top_k,
@@ -165,11 +171,6 @@ async def retrieve(account_id: str, index: str, question: str, mode: str = None,
         # real entry point and returns the structured result, which is where
         # include_references actually lands.
         raw = await rag.aquery_llm(question, param=param)
-    finally:
-        try:
-            await rag.finalize_storages()
-        except Exception:
-            logger.exception("retrieval: finalize_storages failed after query")
 
     result = _normalise(raw, mode, workspace, stale)
     logger.info("retrieval: %s/%s answered in %s mode (%d refs, %d evidence ids)",
@@ -200,3 +201,19 @@ def status(account_id: str, index: str) -> dict:
         "build_count": state.get("build_count"),
         "notice": entry.get("notice"),
     }
+
+
+def ask(account_id: str, index: str, question: str, **kwargs) -> RetrievalResult:
+    """`retrieve`, callable from ordinary synchronous code.
+
+    Every caller used to write `asyncio.run(query.retrieve(...))`, which creates
+    a fresh event loop each time. That is now wrong rather than merely wasteful:
+    the cached LightRAG handle is bound to the query loop, and a Mongo client
+    bound to one loop cannot be used from another.
+
+    So the loop choice lives here, once, instead of at four call sites that
+    would each have to remember it.
+    """
+    from app.services.retrieval import client
+    return client.run_on_query_loop(
+        retrieve(account_id, index, question, **kwargs))

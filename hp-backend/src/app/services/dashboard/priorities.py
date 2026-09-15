@@ -846,8 +846,8 @@ NEWS_QUESTION = (
 def _news_priorities(account_id: str, mode, already: set) -> tuple:
     """Priorities drawn from recent events, used only when filings fall short."""
     try:
-        result = asyncio.run(query.retrieve(account_id, INDEX, NEWS_QUESTION,
-                                            mode=mode, top_k=40))
+        result = query.ask(account_id, INDEX, NEWS_QUESTION,
+                           mode=mode, top_k=40)
     except query.IndexNotReady:
         return [], [], 0
 

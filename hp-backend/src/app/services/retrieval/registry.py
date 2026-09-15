@@ -87,14 +87,37 @@ INDEX_REGISTRY = {
     },
     STRATEGY: {
         "label": "Strategy",
-        "enabled": False,
-        "builder": None,
+        "enabled": True,
+        "builder": corpus.strategy_documents,
+        # Deliberately empty. `datasets` exists to queue a rebuild the moment a
+        # raw file is uploaded, and this index must NOT rebuild then: its corpus
+        # is the other features' finished widgets, and at upload time those have
+        # not regenerated yet. Rebuilding on the file would index the previous
+        # answers and call them current.
+        #
+        # The right trigger fires one step later. `_features_behind()` in
+        # api/v1/account_data.py reads the `widgets` list below, so when a
+        # feature actually republishes a widget, this index is queued then. A
+        # new filing therefore reaches the chat as: PDF -> dashboard rebuilds ->
+        # exec_strategic_priorities republished -> strategy rebuilds.
         "datasets": [],
-        "widgets": [],
-        "required_widgets": [],
+        # The finished outputs of the other ten features. ABX: "Use the finished
+        # account intelligence: facts, priorities, stakeholders, technology,
+        # signals, narratives, objections, intent and HP recommendations."
+        "widgets": ["exec_summary_card", "exec_strategic_priorities",
+                    "stakeholder_contacts_grid", "stakeholder_influence_map",
+                    "stakeholder_talking_points", "news_signals_feed",
+                    "opportunity_narrative_plays", "objection_reframe_cards",
+                    "technographic_map", "technographic_hp_recommendations",
+                    "intent_topics_table", "intent_category_summary",
+                    "intent_hiring_demand", "messaging_pillars_output"],
+        # Enough of an account to be worth asking questions about. Not the whole
+        # list: a feature that has not run yet narrows the corpus, and the chat
+        # says what it does not know rather than refusing to open.
+        "required_widgets": ["exec_summary_card", "stakeholder_contacts_grid"],
         "default_mode": "mix",
-        "notice": ("Corpus is the finished widgets of every other feature. Built "
-                   "last, once those outputs are final."),
+        # No `generates` hook. This index answers questions; it does not produce
+        # a widget, and a widget it produced would feed its own corpus.
     },
 }
 

@@ -311,7 +311,9 @@ export default function UserDashboardPage() {
   // Strategy Chat State
   const [chatAdvisorMode, setChatAdvisorMode] = useState<string>('Strategy Advisor');
   const [chatInput, setChatInput] = useState<string>('');
-  const [chatMessages, setChatMessages] = useState<Array<{ id: string; sender: 'user' | 'assistant'; text: string; timestamp: string }>>([]);
+  const [chatMessages, setChatMessages] = useState<Array<{ id: string; sender: 'user' | 'assistant'; text: string; timestamp: string; citations?: any[]; available?: boolean }>>([]);
+  const [chatPending, setChatPending] = useState(false);
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
 
   // Message Evaluator State
   // Defaults are empty: the objective, format and persona vocabularies are
@@ -425,6 +427,15 @@ export default function UserDashboardPage() {
       fetchWidgetContracts(selectedAccountId, activeFeatureKey);
     }
   }, [selectedAccountId, activeFeatureKey, fetchWidgetContracts]);
+
+  // Changing account ends the conversation. ABX Feature 8: "Validate follow-up
+  // questions against conversation account scope; changing accounts must
+  // invalidate prior retrieved context." Carrying turns across would let a
+  // follow-up resolve "that" against the previous account's answer.
+  useEffect(() => {
+    setChatMessages([]);
+    setChatInput('');
+  }, [selectedAccountId]);
 
   const handleSelectAccount = (acc: CompanyAccount) => {
     setSelectedAccountId(acc.id);
@@ -6007,24 +6018,56 @@ export default function UserDashboardPage() {
                   const stakeholdersCount = groundingMeta.stakeholders_count ?? 23;
                   const solutionsCount = groundingMeta.solutions_count ?? 5;
 
-                  const handleSendPrompt = (promptText: string) => {
-                    if (!promptText.trim()) return;
+                  const handleSendPrompt = async (promptText: string) => {
+                    if (!promptText.trim() || chatPending) return;
+                    const stamp = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
                     const userMsg = {
                       id: `user_${Date.now()}`,
                       sender: 'user' as const,
                       text: promptText,
-                      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                      timestamp: stamp(),
                     };
 
-                    const assistantMsg = {
-                      id: `asst_${Date.now() + 1}`,
-                      sender: 'assistant' as const,
-                      text: `Conversational RAG response for prompt "${promptText}" on ${companyName} is TBD for Step 8 (AI Generation Layer).`,
-                      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                    };
+                    // The whole conversation goes with every question. The chat
+                    // is stateless per account on the server, which is what lets
+                    // ABX's rule hold: switching account clears these messages,
+                    // and the old turns simply stop being sent.
+                    const history = [...chatMessages, userMsg].map(m => ({
+                      role: m.sender === 'user' ? 'user' : 'assistant',
+                      content: m.text,
+                    }));
 
-                    setChatMessages(prev => [...prev, userMsg, assistantMsg]);
+                    setChatMessages(prev => [...prev, userMsg]);
                     setChatInput('');
+                    setChatPending(true);
+
+                    try {
+                      const res = await api.post(
+                        `/accounts/${selectedAccount.id}/widgets/strategy_chat/ask`,
+                        { messages: history, mode: 'advisor' }
+                      );
+                      setChatMessages(prev => [...prev, {
+                        id: `asst_${Date.now()}`,
+                        sender: 'assistant' as const,
+                        text: res.data?.answer || 'No answer was returned.',
+                        timestamp: stamp(),
+                        citations: res.data?.citations || [],
+                        available: res.data?.available !== false,
+                      }]);
+                    } catch (err: any) {
+                      setChatMessages(prev => [...prev, {
+                        id: `asst_${Date.now()}`,
+                        sender: 'assistant' as const,
+                        text: err?.response?.data?.detail
+                          || 'The strategy assistant could not be reached.',
+                        timestamp: stamp(),
+                        citations: [],
+                        available: false,
+                      }]);
+                    } finally {
+                      setChatPending(false);
+                    }
                   };
 
                   return (
@@ -6123,18 +6166,70 @@ export default function UserDashboardPage() {
                                         <Sparkles className="w-3.5 h-3.5 text-amber-500" />
                                         <span>ABM Strategy Assistant</span>
                                       </span>
-                                      <span className="text-[10px] font-mono font-extrabold text-amber-800 bg-amber-50 px-2.5 py-0.5 rounded-full border border-amber-200">
-                                        Inferred TBD
-                                      </span>
+                                      {msg.available === false && (
+                                        <span className="text-[10px] font-bold text-amber-800 bg-amber-50 px-2.5 py-0.5 rounded-full border border-amber-200">
+                                          Not in the evidence
+                                        </span>
+                                      )}
                                     </div>
 
-                                    <div className="bg-amber-50/70 border border-amber-200/80 rounded-xl p-3.5 text-xs text-amber-900 space-y-1.5">
-                                      <span className="font-extrabold text-xs block">
-                                        Strategy Assistant RAG Grounding — Inferred TBD
-                                      </span>
-                                      <p className="text-[11px] text-amber-800 leading-relaxed font-medium">
-                                        Conversational responses grounded in {companyName}&apos;s own account data are not built yet. Strategy Chat is the last feature to be implemented, because it reads the finished output of every other one.
-                                      </p>
+                                    {/* The answer is plain text with UPPERCASE
+                                        headers and numbered lists, so it is
+                                        rendered as written rather than parsed
+                                        as markdown. */}
+                                    <p className="text-xs leading-relaxed whitespace-pre-wrap">{msg.text}</p>
+
+                                    {(msg.citations?.length ?? 0) > 0 && (
+                                      <div className="pt-2 border-t border-slate-200/80 space-y-1.5">
+                                        <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 block">
+                                          Sources ({msg.citations!.length})
+                                        </span>
+                                        {msg.citations!.map((c: any, ci: number) => (
+                                          <div key={ci} className="text-[10px] text-slate-600 leading-relaxed">
+                                            {c.source_url ? (
+                                              <a href={c.source_url} target="_blank" rel="noopener noreferrer"
+                                                 className="text-hp-navy hover:underline inline-flex items-center gap-1">
+                                                <FileText className="w-3 h-3 flex-shrink-0" />
+                                                <span>{c.publisher || c.filing_label || c.dataset || 'Source'}</span>
+                                                <ExternalLink className="w-2.5 h-2.5" />
+                                              </a>
+                                            ) : (
+                                              <span className="font-bold text-slate-500">
+                                                {c.filing_label ? `${c.filing_label}${c.page ? ` p.${c.page}` : ''}` : (c.dataset || 'Account evidence')}
+                                              </span>
+                                            )}
+                                            {c.source_text && <span> — {c.source_text}</span>}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+
+                                    {/* Copy and Send as email, as the reference
+                                        offers. The email is a mailto: so it
+                                        opens the seller's own client with their
+                                        own signature - nothing is sent from
+                                        here, and no account data leaves the
+                                        browser on our account. */}
+                                    <div className="flex items-center gap-3 pt-1">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          navigator.clipboard?.writeText(msg.text);
+                                          setCopiedMessageId(msg.id);
+                                          setTimeout(() => setCopiedMessageId(null), 1500);
+                                        }}
+                                        className="text-[10px] font-bold text-slate-500 hover:text-hp-navy inline-flex items-center gap-1 transition"
+                                      >
+                                        <FileText className="w-3 h-3" />
+                                        {copiedMessageId === msg.id ? 'Copied' : 'Copy'}
+                                      </button>
+                                      <a
+                                        href={`mailto:?subject=${encodeURIComponent(`${companyName} — ABM strategy notes`)}&body=${encodeURIComponent(msg.text)}`}
+                                        className="text-[10px] font-bold text-slate-500 hover:text-hp-navy inline-flex items-center gap-1 transition"
+                                      >
+                                        <Mail className="w-3 h-3" />
+                                        Send as email
+                                      </a>
                                     </div>
 
                                     <span className="text-[9px] font-mono text-slate-400 block">{msg.timestamp}</span>
@@ -6163,10 +6258,12 @@ export default function UserDashboardPage() {
                             />
                             <button
                               type="submit"
-                              disabled={!chatInput.trim()}
+                              disabled={!chatInput.trim() || chatPending}
                               className="p-3 bg-hp-navy hover:bg-blue-900 text-white rounded-2xl transition disabled:opacity-40 shadow-xs flex items-center justify-center flex-shrink-0"
                             >
-                              <Sparkles className="w-4 h-4 text-amber-300" />
+                              {chatPending
+                                ? <Loader2 className="w-4 h-4 animate-spin" />
+                                : <Sparkles className="w-4 h-4 text-amber-300" />}
                             </button>
                           </form>
                         </div>
