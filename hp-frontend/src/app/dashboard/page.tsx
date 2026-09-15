@@ -69,7 +69,8 @@ import {
   ShieldCheck,
   UserCheck,
   CheckCircle2,
-  Minus
+  Minus,
+  BarChart3
 } from 'lucide-react';
 
 const ICON_MAP: Record<string, React.FC<{ className?: string }>> = {
@@ -1333,7 +1334,7 @@ export default function UserDashboardPage() {
                                             <span className="w-6 h-6 rounded-full bg-blue-50 text-hp-navy border border-blue-200 text-[11px] font-extrabold flex items-center justify-center flex-shrink-0 mt-0.5">
                                               {idx + 1}
                                             </span>
-                                            <div className="space-y-2 min-w-0">
+                                            <div className="space-y-2 min-w-0 flex-1">
                                               <h4 className="text-sm font-extrabold text-slate-900 leading-snug">
                                                 Catalyst {idx + 1} &ndash; {p.title}
                                               </h4>
@@ -1343,6 +1344,19 @@ export default function UserDashboardPage() {
                                                 </span>
                                               )}
                                             </div>
+                                            {/* The score on the face of the
+                                                card, so catalysts can be
+                                                compared without opening four
+                                                drawers. The working stays in
+                                                the drawer. */}
+                                            {p.evidence_strength && (
+                                              <span
+                                                className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-blue-50 text-hp-navy border border-blue-200 flex-shrink-0 whitespace-nowrap cursor-help"
+                                                title={p.evidence_strength.formula}
+                                              >
+                                                {p.evidence_strength.score}/{p.evidence_strength.max_score}
+                                              </span>
+                                            )}
                                           </div>
 
                                           {/* The card body is the description -
@@ -1409,39 +1423,95 @@ export default function UserDashboardPage() {
 
                                           {open && (
                                             <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-3">
+                                              {/* Evidence strength: the score,
+                                                  then one bar per term. Three
+                                                  terms, three bars - the
+                                                  formula has no fourth. Each
+                                                  bar fills to its own share of
+                                                  100, so their widths add up to
+                                                  the score the way the terms
+                                                  add up to the total, and the
+                                                  basis line under each says
+                                                  what it was counted from. */}
                                               <div className="space-y-2">
                                                 <div className="flex items-center justify-between">
-                                                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500">
+                                                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 inline-flex items-center gap-1">
+                                                    <BarChart3 className="w-3 h-3" />
                                                     Evidence strength
                                                   </span>
                                                   <span
-                                                    className="text-[10px] font-bold text-slate-500 cursor-help"
-                                                    title={p.score_unavailable_reason || prioritiesData?.score_unavailable_reason}
+                                                    className="text-[11px] font-extrabold text-slate-700 cursor-help"
+                                                    title={p.evidence_strength?.formula || prioritiesData?.evidence_strength_formula}
                                                   >
-                                                    weighted score not defined
+                                                    {p.evidence_strength?.score ?? 0}/{p.evidence_strength?.max_score ?? 100}
                                                   </span>
                                                 </div>
-                                                {[
-                                                  { label: 'Support frequency', weight: '40%', value: m.support_count, unit: 'sentences' },
-                                                  { label: 'Document sections', weight: '25%', value: m.distinct_sections, unit: 'sections' },
-                                                  { label: 'Recency', weight: '20%', value: m.most_recent_date, unit: '' },
-                                                  { label: 'Source diversity', weight: '15%', value: m.independent_source_count, unit: 'sources' },
-                                                ].map((row, ri) => (
-                                                  <div key={ri} className="flex items-center justify-between gap-2 text-[10px]">
-                                                    <span className="text-slate-500 w-32 flex-shrink-0">
-                                                      {row.label} <span className="text-slate-400">({row.weight})</span>
-                                                    </span>
-                                                    <span className={`font-bold ${row.value === null || row.value === undefined || row.value === 0 ? 'text-slate-400 italic' : 'text-slate-700'}`}>
-                                                      {row.value === null || row.value === undefined
-                                                        ? 'not available'
-                                                        : row.value === 0
-                                                          ? 'none'
-                                                          : `${row.value}${row.unit ? ' ' + row.unit : ''}`}
-                                                    </span>
-                                                  </div>
-                                                ))}
+
+                                                <div className="flex items-stretch gap-2">
+                                                  {(p.evidence_strength?.terms || []).map((t: any, ti: number) => (
+                                                    <div key={ti} className="flex-1 min-w-0 space-y-1" title={t.basis}>
+                                                      <div className="h-1.5 rounded-full bg-slate-200 overflow-hidden">
+                                                        <div
+                                                          className="h-full rounded-full bg-hp-navy transition-all"
+                                                          style={{ width: `${t.max_points ? Math.round((t.points / t.max_points) * 100) : 0}%` }}
+                                                        />
+                                                      </div>
+                                                      <div className="flex items-baseline justify-between gap-1">
+                                                        <span className="text-[9px] text-slate-500 truncate">{t.label}</span>
+                                                        <span className="text-[9px] font-bold text-slate-600 flex-shrink-0">
+                                                          {t.points}/{t.max_points}
+                                                        </span>
+                                                      </div>
+                                                    </div>
+                                                  ))}
+                                                </div>
+
+                                                <div className="space-y-0.5 pt-1">
+                                                  {(p.evidence_strength?.terms || []).map((t: any, ti: number) => (
+                                                    <p key={ti} className="text-[10px] text-slate-500 leading-relaxed">
+                                                      <span className="text-slate-400">{t.label}:</span> {t.basis}
+                                                    </p>
+                                                  ))}
+                                                </div>
+
+                                                {/* Evidence that named no
+                                                    category scored nothing for
+                                                    diversity. Said plainly,
+                                                    because a reader comparing
+                                                    two cards needs to know the
+                                                    difference between evidence
+                                                    that is absent and evidence
+                                                    that could not be placed. */}
+                                                {(() => {
+                                                  const div = (p.evidence_strength?.terms || []).find((t: any) => t.key === 'source_diversity');
+                                                  const un = div?.uncategorised_sources || 0;
+                                                  return un > 0 ? (
+                                                    <p className="text-[10px] text-amber-700 leading-relaxed">
+                                                      {un} supporting source{un === 1 ? '' : 's'} carried no category and scored nothing for diversity.
+                                                    </p>
+                                                  ) : null;
+                                                })()}
+
                                                 <p className="text-[10px] text-slate-400 leading-relaxed pt-1 border-t border-slate-200">
-                                                  These are the four measures ABX weights. It does not define how any of them becomes a score, so the counts are shown instead of a composite.
+                                                  Scored on {p.evidence_strength?.scored_on || prioritiesData?.scored_on}. Age is measured to that date, so the score does not drift as this page ages.
+                                                </p>
+                                              </div>
+
+                                              {/* ABX's own four measures, kept
+                                                  beside the score rather than
+                                                  replaced by it. They are what
+                                                  the ordering rule uses, and
+                                                  they say something the three
+                                                  scored terms do not. */}
+                                              <div className="space-y-1 pt-1 border-t border-slate-200">
+                                                <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 block">
+                                                  Supporting counts
+                                                </span>
+                                                <p className="text-[10px] text-slate-500 leading-relaxed">
+                                                  {m.support_count} source sentence{m.support_count === 1 ? '' : 's'}
+                                                  {' · '}{m.distinct_sections} document section{m.distinct_sections === 1 ? '' : 's'}
+                                                  {' · '}{m.independent_source_count} independent source{m.independent_source_count === 1 ? '' : 's'}
+                                                  {m.most_recent_date ? ` · most recent ${m.most_recent_date}` : ''}
                                                 </p>
                                               </div>
 
