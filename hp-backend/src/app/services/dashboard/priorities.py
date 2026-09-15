@@ -14,23 +14,30 @@ seller is the registered source sentence, and every figure is read from the
 evidence row's own `value`, `period` and `unit` fields. A citation the model
 invents resolves to nothing and the priority it supported is dropped.
 
-**The priority score is not computed, and that is deliberate.** ABX specifies:
+**The priority score is computed, from a formula that defines itself.** ABX's
+own weighting - *40% support frequency + 25% supporting document sections + 20%
+recency + 15% independent external-source support* - never said how any of those
+four counts becomes a number on a scale, so for a long time this module computed
+nothing and published `evidence_score: null` with the reason. That refusal was
+right about ABX's sentence and it is still right about it.
 
-    Strategic-priority evidence score = 40% support frequency + 25% supporting
-    document sections + 20% recency + 15% independent external-source support.
+What replaced it is a different, fully specified formula, supplied in writing:
 
-Those four terms appear only inside that sentence. Nothing in the document says
-how a count of supporting sentences, a count of sections, a date or a count of
-sources becomes a number on any scale, and the one `0-100 scale` nearby belongs
-to the urgency drivers. Producing a score would mean inventing four
-normalisations and presenting the result as ABX's formula.
+    Evidence Strength = Filing Evidence (5 per relevant filing, max 25)
+                      + Recency (25/20/15/10/5 by age band, 0 when undated)
+                      + Source Diversity (10 per category, max 50)
 
-So the four **raw measures are preserved and published**, `evidence_score` is
-`null`, and `score_unavailable_reason` says why. ABX Step 3's *"Sort priorities
-from highest to lowest score"* cannot be followed as written, so priorities are
-ordered by a stated raw rule - supporting sentences, then distinct document
-sections, then recency - and the payload names that rule rather than implying a
-score produced it.
+Every term names its own unit, points and cap, so nothing has to be invented to
+compute it. `evidence_strength.py` computes it and publishes each term's working
+beside the total. ABX's four raw measures are still published unchanged in
+`measures`, because they are what the ordering rule uses and they say something
+the score does not.
+
+Priorities are still ordered by the stated raw rule - supporting sentences, then
+distinct document sections, then recency - and not by the score. The score
+answers "how well evidenced is this catalyst"; the ordering answers "which did
+this account's documents say most about", and a catalyst can be strongly
+evidenced by two sources while another is mentioned twenty times.
 
 The urgency score is out of scope for the same reason, one level worse: ABX
 itself records that *"The current POC does not define a reusable
@@ -45,6 +52,7 @@ from datetime import datetime, timezone
 
 from app.core.llm import generate_gpt4o_json_completion
 from app.database.mongodb import get_db
+from app.services.dashboard import evidence_strength
 from app.services.retrieval import evidence as ev
 from app.services.retrieval import index_state, query
 
@@ -59,14 +67,6 @@ MIN_PRIORITIES = 3
 MAX_PRIORITIES = 6
 MIN_EVIDENCE_PER_PRIORITY = 1
 MAX_SUMMARY_SENTENCES = 4
-
-SCORE_UNAVAILABLE_REASON = (
-    "ABX weights this score as 40% support frequency + 25% supporting document "
-    "sections + 20% recency + 15% independent external-source support, but "
-    "defines no way to turn any of those four counts into a number on a scale. "
-    "The raw measures are shown instead; inventing the missing normalisation "
-    "would present our arithmetic as the specification's."
-)
 
 ORDERING_BASIS = (
     "Ordered by the number of supporting source sentences, then by how many "
@@ -289,8 +289,6 @@ def _resolve_priorities(account_id: str, candidates: list) -> tuple:
                 "most_recent_date": dates[-1] if dates else None,
                 "independent_source_count": len(publishers),
             },
-            "evidence_score": None,
-            "score_unavailable_reason": SCORE_UNAVAILABLE_REASON,
         })
 
     # The stated ordering rule, applied least-significant term first so each
@@ -749,6 +747,9 @@ def generate_dashboard_intelligence(account_id: str, mode: str = None) -> dict:
         {"account_id": account_id, "widget_key": "exec_summary_card"}) or {}
     ).get("data") or {}
     company = _text(summary_card.get("company_name")) or "This account"
+    # What makes "the company's own site" decidable for source diversity. Its
+    # careers page and its newsroom are one category; a publication is another.
+    domain = _text(summary_card.get("domain"))
 
     candidates, retrieval = asyncio.run(_candidate_priorities(account_id, mode))
     priorities, dropped, invalid_count = _resolve_priorities(account_id, candidates)
@@ -778,6 +779,25 @@ def generate_dashboard_intelligence(account_id: str, mode: str = None) -> dict:
 
     priorities = priorities[:MAX_PRIORITIES]
 
+    # Scored after the fallback and the cut, so every published catalyst carries
+    # a score and nothing that was dropped was scored. One date for the whole
+    # run, so two catalysts in the same widget are never aged against different
+    # clocks.
+    scored_on = now.date()
+    for priority in priorities:
+        # Scoring reads vendor-supplied strings - a URL, a period label - across
+        # 220 accounts in markets whose conventions this code has not seen. A
+        # catalyst that cannot be scored is still a catalyst worth showing, so a
+        # failure here costs that card its bars rather than costing the account
+        # its dashboard.
+        try:
+            priority["evidence_strength"] = evidence_strength.score(
+                priority["sources"], scored_on, domain)
+        except Exception:
+            logger.exception("executive_dashboard: scoring failed for %r",
+                             priority["title"][:60])
+            priority["evidence_strength"] = None
+
     hp_facts = _hp_facts(db, account_id)
     for priority in priorities:
         priority["description"] = _describe(priority, hp_facts, company)
@@ -797,8 +817,10 @@ def generate_dashboard_intelligence(account_id: str, mode: str = None) -> dict:
             "priority_count": len(priorities),
             "executive_summary": summary,
             "ordering_basis": ORDERING_BASIS,
-            "score_unavailable_reason": SCORE_UNAVAILABLE_REASON,
-            "evidence_scores_available": False,
+            "evidence_scores_available": True,
+            "evidence_strength_formula": evidence_strength.FORMULA,
+            "evidence_strength_max": evidence_strength.MAX_SCORE,
+            "scored_on": scored_on.isoformat(),
             "reported_metrics": reported,
             "generation": {
                 "prompt_version": PROMPT_VERSION,
