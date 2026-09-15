@@ -13,8 +13,8 @@ The intent flow, in four steps:
      keeps its exact 11_intent_score score.
 
 Supporting signals never change a category's score. A category whose file score
-rests on a known noisy keyword keeps its score on screen but is never picked as
-the account's primary HP category. Bombora topics are also mapped to themes by
+rests on a known noisy keyword keeps its score on screen, flagged so the caveat
+travels with the number. Bombora topics are also mapped to themes by
 the dictionary in services/hp/intent_topic_map.py for the raw topic view and
 theme summaries. Sheet 6 (workforce trends) holds role shares, not
 technologies, so it takes no part in step 3.
@@ -450,6 +450,21 @@ def _category_explanation(cat: dict, file_entry: dict | None, signals: list[dict
     return " ".join(parts)
 
 
+def _carries_buying_signal(entry: dict | None) -> bool:
+    """Whether the category file stands behind this category's score.
+
+    Two conditions, both the category file's own: it reports a buying stage
+    behind a score (has_signal), and no part of that score rests on a term the
+    dictionary knows to be noisy. A category failing either keeps its score on
+    screen - it is never rewritten or hidden.
+
+    The spec asks for a category view, not a verdict, so this does not rank or
+    crown a category here. It is the test the Opportunity Map applies before a
+    Bombora topic may act as a timing trigger for this category.
+    """
+    return bool(entry) and bool(entry.get("has_signal")) and not entry.get("quality_flags")
+
+
 def _summarise(topics: list[dict], category_file: dict, inventory: list[dict]) -> dict:
     """Category scores from the file, supporting signals from Bombora and the
     account's technology, and theme summaries from the included topics only."""
@@ -487,10 +502,8 @@ def _summarise(topics: list[dict], category_file: dict, inventory: list[dict]) -
 
     # The feature spec asks for the HP-category view across PC, Workstation,
     # Poly/Collaboration, Print and 3D, "clearly distinguishing provider-supplied
-    # vs internally mapped scores". It does not ask for one category to be
-    # ranked above the others, so none is: the categories are ordered by the
-    # file's own score and a noisy keyword is reported as a caveat on its own
-    # category rather than removing that category from a ranking.
+    # vs internally mapped scores". The categories stay ordered by the file's own
+    # score, so every score is shown as received and none is hidden by a caveat.
     categories.sort(key=lambda c: -((c["primary"] or {}).get("score") or 0))
 
     ai = next(t for t in themes if t["theme"] == tm.THEME_AI)

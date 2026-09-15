@@ -51,7 +51,19 @@ def serialize_data_file(doc: dict) -> dict:
     }
 
 def sanitize_filename(filename: str) -> str:
-    cleaned = re.sub(r'[^a border-zA-Z0-9_\.-]', '_', filename)
+    """Make a basename safe to write to disk.
+
+    The character class had a stray "border-" in it, which is why stored names
+    came out mangled: "My Report 2026" -> "My Re_ort 2026". As written it read as
+    the literals a/space/b/o/r/d/e plus the range r-z, so the twelve lowercase
+    letters outside that range (c f g h i j k l m n p q) were each replaced with
+    an underscore while spaces were let through.
+
+    Only the stored filename was affected. The extension is appended separately
+    by the caller and `original_filename` is kept in the metadata, so no file
+    became unreadable and nothing needs re-uploading.
+    """
+    cleaned = re.sub(r'[^a-zA-Z0-9_.-]', '_', filename)
     return cleaned if cleaned else "dataset_file"
 
 def _find_file_path(rel_path: str) -> str | None:

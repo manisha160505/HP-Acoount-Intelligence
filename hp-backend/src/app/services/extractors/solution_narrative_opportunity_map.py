@@ -16,8 +16,13 @@ from app.services.extractors.grounding import (
     GroundingReport, HP_PRODUCT_LINES,
 )
 from app.services.extractors.datasets import (
-    find_file_path, read_dataset_records, requires_local_datasets,
+    account_domain, find_file_path, read_dataset_records, read_dataset_rows,
+    requires_local_datasets,
 )
+from app.services.extractors.intent_demand_signals import (
+    _carries_buying_signal, _match_provider_account, _parse_category_file,
+)
+from app.services.hp import intent_topic_map as tm
 
 logger = logging.getLogger(__name__)
 
@@ -137,6 +142,86 @@ PLAY_EXCLUDE_TOKENS = {
     "pc": ["vehicle", "vehicles", "server"],
     "workstation": ["vehicle", "vehicles"],
 }
+
+# Which HP category in the category intent file governs each play's timing.
+# The intent hierarchy is: the category file decides whether a category has a
+# buying signal at all; Bombora topics only support a signal the file already
+# carries. A play whose governing category says No Signal cannot take its timing
+# from a Bombora topic, however high that topic scores.
+#
+# daas has no category of its own in the file - it is a way of buying PCs, not
+# an HP category - so it inherits PC's verdict. A play mapped to None here is
+# ungoverned and keeps the old behaviour.
+PLAY_PRIMARY_CATEGORY = {
+    "workstation": tm.CAT_WORKSTATION,
+    "poly": tm.CAT_POLY,
+    "pc": tm.CAT_PC,
+    "print": tm.CAT_PRINT,
+    "daas": tm.CAT_PC,
+}
+
+
+def _intent_timing_gate(category_file: dict, account_match_ok: bool) -> tuple[dict, dict]:
+    """Which HP categories may let a Bombora topic act as a timing trigger.
+
+    Returns (allowed_by_category, report). A category is allowed only when the
+    category file gives it a buying stage and no noisy keyword - the intent
+    widget's own test, imported rather than restated so the two can never drift
+    apart.
+
+    Two deliberate exemptions, both because silence is not the same as a denial:
+
+      * No category file on record - the account has never been scored, which is
+        not the file saying "No Signal". Topics keep their trigger role and the
+        report says the gate was not applied, so a reader can see it.
+      * A file that does not cover this account (mismatch/unverified) - same
+        reasoning, and the domain check below already removes foreign topics.
+    """
+    report = {"applied": False, "reason": None, "allowed": [], "blocked": []}
+
+    if not account_match_ok:
+        report["reason"] = ("The intent export does not match this account's domain, so no "
+                            "Bombora topic is treated as a timing trigger.")
+        report["applied"] = True
+        return {}, report
+
+    if category_file.get("status") != "matched":
+        report["reason"] = (
+            "No HP Category Intent file covers this account, so category intent cannot "
+            "confirm or deny a buying signal. Bombora topics keep their timing role and "
+            "the resulting plays are unconfirmed by category intent.")
+        return {}, report
+
+    report["applied"] = True
+    allowed = {}
+    for name, entry in (category_file.get("categories") or {}).items():
+        if _carries_buying_signal(entry):
+            allowed[name] = entry
+            report["allowed"].append(f"{name} ({entry.get('score')}/100, {entry.get('stage')})")
+        elif entry.get("quality_flags"):
+            terms = ", ".join(f"'{f['term']}'" for f in entry["quality_flags"])
+            report["blocked"].append(f"{name} rests on noisy keyword {terms}")
+        else:
+            report["blocked"].append(
+                f"{name} carries no buying stage in the category file")
+
+    report["reason"] = (
+        "Bombora topics may carry timing only for categories the HP Category Intent file "
+        "gives a buying stage and no noisy keyword: "
+        + ("; ".join(report["allowed"]) if report["allowed"] else "none qualify")
+        + (". Blocked: " + "; ".join(report["blocked"]) if report["blocked"] else "."))
+    return allowed, report
+
+
+def _topic_governing_categories(topic: str) -> set:
+    """HP categories a Bombora topic could speak for.
+
+    Uses the same conservative dictionary as the intent widget. A topic the
+    dictionary maps to no HP category governs none, so it cannot be gated on one
+    and stays context - it was never evidence of a specific category's timing.
+    """
+    mapped = tm.map_topic(topic).get("hp_category")
+    return {mapped} if mapped else set()
 
 
 # Language that claims a buying moment the evidence cannot establish. Wrong
@@ -369,6 +454,20 @@ def generate_opportunity_map_plays_with_gpt4o(account_id: str) -> dict:
     gnews_records = _read_dataset_records(account_id, "google_news")
     events_records = _read_dataset_records(account_id, "news_events")
 
+    # Step 1 of the intent flow. Read here, not only in the intent widget,
+    # because this feature decides which plays claim a buying moment and must
+    # not take that from a Bombora topic the category file does not stand behind.
+    domain = account_domain(account_id)
+    category_file = _parse_category_file(
+        read_dataset_rows(account_id, "hp_category_intent"), domain)
+    topics_meta_records = _read_dataset_records(account_id, "intent_topics")
+    account_match, _observation = _match_provider_account(topics_meta_records, domain)
+    # A mismatch means the export belongs to another company. The intent widget
+    # already drops those topics; this feature reads the raw rows, so the same
+    # check has to be made here or foreign topics would still drive plays.
+    account_match_ok = account_match["status"] != "mismatch"
+    allowed_categories, intent_gate = _intent_timing_gate(category_file, account_match_ok)
+
     inst_doc = db["account_instructions"].find_one({"account_id": account_id})
     guard_doc = db["account_guardrails"].find_one({"account_id": account_id})
     instructions_text = inst_doc.get("instructions_text", "").strip() if inst_doc else ""
@@ -418,9 +517,37 @@ def generate_opportunity_map_plays_with_gpt4o(account_id: str) -> dict:
         if name:
             intent_rows.append({"topic": name, "score": score})
     intent_rows.sort(key=lambda x: -x["score"])
+
+    # A Bombora topic becomes a TIMING TRIGGER only where the HP Category Intent
+    # file gives its category a buying signal. Where it does not, the topic is
+    # still real research and stays in the corpus as CONTEXT: it may be cited as
+    # evidence, but it can no longer make a play look urgent. This is the point
+    # where the intent hierarchy is actually enforced - everything downstream
+    # reads `kind`.
     for r in intent_rows[:10]:
-        corpus.append({"text": r["topic"], "dataset": "intent_score", "field": "Topic",
-                       "composite_score": r["score"], "kind": "trigger"})
+        governing = _topic_governing_categories(r["topic"])
+        if not intent_gate["applied"]:
+            kind, why = "trigger", None          # gate not applicable - see report
+        elif not account_match_ok:
+            # Stated separately from the category reasons below: nothing is wrong
+            # with the topic, it simply belongs to another company's export.
+            kind, why = "context", "the intent export does not match this account's domain"
+        elif not governing:
+            # The dictionary maps this topic to no HP category, so no category
+            # vouches for it. It was never evidence of a specific line's timing.
+            kind, why = "context", "maps to no HP category"
+        elif governing & allowed_categories.keys():
+            kind, why = "trigger", None
+        else:
+            kind = "context"
+            why = ("category intent reports no buying signal for "
+                   + ", ".join(sorted(governing)))
+        r["kind"], r["demoted_reason"] = kind, why
+        item = {"text": r["topic"], "dataset": "intent_score", "field": "Topic",
+                "composite_score": r["score"], "kind": kind}
+        if why:
+            item["demoted_reason"] = why
+        corpus.append(item)
 
     news_triggers, seen = [], set()
     for row in gnews_records + events_records:
@@ -491,13 +618,28 @@ def generate_opportunity_map_plays_with_gpt4o(account_id: str) -> dict:
         hits = [c for c in corpus
                 if any(_token_present(tok, _norm_text(c["text"])) for tok in tokens)
                 and not any(_token_present(x, _norm_text(c["text"])) for x in excludes)]
-        has_signal = any(h.get("kind") == "trigger" for h in hits)
+        has_timing_trigger = any(h.get("kind") == "trigger" for h in hits)
+        # Second gate, at the play rather than the topic. A news event is a
+        # timing trigger in its own right and is not gated - dated news reports
+        # something that happened. This only withholds timing a play would be
+        # taking from Bombora research the category file does not stand behind,
+        # which a topic mapped to no HP category can otherwise still supply.
+        governing = PLAY_PRIMARY_CATEGORY.get(pk)
+        category_blocks_timing = (
+            intent_gate["applied"] and governing is not None
+            and governing not in allowed_categories)
+        if category_blocks_timing:
+            has_news_trigger = any(h.get("kind") == "trigger"
+                                   and h.get("dataset") != "intent_score" for h in hits)
+            has_timing_trigger = has_news_trigger
         # Evidence of ANY kind makes a play eligible. Whether it also carries a
         # timing trigger is check 2's job, and failing that demotes rather than
         # deletes - gating eligibility on it would drop the play instead.
         play_menu[pk] = {
             "eligible": bool(hits),
-            "has_signal": has_signal,
+            "has_timing_trigger": has_timing_trigger,
+            "governing_category": governing,
+            "category_blocks_timing": category_blocks_timing,
             "items": hits[:6],
         }
 
@@ -516,15 +658,29 @@ def generate_opportunity_map_plays_with_gpt4o(account_id: str) -> dict:
         if owners:
             who = "; ".join(f'{c["name"]} ({c["title"]})' for c in owners)
             line += NL + f"    topic owners at this account: {who}"
-        if not info["has_signal"]:
+        if not info["has_timing_trigger"]:
             line += NL + ("    NO TIMING SIGNAL for this play - write its inference as "
                           "exploratory and say so plainly.")
+            if info["category_blocks_timing"]:
+                # Named, so the model writes the real reason instead of implying
+                # the account simply has no research on the topic.
+                line += NL + (
+                    f"    HP category intent reports no buying signal for "
+                    f"{info['governing_category']}. Any intent topic listed above is "
+                    f"research interest only - do NOT present it as a buying moment.")
         menu_lines.append(line)
 
     eligible_keys = [k for k, v in play_menu.items() if v["eligible"]]
 
     # ---- prompt -------------------------------------------------------------
-    intent_lines = [f"- {r['topic']} (Composite Score: {r['score']:.0f})" for r in intent_rows[:10]]
+    # Demotion is marked on the topic itself: the model reads this list directly,
+    # and an unmarked score here would invite exactly the buying-moment reading
+    # the gate exists to prevent.
+    intent_lines = [
+        f"- {r['topic']} (Composite Score: {r['score']:.0f})"
+        + (f" [RESEARCH INTEREST ONLY - {r['demoted_reason']}; not a timing signal]"
+           if r.get("demoted_reason") else "")
+        for r in intent_rows[:10]]
     news_lines = [f"- {t['headline']} ({t['date'] or 'undated'})"
                   + (f" | URL: {t['url']}" if t["url"] else " | URL: none")
                   for t in news_triggers[:10]]
@@ -726,7 +882,7 @@ Output JSON:
             # actually contains one. Asking otherwise is an instruction to
             # fabricate a timing signal.
             if (not has_trigger
-                    and play_menu.get(play_key, {}).get("has_signal")):
+                    and play_menu.get(play_key, {}).get("has_timing_trigger")):
                 retry_notes.setdefault(play_key, (
                     "you cited only context (business description or technology stack). "
                     "Cite at least one INTENT SURGE or NEWS EVENT from this play's listed evidence"))
@@ -1053,8 +1209,13 @@ Output JSON:
                 "discovery_areas": discovery_areas,
                 "dropped": dropped,
                 "grounding_report": report.as_dict(),
+                # Why each play was or was not allowed to claim a buying moment.
+                # Published rather than logged: a play that reads as exploratory
+                # should be traceable to the category verdict that made it so.
+                "intent_timing_gate": intent_gate,
             },
             "source_datasets": ["firmographics", "technographics", "intent_score",
+                                "hp_category_intent", "intent_topics",
                                 "google_news", "news_events", "prospect_contacts"],
             "extracted_at": now,
             "updated_at": now,

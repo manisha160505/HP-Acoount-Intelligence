@@ -2253,6 +2253,9 @@ export default function UserDashboardPage() {
                                       <div key={c.category} className="w-20 text-center">
                                         <span className="text-xs block font-semibold text-slate-600">{categoryLabel(c.category)}</span>
                                         {(c.primary.quality_flags || []).length > 0 && <span className="text-[10px] font-semibold text-amber-700 block">Noisy keyword</span>}
+                                        {!(c.primary.quality_flags || []).length && !c.primary.has_signal && c.primary.score != null && (
+                                          <span className="text-[10px] font-semibold text-slate-400 block">No buying stage</span>
+                                        )}
                                       </div>
                                     ))}
                                   </div>
@@ -2262,7 +2265,7 @@ export default function UserDashboardPage() {
                               <p className="text-xs text-slate-500">{categoryFile?.note || 'Upload the HP Category Intent file to see category scores.'}</p>
                             )}
                             <p className="text-[11px] text-slate-500">
-                              Scores as received from the HP Category Intent file, shown for every HP category. Faded bars rest on a noisy keyword and should be read with care. Supporting Bombora signals add context and never change these scores.
+                              Scores as received from the HP Category Intent file, shown for every HP category, ordered by score. Bars are ordered by score alone: faded bars rest on a noisy keyword and are marked above. Supporting Bombora signals add context and never change these scores.
                               {categoryFile?.top_check && !categoryFile.top_check.consistent && (
                                 <span className="text-amber-700 font-semibold"> The file&apos;s stated top category ({categoryFile.top_check.stated_category}) does not match its scores ({categoryFile.top_check.recomputed_category}).</span>
                               )}

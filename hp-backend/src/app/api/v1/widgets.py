@@ -925,7 +925,7 @@ def retrieval_retire(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
     result = retrieval_ingest.retire_index(
-        account_id, index, reason="retired by an administrator to free capacity")
+        account_id, index, reason="retired by an administrator")
     return {
         "retired": True,
         "index": index,
