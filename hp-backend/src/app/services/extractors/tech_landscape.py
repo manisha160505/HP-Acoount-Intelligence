@@ -664,6 +664,15 @@ def extract_tech_landscape(account_id: str) -> list[dict]:  # noqa: PLR0912, PLR
     mapped_count = len([c for c in hp_categories if c["is_opportunity"]])
     whitespace_cat_count = len([c for c in hp_categories if c["whitespace_count"] > 0])
 
+    # The header total and the per-category counts answer different questions:
+    # `detected_tech_count` is every entry in the technographics export, while
+    # the cards below only count vendors a rule matched into the 7 HP
+    # categories. They are not meant to be equal, and on this account they
+    # differ by an order of magnitude (220 vs ~20). Publishing the mapped total
+    # alongside it lets the UI state the relationship instead of leaving a
+    # reader to assume the cards account for all 220.
+    mapped_signal_count = sum(c["detected_signals_count"] for c in hp_categories)
+
     techno_map_payload = {
         "account_id": account_id,
         "feature_key": "tech_landscape",
@@ -673,6 +682,9 @@ def extract_tech_landscape(account_id: str) -> list[dict]:  # noqa: PLR0912, PLR
         "data": {
             "strategic_read": strategic_read_text,
             "total_detected_technologies": detected_tech_count,
+            # Sum of the per-category "N detected signals" lines, so the UI can
+            # show coverage rather than implying the cards cover the full stack.
+            "mapped_signal_count": mapped_signal_count,
             "total_categories": len(hp_categories),
             "hp_mapped_categories": f"{hp_line_categories}/{len(hp_categories)}",
             "opportunity_categories": f"{mapped_count}/{len(hp_categories)}",

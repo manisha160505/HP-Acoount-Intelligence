@@ -319,7 +319,7 @@ def _read_dataset_records(account_id: str, dataset_key: str) -> list[dict]:
 # takes seller input; the other four key on the account's data alone.
 
 # Bump when the prompt changes so cached assets are regenerated.
-CONTENT_PROMPT_VERSION = "2026-09-11.7"
+CONTENT_PROMPT_VERSION = "2026-09-16.9"
 ASSET_HISTORY_MAX = 20
 RETRY_ROUNDS = 2
 TOPIC_MAX_CHARS = 200
@@ -330,27 +330,38 @@ CONTEXT_MAX_CHARS = 2000
 # The three-paragraph shape shared by Email and Branded Emailer; the two differ
 # only in how they are composed and rendered.
 _EMAIL_SHAPE = ("A three-paragraph outreach email written as HP (\"At HP, we ...\"). "
-                  "subject_line: under 80 characters, names the account and the subject. "
+                  "subject_line: MUST use the format 'Re: [specific initiative or challenge]' - it "
+                  "starts with 'Re: ' and then names the specific initiative or challenge this email "
+                  "is about, taken from the evidence. Not a generic subject, and under 80 characters. "
                   "opening (paragraph 1, one or two sentences): the hook - one specific account fact "
                   "or hiring signal from the evidence, stated with confidence. "
                   "body_sections (paragraph 2): EXACTLY ONE paragraph, no heading, two or three "
                   "sentences, at most 60 words - restate the paragraph-1 evidence as the need, then "
                   "name the one HP line with ONE concrete capability that meets it. "
-                  "cta (paragraph 3, one sentence): a question asking for a brief, focused discussion. "
-                  "90-130 words in total. The salutation and sign-off are added automatically - do not "
+                  "cta (paragraph 3, one sentence): a LOW-FRICTION next step - ask for a briefing, a "
+                  "workshop, an assessment or a short focused discussion. Never claim an existing "
+                  "meeting, project or prior conversation unless the evidence states one. "
+                  "AT MOST 110 words in total. The salutation and sign-off are added automatically - do not "
                   "write 'Dear', 'Sincerely' or a signature.")
 
 CONTENT_TYPE_CONTRACTS = {
     "email": {
         "title": "Email", "subtitle": "Personalized executive outreach email",
+        "words": (None, 110),
         "required": ["subject_line", "opening", "body_sections", "cta"],
         "sections": (1, 2), "subject_max": 80, "email_shaped": True,
+        "subject_prefix": "Re: ",
         "shape": _EMAIL_SHAPE,
     },
     "linkedin": {
         "title": "LinkedIn Post", "subtitle": "Social selling content for LinkedIn",
+        "words": (150, 200),
         "required": ["headline", "opening", "body_sections", "cta"],
         "optional": ["hashtags"],
+        # HP_ABX_v3_final: "LinkedIn Post = 2-3 variants, each 150-200 words".
+        # The only format the spec asks to be produced more than once, so the
+        # seller compares finished posts and publishes one.
+        "variants": 3,
         "sections": (1, 3), "public": True,
         "shape": ("A public LinkedIn post the seller publishes on their own feed, in the first person. "
                   "People in this persona's ROLE are the audience - write for them, never to one person. "
@@ -363,20 +374,30 @@ CONTENT_TYPE_CONTRACTS = {
                   "cta: one closing question that invites people in this role to comment. "
                   "hashtags: 2-3 specific hashtags for this topic and role - never #HP, #Innovation or "
                   "other generic tags - and keep hashtags OUT of every other field. "
-                  "120-200 words in total."),
+                  "150-200 words in total."),
     },
     "one_pager": {
         "title": "One-Pager", "subtitle": "Single-page solution overview for the account",
+        "words": (None, 400),
         "headings": True,
         "required": ["headline", "opening", "body_sections", "cta"],
-        "sections": (3, 4),
+        # HP_ABX_v3_final: "One-Pager = maximum 400 words with four sections in
+        # this order: Account Challenge; How HP Helps; Proof Points; Next Step."
+        # The order is mandated, so the headings are fixed rather than left to
+        # the model, and `required_headings` re-checks what came back.
+        "sections": (4, 4),
+        "required_headings": ["Account Challenge", "How HP Helps", "Proof Points", "Next Step"],
         "shape": ("A one-page solution overview for the account. headline; opening summary paragraph; "
-                  "3-4 body_sections each WITH a heading, covering: the situation the evidence shows, "
-                  "what HP proposes, why now, and the next step; cta is the recommended action. "
-                  "250-400 words. No subject_line."),
+                  "EXACTLY 4 body_sections, each WITH a heading, and the headings must be exactly "
+                  "these four in this order: 'Account Challenge' (the situation the evidence shows); "
+                  "'How HP Helps' (what HP proposes); 'Proof Points' (the supporting evidence - if no "
+                  "HP proof point is available, say what the account evidence supports and no more); "
+                  "'Next Step' (why now and the recommended action); cta is the recommended action. "
+                  "AT MOST 400 words. No subject_line."),
     },
     "exec_brief": {
         "title": "Executive Brief", "subtitle": "2-page intelligence brief for leadership",
+        "words": (350, 550),
         "headings": True,
         "required": ["headline", "opening", "body_sections", "cta"],
         "sections": (3, 5),
@@ -388,8 +409,10 @@ CONTENT_TYPE_CONTRACTS = {
     },
     "follow_up": {
         "title": "Follow-up Note", "subtitle": "Post-meeting follow-up with next steps",
+        "words": (None, 150),
         "required": ["subject_line", "opening", "body_sections", "cta"],
         "sections": (1, 2), "subject_max": 80, "email_shaped": True,
+        "subject_prefix": "Re: ",
         "shape": ("A short post-meeting follow-up email written as HP. subject_line; opening thanks briefly and "
                   "restates the one thing discussed that matters - drawn from the seller's additional "
                   "context if supplied, otherwise from the evidence; 1-2 body_sections with agreed next "
@@ -398,8 +421,10 @@ CONTENT_TYPE_CONTRACTS = {
     },
     "branded_emailer": {
         "title": "Branded Emailer", "subtitle": "HP-branded email with visual preview and HTML download",
+        "words": (None, 110),
         "required": ["subject_line", "opening", "body_sections", "cta"],
         "sections": (1, 2), "subject_max": 80, "email_shaped": True,
+        "subject_prefix": "Re: ",
         # Greets the role ("Dear CIO,") and carries no sign-off - the sender is the
         # From line of the branded layout.
         "greeting_role": True, "signoff": False,
@@ -407,6 +432,7 @@ CONTENT_TYPE_CONTRACTS = {
     },
     "landing_page": {
         "title": "Landing Page", "subtitle": "HP-branded landing page with visual preview and HTML download",
+        "words": (None, 300),
         "headings": True,
         "required": ["headline", "opening", "body_sections", "cta"],
         "sections": (3, 4),
@@ -735,9 +761,45 @@ def _validate_asset(raw, contract: dict, persona: dict, labels: dict[str, str],
     if subject and smax and len(subject) > smax:
         faults.append(f"subject_line is {len(subject)} characters; at most {smax}")
 
+    # HP_ABX_v3_final: "subject format 'Re: [specific initiative or challenge]'".
+    # A hard fault, so a generic subject is rewritten rather than published.
+    sprefix = contract.get("subject_prefix")
+    if subject and sprefix and not subject.lower().startswith(sprefix.lower()):
+        faults.append(f"subject_line must start with \"{sprefix}\" and then name the specific "
+                      f"initiative or challenge; got \"{subject}\"")
+
+    # HP_ABX_v3_final mandates the one-pager's four headings and their order.
+    req_headings = contract.get("required_headings")
+    if req_headings and sections:
+        got = [(s["heading"] or "").strip().lower() for s in sections]
+        want = [h.lower() for h in req_headings]
+        if got != want:
+            faults.append(
+                "body_sections headings are "
+                + (", ".join(f'"{s["heading"] or ""}"' for s in sections) or "(none)")
+                + "; HP_ABX_v3_final requires exactly "
+                + ", ".join(f'"{h}"' for h in req_headings) + " in that order")
+
     texts = [subject, headline, opening, cta, framing, " ".join(hashtags)] \
             + [s["text"] for s in sections] + [s["heading"] or "" for s in sections]
     blob = " ".join(t for t in texts if t).lower()
+
+    # Word limits were stated in the prompt but never checked, so a model that
+    # overran simply overran. HP_ABX_v3_final sets these as format rules, so
+    # they are enforced here like any other contract term.
+    #
+    # Counted over the body a reader actually sees: the subject line, the
+    # persona framing (an internal note) and the hashtags are excluded, since
+    # none of them are part of the prose the limit governs.
+    wmin, wmax = contract.get("words") or (None, None)
+    if wmin or wmax:
+        counted = [headline, opening, cta] + [s["text"] for s in sections] \
+                  + [s["heading"] or "" for s in sections]
+        words = len(" ".join(t for t in counted if t).split())
+        if wmax and words > wmax:
+            faults.append(f"copy is {words} words; at most {wmax}")
+        elif wmin and words < wmin:
+            faults.append(f"copy is {words} words; at least {wmin}")
 
     for phrase in BANNED_PHRASES:
         if phrase in blob:
@@ -918,6 +980,62 @@ def render_asset_html(record: dict) -> str | None:
     )
 
 
+def _safe_fallback_asset(contract: dict, persona: dict, company_name: str, topic: str,
+                         labels: dict[str, str]) -> dict | None:
+    """The deterministic template, for when live generation cannot produce a
+    grounded result.
+
+    HP_ABX_v3_final, Fallback handling: "If live AI is unavailable, provide the
+    deterministic template populated with the verified trigger, persona, HP play
+    and next-step request fields."
+
+    Every sentence here is composed in Python from evidence the account already
+    carries, so it cannot hallucinate: there is no model in this path. It is
+    marked `is_fallback` so the UI never presents it as generated copy.
+    """
+    if not labels:
+        return None
+    # The first account-evidence cell is the trigger; persona cells describe who
+    # it is going to. Both are already labelled and grounded.
+    trigger = next((v for k, v in labels.items() if k.startswith("A")), "")
+    if not trigger:
+        return None
+    role = str(persona.get("title") or "this role").strip()
+    subject_core = topic.strip() or "your current priorities"
+    opening = (f"At HP, we track publicly reported developments at {company_name}. "
+               f"This note follows one of them: {trigger}")
+    body = (f"We work with {role} counterparts on the device, security and workforce "
+            f"implications of changes like this. What applies to {company_name} depends on "
+            f"your current estate and plans, which is why this is a question rather than a "
+            f"recommendation.")
+    cta = ("Would a short briefing be useful to establish whether this is relevant to your "
+           "roadmap?")
+    asset = {
+        "opening": opening,
+        "body_sections": [{"heading": None, "text": body}],
+        "cta": cta,
+        "persona_framing": f"Role-based version for {role}; composed from account evidence only.",
+        "evidence_used": [k for k in labels if k.startswith("A")][:1],
+    }
+    if "subject_line" in set(_content_fields(contract)):
+        asset["subject_line"] = f"Re: {subject_core}"[:contract.get("subject_max") or 80]
+    if "headline" in set(_content_fields(contract)):
+        asset["headline"] = f"{company_name}: {subject_core}"
+    if contract.get("headings"):
+        # A headed format needs its mandated sections; the template fills the
+        # ones it can stand behind and says nothing it cannot.
+        req = contract.get("required_headings") or ["Account Challenge", "How HP Helps",
+                                                    "Proof Points", "Next Step"]
+        texts = {
+            "Account Challenge": trigger,
+            "How HP Helps": body,
+            "Proof Points": "No HP proof point is attached to this account yet.",
+            "Next Step": cta,
+        }
+        asset["body_sections"] = [{"heading": h, "text": texts.get(h, body)} for h in req]
+    return asset
+
+
 def _compose_greeting(persona: dict, contract: dict) -> str:
     """Salutation: the first name for a named contact. For an archetype, the role
     itself on a branded emailer ("Dear CIO,") or a placeholder the seller fills in
@@ -959,14 +1077,16 @@ def _compose_plain_text(record: dict, contract: dict) -> str:
     return "\n\n".join(x for x in lines if x).strip()
 
 
-def generate_content_asset(account_id: str, persona_id: str, content_type: str,
-                           topic: str, additional_context: str = "") -> dict:
-    """One cached GPT-4o call per (persona, type, topic, context). Returns the
-    content_generated_assets widget document. Raises ValueError for a request
-    the account's data cannot serve (unknown persona or type, empty topic)."""
-    db = get_db()
-    now = datetime.now(UTC)
+def _build_generation_context(db, account_id: str, persona_id: str, content_type: str,
+                              topic: str, additional_context: str) -> dict:
+    """Everything both co-creation steps need: the validated request, the labelled
+    evidence blocks, the grounding corpus and the cache fingerprint.
 
+    Extracted so suggesting angles and writing the asset read the SAME evidence.
+    If they drifted apart, the seller could pick an angle built on evidence the
+    generator never sees. Raises ValueError for a request the account's data
+    cannot serve.
+    """
     content_type = str(content_type or "").strip().lower()
     contract = CONTENT_TYPE_CONTRACTS.get(content_type)
     if not contract:
@@ -1039,6 +1159,157 @@ def generate_content_asset(account_id: str, persona_id: str, content_type: str,
     fingerprint = _request_fingerprint(list(labels.values()), persona, content_type, topic, additional_context,
                                        instructions_text, guardrails_text)
 
+    return {
+        "contract": contract, "persona": persona, "company_name": company_name,
+        "account_block": account_block, "persona_block": persona_block,
+        "labels": labels, "ground": ground, "report": report,
+        "banned_names": banned_names, "fingerprint": fingerprint,
+        "instructions_text": instructions_text, "guardrails_text": guardrails_text,
+        "topic": topic, "additional_context": additional_context,
+        "content_type": content_type,
+    }
+
+
+def suggest_content_angles(account_id: str, persona_id: str, content_type: str,
+                           topic: str, additional_context: str = "") -> dict:
+    """Step 2 of the co-creation flow: propose 2-3 short angles for the seller to
+    choose between, BEFORE any full asset is written.
+
+    Dhruvi's requirement (docs/mails, "3. Human in the Loop / Co-creation") is
+    "the user provides a brief -> the system suggests relevant options -> the
+    user selects or adjusts the option -> the system generates the content
+    accordingly". Each option here is a few lines, not a finished asset: one
+    cheap call produces the whole set, and the expensive generate+retry loop
+    runs once, on the angle the seller actually picked.
+
+    Returns the content_angle_options widget document. Raises ValueError for a
+    request the account's data cannot serve, exactly as generate_content_asset
+    does, so the endpoint's error handling is unchanged.
+    """
+    db = get_db()
+    now = datetime.now(UTC)
+    ctx = _build_generation_context(db, account_id, persona_id, content_type,
+                                    topic, additional_context)
+    contract, persona, company_name = ctx["contract"], ctx["persona"], ctx["company_name"]
+
+    def _payload(status_val: str, options: list, last_error: dict | None) -> dict:
+        return {
+            "account_id": account_id,
+            "feature_key": "content_studio",
+            "widget_key": "content_angle_options",
+            "data_classification": "inferred",
+            "status": status_val,
+            "data": {
+                "options": options,
+                "persona_id": persona_id,
+                "content_type": content_type,
+                "content_type_label": contract["title"],
+                "topic": topic,
+                "evidence_labels": ctx["labels"],
+                "last_error": last_error,
+            },
+            "source_datasets": ["firmographics", "prospect_contacts", "job_openings"],
+            "extracted_at": now,
+            "updated_at": now,
+        }
+
+    system_prompt = (
+        _build_system_prompt(company_name, contract, ctx["account_block"], persona,
+                             ctx["persona_block"], topic, additional_context,
+                             ctx["instructions_text"], ctx["guardrails_text"])
+        + "\n\nTHIS CALL IS DIFFERENT - DO NOT WRITE THE ASSET.\n"
+        "Propose EXACTLY 3 distinct angles the seller could take, so they can pick one. "
+        "An angle is a direction, not a draft: no salutation, no sign-off, no full copy.\n"
+        "Each angle must be built on a DIFFERENT evidence item from the block above, and must "
+        "cite that item's label in evidence_used. Three rewordings of one idea is a failed answer.\n"
+        "Per angle return: \"label\" (3-6 words, how it reads in a picker); \"summary\" (ONE "
+        "sentence on the argument it makes); \"opening_line\" (one sentence, the hook it would "
+        "open on); \"evidence_used\" (labels from the evidence block, at least one).\n"
+        "Use calibrated language for anything not written in the evidence.\n"
+        'Output JSON: {"options": [{"label": "...", "summary": "...", '
+        '"opening_line": "...", "evidence_used": ["A1"]}]}'
+    )
+    user_prompt = (f"Propose 3 angles for a {contract['title']} to {persona['title']} at "
+                   f"{company_name} on \"{topic}\". Return JSON matching the schema.")
+
+    llm_res = generate_gpt4o_json_completion(system_prompt, user_prompt)
+    options, seen = [], set()
+    if isinstance(llm_res, dict) and isinstance(llm_res.get("options"), list):
+        for idx, o in enumerate(llm_res["options"]):
+            if not isinstance(o, dict):
+                continue
+            label = str(o.get("label") or "").strip()
+            summary = str(o.get("summary") or "").strip()
+            opening = str(o.get("opening_line") or "").strip()
+            if not (label and summary) or _PLACEHOLDER_RE.match(label):
+                continue
+            # Same grounding gate as the asset path: an angle that quotes a
+            # figure the uploads never carried is dropped, not shown and then
+            # caught later. A URL is stripped rather than rejecting the angle.
+            bad_nums, _ = check_text(ctx["ground"], ctx["report"], f"angle{idx}",
+                                     label, summary, opening)
+            if bad_nums:
+                logger.info("content studio: angle %d dropped, unsourced %s", idx, bad_nums)
+                continue
+            key = summary.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            options.append({
+                "option_id": hashlib.sha1(
+                    f"{ctx['fingerprint']}:{label}".encode()).hexdigest()[:12],
+                "label": label,
+                "summary": summary,
+                "opening_line": opening,
+                "evidence_used": [lab for lab in (o.get("evidence_used") or [])
+                                  if lab in ctx["labels"]],
+            })
+
+    if not options:
+        # No angles is not a failure to hide: the seller can still generate
+        # directly, so the widget says so rather than blocking the feature.
+        return _payload("empty", [], {
+            "notice": "No angles could be proposed for this brief. You can generate directly instead.",
+            "at": now.isoformat(),
+        })
+
+    payload = _payload("available", options[:3], None)
+    db["account_widgets"].update_one(
+        {"account_id": account_id, "widget_key": "content_angle_options"},
+        {"$set": payload}, upsert=True)
+    return payload
+
+
+def generate_content_asset(account_id: str, persona_id: str, content_type: str,
+                           topic: str, additional_context: str = "",
+                           selected_angle: str = "") -> dict:
+    """One cached GPT-4o call per (persona, type, topic, context, angle). Returns
+    the content_generated_assets widget document. Raises ValueError for a request
+    the account's data cannot serve (unknown persona or type, empty topic).
+
+    `selected_angle` is the option the seller picked in the co-creation step. It
+    is folded into the prompt AND the cache fingerprint, so picking a different
+    angle regenerates rather than serving the previous angle's asset.
+    """
+    db = get_db()
+    now = datetime.now(UTC)
+
+    ctx = _build_generation_context(db, account_id, persona_id, content_type,
+                                    topic, additional_context)
+    contract, persona = ctx["contract"], ctx["persona"]
+    company_name, labels = ctx["company_name"], ctx["labels"]
+    account_block, persona_block = ctx["account_block"], ctx["persona_block"]
+    ground, report, banned_names = ctx["ground"], ctx["report"], ctx["banned_names"]
+    instructions_text, guardrails_text = ctx["instructions_text"], ctx["guardrails_text"]
+    content_type, topic = ctx["content_type"], ctx["topic"]
+    additional_context = ctx["additional_context"]
+
+    # The chosen angle is part of the cache key: picking a different angle must
+    # regenerate, not serve the asset written for the previous one.
+    selected_angle = str(selected_angle or "").strip()[:TOPIC_MAX_CHARS]
+    fingerprint = ctx["fingerprint"] if not selected_angle else hashlib.sha1(
+        (ctx["fingerprint"] + "|" + selected_angle.lower()).encode("utf-8")).hexdigest()
+
     existing = db["account_widgets"].find_one({
         "account_id": account_id, "widget_key": "content_generated_assets"})
     existing_assets = list(((existing or {}).get("data") or {}).get("assets") or [])
@@ -1073,69 +1344,118 @@ def generate_content_asset(account_id: str, persona_id: str, content_type: str,
     system_prompt = _build_system_prompt(company_name, contract, account_block, persona,
                                          persona_block, topic, additional_context,
                                          instructions_text, guardrails_text)
+    if selected_angle:
+        # The seller chose this angle in the co-creation step. It steers the
+        # argument; it does not license anything the evidence does not carry,
+        # so the grounding gate still applies to every word that comes back.
+        system_prompt += (
+            "\n\nTHE SELLER HAS CHOSEN THIS ANGLE - write to it:\n"
+            f"{selected_angle}\n"
+            "Build the copy around this argument. Every claim still has to stand on the "
+            "evidence block above; the angle does not authorise a fact that is not there.")
     user_prompt = (f"Write the {contract['title']} for {persona['title']} at {company_name} "
                    f"on the topic \"{topic}\". Return JSON matching the schema.")
 
     attempts: list[list[str]] = []
-    best: tuple[dict, list[str]] | None = None   # cleanest publishable draft seen so far
 
-    def _consider(asset, soft):
-        nonlocal best
-        if asset is not None and (best is None or len(soft) < len(best[1])):
-            best = (asset, soft)
+    def _draft(extra_instruction: str = "") -> tuple[dict | None, list[str], list[str]]:
+        """One generate -> validate -> bounded-retry cycle. Returns
+        (asset, faults, style_warnings); asset is None if nothing passed."""
+        sys_prompt = system_prompt + extra_instruction
+        best: tuple[dict, list[str]] | None = None   # cleanest publishable draft seen
 
-    llm_res = generate_gpt4o_json_completion(system_prompt, user_prompt)
-    if llm_res is None:
-        asset, faults, soft = None, ["model returned nothing - OPENAI_API_KEY missing or the call failed"], []
-    else:
-        asset, faults, soft = _validate_asset(llm_res, contract, persona, labels, ground, report, banned_names)
-        attempts.append(faults + soft)
-        _consider(asset, soft)
+        def _consider(a, sf):
+            nonlocal best
+            if a is not None and (best is None or len(sf) < len(best[1])):
+                best = (a, sf)
+
+        llm_res = generate_gpt4o_json_completion(sys_prompt, user_prompt)
+        if llm_res is None:
+            return None, ["model returned nothing - OPENAI_API_KEY missing or the call failed"], []
+
+        a, f, sf = _validate_asset(llm_res, contract, persona, labels, ground, report, banned_names)
+        attempts.append(f + sf)
+        _consider(a, sf)
         # Bounded retry, for style warnings as well as hard faults. The model is
         # told exactly what was rejected, not asked again blindly.
         for _round in range(RETRY_ROUNDS):
-            if asset is not None and not soft:
+            if a is not None and not sf:
                 break
-            notes = faults + [f"{w} - replace it with a specific statement about this account; "
-                              "do not substitute a synonym" for w in soft]
-            retry_system = system_prompt + (
+            notes = f + [f"{w} - replace it with a specific statement about this account; "
+                         "do not substitute a synonym" for w in sf]
+            retry_system = sys_prompt + (
                 "\n\nRETRY - YOUR PREVIOUS ANSWER WAS REJECTED.\n"
                 "Fix exactly the faults below and return the COMPLETE asset object again - every "
                 "key, carrying the parts that were already correct through unchanged.\n"
-                + "\n".join(f"- {f}" for f in notes) + "\n"
+                + "\n".join(f"- {x}" for x in notes) + "\n"
                 "Use calibrated language (\"may\", \"could\", \"suggests\", \"worth exploring\") for "
                 "anything not written in the evidence."
             )
             retry_res = generate_gpt4o_json_completion(retry_system, user_prompt)
             if retry_res is None:
                 break
-            asset, faults, soft = _validate_asset(retry_res, contract, persona, labels, ground, report, banned_names)
-            attempts.append(faults + soft)
-            _consider(asset, soft)
+            a, f, sf = _validate_asset(retry_res, contract, persona, labels, ground, report, banned_names)
+            attempts.append(f + sf)
+            _consider(a, sf)
 
-    # Retry budget spent: publish the cleanest draft that had no hard fault,
-    # carrying its remaining style warnings, rather than withhold everything.
-    if (asset is None and best is not None) or (asset is not None and best is not None and len(best[1]) < len(soft)):
-        asset, soft = best
+        # Retry budget spent: publish the cleanest draft that had no hard fault,
+        # carrying its remaining style warnings, rather than withhold everything.
+        if (a is None and best is not None) or (a is not None and best is not None and len(best[1]) < len(sf)):
+            a, sf = best
+        return a, f, sf
+
+    # HP_ABX_v3_final asks for 2-3 LinkedIn variants; every other format is a
+    # single asset. Each variant is generated and validated independently, so a
+    # variant that fails the gate is dropped rather than dragging the set down.
+    want_variants = int(contract.get("variants") or 1)
+    variants: list[dict] = []
+    asset, faults, soft = None, [], []
+    for i in range(want_variants):
+        extra = ""
+        if want_variants > 1:
+            extra = ("\n\nTHIS IS VARIANT %d OF %d. Each variant must take a GENUINELY DIFFERENT "
+                     "approach - a different hook, a different evidence item and a different "
+                     "closing question. Do not reword one idea." % (i + 1, want_variants))
+            if variants:
+                prior = "; ".join((v["asset"].get("headline") or "")[:80] for v in variants)
+                extra += "\nAlready written, do not repeat these openings: " + prior
+        v_asset, v_faults, v_soft = _draft(extra)
+        if v_asset is not None:
+            variants.append({"asset": v_asset, "soft": v_soft})
+            if asset is None:
+                asset, faults, soft = v_asset, v_faults, v_soft
+        elif asset is None:
+            faults, soft = v_faults, v_soft
 
     if asset is None:
         logger.warning("content studio: generation rejected for %s/%s/%s: %s",
                        account_id, persona_id, content_type, faults)
-        last_error = {
-            "faults": faults,
-            "attempts": attempts,
-            "persona_id": persona_id,
-            "content_type": content_type,
-            "topic": topic,
-            "at": now.isoformat(),
-            "notice": "The generated draft did not pass the grounding and style checks and was not published. "
-                      "Earlier assets are kept.",
-        }
-        payload = _payload("available" if existing_assets else "pending", None, existing_assets, last_error)
-        db["account_widgets"].update_one(
-            {"account_id": account_id, "widget_key": "content_generated_assets"},
-            {"$set": payload}, upsert=True)
-        return payload
+        # Spec fallback: rather than returning nothing, populate the
+        # deterministic template from the verified fields. It is composed in
+        # Python, so it carries no model output and cannot hallucinate.
+        asset = _safe_fallback_asset(contract, persona, company_name, topic, labels)
+        is_fallback = asset is not None
+        if not is_fallback:
+            last_error = {
+                "faults": faults,
+                "attempts": attempts,
+                "persona_id": persona_id,
+                "content_type": content_type,
+                "topic": topic,
+                "at": now.isoformat(),
+                "notice": "The generated draft did not pass the grounding and style checks and was not published. "
+                          "Earlier assets are kept.",
+            }
+            payload = _payload("available" if existing_assets else "pending", None, existing_assets, last_error)
+            db["account_widgets"].update_one(
+                {"account_id": account_id, "widget_key": "content_generated_assets"},
+                {"$set": payload}, upsert=True)
+            return payload
+        soft = ["live generation did not produce a grounded draft - this is the deterministic "
+                "template, composed from verified account fields only"]
+        variants = []
+    else:
+        is_fallback = False
 
     record = {
         "asset_id": fingerprint[:16],
@@ -1146,17 +1466,43 @@ def generate_content_asset(account_id: str, persona_id: str, content_type: str,
         "content_type_label": contract["title"],
         "topic": topic,
         "additional_context": additional_context or None,
+        # Which co-creation angle produced this, so the card can show what the
+        # seller picked rather than leaving the choice invisible after the fact.
+        "selected_angle": selected_angle or None,
         "generated": asset,
         "style_warnings": soft,
         "attempts": len(attempts),
         "evidence_labels": {lab: labels[lab] for lab in asset["evidence_used"]},
         "rendered_html": None,
         "grounding_report": report.as_dict(),
+        # True when live generation failed and this is the deterministic
+        # template. The UI must not present it as generated copy.
+        "is_fallback": is_fallback,
         "generated_at": now.isoformat(),
     }
     record["greeting"] = _compose_greeting(persona, contract) if contract.get("email_shaped") else None
     record["plain_text"] = _compose_plain_text(record, contract)
     record["rendered_html"] = render_asset_html(record)
+
+    # The remaining variants, each composed the same way so the seller can copy
+    # any of them. `record` itself stays the first variant, so every existing
+    # reader of `latest` is unaffected by this field's presence.
+    if len(variants) > 1:
+        record["variants"] = []
+        for idx, v in enumerate(variants):
+            v_rec = {**record, "generated": v["asset"], "style_warnings": v["soft"],
+                     "variant_index": idx + 1,
+                     "evidence_labels": {lab: labels[lab] for lab in v["asset"]["evidence_used"]}}
+            v_rec["plain_text"] = _compose_plain_text(v_rec, contract)
+            v_rec.pop("variants", None)
+            record["variants"].append({
+                "variant_index": idx + 1,
+                "generated": v["asset"],
+                "style_warnings": v["soft"],
+                "plain_text": v_rec["plain_text"],
+                "evidence_labels": v_rec["evidence_labels"],
+            })
+        record["variant_count"] = len(variants)
     assets = [x for x in existing_assets if x.get("request_fingerprint") != fingerprint]
     assets.insert(0, record)
     assets = assets[:ASSET_HISTORY_MAX]

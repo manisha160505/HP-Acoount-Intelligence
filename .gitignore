@@ -89,3 +89,11 @@ ingest/
 # Meeting notes under docs/meeting-notes/ are deliberately still tracked.
 docs/mails*.txt
 hp-project-flow.html
+
+# Editor backups. Seven page.tsx.bak* snapshots were tracked, and the widget
+# validator scanned them as if they were live UI - reporting a "Contract TBD"
+# placeholder that had already been removed from page.tsx. Their history stays
+# in git; only the working copies are ignored from here.
+*.bak
+*.bak[0-9]
+*.bak[0-9][0-9]

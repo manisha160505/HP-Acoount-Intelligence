@@ -156,7 +156,24 @@ def build_corpus(records_by_dataset: dict[str, list[dict]]) -> Corpus:
 # "Poly Voyager Headsets"); anything naming no HP line at all is rejected.
 HP_LINE_TOKENS = [
     (("z by hp", "hp z", "workstation"), "Z by HP Workstations"),
-    (("elitebook", "probook", "elite pc", "pro pc", "elite /", "elite and pro"),
+    # "hp elite" and "hp pro" match the way the line is actually written. The
+    # list previously held only the SKU-shaped spellings ("elitebook", "elite
+    # pc") and the two separator forms ("elite /", "elite and pro"), so "HP
+    # Elite", "HP Elite & Pro PCs" and "HP Elite/Pro PCs" all resolved to no HP
+    # line - including the last two, which this codebase's own prompts instruct
+    # the model to produce (see recent_news_signals and objection_playbook).
+    #
+    # In the evaluator that was a grounding leak rather than a cosmetic miss: a
+    # claim naming no HP line routes to the ACCOUNT corpus, so "HP Elite
+    # protects 240 device models" could be verified against a row that happened
+    # to contain 240 for an unrelated reason. Guardrail 13 exists to stop an HP
+    # capability claim being answered by account data.
+    #
+    # Both tokens are prefixed with "hp " on purpose. A bare "elite" or "pro"
+    # appears in ordinary prose ("elite performance", "pro tier") and in other
+    # vendors' names, and would route that text to the HP corpus.
+    (("elitebook", "probook", "hp elite", "hp pro", "elite pc", "pro pc",
+      "elite /", "elite and pro"),
      "HP Elite / Pro PCs"),
     (("wolf",), "HP Wolf Security"),
     (("poly",), "Poly Collaboration"),

@@ -304,6 +304,16 @@ export default function UserDashboardPage() {
   const [isGeneratingContent, setIsGeneratingContent] = useState<boolean>(false);
   const [hasGeneratedContent, setHasGeneratedContent] = useState<boolean>(false);
   const [generatedAsset, setGeneratedAsset] = useState<any>(null);
+  // Co-creation step: the brief produces angles, the seller picks or edits one,
+  // and only then is the asset written. `selectedAngle` carries the chosen text
+  // (editable, so "selects OR ADJUSTS" is satisfied) into the generate call.
+  const [angleOptions, setAngleOptions] = useState<any[]>([]);
+  const [isSuggestingAngles, setIsSuggestingAngles] = useState<boolean>(false);
+  const [selectedAngleId, setSelectedAngleId] = useState<string | null>(null);
+  const [selectedAngle, setSelectedAngle] = useState<string>('');
+  const [angleNotice, setAngleNotice] = useState<string | null>(null);
+  // Which LinkedIn variant is on screen (1-based, matching variant_index).
+  const [activeVariantIndex, setActiveVariantIndex] = useState<number>(1);
   const [generateError, setGenerateError] = useState<any>(null);
   const [copiedAssetId, setCopiedAssetId] = useState<string | null>(null);
   const [isGeneratingOppMap, setIsGeneratingOppMap] = useState<boolean>(false);
@@ -692,11 +702,47 @@ export default function UserDashboardPage() {
                 ACTIVE
               </span>
 
-              {/* Urgency Score Pill */}
-              <div className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-amber-50 text-amber-800 border border-amber-200/80 text-xs font-bold">
-                <span className="text-[11px]">Urgency Score</span>
-                <span className="bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded font-mono text-[10px]">Contract TBD</span>
-              </div>
+              {/* Urgency Score Pill
+                *
+                * Bound to the same exec_urgency_score widget as the breakdown
+                * card below, so the two can never disagree. This previously
+                * read a hardcoded "Contract TBD" - a placeholder that outlived
+                * the contract question and sat next to a card that was already
+                * computing the real number.
+                *
+                * `widgets` holds only the active feature's widgets, so this
+                * resolves on the executive dashboard and renders nothing
+                * elsewhere rather than showing a stale or empty score. Read on
+                * 'partial' too, matching the card: a payload whose composite is
+                * blocked by one unavailable driver still reports N/A honestly.
+                */}
+              {(() => {
+                const urgencyWidget = widgets.find(w => w.widget_key === 'exec_urgency_score');
+                const urgency = (urgencyWidget && urgencyWidget.data
+                  && (urgencyWidget.status === 'available' || urgencyWidget.status === 'partial'))
+                  ? (urgencyWidget.data as any) : null;
+
+                if (!urgency) return null;
+
+                const hasScore = urgency.score != null;
+                return (
+                  <div
+                    className={`inline-flex items-center space-x-1.5 px-3 py-1 rounded-full border text-xs font-bold ${
+                      hasScore
+                        ? 'bg-amber-50 text-amber-800 border-amber-200/80'
+                        : 'bg-slate-50 text-slate-600 border-slate-200'
+                    }`}
+                    title={hasScore ? undefined : (urgency.unavailable_reason || undefined)}
+                  >
+                    <span className="text-[11px]">Urgency Score</span>
+                    <span className={`px-1.5 py-0.5 rounded font-mono text-[10px] ${
+                      hasScore ? 'bg-amber-200 text-amber-900' : 'bg-slate-200 text-slate-700'
+                    }`}>
+                      {hasScore ? `${urgency.score}/${urgency.max_score ?? 100}` : 'N/A'}
+                    </span>
+                  </div>
+                );
+              })()}
             </div>
 
             {/* X-Ray Mode Toggle Button */}
@@ -872,6 +918,14 @@ export default function UserDashboardPage() {
                   const industryVal = summaryData?.industry_classification || null;
                   const parentVal = summaryData?.ultimate_parent || null;
 
+                  // Set when the backend suppressed a field rather than
+                  // displaying a value it could not stand behind. Shown as an
+                  // explicit "needs review" chip: a field that silently
+                  // vanishes looks like missing data, when in fact a
+                  // contradiction was detected and deliberately not resolved.
+                  const parentFlag = ((summaryData?.review_flags || []) as any[])
+                    .find((f: any) => f?.field === 'ultimate_parent') || null;
+
                   return (
                     <div className="space-y-6">
                       
@@ -929,6 +983,22 @@ export default function UserDashboardPage() {
                                 <div className="flex items-center space-x-1.5 text-slate-700">
                                   <User className="w-4 h-4 text-hp-navy" />
                                   <span>Ultimate Parent: <strong className="font-bold text-slate-900">{parentVal}</strong></span>
+                                </div>
+                              )}
+
+                              {!parentVal && parentFlag && (
+                                <div
+                                  className="flex items-center space-x-1.5 text-amber-800"
+                                  title={parentFlag.reason || undefined}
+                                >
+                                  <User className="w-4 h-4 text-amber-600" />
+                                  <span>
+                                    Ultimate Parent:{' '}
+                                    <strong className="font-bold text-amber-900">Unavailable</strong>
+                                    <span className="ml-1.5 text-[10px] font-bold bg-amber-100 text-amber-900 px-1.5 py-0.5 rounded border border-amber-200 uppercase">
+                                      Needs Review
+                                    </span>
+                                  </span>
                                 </div>
                               )}
                             </div>
@@ -1629,6 +1699,26 @@ export default function UserDashboardPage() {
                     return { label: 'Low', cls: 'bg-gray-100 text-gray-600 border-gray-200', pulse: false };
                   };
 
+                  // Has the event actually happened? A plant that "will be built"
+                  // and one that "has opened" are different conversations, so the
+                  // card must not read the same for both. 'unknown', a missing
+                  // value and anything unrecognised all render nothing rather
+                  // than asserting a status the evidence did not support.
+                  const eventStatusBadge = (raw: any) => {
+                    switch (String(raw ?? '').trim().toLowerCase()) {
+                      case 'completed':
+                        return { label: 'Completed', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200', title: 'This event has already happened' };
+                      case 'announced':
+                        return { label: 'Announced', cls: 'bg-blue-50 text-blue-700 border-blue-200', title: 'Formally announced, not yet completed' };
+                      case 'planned':
+                        return { label: 'Planned', cls: 'bg-violet-50 text-violet-700 border-violet-200', title: 'Targeted or under consideration, not yet committed' };
+                      case 'rumoured':
+                        return { label: 'Rumoured', cls: 'bg-amber-50 text-amber-700 border-amber-200', title: 'Reported second-hand and unconfirmed' };
+                      default:
+                        return null;
+                    }
+                  };
+
                   // Source-confidence dot. google_news reports High/Medium/Low,
                   // news_events a 0-1 float; both map onto the same three states.
                   // No value in the row means no dot - nothing is assumed.
@@ -1897,6 +1987,19 @@ export default function UserDashboardPage() {
                                         {urgency.label}
                                       </span>
                                     )}
+                                    {(() => {
+                                      // Whether the event has actually happened. "unknown" is
+                                      // deliberately silent - no badge rather than a guess.
+                                      const st = eventStatusBadge(s.event_status);
+                                      return st ? (
+                                        <span
+                                          title={st.title}
+                                          className={`text-[10px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider border ${st.cls}`}
+                                        >
+                                          {st.label}
+                                        </span>
+                                      ) : null;
+                                    })()}
                                     <span className="text-xs text-slate-400">{fmtDate(s.event_date)}</span>
                                     {s.publication_date && s.publication_date !== s.event_date && (
                                       <span className="text-[10px] text-slate-400" title="Publication date, where it differs from the event date">
@@ -3858,7 +3961,14 @@ export default function UserDashboardPage() {
                             <span>Technographic Map</span>
                           </h3>
                           <p className="text-xs text-slate-500 mt-0.5">
-                            {mapData.total_detected_technologies || 21} detected technologies across {mapData.total_categories || 7} categories in {selectedAccount?.name || 'Target Account'}&apos;s stack, mapped to what each one means for HP
+                            {/* Two different counts: the full technographics export, and the
+                                subset a rule matched into the HP categories below. They are
+                                not equal - saying so here stops a reader assuming the cards
+                                account for the whole stack. */}
+                            {mapData.total_detected_technologies ?? '--'} technologies detected in {selectedAccount?.name || 'Target Account'}&apos;s technographics export
+                            {typeof mapData.mapped_signal_count === 'number' && (
+                              <> &middot; {mapData.mapped_signal_count} map to the {mapData.total_categories ?? 7} HP categories below</>
+                            )}
                           </p>
                         </div>
 
@@ -3904,20 +4014,34 @@ export default function UserDashboardPage() {
                             {/* 4 Stat Cards */}
                             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
                               <div className="bg-slate-50/80 p-3.5 rounded-xl border border-slate-200 space-y-1">
-                                <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider block">DETECTED TECHNOLOGIES</span>
-                                <div className="text-xl font-black font-mono text-slate-900">{mapData.total_detected_technologies || 21}</div>
+                                {/* Relabelled: this is the whole export, not the subset the
+                                    category cards below count. The tile beside it carries
+                                    that subset so the two can be read together.
+
+                                    The `|| 21`, `|| '5/7'` and `|| '4/7'` fallbacks these
+                                    tiles used to carry were one account's figures, and would
+                                    render as another account's real numbers whenever the
+                                    widget came back empty. The backend already refuses that
+                                    (see tech_landscape.py: "No hardcoded fallback"); an
+                                    absent value now reads as absent. */}
+                                <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider block">TECHNOLOGIES IN EXPORT</span>
+                                <div className="text-xl font-black font-mono text-slate-900">{mapData.total_detected_technologies ?? '--'}</div>
                               </div>
                               <div className="bg-slate-50/80 p-3.5 rounded-xl border border-slate-200 space-y-1">
-                                <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider block">CATEGORIES</span>
-                                <div className="text-xl font-black font-mono text-slate-900">{mapData.total_categories || 7}</div>
+                                <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider block">MAPPED TO HP CATEGORIES</span>
+                                <div className="text-xl font-black font-mono text-slate-900">
+                                  {typeof mapData.mapped_signal_count === 'number' && typeof mapData.total_detected_technologies === 'number'
+                                    ? `${mapData.mapped_signal_count}/${mapData.total_detected_technologies}`
+                                    : '--'}
+                                </div>
                               </div>
                               <div className="bg-blue-50/60 p-3.5 rounded-xl border border-blue-200/80 space-y-1">
                                 <span className="text-[10px] font-extrabold text-blue-800 uppercase tracking-wider block">HP-MAPPED CATEGORIES</span>
-                                <div className="text-xl font-black font-mono text-hp-navy">{mapData.hp_mapped_categories || '5/7'}</div>
+                                <div className="text-xl font-black font-mono text-hp-navy">{mapData.hp_mapped_categories ?? '--'}</div>
                               </div>
                               <div className="bg-emerald-50/60 p-3.5 rounded-xl border border-emerald-200/80 space-y-1">
                                 <span className="text-[10px] font-extrabold text-emerald-800 uppercase tracking-wider block">WHITESPACE CATEGORIES</span>
-                                <div className="text-xl font-black font-mono text-emerald-700">{mapData.whitespace_categories || '4/7'}</div>
+                                <div className="text-xl font-black font-mono text-emerald-700">{mapData.whitespace_categories ?? '--'}</div>
                               </div>
                             </div>
                           </div>
@@ -5424,11 +5548,18 @@ export default function UserDashboardPage() {
                                       </div>
 
                                       <div className="flex md:justify-end flex-shrink-0">
-                                        <span className={`rounded-full px-3 py-1 text-[11px] font-semibold whitespace-nowrap h-fit ${
-                                          sourced.total > 0 && sourced.sourced === sourced.total
-                                            ? 'bg-slate-100 text-slate-600 border border-slate-200'
-                                            : 'bg-amber-50 text-amber-700 border border-amber-200'}`}>
-                                          {sourced.sourced}/{sourced.total} sourced
+                                        {/* Denominator is what the model PROPOSED, so a pillar
+                                            that had claims discarded reads 3/5, not 3/3. Amber
+                                            whenever anything was dropped. */}
+                                        <span
+                                          title={sourced.dropped > 0
+                                            ? `${sourced.dropped} proposed proof point(s) cited evidence that did not resolve and were discarded`
+                                            : undefined}
+                                          className={`rounded-full px-3 py-1 text-[11px] font-semibold whitespace-nowrap h-fit ${
+                                            (sourced.proposed ?? sourced.total) > 0 && sourced.sourced === (sourced.proposed ?? sourced.total)
+                                              ? 'bg-slate-100 text-slate-600 border border-slate-200'
+                                              : 'bg-amber-50 text-amber-700 border border-amber-200'}`}>
+                                          {sourced.sourced}/{sourced.proposed ?? sourced.total} sourced
                                         </span>
                                       </div>
                                     </button>
@@ -5482,7 +5613,8 @@ export default function UserDashboardPage() {
 
                                         <div className="border-t border-slate-200 mt-5 pt-4">
                                           <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400 mb-2.5">
-                                            Proof points ({sourced.total}, {sourced.sourced} sourced)
+                                            Proof points ({sourced.total} shown, {sourced.sourced} sourced
+                                            {sourced.dropped > 0 && ` · ${sourced.dropped} discarded as unverifiable`})
                                           </p>
                                           {sourced.total === 0 ? (
                                             <p className="text-xs text-slate-400">No proof point survived validation.</p>
@@ -5547,6 +5679,33 @@ export default function UserDashboardPage() {
                               </div>
                             </section>
                           )}
+
+                          {/* SOURCES - every distinct citation actually used across the
+                              pillars, so the document's evidence can be read without
+                              expanding each row. Built from the same proof-point sources
+                              the rows show, so it can never list something unused. */}
+                          {(() => {
+                            const used = dedupeSources(
+                              pillars.flatMap((p: any) => [
+                                ...(p.proof_points || []).flatMap((pr: any) => pr.sources || []),
+                                ...(p.challenge_evidence || []),
+                              ])
+                            );
+                            if (!used.length) return null;
+                            return (
+                              <section className="rounded-xl border border-slate-200 bg-white p-4">
+                                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2">
+                                  Sources ({used.length})
+                                </p>
+                                {/* The same chip the pillar rows use, so a source reads
+                                    identically wherever it appears and keeps its
+                                    linked/unlinked distinction and evidence-id tooltip. */}
+                                <div className="flex flex-wrap gap-1.5">
+                                  {used.map((s: any, i: number) => <SourceChip key={i} s={s} />)}
+                                </div>
+                              </section>
+                            );
+                          })()}
 
                           {/* What was discarded, rather than a quietly shorter list. */}
                           <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-[11px] text-slate-500">
@@ -5625,6 +5784,42 @@ export default function UserDashboardPage() {
                     'HP Enterprise Printing & Managed Print Services'
                   ];
 
+                  // Co-creation step 2: ask for angles instead of an asset. One
+                  // cheap call; the expensive generate+retry loop runs later, on
+                  // the one angle the seller actually picked.
+                  const handleSuggestAngles = async () => {
+                    if (!selectedAccountId) return;
+                    const topicValue = (customTopic.trim() || selectedTopic || '').trim();
+                    if (!topicValue) return;
+                    const personaForRequest = targetPersonas.find(p => p.id === selectedPersona) || targetPersonas[0];
+                    setIsSuggestingAngles(true);
+                    setAngleNotice(null);
+                    setGenerateError(null);
+                    try {
+                      const response = await api.post<WidgetResponse>(
+                        `/accounts/${selectedAccountId}/widgets/content_studio/angles`,
+                        {
+                          persona_id: personaForRequest?.id,
+                          content_type: selectedContentType,
+                          topic: topicValue,
+                          additional_context: additionalContext.trim(),
+                        }
+                      );
+                      const opts = response.data?.data?.options || [];
+                      setAngleOptions(opts);
+                      setSelectedAngleId(null);
+                      setSelectedAngle('');
+                      if (!opts.length) {
+                        setAngleNotice(response.data?.data?.last_error?.notice
+                          || 'No angles were returned. You can generate directly instead.');
+                      }
+                    } catch (err: any) {
+                      setAngleNotice(err?.response?.data?.detail || err?.message || 'Could not suggest angles.');
+                    } finally {
+                      setIsSuggestingAngles(false);
+                    }
+                  };
+
                   const handleGenerateClick = async () => {
                     if (!selectedAccountId) return;
                     const topicValue = (customTopic.trim() || selectedTopic || '').trim();
@@ -5640,6 +5835,7 @@ export default function UserDashboardPage() {
                           content_type: selectedContentType,
                           topic: topicValue,
                           additional_context: additionalContext.trim(),
+                          selected_angle: selectedAngle.trim(),
                         }
                       );
                       const latest = response.data?.data?.latest || null;
@@ -5647,6 +5843,7 @@ export default function UserDashboardPage() {
                       setWidgets(prev => prev.map(w => (w.widget_key === 'content_generated_assets' ? response.data : w)));
                       if (latest) {
                         setGeneratedAsset(latest);
+                        setActiveVariantIndex(1);
                         setHasGeneratedContent(true);
                       } else {
                         setGeneratedAsset(null);
@@ -5819,7 +6016,82 @@ export default function UserDashboardPage() {
                             />
                           </div>
 
-                          {/* 5. Generate Button */}
+                          {/* 5. Suggested angles - the co-creation step.
+                              The brief above produces options; the seller picks
+                              one and may edit it before generating. Optional by
+                              design: generating without choosing an angle still
+                              works exactly as it did before. */}
+                          <div className="space-y-2 pt-2 border-t border-slate-100">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-xs font-black text-slate-900 flex items-center gap-1.5 uppercase tracking-wider">
+                                <Sparkles className="w-3.5 h-3.5 text-hp-navy" />
+                                <span>Suggested Angles (Optional)</span>
+                              </span>
+                              <button
+                                type="button"
+                                onClick={handleSuggestAngles}
+                                disabled={isSuggestingAngles || isGeneratingContent}
+                                className="text-[11px] font-bold text-hp-navy hover:underline disabled:opacity-40 disabled:no-underline"
+                              >
+                                {isSuggestingAngles ? 'Suggesting...' : angleOptions.length ? 'Suggest again' : 'Suggest angles'}
+                              </button>
+                            </div>
+
+                            {angleNotice && (
+                              <p className="text-[11px] text-slate-500 leading-relaxed">{angleNotice}</p>
+                            )}
+
+                            {angleOptions.length > 0 && (
+                              <div className="space-y-1.5">
+                                {angleOptions.map((opt: any) => {
+                                  const picked = selectedAngleId === opt.option_id;
+                                  return (
+                                    <button
+                                      key={opt.option_id}
+                                      type="button"
+                                      onClick={() => {
+                                        if (picked) {
+                                          setSelectedAngleId(null);
+                                          setSelectedAngle('');
+                                        } else {
+                                          setSelectedAngleId(opt.option_id);
+                                          setSelectedAngle(
+                                            [opt.summary, opt.opening_line].filter(Boolean).join(' ')
+                                          );
+                                        }
+                                      }}
+                                      className={`w-full text-left px-3 py-2 rounded-xl border transition ${
+                                        picked
+                                          ? 'bg-blue-50 border-hp-navy ring-1 ring-hp-navy'
+                                          : 'bg-slate-50 border-slate-200 hover:border-slate-300'
+                                      }`}
+                                    >
+                                      <span className="block text-[11px] font-bold text-slate-900">{opt.label}</span>
+                                      <span className="block text-[11px] text-slate-600 leading-snug mt-0.5">{opt.summary}</span>
+                                      {opt.evidence_used?.length > 0 && (
+                                        <span className="block text-[10px] text-slate-400 mt-1">
+                                          Based on {opt.evidence_used.join(', ')}
+                                        </span>
+                                      )}
+                                    </button>
+                                  );
+                                })}
+
+                                {/* "selects OR ADJUSTS the option" - the chosen
+                                    angle stays editable before it is generated. */}
+                                {selectedAngleId && (
+                                  <textarea
+                                    rows={3}
+                                    value={selectedAngle}
+                                    onChange={(e) => setSelectedAngle(e.target.value)}
+                                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-[11px] text-slate-800 focus:outline-none focus:ring-2 focus:ring-hp-navy resize-none"
+                                  />
+                                )}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* 6. Generate Button */}
                           <button
                             onClick={handleGenerateClick}
                             disabled={isGeneratingContent}
@@ -5833,7 +6105,7 @@ export default function UserDashboardPage() {
                             ) : (
                               <>
                                 <Sparkles className="w-4 h-4 text-amber-300" />
-                                <span>Generate Content</span>
+                                <span>{selectedAngleId ? 'Generate from Selected Angle' : 'Generate Content'}</span>
                               </>
                             )}
                           </button>
@@ -5893,11 +6165,58 @@ export default function UserDashboardPage() {
                               </p>
                             </div>
                           ) : (() => {
-                            const g = generatedAsset.generated || {};
+                            // A LinkedIn post comes back as 2-3 variants (HP_ABX_v3_final);
+                            // every other format is a single asset. The chosen variant
+                            // replaces the generated body, so everything below reads one shape.
+                            const variants: any[] = generatedAsset.variants || [];
+                            const activeVariant = variants.length > 1
+                              ? (variants.find(v => v.variant_index === activeVariantIndex) || variants[0])
+                              : null;
+                            const g = (activeVariant?.generated) || generatedAsset.generated || {};
                             const gr = generatedAsset.grounding_report || {};
-                            const labels: [string, any][] = Object.entries(generatedAsset.evidence_labels || {});
+                            const labels: [string, any][] = Object.entries(
+                              (activeVariant?.evidence_labels) || generatedAsset.evidence_labels || {});
                             return (
                             <div className="w-full space-y-5 text-left animate-fade-in">
+
+                              {/* Deterministic template, not generated copy. The spec
+                                  requires the safe fallback be offered rather than
+                                  nothing - and that it never read as model output. */}
+                              {generatedAsset.is_fallback && (
+                                <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+                                  <p className="text-[11px] font-bold uppercase tracking-wider text-amber-900">
+                                    Safe template - not AI-generated
+                                  </p>
+                                  <p className="text-xs text-amber-800 leading-relaxed mt-1">
+                                    Live generation could not produce a grounded draft for this brief, so
+                                    this is the deterministic template built from verified account fields
+                                    only. Edit it before sending, or try generating again.
+                                  </p>
+                                </div>
+                              )}
+
+                              {/* Variant switcher */}
+                              {variants.length > 1 && (
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                                    {variants.length} variants
+                                  </span>
+                                  {variants.map((v: any) => (
+                                    <button
+                                      key={v.variant_index}
+                                      type="button"
+                                      onClick={() => setActiveVariantIndex(v.variant_index)}
+                                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${
+                                        (activeVariant?.variant_index === v.variant_index)
+                                          ? 'bg-hp-navy text-white border-hp-navy'
+                                          : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'
+                                      }`}
+                                    >
+                                      Variant {v.variant_index}
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
 
                               {/* Card header: type and persona, with Copy / Download HTML */}
                               <div className="flex items-center justify-between gap-3">
@@ -5912,7 +6231,9 @@ export default function UserDashboardPage() {
                                     <button
                                       onClick={async () => {
                                         try {
-                                          await navigator.clipboard.writeText(generatedAsset.plain_text);
+                                          // Copy what is on screen, not always variant 1.
+                                          await navigator.clipboard.writeText(
+                                            activeVariant?.plain_text || generatedAsset.plain_text);
                                           setCopiedAssetId(generatedAsset.asset_id);
                                           setTimeout(() => setCopiedAssetId(null), 1500);
                                         } catch {
@@ -6120,8 +6441,16 @@ export default function UserDashboardPage() {
                   ];
 
                   const companyName = groundingMeta.company_name || selectedAccount?.name || 'Target Account';
-                  const stakeholdersCount = groundingMeta.stakeholders_count ?? 23;
-                  const solutionsCount = groundingMeta.solutions_count ?? 5;
+                  // Null when the account uploaded no contacts. These used to
+                  // default to 23 stakeholders / 5 solutions, so an account with
+                  // no data still rendered a confident "Grounded in" line built
+                  // from another account's figures. A missing count is now shown
+                  // as unavailable rather than invented; `solutions_count` is
+                  // gone entirely because nothing ever computed it.
+                  const stakeholdersCount: number | null =
+                    typeof groundingMeta.stakeholders_count === 'number'
+                      ? groundingMeta.stakeholders_count
+                      : null;
 
                   const handleSendPrompt = (promptText: string) => {
                     if (!promptText.trim()) return;
@@ -6176,7 +6505,9 @@ export default function UserDashboardPage() {
 
                         <div className="flex items-center gap-1.5 text-slate-500 font-medium">
                           <Info className="w-3.5 h-3.5 text-hp-navy" />
-                          <span>Grounded in: <strong className="text-slate-800">{companyName} Intelligence</strong> &middot; <strong className="text-slate-800">{stakeholdersCount} Stakeholders</strong> &middot; <strong className="text-slate-800">{solutionsCount} Solutions</strong></span>
+                          <span>Grounded in: <strong className="text-slate-800">{companyName} Intelligence</strong>{stakeholdersCount !== null
+                            ? <> &middot; <strong className="text-slate-800">{stakeholdersCount} Stakeholders</strong></>
+                            : <> &middot; <span className="text-slate-500 italic">stakeholder count not available</span></>}</span>
                         </div>
                       </div>
 
