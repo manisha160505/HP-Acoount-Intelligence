@@ -65,18 +65,33 @@ def extract_strategy_chat(account_id: str) -> list[dict]:
         if h:
             seen_headlines.add(h.lower())
 
-    live_signals_count = len(seen_headlines) if seen_headlines else 10
-    stakeholders_count = len(contacts_records) if contacts_records else 23
-    intent_topics_count = len(intent_score_records) if intent_score_records else 149
-    installed_vendors_count = len(full_tech_stack) if full_tech_stack else 220
+    # Counts are what the account's own uploads contain, or None when a dataset
+    # holds nothing. These previously fell back to 10 / 23 / 149 / 220 - figures
+    # carried over from one seed account. An account missing a dataset therefore
+    # published another account's numbers as its own, and the chat header stated
+    # them as fact. None renders as "not available" downstream; a fabricated
+    # count cannot be told apart from a real one by anyone reading the widget.
+    live_signals_count = len(seen_headlines) if seen_headlines else None
+    stakeholders_count = len(contacts_records) if contacts_records else None
+    intent_topics_count = len(intent_score_records) if intent_score_records else None
+    installed_vendors_count = len(full_tech_stack) if full_tech_stack else None
 
     grounding_metadata = {
         "company_name": company_name,
         "stakeholders_count": stakeholders_count,
-        "solutions_count": 5,
         "installed_vendors_count": installed_vendors_count,
         "live_signals_count": live_signals_count,
-        "intent_topics_count": intent_topics_count
+        "intent_topics_count": intent_topics_count,
+        # Which of the above rest on real rows. The chat UI uses this to say
+        # "not available" rather than silently rendering a blank as a zero.
+        "unavailable_counts": sorted(
+            k for k, v in {
+                "stakeholders_count": stakeholders_count,
+                "installed_vendors_count": installed_vendors_count,
+                "live_signals_count": live_signals_count,
+                "intent_topics_count": intent_topics_count,
+            }.items() if v is None
+        ),
     }
 
     suggested_prompts = [

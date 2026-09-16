@@ -110,7 +110,14 @@ GATE_MAX_AGE_DAYS = 365
 DEDUP_SIMILARITY = 0.85
 
 # Bump when the scoring prompt changes so cached output is regenerated.
-SIGNAL_SCORING_PROMPT_VERSION = 8
+SIGNAL_SCORING_PROMPT_VERSION = 9
+
+# Whether the event has actually happened. A plant that "will be built" and one
+# that "has opened" are different sales conversations, so the card must not read
+# the same for both. "unknown" is the honest default and renders no badge -
+# the model is told to choose it rather than guess between the others.
+EVENT_STATUSES = ["completed", "announced", "planned", "rumoured", "unknown"]
+DEFAULT_EVENT_STATUS = "unknown"
 
 # The only product lines a signal may be attributed to. The model picks one of
 # these or returns null; it never names a product of its own invention. Account
@@ -136,6 +143,14 @@ def _parse_date(raw: str) -> datetime | None:
         except (ValueError, TypeError):
             continue
     return None
+
+
+def _sort_timestamp(signal: dict) -> float:
+    """Epoch seconds for tie-break ordering. `_event_dt` has been popped by the
+    time ranking runs, so re-parse; an unparseable or missing date sorts last
+    rather than raising or silently ordering as if it were the epoch."""
+    dt = _parse_date(signal.get("event_date") or "")
+    return dt.timestamp() if dt else float("-inf")
 
 
 def _canonical(text: str) -> str:
@@ -504,6 +519,13 @@ CRITICAL RULES:
 2b. "hp_play" names the single HP product line this signal most supports. It MUST be copied exactly from this list, or be null:
 {hp_play_list}
 Return null whenever the evidence gives no honest basis for choosing one - a dividend, an earnings figure or a community partnership usually does not. A guessed play is worse than none.
+2c. "event_status" says whether the event HAS HAPPENED, judged only from the tense and wording of that signal's own headline and evidence. Copy exactly one of these strings:
+  - "completed"  - it has already happened ("opened", "has acquired", "reported Q3 results", "completed")
+  - "announced"  - formally stated by the company as decided but not yet done ("announces plans to", "to build", "will launch", "has signed an agreement to")
+  - "planned"    - under consideration or targeted, not yet committed ("aims to", "is exploring", "targets 2027", "eyes expansion")
+  - "rumoured"   - reported second-hand or unconfirmed ("reportedly", "sources say", "is said to be", "speculation")
+  - "unknown"    - the wording does not settle it
+Judge the EVENT, not the article: a story published today about a factory that opened last year is "completed". Do not infer from the date alone. If the tense is genuinely ambiguous return "unknown" - that is a correct answer, not a failure, and is far better than guessing. Never use a status to make a signal sound more urgent than its wording supports.
 3. Do NOT return a weighted total, an overall confidence, a tier, a category, a date, a headline, an evidence sentence, a URL or a publisher. Those are computed or held elsewhere. Return only what the schema below asks for.
 4. Never rewrite, paraphrase or "clean up" the evidence sentence. You are reading it, not editing it.
 5. Return one entry per supplied id, using the id exactly as given.
@@ -523,7 +545,8 @@ Output JSON:
         "source_reliability": {{"score": 6, "rationale": "..."}}
       }},
       "sales_angle": "Two to three sentences: what this evidences, what it does not, and whether it warrants an HP conversation.",
-      "hp_play": null
+      "hp_play": null,
+      "event_status": "announced"
     }}
   ]
 }}
@@ -585,6 +608,11 @@ Output JSON:
                 # Enum-checked: anything the model invents is discarded, not stored.
                 "hp_play": (str(entry.get("hp_play")).strip()
                             if str(entry.get("hp_play") or "").strip() in HP_PLAYS else None),
+                # Enum-checked like hp_play: an invented status falls back to
+                # "unknown", which renders no badge, rather than being stored.
+                "event_status": (str(entry.get("event_status")).strip().lower()
+                                 if str(entry.get("event_status") or "").strip().lower()
+                                 in EVENT_STATUSES else DEFAULT_EVENT_STATUS),
                 "gate_pass": bool(entry.get("gate_pass", True)),
                 "gate_reject_reason": (str(entry.get("gate_reject_reason")).strip()
                                        if entry.get("gate_reject_reason") else None),
@@ -727,6 +755,9 @@ def extract_recent_news_signals(account_id: str) -> list[dict]:
         sc = scores.get(s["signal_id"])
         s["confidence"] = sc["confidence"] if sc else None
         s["tier"] = sc["tier"] if sc else None
+        # Unscored signals carry the honest default, so the card always has a
+        # value to read and never renders a stale or missing status.
+        s["event_status"] = (sc or {}).get("event_status") or DEFAULT_EVENT_STATUS
         s.pop("_canon", None)
         s.pop("_event_dt", None)
 
@@ -735,8 +766,13 @@ def extract_recent_news_signals(account_id: str) -> list[dict]:
                        if scores.get(s["signal_id"])
                        and scores[s["signal_id"]]["gate_pass"]
                        and s["confidence"] >= MIN_CONFIDENCE_TO_PUBLISH]
-        publishable.sort(key=lambda s: (-s["confidence"], s["event_date"]), reverse=False)
-        publishable = sorted(publishable, key=lambda s: -s["confidence"])[:MAX_SIGNALS]
+        # Confidence descending, ties broken by newest event first. Sorting on
+        # the parsed datetime rather than the raw event_date string keeps mixed
+        # date formats ordering correctly; undated signals sort last.
+        publishable = sorted(
+            publishable,
+            key=lambda s: (-s["confidence"], -_sort_timestamp(s)),
+        )[:MAX_SIGNALS]
     else:
         publishable = sorted(deduped, key=lambda s: s["event_date"], reverse=True)[:MAX_SIGNALS]
 
