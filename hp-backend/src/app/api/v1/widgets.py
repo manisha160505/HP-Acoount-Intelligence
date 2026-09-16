@@ -5,6 +5,7 @@ from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.database.mongodb import get_db
+from app.errors import APIError, ErrorCode
 
 logger = logging.getLogger(__name__)
 from app.core.deps import require_admin_role, require_user_role
@@ -579,8 +580,10 @@ def regenerate_account_feature_widgets(
     except Exception as exc:
         logger.warning("regenerate failed for %s on account %s: %s",
                        key_clean, account_id, exc, exc_info=True)
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY,
-                            detail=f"Regeneration failed: {type(exc).__name__}: {exc}") from exc
+        raise APIError(
+            ErrorCode.GENERATION_FAILED,
+            log_context={"feature": key_clean, "account_id": account_id},
+        ) from exc
 
     return get_account_feature_widgets(account_id, key_clean, current_user)
 
@@ -638,7 +641,10 @@ def generate_content_studio_endpoint(
         ext_doc = generate_content_asset(
             account_id, body.persona_id, body.content_type, body.topic, body.additional_context)
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+        # The message is raised for a seller to read (an unknown persona or
+        # content type), so it is passed through rather than replaced.
+        raise APIError(ErrorCode.INVALID_PARAMETER, str(e),
+                       log_context={"account_id": account_id}) from e
 
     updated_at_val = ext_doc.get("updated_at")
     updated_at_str = updated_at_val.isoformat() if isinstance(updated_at_val, datetime) else str(updated_at_val or "")
@@ -790,7 +796,8 @@ def evaluate_message_endpoint(
     except (evaluator_evaluate.EvaluationError,
             evaluator_scoring.ScoringError,
             evaluator_formats.FormatError) as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise APIError(ErrorCode.EXTRACTION_FAILED, str(exc), status_code=422,
+                       log_context={"account_id": account_id}) from exc
 
 
 @router.post("/accounts/{account_id}/widgets/message_evaluator/rewrite")
@@ -806,7 +813,8 @@ def rewrite_message_endpoint(
         return evaluator_evaluate.rewrite_message(
             account_id, body.fingerprint, body.selected_recommendations)
     except evaluator_evaluate.EvaluationError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise APIError(ErrorCode.EXTRACTION_FAILED, str(exc), status_code=422,
+                       log_context={"account_id": account_id}) from exc
 
 
 @router.get("/accounts/{account_id}/widgets/message_evaluator/history")
@@ -899,7 +907,8 @@ def retrieval_rebuild(
     try:
         retrieval_registry.spec(index)
     except retrieval_registry.UnknownIndex as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise APIError(ErrorCode.INVALID_PARAMETER, str(exc),
+                       log_context={"account_id": account_id, "index": index}) from exc
 
     if not retrieval_registry.is_enabled(index):
         raise HTTPException(
@@ -939,7 +948,8 @@ def retrieval_retire(
     try:
         retrieval_registry.spec(index)
     except retrieval_registry.UnknownIndex as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise APIError(ErrorCode.INVALID_PARAMETER, str(exc),
+                       log_context={"account_id": account_id, "index": index}) from exc
 
     result = retrieval_ingest.retire_index(
         account_id, index, reason="retired by an administrator")
@@ -996,7 +1006,10 @@ def generate_content_messaging(
     try:
         doc = messaging_pillars.generate_messaging_pillars(account_id)
     except messaging_pillars.PillarError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        # "no pillar survived validation" is a state of the data, not a bad
+        # request - 409 says the call was fine and the data is not ready.
+        raise APIError(ErrorCode.NO_SOURCE_DATA, str(exc),
+                       log_context={"account_id": account_id}) from exc
 
     contract = next(c for c in WIDGET_REGISTRY["content_messaging"]
                     if c["widget_key"] == messaging_pillars.WIDGET_KEY)

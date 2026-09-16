@@ -13,7 +13,7 @@ import uuid
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
-from starlette.responses import JSONResponse, Response
+from starlette.responses import Response
 
 from app.observability.context import request_id_var
 from app.observability.metrics import record_error, record_request
@@ -147,20 +147,6 @@ def _client_ip(request: Request) -> str:
     return request.client.host if request.client else ""
 
 
-async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    """Turn an uncaught exception into a 500 that names the request.
-
-    FastAPI's default returns a bare "Internal Server Error" with no id, so a
-    user reporting a failure gives support nothing to search on. The exception
-    itself is logged by the middleware above; deliberately not repeated here,
-    and deliberately not included in the body - the message can carry a
-    connection string or a key.
-    """
-    return JSONResponse(
-        status_code=500,
-        content={
-            "detail": "Internal server error.",
-            "request_id": request_id_var.get(),
-        },
-        headers={"X-Request-ID": request_id_var.get()},
-    )
+# The unhandled-exception handler that used to live here now lives in
+# app.errors.handlers, alongside the handlers for APIError, HTTPException and
+# validation failures - so every error path builds the same body in one place.

@@ -28,6 +28,7 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
+from app.errors.handlers import unhandled_exception_handler
 from app.observability.context import request_id_var
 from app.observability.logging import (
     JsonFormatter,
@@ -35,10 +36,7 @@ from app.observability.logging import (
     configure_logging,
     log_level_from_env,
 )
-from app.observability.middleware import (
-    RequestLoggingMiddleware,
-    unhandled_exception_handler,
-)
+from app.observability.middleware import RequestLoggingMiddleware
 
 # The agreed contract. Asserted as a set so that adding a field is fine and
 # removing or renaming one is not.
@@ -280,9 +278,12 @@ def test_the_500_body_carries_the_same_request_id_as_the_header(client_and_logs)
     client, _ = client_and_logs
     response = client.get("/boom")
     assert response.status_code == 500
-    body_id = response.json()["request_id"]
+    # The id moved into the structured `error` object when the error envelope
+    # landed; `detail` stays a plain string for the frontend.
+    body_id = response.json()["meta"]["request_id"]
     assert body_id
     assert body_id == response.headers["X-Request-ID"]
+    assert isinstance(response.json()["detail"], str)
 
 
 def test_the_500_body_does_not_leak_the_exception_message(client_and_logs):
@@ -303,7 +304,7 @@ def test_the_request_id_does_not_leak_between_requests(client_and_logs):
     # the handler can read it), so this pins that it still does not bleed into
     # the next request.
     client, caplog = client_and_logs
-    failed_id = client.get("/boom").json()["request_id"]
+    failed_id = client.get("/boom").json()["meta"]["request_id"]
 
     # caplog accumulates across calls within a test, so the records from the
     # failing request above are cleared rather than indexed past.

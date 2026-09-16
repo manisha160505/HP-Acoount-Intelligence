@@ -15,6 +15,7 @@ from app.api.v1.feature_mapping import FEATURE_MAPPINGS
 from app.config.settings import settings
 from app.core.deps import get_current_user_flexible, require_admin_role
 from app.database.mongodb import get_db
+from app.errors import ErrorCode
 from app.schemas.account_data import DATASET_REGISTRY, AccountDataFileResponse
 
 logger = logging.getLogger(__name__)
@@ -125,7 +126,15 @@ def _run_dependent_extractors(account_id: str, dataset_key: str) -> tuple[list, 
         except Exception as exc:
             logger.warning("re-extraction failed for %s after %s changed: %s",
                            feature_key, dataset_key, exc, exc_info=True)
-            failed.append({"feature": feature_key, "error": f"{type(exc).__name__}: {exc}"})
+            # The exception text is in the log line above with the traceback.
+            # What reaches the UI is the feature name and a stable reason: an
+            # extractor's internal message ("KeyError: 'revenue_usd'") tells a
+            # seller nothing and can carry row data from the source file.
+            failed.append({
+                "feature": feature_key,
+                "error": "This feature could not be rebuilt from the new data.",
+                "code": ErrorCode.EXTRACTION_FAILED.value,
+            })
 
     _queue_retrieval_updates(account_id, dataset_key, regenerated)
     return regenerated, failed
