@@ -1,27 +1,38 @@
-import os
-import io
-import re
 import csv
+import hashlib
+import html as _html
 import json
 import logging
-import pandas as pd
+import os
+import re
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+
+import pandas as pd
 from bson import ObjectId
-import html as _html
-import hashlib
-from app.database.mongodb import get_db
+
 from app.core.llm import generate_gpt4o_json_completion
+from app.database.mongodb import get_db
 from app.services.extractors.grounding import (
-    build_corpus, check_text, strip_unsourced_urls, filter_enum_list,
-    GroundingReport, HP_PRODUCT_LINES,
+    HP_PRODUCT_LINES,
+    GroundingReport,
+    build_corpus,
+    check_text,
+    filter_enum_list,
+    strip_unsourced_urls,
 )
+
 # Imported, not copied: a role-type proxy is judged by the same HP-relevance,
 # seniority and department rules Stakeholder Map applies to a named contact
 # (spec Section 3). stakeholder_map itself is not modified.
 from app.services.extractors.stakeholder_map import (
-    score_hp_relevance, hp_relevance_band, seniority_band, normalize_department,
-    NON_IT_TITLE_CAP, UNASSIGNED_DEPT, HP_RELEVANCE_FLOOR,
+    HP_RELEVANCE_FLOOR,
+    NON_IT_TITLE_CAP,
+    UNASSIGNED_DEPT,
+    hp_relevance_band,
+    normalize_department,
+    score_hp_relevance,
+    seniority_band,
 )
 
 logger = logging.getLogger(__name__)
@@ -266,10 +277,10 @@ def _read_dataset_records(account_id: str, dataset_key: str) -> list[dict]:
         "$or": [{"dataset_key": dataset_key}, {"category": dataset_key}],
         "status": "active"
     })
-    
+
     if not file_doc:
         return []
-    
+
     rel_path = file_doc.get("file_path", "")
     candidate_paths = [
         os.path.join(os.getcwd(), rel_path),
@@ -278,16 +289,16 @@ def _read_dataset_records(account_id: str, dataset_key: str) -> list[dict]:
         os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", rel_path)),
         os.path.join(r"C:\hp-account\HP-Acoount-Intelligence\hp-backend", rel_path)
     ]
-    
+
     full_path = None
     for cp in candidate_paths:
         if os.path.exists(cp):
             full_path = cp
             break
-            
+
     if not full_path:
         return []
-    
+
     ext = os.path.splitext(full_path)[1].lower()
     try:
         if ext in [".xlsx", ".xls"]:
@@ -295,9 +306,9 @@ def _read_dataset_records(account_id: str, dataset_key: str) -> list[dict]:
             df = df.fillna("")
             return df.to_dict(orient="records")
         else:
-            with open(full_path, "r", encoding="utf-8-sig", errors="replace") as f:
+            with open(full_path, encoding="utf-8-sig", errors="replace") as f:
                 reader = csv.DictReader(f)
-                return [row for row in reader]
+                return list(reader)
     except Exception:
         return []
 
@@ -606,7 +617,7 @@ def _request_fingerprint(evidence_cells: list[str], persona: dict, content_type:
 # differs per account arrives as data - the evidence blocks, the persona, and
 # the account_instructions / account_guardrails documents an account team edits
 # without a deploy. Never write an account's name, sector or example into it.
-def _build_system_prompt(company_name: str, contract: dict, account_block: str,
+def _build_system_prompt(company_name: str, contract: dict, account_block: str,  # noqa: PLR0913, PLR0917 - long signature predates the lint gate
                          persona: dict, persona_block: str, topic: str,
                          additional_context: str, instructions_text: str,
                          guardrails_text: str) -> str:
@@ -939,7 +950,7 @@ def _compose_plain_text(record: dict, contract: dict) -> str:
     if contract.get("email_shaped"):
         head = [f"Subject: {g['subject_line']}"] if g.get("subject_line") else []
         signoff = [EMAIL_SIGNOFF] if contract.get("signoff", True) else []
-        return "\n\n".join(head + [record.get("greeting") or ""] + paras + signoff).strip()
+        return "\n\n".join([*head, record.get("greeting") or "", *paras, *signoff]).strip()
     lines = [g["headline"]] if g.get("headline") else []
     lines.append(g.get("opening", ""))
     for sec in (g.get("body_sections") or []):
@@ -954,7 +965,7 @@ def generate_content_asset(account_id: str, persona_id: str, content_type: str,
     content_generated_assets widget document. Raises ValueError for a request
     the account's data cannot serve (unknown persona or type, empty topic)."""
     db = get_db()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     content_type = str(content_type or "").strip().lower()
     contract = CONTENT_TYPE_CONTRACTS.get(content_type)
@@ -1104,9 +1115,7 @@ def generate_content_asset(account_id: str, persona_id: str, content_type: str,
 
     # Retry budget spent: publish the cleanest draft that had no hard fault,
     # carrying its remaining style warnings, rather than withhold everything.
-    if asset is None and best is not None:
-        asset, soft = best
-    elif asset is not None and best is not None and len(best[1]) < len(soft):
+    if (asset is None and best is not None) or (asset is not None and best is not None and len(best[1]) < len(soft)):
         asset, soft = best
 
     if asset is None:
@@ -1161,14 +1170,14 @@ def generate_content_asset(account_id: str, persona_id: str, content_type: str,
 
 def extract_content_studio(account_id: str) -> list[dict]:
     db = get_db()
-    now = datetime.now(timezone.utc)
-    
+    now = datetime.now(UTC)
+
     firmo_records = _read_dataset_records(account_id, "firmographics")
     gnews_records = _read_dataset_records(account_id, "google_news")
     events_records = _read_dataset_records(account_id, "news_events")
     job_records = _read_dataset_records(account_id, "job_openings")
     intent_records = _read_dataset_records(account_id, "intent_score")
-    
+
     results = []
 
     # 1. Target Personas, in spec order: named (Source A, via Stakeholder Map)
@@ -1221,7 +1230,7 @@ def extract_content_studio(account_id: str) -> list[dict]:
     business_context = {}
     if firmo_records and len(firmo_records) > 0:
         f = firmo_records[0]
-        
+
         c_name = str(f.get("Company Name") or f.get("company_name") or f.get("Name") or "").strip()
         domain_val = str(f.get("Company Domain") or f.get("company_domain") or f.get("Domain") or f.get("Website") or f.get("website") or "").strip()
         desc_val = str(f.get("Business Description") or f.get("business_description") or "").strip()

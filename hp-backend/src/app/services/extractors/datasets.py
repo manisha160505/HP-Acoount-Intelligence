@@ -48,6 +48,15 @@ def find_file_path(rel_path: str) -> str | None:
     Ordered by how specific the guess is. The working directory comes first
     because the seeder writes datasets relative to it; the `__file__` walks
     cover being started from somewhere else; `/app` covers the container.
+
+    The four-level walk reaches the BACKEND ROOT, which is where the datasets
+    actually live (`hp-backend/data/accounts/...`). It was missing, and the
+    other walks stop at `src/`, so the only candidate that ever resolved was
+    the CWD one - meaning every entry point had to be started from
+    `hp-backend/` or it silently found no files at all. That is not a loud
+    failure: `read_dataset_records(strict=False)` treats "not here" as "not
+    registered", so a retrieval build started one directory up quietly dropped
+    all 8 filings and indexed 7 documents instead of 19.
     """
     if not rel_path:
         return None
@@ -56,6 +65,7 @@ def find_file_path(rel_path: str) -> str | None:
     for candidate in (
         os.path.join(os.getcwd(), rel_path),
         os.path.join("/app", rel_path),
+        os.path.abspath(os.path.join(here, "..", "..", "..", "..", rel_path)),
         os.path.abspath(os.path.join(here, "..", "..", "..", rel_path)),
         os.path.abspath(os.path.join(here, "..", "..", rel_path)),
         os.path.abspath(os.path.join(here, "..", rel_path)),
@@ -70,7 +80,7 @@ def _parse(full_path: str) -> list[dict]:
     try:
         if ext in (".xlsx", ".xls"):
             return pd.read_excel(full_path).fillna("").to_dict(orient="records")
-        with open(full_path, "r", encoding="utf-8-sig", errors="replace") as fh:
+        with open(full_path, encoding="utf-8-sig", errors="replace") as fh:
             return list(csv.DictReader(fh))
     except Exception:
         logger.exception("Could not parse dataset file %s", full_path)

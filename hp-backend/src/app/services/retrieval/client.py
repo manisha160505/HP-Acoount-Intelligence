@@ -27,9 +27,9 @@ Three things here are load-bearing and easy to get wrong:
 
 import asyncio
 import logging
-import threading
 import os
 import re
+import threading
 
 from app.config.settings import settings
 
@@ -53,19 +53,23 @@ def _slug(value) -> str:
 
 
 def workspace_name(account_id: str, index: str) -> str:
-    """The storage namespace for one index of one account. One, not one per build.
+    """The storage namespace for one index of one account.
 
-    An earlier design numbered the workspace per build so a new one could be
-    built alongside the live one and swapped in atomically. That does not fit
-    the cluster: one workspace costs three Atlas vector search indexes
-    (`_chunks`, `_entities`, `_relationships`) and the free tier's hard cap is
-    three, so two workspaces cannot coexist - the second build fails with
-    "The maximum number of FTS indexes has been reached for this instance size."
+    Two things now hang off this name. It prefixes the per-workspace KV, graph
+    and doc-status collections, as it always did - and it is also the value of
+    the `workspace` field that partitions the shared vector collections, which
+    makes it an isolation boundary rather than just a naming convention. That
+    is why an unusable name raises here instead of being sanitised: two accounts
+    whose names collapsed to the same string would share a partition.
 
-    So the workspace is stable, and safety comes from the update strategy
-    instead: a normal change touches only the documents that changed, in place,
-    which never needs a second workspace. `version` survives as metadata in
-    `retrieval_index_state`, not as part of the name.
+    The workspace is stable across builds, not numbered per build. An earlier
+    design numbered it so a replacement could be built beside the live one and
+    swapped in atomically, which needed two workspaces to coexist - impossible
+    when each cost three Atlas vector indexes against a cap of three. The shared
+    vector layer removes that particular cost, but the stable name is kept
+    because the update strategy no longer needs a swap: a normal change touches
+    only the documents that changed, in place. `version` lives in
+    `retrieval_index_state`, not in the name.
     """
     account = _slug(account_id)
     idx = _slug(index)
@@ -204,20 +208,57 @@ async def build_rag(account_id: str, index: str, for_query: bool = False):
     every build.
     """
     from lightrag import LightRAG
-    from lightrag.utils import EmbeddingFunc
     from lightrag.kg.shared_storage import initialize_pipeline_status
+    from lightrag.utils import EmbeddingFunc
+
+    from app.services.retrieval import shared_vdb
 
     workspace = workspace_name(account_id, index)
     _apply_mongo_env()
-    os.environ["MONGODB_WORKSPACE"] = workspace
+    shared_vdb.register()
+
+    # MONGODB_WORKSPACE is deliberately NOT set, and must not be.
+    #
+    # It used to be, and it was a cross-account data race. Every Mongo storage
+    # reads that variable in its constructor and lets it OVERRIDE the workspace
+    # passed here - so with the ingest worker on one thread and FastAPI's
+    # threadpool on others (every widget handler is a sync `def`, and several
+    # call `asyncio.run(...retrieve...)`), one thread could set the variable for
+    # account A while another was between its own write and storage
+    # construction. The second handle would then be built against A's workspace
+    # while believing it was B's: A's graph updated with B's data, or B's
+    # answers drawn from A's corpus.
+    #
+    # The variable is redundant - `workspace=` below is authoritative - so the
+    # fix is simply not to set it, and to refuse to run if something else has.
+    if (os.environ.get("MONGODB_WORKSPACE") or "").strip():
+        raise RetrievalConfigError(
+            "MONGODB_WORKSPACE is set in the environment. It overrides the "
+            "per-handle workspace inside LightRAG's storage constructors, which "
+            "would let one account's handle be built against another's "
+            "workspace. Unset it.")
 
     rag = LightRAG(
         working_dir=_working_dir(),
         workspace=workspace,
         kv_storage="MongoKVStorage",
         doc_status_storage="MongoDocStatusStorage",
-        graph_storage="MongoGraphStorage",
-        vector_storage="MongoVectorDBStorage",
+        # Per-workspace, exactly as before: physical separation, and it costs no
+        # Atlas index capacity. The subclass only declines to create the Atlas
+        # Search index the base would add, because the cluster's index cap
+        # counts search and vector indexes together and that capacity is
+        # reserved for the three shared vector indexes.
+        graph_storage="HpMongoGraphStorage",
+        # Three shared collections for every account, partitioned by workspace
+        # with an Atlas pre-filter. This is what makes account #2 possible: the
+        # index cost is now constant rather than three per account per index.
+        vector_storage="HpSharedVectorStorage",
+        # Both sides of the merge belong here. The storage classes above came
+        # with the shared-vector migration; the model split below came with
+        # Strategy Chat, where a query handle answers on `query_model()` while a
+        # build still extracts on `retrieval_model()`. They are independent
+        # choices - which collections the vectors live in, and which model reads
+        # them - so taking either alone would have silently dropped a feature.
         llm_model_func=_query_llm_model_func if for_query else _llm_model_func,
         llm_model_name=query_model() if for_query else retrieval_model(),
         llm_model_max_async=LLM_MAX_ASYNC,
@@ -353,18 +394,27 @@ def forget_query_handle(workspace: str):
 
 
 def drop_workspace(workspace: str) -> dict:
-    """Delete every collection and search index belonging to one workspace.
+    """Erase one workspace: its own collections, and its rows in the shared ones.
 
-    Necessary, not housekeeping. Each workspace costs three Atlas vector search
-    indexes (chunks, entities, relationships) and thirteen collections, and a
-    cluster has a hard cap on search indexes - so a retired workspace left in
-    place permanently consumes capacity a future build needs.
+    Both halves are required, and the second is the one that is easy to forget.
+    A workspace's KV, graph and doc-status collections carry its name as a
+    prefix and are dropped outright. Its VECTORS, however, live in the three
+    shared collections alongside every other account's - so they have to be
+    deleted by partition. Dropping only the prefixed collections would leave a
+    full set of orphaned vectors behind, and the next build would then retrieve
+    chunks whose graph and text no longer exist.
 
-    Search indexes are dropped explicitly before the collections: dropping a
-    collection releases its indexes eventually, but not synchronously, and a
-    build starting immediately afterwards can still hit the cap.
+    Shared collections are never themselves dropped: they hold every account's
+    data, and their indexes take minutes to rebuild during which no account can
+    be queried.
+
+    Search indexes on the prefixed collections are dropped explicitly before the
+    collections, because dropping a collection releases its indexes eventually
+    but not synchronously - and the cluster's cap counts search and vector
+    indexes together, so a lingering one can starve the shared vector indexes.
     """
     from app.database.mongodb import get_db
+    from app.services.retrieval.shared_vdb import PARTITION_FIELD, shared_collection_name
 
     if not workspace or not WORKSPACE_RE.match(workspace):
         raise RetrievalConfigError("refusing to drop %r - not a workspace name"
@@ -372,8 +422,10 @@ def drop_workspace(workspace: str) -> dict:
     forget_query_handle(workspace)
 
     db = get_db()
-    dropped = {"workspace": workspace, "search_indexes": 0, "collections": 0}
+    dropped = {"workspace": workspace, "search_indexes": 0, "collections": 0,
+               "vectors": 0}
 
+    # The workspace's own collections.
     for name in [c for c in db.list_collection_names()
                  if c == workspace or c.startswith(workspace + "_")]:
         try:
@@ -389,6 +441,22 @@ def drop_workspace(workspace: str) -> dict:
         db[name].drop()
         dropped["collections"] += 1
 
-    logger.info("retrieval: dropped workspace %s (%d collections, %d search indexes)",
-                workspace, dropped["collections"], dropped["search_indexes"])
+    # Its rows in the shared vector collections.
+    for namespace in ("entities", "relationships", "chunks"):
+        collection = shared_collection_name(namespace)
+        try:
+            result = db[collection].delete_many({PARTITION_FIELD: workspace})
+            dropped["vectors"] += result.deleted_count
+        except Exception:
+            # Left behind, a stale partition would answer queries for a
+            # workspace whose graph is gone. Loud, not swallowed.
+            logger.exception(
+                "retrieval: could not clear partition %s from %s - stale vectors "
+                "may remain and must be removed before rebuilding",
+                workspace, collection)
+            raise
+
+    logger.info("retrieval: dropped workspace %s (%d collections, %d search "
+                "indexes, %d shared vectors)", workspace, dropped["collections"],
+                dropped["search_indexes"], dropped["vectors"])
     return dropped

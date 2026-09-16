@@ -1,6 +1,7 @@
-from datetime import datetime
-from pydantic import BaseModel, Field, field_validator
 from typing import Literal
+
+from pydantic import BaseModel, Field, field_validator
+
 
 class AccountBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)

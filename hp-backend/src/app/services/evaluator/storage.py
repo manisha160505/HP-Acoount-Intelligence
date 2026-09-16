@@ -14,7 +14,7 @@ returning nothing.
 
 import hashlib
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.database.mongodb import get_db
 
@@ -75,7 +75,7 @@ def next_version(account_id: str, persona_id: str) -> int:
 def save(evaluation: dict) -> dict:
     """Persist one evaluation and update the widget pointer."""
     db = get_db()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     evaluation["created_at"] = now
 
     db[COLLECTION].update_one(
@@ -116,7 +116,7 @@ def save(evaluation: dict) -> dict:
     return evaluation
 
 
-def history(account_id: str, persona_id: str = None, limit: int = 20) -> list:
+def history(account_id: str, persona_id: str | None = None, limit: int = 20) -> list:
     db = get_db()
     query = {"account_id": account_id}
     if persona_id:

@@ -22,12 +22,15 @@ account's uploads, prose about the product against the approved HP facts.
 import hashlib
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.core.llm import generate_gpt4o_json_completion
 from app.database.mongodb import get_db
 from app.services.extractors.grounding import (
-    build_corpus, corpus_from_texts, check_text, GroundingReport,
+    GroundingReport,
+    build_corpus,
+    check_text,
+    corpus_from_texts,
 )
 from app.services.hp.guardrails import approve_facts, summarise
 from app.services.hp.product_rules import RULES_BY_ID, match_rules
@@ -95,7 +98,7 @@ def _account_evidence(db, account_id: str) -> dict:
         "triggers": triggers,
         "tech_stack": stack,
         "categories": techno.get("categories") or [],
-        "texts": [exec_card.get("business_description") or ""] + intent + triggers + stack,
+        "texts": [exec_card.get("business_description") or "", *intent, *triggers, *stack],
     }
 
 
@@ -190,7 +193,7 @@ approved_facts", "discovery_question": "one neutral question a seller could ask"
 def generate_hp_recommendations(account_id: str) -> dict | None:
     """Build the technographic_hp_recommendations widget payload."""
     db = get_db()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     kversion = knowledge_version(db)
 
     evidence = _account_evidence(db, account_id)

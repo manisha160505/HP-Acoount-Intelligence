@@ -68,7 +68,7 @@ class Document:
         self.unit_key = unit_key
         self.feature = feature
         self.title = title
-        self.lines = [l for l in lines if l]
+        self.lines = [line for line in lines if line]
         self.evidence_rows = evidence_rows
         # Fingerprinted on the text that actually gets indexed, not on the raw
         # source it was built from.
@@ -372,7 +372,7 @@ def _hp_documents(db, account_id, index) -> list:
             category = _text(meta.get("category_name"))
             if device or category:
                 out.append("%s addresses %s." % (family, category or device))
-            for i, fact in enumerate(facts):
+            for _i, fact in enumerate(facts):
                 line = b.line(fact.get("text"), field="approved_fact",
                               record_id=fact.get("slide_id"))
                 conditions = [c for c in (fact.get("conditions") or []) if _text(c)]
@@ -469,8 +469,7 @@ def _filing_documents(account_id, index, company) -> list:
     filings simply contributes no documents here, and the dashboard falls back
     to what the CSVs carry.
     """
-    from app.services.extractors.datasets import (
-        DatasetFileMissing, dataset_file_paths)
+    from app.services.extractors.datasets import DatasetFileMissing, dataset_file_paths
     from app.services.retrieval import financials, pdf
 
     try:

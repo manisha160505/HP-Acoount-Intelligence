@@ -1,35 +1,52 @@
-from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, status
-from bson import ObjectId
 import logging
+from datetime import datetime
+
+from bson import ObjectId
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.database.mongodb import get_db
+from app.errors import APIError, ErrorCode
 
 logger = logging.getLogger(__name__)
-from app.core.deps import require_user_role, require_admin_role
-from app.schemas.widget import (WidgetContract, WidgetResponse, ContentGenerateRequest,
-                                StrategyChatRequest,
-                               MessageEvaluateRequest, MessageRewriteRequest)
-from app.services.extractors.executive_dashboard import extract_executive_dashboard
-from app.services.extractors.recent_news_signals import extract_recent_news_signals
-from app.services.extractors.intent_demand_signals import extract_intent_demand_signals
-from app.services.extractors.solution_narrative_opportunity_map import extract_solution_narrative_opportunity_map, generate_opportunity_map_plays_with_gpt4o
-from app.services.extractors.stakeholder_map import extract_stakeholder_map
-from app.services.extractors.tech_landscape import extract_tech_landscape
-from app.services.extractors.objection_playbook import extract_objection_playbook
+from app.core.deps import require_admin_role, require_user_role
+from app.schemas.widget import (
+    ContentGenerateRequest,
+    MessageEvaluateRequest,
+    MessageRewriteRequest,
+    # Strategy Chat's request body. The only symbol this branch's import block
+    # carried that main's did not - every extractor it also listed is imported
+    # below, sorted, including `extract_strategy_chat`.
+    StrategyChatRequest,
+    WidgetContract,
+    WidgetResponse,
+)
+from app.services.evaluator import (
+    evaluate as evaluator_evaluate,
+    formats as evaluator_formats,
+    scoring as evaluator_scoring,
+    storage as evaluator_storage,
+)
 from app.services.extractors.content_messaging import extract_content_messaging
 from app.services.extractors.content_studio import extract_content_studio, generate_content_asset
-from app.services.extractors.strategy_chat import extract_strategy_chat
+from app.services.extractors.executive_dashboard import extract_executive_dashboard
+from app.services.extractors.intent_demand_signals import extract_intent_demand_signals
 from app.services.extractors.message_evaluator import extract_message_evaluator
-from app.services.evaluator import scoring as evaluator_scoring
-from app.services.evaluator import formats as evaluator_formats
-from app.services.evaluator import storage as evaluator_storage
-from app.services.evaluator import evaluate as evaluator_evaluate
-from app.services.retrieval import ingest as retrieval_ingest
-from app.services.retrieval import jobs as retrieval_jobs
-from app.services.retrieval import query as retrieval_query
-from app.services.retrieval import registry as retrieval_registry
+from app.services.extractors.objection_playbook import extract_objection_playbook
+from app.services.extractors.recent_news_signals import extract_recent_news_signals
+from app.services.extractors.solution_narrative_opportunity_map import (
+    extract_solution_narrative_opportunity_map,
+    generate_opportunity_map_plays_with_gpt4o,
+)
+from app.services.extractors.stakeholder_map import extract_stakeholder_map
+from app.services.extractors.strategy_chat import extract_strategy_chat
+from app.services.extractors.tech_landscape import extract_tech_landscape
 from app.services.messaging import pillars as messaging_pillars
+from app.services.retrieval import (
+    ingest as retrieval_ingest,
+    jobs as retrieval_jobs,
+    query as retrieval_query,
+    registry as retrieval_registry,
+)
 
 router = APIRouter(tags=["Widget Contracts & Dashboard Shell"])
 
@@ -72,11 +89,15 @@ WIDGET_REGISTRY = {
             "widget_key": "exec_urgency_score",
             "widget_name": "Urgency & Opportunity Score",
             "feature_key": "executive_dashboard",
-            "description": "Derived composite account urgency score contract. Calculation logic and driver weights are TBD for future runtime calculation. Zero fabricated values.",
+            "description": "Composite account urgency: 20% Fleet Refresh + 25% AI/Workstation + 15% Hiring + 15% Expansion + 25% Intent. Weights are ABX Feature 1 Step 5; the per-driver formulas are delivery-authored and NOT yet client-agreed. Unavailable drivers block the composite rather than scoring 0.",
             "widget_type": "urgency_meter",
             "data_classification": "derived",
-            "source_datasets": ["job_openings", "intent_score", "google_news"],
-            "source_fields": ["hiring_velocity", "composite_score", "event_type"],
+            "source_datasets": ["firmographics", "technographics", "webstack",
+                                "job_openings", "intent_score",
+                                "hp_category_intent", "google_news", "news_events"],
+            "source_fields": ["Number Of Employees Range", "Yearly Revenue Range",
+                              "status", "normalized_title", "categories",
+                              "posted_at", "Intent Score (/100)", "event_headline"],
             "display_order": 4
         },
         {
@@ -425,7 +446,7 @@ FEATURE_EXTRACTORS = {
 @router.get("/widgets", response_model=list[WidgetContract])
 def list_all_widgets(current_user: dict = Depends(require_user_role)):
     all_widgets = []
-    for feature_key, widgets in WIDGET_REGISTRY.items():
+    for _feature_key, widgets in WIDGET_REGISTRY.items():
         all_widgets.extend(widgets)
     return all_widgets
 
@@ -461,7 +482,7 @@ def get_account_feature_widgets(
         )
 
     widget_contracts = WIDGET_REGISTRY[key_clean]
-    
+
     # Read what was stored. Extraction happens when a file is added, updated or
     # deleted, and on an explicit regenerate - not on a page view. Re-running it
     # here rewrote every widget on every request, and when the data or a prompt
@@ -489,14 +510,14 @@ def get_account_feature_widgets(
     extracted_widgets_map = {w["widget_key"]: w for w in stored}
 
     responses = []
-    
+
     for contract in widget_contracts:
         w_key = contract["widget_key"]
         if w_key in extracted_widgets_map:
             ext_doc = extracted_widgets_map[w_key]
             updated_at_val = ext_doc.get("updated_at")
             updated_at_str = updated_at_val.isoformat() if isinstance(updated_at_val, datetime) else str(updated_at_val or "")
-            
+
             responses.append({
                 "account_id": account_id,
                 "feature_key": key_clean,
@@ -563,8 +584,10 @@ def regenerate_account_feature_widgets(
     except Exception as exc:
         logger.warning("regenerate failed for %s on account %s: %s",
                        key_clean, account_id, exc, exc_info=True)
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY,
-                            detail=f"Regeneration failed: {type(exc).__name__}: {exc}")
+        raise APIError(
+            ErrorCode.GENERATION_FAILED,
+            log_context={"feature": key_clean, "account_id": account_id},
+        ) from exc
 
     return get_account_feature_widgets(account_id, key_clean, current_user)
 
@@ -622,7 +645,10 @@ def generate_content_studio_endpoint(
         ext_doc = generate_content_asset(
             account_id, body.persona_id, body.content_type, body.topic, body.additional_context)
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        # The message is raised for a seller to read (an unknown persona or
+        # content type), so it is passed through rather than replaced.
+        raise APIError(ErrorCode.INVALID_PARAMETER, str(e),
+                       log_context={"account_id": account_id}) from e
 
     updated_at_val = ext_doc.get("updated_at")
     updated_at_str = updated_at_val.isoformat() if isinstance(updated_at_val, datetime) else str(updated_at_val or "")
@@ -774,7 +800,8 @@ def evaluate_message_endpoint(
     except (evaluator_evaluate.EvaluationError,
             evaluator_scoring.ScoringError,
             evaluator_formats.FormatError) as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+        raise APIError(ErrorCode.EXTRACTION_FAILED, str(exc), status_code=422,
+                       log_context={"account_id": account_id}) from exc
 
 
 @router.post("/accounts/{account_id}/widgets/message_evaluator/rewrite")
@@ -790,13 +817,14 @@ def rewrite_message_endpoint(
         return evaluator_evaluate.rewrite_message(
             account_id, body.fingerprint, body.selected_recommendations)
     except evaluator_evaluate.EvaluationError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+        raise APIError(ErrorCode.EXTRACTION_FAILED, str(exc), status_code=422,
+                       log_context={"account_id": account_id}) from exc
 
 
 @router.get("/accounts/{account_id}/widgets/message_evaluator/history")
 def message_evaluator_history(
     account_id: str,
-    persona_contact_id: str = None,
+    persona_contact_id: str | None = None,
     limit: int = 20,
     current_user: dict = Depends(require_user_role)
 ):
@@ -883,7 +911,8 @@ def retrieval_rebuild(
     try:
         retrieval_registry.spec(index)
     except retrieval_registry.UnknownIndex as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+        raise APIError(ErrorCode.INVALID_PARAMETER, str(exc),
+                       log_context={"account_id": account_id, "index": index}) from exc
 
     if not retrieval_registry.is_enabled(index):
         raise HTTPException(
@@ -923,10 +952,11 @@ def retrieval_retire(
     try:
         retrieval_registry.spec(index)
     except retrieval_registry.UnknownIndex as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+        raise APIError(ErrorCode.INVALID_PARAMETER, str(exc),
+                       log_context={"account_id": account_id, "index": index}) from exc
 
     result = retrieval_ingest.retire_index(
-        account_id, index, reason="retired by an administrator to free capacity")
+        account_id, index, reason="retired by an administrator")
     return {
         "retired": True,
         "index": index,
@@ -955,7 +985,7 @@ def retrieval_run_now(
         results = retrieval_ingest.drain(max_jobs=3)
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                            detail="%s: %s" % (type(exc).__name__, exc))
+                            detail="%s: %s" % (type(exc).__name__, exc)) from exc
     return {"ran": results, "status": retrieval_query.status(account_id, index)}
 
 
@@ -980,7 +1010,10 @@ def generate_content_messaging(
     try:
         doc = messaging_pillars.generate_messaging_pillars(account_id)
     except messaging_pillars.PillarError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+        # "no pillar survived validation" is a state of the data, not a bad
+        # request - 409 says the call was fine and the data is not ready.
+        raise APIError(ErrorCode.NO_SOURCE_DATA, str(exc),
+                       log_context={"account_id": account_id}) from exc
 
     contract = next(c for c in WIDGET_REGISTRY["content_messaging"]
                     if c["widget_key"] == messaging_pillars.WIDGET_KEY)
@@ -1035,4 +1068,5 @@ def strategy_chat_ask(
             mode=body.mode,
         )
     except strategy_chat_service.ChatUnavailable as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=str(exc)) from exc

@@ -1,12 +1,9 @@
-import os
-import io
-import csv
-import pandas as pd
-from datetime import datetime, timezone
-from bson import ObjectId
+from datetime import UTC, datetime
+
 from app.database.mongodb import get_db
 from app.services.extractors.datasets import (
-    find_file_path, read_dataset_records, requires_local_datasets,
+    read_dataset_records,
+    requires_local_datasets,
 )
 
 TECHNOGRAPHICS_CATEGORY_COLUMNS = [
@@ -46,8 +43,8 @@ def _read_dataset_records(account_id: str, dataset_key: str) -> list[dict]:
 )
 def extract_content_messaging(account_id: str) -> list[dict]:
     db = get_db()
-    now = datetime.now(timezone.utc)
-    
+    now = datetime.now(UTC)
+
     # Read approved 5 datasets ONLY
     firmo_records = _read_dataset_records(account_id, "firmographics")
     techno_records = _read_dataset_records(account_id, "technographics")
@@ -61,7 +58,7 @@ def extract_content_messaging(account_id: str) -> list[dict]:
     business_context = {}
     if firmo_records and len(firmo_records) > 0:
         f = firmo_records[0]
-        
+
         c_name = str(f.get("Company Name") or f.get("company_name") or f.get("Name") or "").strip()
         domain_val = str(f.get("Company Domain") or f.get("company_domain") or f.get("Domain") or f.get("Website") or f.get("website") or "").strip()
         desc_val = str(f.get("Business Description") or f.get("business_description") or "").strip()

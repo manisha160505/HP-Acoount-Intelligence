@@ -75,10 +75,17 @@ INDEX_REGISTRY = {
         # absent from `widgets` above: a generated widget feeding its own corpus
         # would change the corpus on every build and trigger the next one.
         #
-        # `exec_urgency_score` is out of scope. ABX fixes its weights but leaves
-        # the raw-data-to-driver transformation undefined - "The current POC does
+        # `exec_urgency_score` is computed by `urgency.py`, not retrieved, so it
+        # is absent from `widgets` above for the same reason
+        # `exec_strategic_priorities` is.
+        #
+        # It was out of scope until now: ABX fixes the weights but leaves the
+        # raw-data-to-driver transformation undefined - "The current POC does
         # not define a reusable raw-data-to-driver formula for all accounts" -
-        # and its own missing-input rule then forbids computing an overall score.
+        # and directs that one not be invented here. That direction has been
+        # knowingly overridden on instruction; the driver formulas are
+        # delivery-authored, every payload says so, and they need client
+        # sign-off before the number is presented as HP's.
         "generates": {
             "feature_key": "executive_dashboard",
             "widget_key": "exec_strategic_priorities",

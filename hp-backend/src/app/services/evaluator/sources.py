@@ -34,10 +34,14 @@ import logging
 import re
 
 from app.services.extractors.grounding import (
-    Corpus, build_corpus, corpus_from_texts, normalize_hp_product,
+    build_corpus,
+    corpus_from_texts,
+    normalize_hp_product,
 )
 from app.services.hp.guardrails import (
-    SUPERLATIVE_BLOCK_COUNTRIES, COMPETITOR_BLOCK_COUNTRIES, normalize_country,
+    COMPETITOR_BLOCK_COUNTRIES,
+    SUPERLATIVE_BLOCK_COUNTRIES,
+    normalize_country,
 )
 
 logger = logging.getLogger(__name__)
@@ -101,7 +105,7 @@ def _text(value) -> str:
 class EvaluatorSources:
     """The four sources, assembled for one account and one draft."""
 
-    def __init__(self, account_id, company_name, country, account, hp, persona,
+    def __init__(self, account_id, company_name, country, account, hp, persona,  # noqa: PLR0913, PLR0917 - long signature predates the lint gate
                  draft, hp_fact_count, hp_available):
         self.account_id = account_id
         self.company_name = company_name

@@ -102,7 +102,7 @@ def _numeric_run(tokens: list) -> tuple:
     """
     best = None
     start = None
-    for i, token in enumerate(tokens + [""]):
+    for i, token in enumerate([*tokens, ""]):
         if token and _is_figure(token):
             if start is None:
                 start = i
@@ -239,7 +239,7 @@ def bind_row(tokens: list, periods: list, has_trailing_label: bool) -> tuple:
     is_partial_year = periods and periods[-1].lower().endswith("total")
     if is_partial_year and 1 < len(figures) < len(periods):
         months = periods[:len(figures) - 1]
-        return label, list(zip(months + [periods[-1]], figures))
+        return label, list(zip([*months, periods[-1]], figures))
 
     return None, []
 

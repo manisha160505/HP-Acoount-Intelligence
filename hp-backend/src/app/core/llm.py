@@ -1,6 +1,8 @@
 import json
 import logging
+
 from openai import OpenAI
+
 from app.config.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -10,7 +12,7 @@ def get_openai_client() -> OpenAI | None:
     if not api_key:
         logger.warning("OPENAI_API_KEY is not set in environment or settings.")
         return None
-    
+
     endpoint = settings.OPENAI_ENDPOINT.strip()
     return OpenAI(base_url=endpoint, api_key=api_key)
 
@@ -83,5 +85,5 @@ def generate_gpt4o_json_completion(system_prompt: str, user_prompt: str) -> dict
             return json.loads(content)
         return None
     except Exception as e:
-        logger.error(f"Error calling GPT-4o API completion: {e}")
+        logger.error("Error calling GPT-4o API completion: %s", e)
         return None

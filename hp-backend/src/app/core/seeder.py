@@ -1,11 +1,10 @@
-import os
-import csv
-import shutil
 import logging
-from datetime import datetime, timezone
-from bson import ObjectId
-from app.database.mongodb import get_db
+import os
+import shutil
+from datetime import UTC, datetime
+
 from app.core.security import get_password_hash
+from app.database.mongodb import get_db
 
 logger = logging.getLogger(__name__)
 
@@ -39,11 +38,11 @@ def _find_backend_root() -> str:
 
 def seed_database_if_empty():
     db = get_db()
-    now = datetime.now(timezone.utc)
-    
+    now = datetime.now(UTC)
+
     # 1. Seed Default Users
     users_col = db["users"]
-    
+
     admin_doc = users_col.find_one({"email": "admin@hp.com"})
     if not admin_doc:
         admin_doc = {
@@ -105,7 +104,8 @@ def seed_database_if_empty():
         }
         res = accounts_col.insert_one(astra_doc)
         astra_id = str(res.inserted_id)
-        logger.info(f"Created benchmark target account 'PT Astra International Tbk' (ID: {astra_id})")
+        logger.info("Created benchmark target account 'PT Astra International Tbk' (ID: %s)",
+                    astra_id)
     else:
         astra_id = str(astra_doc["_id"])
         accounts_col.update_one(
@@ -117,7 +117,7 @@ def seed_database_if_empty():
     data_files_col = db["account_data_files"]
     backend_root = _find_backend_root()
     seed_source_dir = os.path.join(backend_root, "seed_data", "astra")
-    logger.info(f"Using seed source directory: {seed_source_dir}")
+    logger.info("Using seed source directory: %s", seed_source_dir)
 
     if os.path.exists(seed_source_dir):
         for d_key, filename, display_name in SEED_FILES:
@@ -153,7 +153,7 @@ def seed_database_if_empty():
             row_count = 0
             try:
                 if dest_file_path and os.path.exists(dest_file_path):
-                    with open(dest_file_path, "r", encoding="utf-8-sig", errors="replace") as f:
+                    with open(dest_file_path, encoding="utf-8-sig", errors="replace") as f:
                         row_count = max(0, sum(1 for _ in f) - 1)
             except Exception:
                 row_count = 0
@@ -174,7 +174,7 @@ def seed_database_if_empty():
                     "updated_at": now
                 }
                 data_files_col.insert_one(metadata)
-                logger.info(f"Seeded active dataset '{d_key}' for account {astra_id}")
+                logger.info("Seeded active dataset '%s' for account %s", d_key, astra_id)
             else:
                 # Ensure status is active and row_count/size are up to date
                 data_files_col.update_one(

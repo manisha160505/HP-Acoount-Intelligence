@@ -30,7 +30,7 @@ It also did `list(seen_headlines)[:5]` over a **set**, so "recent trigger events
 was whichever five Python happened to hash first and changed between runs.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from bson import ObjectId
 
@@ -65,7 +65,7 @@ def _widget(db, account_id: str, widget_key: str) -> dict:
 def extract_strategy_chat(account_id: str) -> list[dict]:
     """Build the two Strategy Chat widgets from the other features' outputs."""
     db = get_db()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     summary = _widget(db, account_id, "exec_summary_card")
     contacts = _widget(db, account_id, "stakeholder_contacts_grid")

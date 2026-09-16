@@ -7,7 +7,13 @@ across releases - so it is mapped here into `RetrievalResult` once, and the
 features depend on that.
 
 There is one workspace per (account, index), so a build writes into the same
-place queries read. What that means for a query depends on the build:
+place queries read. That "place" is now two things: this account's own KV, graph
+and doc-status collections, and its partition of the three shared vector
+collections - which every account shares, separated by an Atlas pre-filter on
+the workspace name. A query therefore cannot see another account's vectors, and
+the graph it walks is this account's alone.
+
+What a build means for a query:
 
   * an **incremental update** touches only the documents that changed, so a
     query during one still answers from everything else;
@@ -120,7 +126,7 @@ def _normalise(raw, mode, workspace, stale) -> RetrievalResult:
                            mode=mode, workspace=workspace, stale=stale)
 
 
-async def retrieve(account_id: str, index: str, question: str, mode: str = None,
+async def retrieve(account_id: str, index: str, question: str, mode: str | None = None,
                    top_k: int = DEFAULT_TOP_K, only_context: bool = False,
                    conversation_history=None) -> RetrievalResult:
     """Ask one index one question."""
@@ -129,13 +135,12 @@ async def retrieve(account_id: str, index: str, question: str, mode: str = None,
     state = index_state.get(account_id, index)
     workspace = state.get("workspace")
 
-    # Refused rather than attempted. Opening a retired workspace would recreate
-    # it - and its Atlas vector indexes - then answer from an empty graph, which
-    # reads as "no such fact" instead of "no index".
+    # Refused rather than attempted. Opening a retired workspace would answer
+    # from an empty graph, which reads as "no such fact" instead of "no index".
     if state.get("status") == index_state.RETIRED:
         raise IndexNotReady(
-            "this index was retired to free capacity, so it cannot answer. The "
-            "feature still shows its last published output.")
+            "this index was retired, so it cannot answer. The feature still "
+            "shows its last published output.")
 
     if not workspace or state.get("status") == index_state.BUILDING:
         raise IndexNotReady(

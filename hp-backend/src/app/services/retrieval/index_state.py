@@ -1,10 +1,14 @@
 """Index state: what is indexed, at what version, and whether it can be trusted.
 
-There is **one workspace per (account, index)**, because one workspace costs
-three Atlas vector search indexes and the free tier's cap is three. Two cannot
-coexist, so the atomic build-beside-and-swap design does not fit this cluster.
+There is **one workspace per (account, index)**. It names that account's KV,
+graph and doc-status collections, and it is also the partition value separating
+its vectors from every other account's inside the three shared vector
+collections - so it is an isolation boundary, not just a label.
 
-Safety comes from the update path instead, and the two paths differ in what
+A workspace no longer costs any Atlas search index capacity of its own (the
+three shared vector indexes serve every account), but builds are still not
+atomic: the workspace is stable rather than numbered per build, so a full
+rebuild replaces data in place. The two paths therefore still differ in what
 they can promise:
 
   **Incremental update** - the normal case. Fingerprints identify the documents
@@ -21,7 +25,7 @@ they can promise:
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.database.mongodb import get_db
 
@@ -48,7 +52,7 @@ INCREMENTAL = "incremental"
 
 
 def _now():
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def get(account_id: str, index: str) -> dict:
@@ -181,7 +185,7 @@ def record_incremental(account_id: str, index: str, documents: dict,
     return state
 
 
-def fail_build(account_id: str, index: str, error: str, mode: str = None) -> dict:
+def fail_build(account_id: str, index: str, error: str, mode: str | None = None) -> dict:
     """Record a failed build.
 
     After a failed FULL rebuild the workspace has already been dropped, so there
@@ -289,7 +293,7 @@ def retire(account_id: str, index: str, reason: str = "") -> dict:
     """
     state = get(account_id, index)
     state["status"] = RETIRED
-    state["last_error"] = reason or "the workspace was dropped to free capacity"
+    state["last_error"] = reason or "the workspace was dropped"
     state["documents"] = {}
     state["retired_at"] = _now()
     save(state)

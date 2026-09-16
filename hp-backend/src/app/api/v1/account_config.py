@@ -1,13 +1,15 @@
-from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, status
+from datetime import UTC, datetime
+
 from bson import ObjectId
-from app.database.mongodb import get_db
+from fastapi import APIRouter, Depends, HTTPException, status
+
 from app.core.deps import require_admin_role
+from app.database.mongodb import get_db
 from app.schemas.account_config import (
-    AccountInstructionsUpdate,
-    AccountInstructionsResponse,
+    AccountGuardrailsResponse,
     AccountGuardrailsUpdate,
-    AccountGuardrailsResponse
+    AccountInstructionsResponse,
+    AccountInstructionsUpdate,
 )
 
 router = APIRouter(prefix="/accounts/{account_id}", tags=["Account Configuration (Admin Only)"])
@@ -27,7 +29,7 @@ def get_instructions(
 
     doc = db["account_instructions"].find_one({"account_id": account_id})
     if not doc:
-        now_str = datetime.now(timezone.utc).isoformat()
+        now_str = datetime.now(UTC).isoformat()
         return {
             "account_id": account_id,
             "instructions_text": "",
@@ -57,7 +59,7 @@ def update_instructions(
     if not account:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company account not found")
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     db["account_instructions"].update_one(
         {"account_id": account_id},
         {
@@ -96,7 +98,7 @@ def get_guardrails(
 
     doc = db["account_guardrails"].find_one({"account_id": account_id})
     if not doc:
-        now_str = datetime.now(timezone.utc).isoformat()
+        now_str = datetime.now(UTC).isoformat()
         return {
             "account_id": account_id,
             "enabled": False,
@@ -128,7 +130,7 @@ def update_guardrails(
     if not account:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company account not found")
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     db["account_guardrails"].update_one(
         {"account_id": account_id},
         {

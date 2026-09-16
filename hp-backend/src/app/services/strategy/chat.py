@@ -37,14 +37,12 @@ anything. What a recommendation needs is reasoning that rests on retrieved
 account evidence, and on approved HP product facts where it names a product.
 """
 
-import asyncio
 import logging
 
 from app.core.llm import generate_chat_completion, generate_gpt4o_json_completion
 from app.database.mongodb import get_db
 from app.services.extractors import grounding
-from app.services.retrieval import evidence as ev
-from app.services.retrieval import index_state, query
+from app.services.retrieval import evidence as ev, index_state, query
 
 logger = logging.getLogger(__name__)
 
@@ -282,7 +280,7 @@ UNAVAILABLE = (
     "{closest}")
 
 
-def answer(account_id: str, messages: list, mode: str = None) -> dict:
+def answer(account_id: str, messages: list, mode: str | None = None) -> dict:
     """Answer one question about one account. Returns the published payload."""
     db = get_db()
 
@@ -313,7 +311,7 @@ def answer(account_id: str, messages: list, mode: str = None) -> dict:
         result = query.ask(account_id, INDEX, question,
                            top_k=TOP_K, only_context=True)
     except query.IndexNotReady as exc:
-        raise ChatUnavailable(str(exc))
+        raise ChatUnavailable(str(exc)) from exc
     except Exception as exc:
         # Retrieval can refuse a question for its own reasons - a query it
         # considers too short, a transient backend error. None of those is a

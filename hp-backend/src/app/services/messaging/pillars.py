@@ -30,18 +30,21 @@ the Message Evaluator's phrase spans.
 import asyncio
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.core.llm import generate_gpt4o_json_completion
 from app.database.mongodb import get_db
 from app.services.extractors.grounding import (
-    HP_PRODUCT_LINES, filter_enum_list, normalize_hp_product,
+    HP_PRODUCT_LINES,
+    filter_enum_list,
+    normalize_hp_product,
 )
 from app.services.hp.guardrails import (
-    COMPETITOR_BLOCK_COUNTRIES, SUPERLATIVE_BLOCK_COUNTRIES, normalize_country,
+    COMPETITOR_BLOCK_COUNTRIES,
+    SUPERLATIVE_BLOCK_COUNTRIES,
+    normalize_country,
 )
-from app.services.retrieval import evidence as ev
-from app.services.retrieval import index_state, query
+from app.services.retrieval import evidence as ev, index_state, query
 
 logger = logging.getLogger(__name__)
 
@@ -242,7 +245,7 @@ Return JSON:
                  "theme": "<two or three words>"}]}"""
 
 
-async def _candidate_challenges(account_id: str, mode: str = None) -> tuple:
+async def _candidate_challenges(account_id: str, mode: str | None = None) -> tuple:
     """(candidates, retrieval_result). Retrieval first - no filtering yet."""
     result = await query.retrieve(account_id, INDEX, CHALLENGE_QUESTION,
                                   mode=mode, top_k=60)
@@ -824,10 +827,10 @@ def _framing(pillars: list, company: str, restrictions: dict) -> dict:
 # Entry point
 # ---------------------------------------------------------------------------
 
-def generate_messaging_pillars(account_id: str, mode: str = None) -> dict:
+def generate_messaging_pillars(account_id: str, mode: str | None = None) -> dict:
     """Build the message house. Returns the stored widget document."""
     db = get_db()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     state = index_state.get(account_id, INDEX)
     if state.get("status") not in (index_state.READY, index_state.STALE):

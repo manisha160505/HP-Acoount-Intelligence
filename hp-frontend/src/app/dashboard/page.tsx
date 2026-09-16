@@ -69,7 +69,8 @@ import {
   ShieldCheck,
   UserCheck,
   CheckCircle2,
-  Minus
+  Minus,
+  BarChart3
 } from 'lucide-react';
 
 const ICON_MAP: Record<string, React.FC<{ className?: string }>> = {
@@ -839,6 +840,15 @@ export default function UserDashboardPage() {
                   const metricsWidget = widgets.find(w => w.widget_key === 'exec_key_metrics');
                   const hiringWidget = widgets.find(w => w.widget_key === 'exec_hiring_velocity');
                   const prioritiesWidget = widgets.find(w => w.widget_key === 'exec_strategic_priorities');
+                  const urgencyWidget = widgets.find(w => w.widget_key === 'exec_urgency_score');
+
+                  // Read on 'partial' too. A urgency payload whose composite is
+                  // blocked by one unavailable driver still carries the four
+                  // that computed, and the card's job in that state is to name
+                  // the blocker - which needs the data, not an empty card.
+                  const urgencyData = (urgencyWidget && urgencyWidget.data
+                    && (urgencyWidget.status === 'available' || urgencyWidget.status === 'partial'))
+                    ? urgencyWidget.data : null;
 
                   const summaryData = (summaryWidget && summaryWidget.status === 'available' && summaryWidget.data) ? summaryWidget.data : null;
                   const metricsData = (metricsWidget && metricsWidget.status === 'available' && metricsWidget.data) ? metricsWidget.data : null;
@@ -1116,65 +1126,76 @@ export default function UserDashboardPage() {
                               <Flame className="w-4 h-4 text-amber-500" />
                               <span>URGENCY SCORE & DRIVER BREAKDOWN</span>
                             </h3>
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200">
-                              Derived Contract TBD
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
+                              urgencyData?.client_agreed
+                                ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                : 'bg-amber-50 text-amber-800 border-amber-200'
+                            }`}>
+                              {!urgencyData
+                                ? 'Not yet computed'
+                                : urgencyData.client_agreed
+                                  ? 'Client-agreed formula'
+                                  : 'Delivery-authored · not client-agreed'}
                             </span>
                           </div>
 
                           <div className="flex flex-col sm:flex-row items-center gap-6">
-                            <div className="w-24 h-24 rounded-full border-4 border-amber-400 flex flex-col items-center justify-center flex-shrink-0 bg-amber-50/50 shadow-inner">
-                              <span className="text-xl font-extrabold text-slate-800">TBD</span>
+                            <div className={`w-24 h-24 rounded-full border-4 flex flex-col items-center justify-center flex-shrink-0 shadow-inner ${
+                              urgencyData?.score != null
+                                ? 'border-amber-400 bg-amber-50/50'
+                                : 'border-slate-300 bg-slate-50'
+                            }`}>
+                              <span className={`font-extrabold ${
+                                urgencyData?.score != null ? 'text-3xl text-slate-800' : 'text-base text-slate-400'
+                              }`}>
+                                {urgencyData?.score ?? 'N/A'}
+                              </span>
                               <span className="text-[10px] font-bold text-slate-400">/100</span>
                             </div>
 
                             <div className="flex-1 w-full space-y-3 text-xs">
-                              {[
-                                {
-                                  id: 'fleet_refresh',
-                                  label: 'Fleet-Refresh & Dual-OS',
-                                  scoreText: 'TBD',
-                                  progressPct: '0%',
-                                  barColor: 'bg-slate-300',
-                                  rationale: `Fleet-refresh & dual-OS driver calculation: TBD for future runtime calculation. Current workforce size: ${metricsData ? metricsData.employee_count : 'Dataset not uploaded'}.`
-                                },
-                                {
-                                  id: 'ai_catalysts',
-                                  label: 'AI / Workstation Catalysts',
-                                  scoreText: 'TBD',
-                                  progressPct: '0%',
-                                  barColor: 'bg-slate-300',
-                                  rationale: `AI/workstation catalysts driver calculation: TBD for future runtime calculation.`
-                                },
-                                {
-                                  id: 'hiring_velocity',
-                                  label: 'Hiring Velocity',
-                                  scoreText: hiringData ? `${hiringData.open_job_count} postings seen` : 'TBD',
-                                  progressPct: hiringData ? '80%' : '0%',
-                                  barColor: hiringData ? 'bg-hp-navy' : 'bg-slate-300',
-                                  rationale: `Hiring velocity signal: ${hiringData ? `${hiringData.open_job_count} job postings seen in job_openings.csv (open and closed).` : 'No job openings dataset uploaded yet.'}`
-                                },
-                                {
-                                  id: 'expansion_triggers',
-                                  label: 'Expansion / Print Triggers',
-                                  scoreText: 'TBD',
-                                  progressPct: '0%',
-                                  barColor: 'bg-slate-300',
-                                  rationale: `Expansion / print triggers driver calculation: TBD for future runtime calculation.`
-                                },
-                                {
-                                  id: 'intent_intensity',
-                                  label: 'Intent Intensity',
-                                  scoreText: 'TBD',
-                                  progressPct: '0%',
-                                  barColor: 'bg-slate-300',
-                                  rationale: `Intent intensity driver calculation: TBD for future runtime calculation.`
-                                }
-                              ].map((driver) => (
+                              {(urgencyData?.drivers ?? []).map((d: any) => ({
+                                  id: d.key,
+                                  label: d.label,
+                                  available: d.available,
+                                  proxy: d.proxy,
+                                  scoreText: d.available ? `${d.value}/100` : 'Unavailable',
+                                  progressPct: d.available ? `${d.value}%` : '0%',
+                                  barColor: !d.available
+                                    ? 'bg-slate-300'
+                                    : d.proxy ? 'bg-amber-400' : 'bg-hp-navy',
+                                  // The whole working, so a seller who
+                                  // disagrees with the number can see which
+                                  // term to disagree with.
+                                  rationale: d.available
+                                    ? [
+                                        `Weight ${Math.round(d.weight * 100)}% of the total.`,
+                                        ...(d.terms ?? []).map((t: any) =>
+                                          `${t.label}: ${t.points}/${t.max_points} — ${t.basis}.`),
+                                        ...(d.proxy ? [`⚠ ${d.proxy_note}`] : []),
+                                        ...(d.authored_by
+                                          ? [`Bands and point values for this driver were authored ${d.authored_by}-side.`]
+                                          : []),
+                                        ...(d.notes ?? []),
+                                      ].join(' ')
+                                    : d.unavailable_reason,
+                                })).map((driver: any) => (
                                 <div key={driver.id} className="relative">
                                   <div className="flex justify-between items-center font-bold text-slate-700 text-[11px] mb-1">
                                     <div className="flex items-center space-x-1.5">
-                                      <span>{driver.label}</span>
-                                      
+                                      <span className={driver.available ? '' : 'text-slate-400'}>{driver.label}</span>
+
+                                      {/* A proxy driver scores something
+                                          adjacent to what its name promises -
+                                          fleet SIZE, not refresh due-ness. That
+                                          belongs on the face of the card, not
+                                          only inside the popover. */}
+                                      {driver.proxy && (
+                                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">
+                                          PROXY
+                                        </span>
+                                      )}
+
                                       {/* Interactive Info Icon Button */}
                                       <div className="relative inline-block">
                                         <button
@@ -1226,8 +1247,31 @@ export default function UserDashboardPage() {
                                   )}
                                 </div>
                               ))}
+
+                              {!urgencyData && (
+                                <p className="text-[11px] text-slate-400 leading-relaxed">
+                                  The urgency score has not been computed for this account yet.
+                                </p>
+                              )}
                             </div>
                           </div>
+
+                          {/* Why there is no total. ABX forbids scoring a
+                              missing driver as 0, so one unavailable driver
+                              blocks the composite - and the card has to say
+                              which one rather than showing an empty dial. */}
+                          {urgencyData && urgencyData.score == null && (
+                            <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-3 leading-relaxed">
+                              {urgencyData.unavailable_reason}
+                            </p>
+                          )}
+
+                          {urgencyData && (
+                            <p className="text-[10px] text-slate-400 leading-relaxed border-t border-slate-100 pt-3">
+                              {urgencyData.formula}{' '}{urgencyData.formula_authority}
+                              {urgencyData.proxy_drivers?.length > 0 && ' Drivers marked PROXY score something adjacent to their name — open each for what it actually measures.'}
+                            </p>
+                          )}
                         </div>
 
                         {/* Quick Stats Card */}
@@ -1344,7 +1388,7 @@ export default function UserDashboardPage() {
                                             <span className="w-6 h-6 rounded-full bg-blue-50 text-hp-navy border border-blue-200 text-[11px] font-extrabold flex items-center justify-center flex-shrink-0 mt-0.5">
                                               {idx + 1}
                                             </span>
-                                            <div className="space-y-2 min-w-0">
+                                            <div className="space-y-2 min-w-0 flex-1">
                                               <h4 className="text-sm font-extrabold text-slate-900 leading-snug">
                                                 Catalyst {idx + 1} &ndash; {p.title}
                                               </h4>
@@ -1354,6 +1398,19 @@ export default function UserDashboardPage() {
                                                 </span>
                                               )}
                                             </div>
+                                            {/* The score on the face of the
+                                                card, so catalysts can be
+                                                compared without opening four
+                                                drawers. The working stays in
+                                                the drawer. */}
+                                            {p.evidence_strength && (
+                                              <span
+                                                className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-blue-50 text-hp-navy border border-blue-200 flex-shrink-0 whitespace-nowrap cursor-help"
+                                                title={p.evidence_strength.formula}
+                                              >
+                                                {p.evidence_strength.score}/{p.evidence_strength.max_score}
+                                              </span>
+                                            )}
                                           </div>
 
                                           {/* The card body is the description -
@@ -1420,39 +1477,95 @@ export default function UserDashboardPage() {
 
                                           {open && (
                                             <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-3">
+                                              {/* Evidence strength: the score,
+                                                  then one bar per term. Three
+                                                  terms, three bars - the
+                                                  formula has no fourth. Each
+                                                  bar fills to its own share of
+                                                  100, so their widths add up to
+                                                  the score the way the terms
+                                                  add up to the total, and the
+                                                  basis line under each says
+                                                  what it was counted from. */}
                                               <div className="space-y-2">
                                                 <div className="flex items-center justify-between">
-                                                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500">
+                                                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 inline-flex items-center gap-1">
+                                                    <BarChart3 className="w-3 h-3" />
                                                     Evidence strength
                                                   </span>
                                                   <span
-                                                    className="text-[10px] font-bold text-slate-500 cursor-help"
-                                                    title={p.score_unavailable_reason || prioritiesData?.score_unavailable_reason}
+                                                    className="text-[11px] font-extrabold text-slate-700 cursor-help"
+                                                    title={p.evidence_strength?.formula || prioritiesData?.evidence_strength_formula}
                                                   >
-                                                    weighted score not defined
+                                                    {p.evidence_strength?.score ?? 0}/{p.evidence_strength?.max_score ?? 100}
                                                   </span>
                                                 </div>
-                                                {[
-                                                  { label: 'Support frequency', weight: '40%', value: m.support_count, unit: 'sentences' },
-                                                  { label: 'Document sections', weight: '25%', value: m.distinct_sections, unit: 'sections' },
-                                                  { label: 'Recency', weight: '20%', value: m.most_recent_date, unit: '' },
-                                                  { label: 'Source diversity', weight: '15%', value: m.independent_source_count, unit: 'sources' },
-                                                ].map((row, ri) => (
-                                                  <div key={ri} className="flex items-center justify-between gap-2 text-[10px]">
-                                                    <span className="text-slate-500 w-32 flex-shrink-0">
-                                                      {row.label} <span className="text-slate-400">({row.weight})</span>
-                                                    </span>
-                                                    <span className={`font-bold ${row.value === null || row.value === undefined || row.value === 0 ? 'text-slate-400 italic' : 'text-slate-700'}`}>
-                                                      {row.value === null || row.value === undefined
-                                                        ? 'not available'
-                                                        : row.value === 0
-                                                          ? 'none'
-                                                          : `${row.value}${row.unit ? ' ' + row.unit : ''}`}
-                                                    </span>
-                                                  </div>
-                                                ))}
+
+                                                <div className="flex items-stretch gap-2">
+                                                  {(p.evidence_strength?.terms || []).map((t: any, ti: number) => (
+                                                    <div key={ti} className="flex-1 min-w-0 space-y-1" title={t.basis}>
+                                                      <div className="h-1.5 rounded-full bg-slate-200 overflow-hidden">
+                                                        <div
+                                                          className="h-full rounded-full bg-hp-navy transition-all"
+                                                          style={{ width: `${t.max_points ? Math.round((t.points / t.max_points) * 100) : 0}%` }}
+                                                        />
+                                                      </div>
+                                                      <div className="flex items-baseline justify-between gap-1">
+                                                        <span className="text-[9px] text-slate-500 truncate">{t.label}</span>
+                                                        <span className="text-[9px] font-bold text-slate-600 flex-shrink-0">
+                                                          {t.points}/{t.max_points}
+                                                        </span>
+                                                      </div>
+                                                    </div>
+                                                  ))}
+                                                </div>
+
+                                                <div className="space-y-0.5 pt-1">
+                                                  {(p.evidence_strength?.terms || []).map((t: any, ti: number) => (
+                                                    <p key={ti} className="text-[10px] text-slate-500 leading-relaxed">
+                                                      <span className="text-slate-400">{t.label}:</span> {t.basis}
+                                                    </p>
+                                                  ))}
+                                                </div>
+
+                                                {/* Evidence that named no
+                                                    category scored nothing for
+                                                    diversity. Said plainly,
+                                                    because a reader comparing
+                                                    two cards needs to know the
+                                                    difference between evidence
+                                                    that is absent and evidence
+                                                    that could not be placed. */}
+                                                {(() => {
+                                                  const div = (p.evidence_strength?.terms || []).find((t: any) => t.key === 'source_diversity');
+                                                  const un = div?.uncategorised_sources || 0;
+                                                  return un > 0 ? (
+                                                    <p className="text-[10px] text-amber-700 leading-relaxed">
+                                                      {un} supporting source{un === 1 ? '' : 's'} carried no category and scored nothing for diversity.
+                                                    </p>
+                                                  ) : null;
+                                                })()}
+
                                                 <p className="text-[10px] text-slate-400 leading-relaxed pt-1 border-t border-slate-200">
-                                                  These are the four measures ABX weights. It does not define how any of them becomes a score, so the counts are shown instead of a composite.
+                                                  Scored on {p.evidence_strength?.scored_on || prioritiesData?.scored_on}. Age is measured to that date, so the score does not drift as this page ages.
+                                                </p>
+                                              </div>
+
+                                              {/* ABX's own four measures, kept
+                                                  beside the score rather than
+                                                  replaced by it. They are what
+                                                  the ordering rule uses, and
+                                                  they say something the three
+                                                  scored terms do not. */}
+                                              <div className="space-y-1 pt-1 border-t border-slate-200">
+                                                <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 block">
+                                                  Supporting counts
+                                                </span>
+                                                <p className="text-[10px] text-slate-500 leading-relaxed">
+                                                  {m.support_count} source sentence{m.support_count === 1 ? '' : 's'}
+                                                  {' · '}{m.distinct_sections} document section{m.distinct_sections === 1 ? '' : 's'}
+                                                  {' · '}{m.independent_source_count} independent source{m.independent_source_count === 1 ? '' : 's'}
+                                                  {m.most_recent_date ? ` · most recent ${m.most_recent_date}` : ''}
                                                 </p>
                                               </div>
 
@@ -2264,6 +2377,9 @@ export default function UserDashboardPage() {
                                       <div key={c.category} className="w-20 text-center">
                                         <span className="text-xs block font-semibold text-slate-600">{categoryLabel(c.category)}</span>
                                         {(c.primary.quality_flags || []).length > 0 && <span className="text-[10px] font-semibold text-amber-700 block">Noisy keyword</span>}
+                                        {!(c.primary.quality_flags || []).length && !c.primary.has_signal && c.primary.score != null && (
+                                          <span className="text-[10px] font-semibold text-slate-400 block">No buying stage</span>
+                                        )}
                                       </div>
                                     ))}
                                   </div>
@@ -2273,7 +2389,7 @@ export default function UserDashboardPage() {
                               <p className="text-xs text-slate-500">{categoryFile?.note || 'Upload the HP Category Intent file to see category scores.'}</p>
                             )}
                             <p className="text-[11px] text-slate-500">
-                              Scores as received from the HP Category Intent file, shown for every HP category. Faded bars rest on a noisy keyword and should be read with care. Supporting Bombora signals add context and never change these scores.
+                              Scores as received from the HP Category Intent file, shown for every HP category, ordered by score. Bars are ordered by score alone: faded bars rest on a noisy keyword and are marked above. Supporting Bombora signals add context and never change these scores.
                               {categoryFile?.top_check && !categoryFile.top_check.consistent && (
                                 <span className="text-amber-700 font-semibold"> The file&apos;s stated top category ({categoryFile.top_check.stated_category}) does not match its scores ({categoryFile.top_check.recomputed_category}).</span>
                               )}

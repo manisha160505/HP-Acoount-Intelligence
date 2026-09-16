@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends
-from app.core.deps import require_user_role, require_admin_role
+
+from app.core.deps import require_admin_role, require_user_role
 
 router = APIRouter(prefix="/protected", tags=["Protected Verification Endpoints"])
 

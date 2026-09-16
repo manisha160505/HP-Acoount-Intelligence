@@ -1,8 +1,11 @@
 """Building and updating an index, within a one-workspace budget.
 
-The cluster allows three Atlas vector search indexes and one LightRAG workspace
-costs exactly three, so there is one workspace per (account, index) and no room
-to build a replacement beside it. Two paths, with deliberately different
+There is one workspace per (account, index) and no second one to build a
+replacement in, so a full rebuild replaces data in place. (Workspaces used to
+cost three Atlas vector indexes each against a cluster cap of three, which is
+why no replacement could ever be built beside the live one; vectors now live in
+three shared, partitioned collections, so the cap is no longer what constrains
+this - the stable workspace name is.) Two paths, with deliberately different
 promises:
 
 **Incremental** - what a data change actually triggers.
@@ -70,13 +73,11 @@ async def update_index(account_id: str, index: str, full: bool = False,
              "damaged": [], "skipped": False, "duration_seconds": 0.0}
 
     # A retired index stays retired until someone explicitly rebuilds it. An
-    # ordinary data change must not bring it back: recreating the workspace
-    # would recreate its three Atlas vector indexes and take back the capacity
-    # it was retired to release.
+    # ordinary data change must not bring it back: rebuilding costs an LLM call
+    # per chunk, and a retired index was retired on purpose.
     if index_state.is_retired(account_id, index) and not full:
         raise BuildBlocked(
-            "this index was retired to free capacity - rebuild it explicitly to "
-            "bring it back")
+            "this index was retired - rebuild it explicitly to bring it back")
 
     ok, reason = registry.preconditions(db, account_id, index)
     if not ok:
@@ -134,7 +135,7 @@ async def update_index(account_id: str, index: str, full: bool = False,
     # Start from what is already recorded, so a document we do not touch keeps
     # its existing fingerprint and a failure does not mark it current.
     recorded = {} if full else dict(
-        (index_state.get(account_id, index).get("documents") or {}))
+        index_state.get(account_id, index).get("documents") or {})
 
     try:
         rag = await client.build_rag(account_id, index)
@@ -426,12 +427,15 @@ def retire_index(account_id: str, index: str, reason: str = "") -> dict:
     """Drop an index's workspace and mark it retired.
 
     The reason this exists rather than calling `client.drop_workspace` directly:
-    dropping the collections alone leaves `retrieval_index_state` still reading
-    READY and naming a workspace that no longer exists. The next query or data
-    change would then reopen it, recreate the collections AND their three Atlas
-    vector indexes, and answer from an empty graph - silently taking back the
-    capacity the drop was meant to release, and reporting "no such fact" rather
-    than "no index".
+    dropping the data alone leaves `retrieval_index_state` still reading READY
+    and naming a workspace that no longer holds anything. The next query or data
+    change would then reopen it and answer from an empty graph, reporting "no
+    such fact" rather than "no index" - a silent wrong answer instead of an
+    honest refusal.
+
+    What retiring now reclaims is storage, not Atlas index capacity: the three
+    shared vector indexes serve every account and are never dropped. The
+    account's rows are removed from the shared collections by partition.
 
     What survives: the published widget and the evidence registry, both stored
     outside the workspace. The feature keeps rendering its last build with
