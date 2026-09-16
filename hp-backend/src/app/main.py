@@ -9,11 +9,10 @@ from app.config.settings import settings
 from app.core.seeder import seed_database_if_empty
 from app.database.mongodb import close_mongo_connection, connect_to_mongo, get_db
 from app.database.seed import seed_users
+from app.errors import register_error_handlers
 from app.observability import setup_observability, shutdown_observability
-from app.observability.middleware import (
-    RequestLoggingMiddleware,
-    unhandled_exception_handler,
-)
+from app.observability.envelope_middleware import ResponseEnvelopeMiddleware
+from app.observability.middleware import RequestLoggingMiddleware
 from app.observability.tracing import instrument_app
 
 # Called before anything else so that every log line from the imports below,
@@ -101,6 +100,12 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+# Registered first, so it runs INNERMOST - closest to the route. It has to see
+# the handler's own JSON body before anything else touches it, and it must not
+# see the error bodies the exception handlers produce (those are already
+# enveloped, and it skips 4xx/5xx for that reason).
+app.add_middleware(ResponseEnvelopeMiddleware)
+
 # Starlette runs middleware in reverse order of registration, so this must be
 # added before CORS for CORS to be the outermost layer - otherwise a request
 # rejected by CORS would never reach the logger, and an exception raised inside
@@ -124,9 +129,12 @@ app.add_middleware(
 # stands when called.
 instrument_app(app)
 
-# FastAPI's default 500 is a bare "Internal Server Error" with no id, which
-# leaves a user-reported failure with nothing to search the logs on.
-app.add_exception_handler(Exception, unhandled_exception_handler)
+# Every failure path - a raised APIError, a plain HTTPException, a schema
+# validation failure, or an uncaught exception - is normalised into one JSON
+# body here, with the request id attached so a user-reported failure has
+# something to search the logs on. `detail` stays a plain string inside that
+# body, so the frontend sites that render it directly keep working unchanged.
+register_error_handlers(app)
 
 app.include_router(api_v1_router)
 
