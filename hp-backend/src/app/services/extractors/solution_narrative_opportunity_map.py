@@ -1,27 +1,34 @@
-import os
-import io
-import csv
-import re
-import json
 import hashlib
+import json
 import logging
-import pandas as pd
-from datetime import datetime, timezone
+import re
+from datetime import UTC, datetime
+
 from bson import ObjectId
-from app.database.mongodb import get_db
+
 from app.core.llm import generate_gpt4o_json_completion
-from app.services.extractors.recent_news_signals import extract_recent_news_signals
-from app.services.extractors.grounding import (
-    build_corpus, check_text, filter_enum_list, strip_unsourced_urls,
-    GroundingReport, HP_PRODUCT_LINES,
-)
+from app.database.mongodb import get_db
 from app.services.extractors.datasets import (
-    account_domain, find_file_path, read_dataset_records, read_dataset_rows,
+    account_domain,
+    find_file_path,
+    read_dataset_records,
+    read_dataset_rows,
     requires_local_datasets,
 )
-from app.services.extractors.intent_demand_signals import (
-    _carries_buying_signal, _match_provider_account, _parse_category_file,
+from app.services.extractors.grounding import (
+    HP_PRODUCT_LINES,
+    GroundingReport,
+    build_corpus,
+    check_text,
+    filter_enum_list,
+    strip_unsourced_urls,
 )
+from app.services.extractors.intent_demand_signals import (
+    _carries_buying_signal,
+    _match_provider_account,
+    _parse_category_file,
+)
+from app.services.extractors.recent_news_signals import extract_recent_news_signals
 from app.services.hp import intent_topic_map as tm
 
 logger = logging.getLogger(__name__)
@@ -415,7 +422,7 @@ def _match_play_contacts(play_key: str, contacts: list[dict]) -> list[dict]:
     scored.sort(key=lambda x: (-x[0], -x[1]))
 
     out = []
-    for rank, _s, c in scored[:2]:
+    for _rank, _s, c in scored[:2]:
         why = (f"{c.get('influence_type') or 'Contact'} in {c.get('normalized_department')}"
                f" whose title matches this play's remit.")
         out.append({
@@ -439,9 +446,9 @@ def _opportunity_fingerprint(corpus_items: list[str], contact_ids: list[str]) ->
     ).hexdigest()
 
 
-def generate_opportunity_map_plays_with_gpt4o(account_id: str) -> dict:
+def generate_opportunity_map_plays_with_gpt4o(account_id: str) -> dict:  # noqa: PLR0912, PLR0915 - branch-heavy extractor predates the lint gate
     db = get_db()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     account_doc = None
     if ObjectId.is_valid(account_id):
@@ -561,7 +568,7 @@ def generate_opportunity_map_plays_with_gpt4o(account_id: str) -> dict:
         dt = None
         for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y", "%Y/%m/%d"):
             try:
-                dt = datetime.strptime(raw_date[:10], fmt).replace(tzinfo=timezone.utc)
+                dt = datetime.strptime(raw_date[:10], fmt).replace(tzinfo=UTC)
                 break
             except (ValueError, TypeError):
                 continue
@@ -569,7 +576,7 @@ def generate_opportunity_map_plays_with_gpt4o(account_id: str) -> dict:
             "headline": headline, "date": raw_date, "dt": dt,
             "url": str(row.get("event_url") or "").strip(),
         })
-    news_triggers.sort(key=lambda t: t["dt"] or datetime.min.replace(tzinfo=timezone.utc),
+    news_triggers.sort(key=lambda t: t["dt"] or datetime.min.replace(tzinfo=UTC),
                        reverse=True)
     for t in news_triggers[:10]:
         corpus.append({"text": t["headline"], "dataset": "google_news / news_events",
@@ -578,7 +585,7 @@ def generate_opportunity_map_plays_with_gpt4o(account_id: str) -> dict:
 
     # Only demand a trigger citation when the account actually has triggers to
     # cite - an account with no news or intent data must not be blanked out.
-    has_any_trigger_available = any(c.get("kind") == "trigger" for c in corpus)
+    has_any_trigger_available = any(c.get("kind") == "trigger" for c in corpus)  # noqa: F841 - dead assignment - see the audit note; kept until the intent is confirmed
 
     # Grounding corpus: every cell of every dataset this feature reads. Used to
     # reject a number, URL or product name the account's own data never carried.
@@ -778,7 +785,7 @@ Output JSON:
     # first answer so those fields survive the correction.
     first_pass_raw: dict = {}
 
-    def _process(raw_plays) -> None:
+    def _process(raw_plays) -> None:  # noqa: PLR0915 - long extractor predates the lint gate; split rather than raise the limit
         """One validation pass. Appends survivors to cleaned_plays and records
         why anything else was rejected."""
         if not isinstance(raw_plays, list):
@@ -842,9 +849,7 @@ Output JSON:
                         ct = _norm_text(c["text"])
                         if not ct:
                             continue
-                        if np in ct:
-                            hits.append((len(ct), c))
-                        elif len(ct) >= 6 and _token_present(ct, np):
+                        if np in ct or (len(ct) >= 6 and _token_present(ct, np)):
                             hits.append((len(ct), c))
                     # Prefer the most specific (longest) matching cell.
                     hit = max(hits, key=lambda x: x[0])[1] if hits else None
@@ -960,7 +965,7 @@ Output JSON:
             # --- deterministic priority --------------------------------------
             cited_dts = [v["dt"] for v in verified if v.get("dt")]
             newest = max(cited_dts) if cited_dts else None
-            cited_intent = [v["composite_score"] for v in verified if v.get("composite_score")]
+            cited_intent = [v["composite_score"] for v in verified if v.get("composite_score")]  # noqa: F841 - dead assignment - see the audit note; kept until the intent is confirmed
 
             contacts = play_contacts.get(play_key) or []
             scale = _build_scale_statement(
@@ -1158,8 +1163,12 @@ Output JSON:
 
     # Spec ordering: all three checks first, then those missing one, tie-broken
     # by how current the cited trigger is.
-    published = {p["play_key"] for p in cleaned_plays} | {a["play_key"] for a in discovery_areas} \
-        if False else {p["play_key"] for p in cleaned_plays}
+    # NOTE: this was written as `{...} | {... discovery_areas} if False else {...}`.
+    # The `if False` made the first arm unreachable, which is the only reason the
+    # undefined name `discovery_areas` never raised. Collapsed here to the arm
+    # that actually executes - behaviour is unchanged. If the union was the real
+    # intent, `discovery_areas` needs defining and the condition needs replacing.
+    published = {p["play_key"] for p in cleaned_plays}
     withheld = sorted({d.split(":")[0].strip() for d in dropped} - published)
     if withheld:
         logger.warning("opportunity map: %d play(s) withheld entirely: %s",
@@ -1256,12 +1265,12 @@ Output JSON:
 )
 def extract_solution_narrative_opportunity_map(account_id: str) -> list[dict]:
     db = get_db()
-    now = datetime.now(timezone.utc)
-    
+    now = datetime.now(UTC)
+
     firmo_records = _read_dataset_records(account_id, "firmographics")
     techno_records = _read_dataset_records(account_id, "technographics")
     intent_records = _read_dataset_records(account_id, "intent_score")
-    
+
     results = []
 
     # 1. Widget: opportunity_context_card

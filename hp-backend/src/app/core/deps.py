@@ -1,8 +1,9 @@
+from bson import ObjectId
 from fastapi import Depends, HTTPException, Query, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+
 from app.core.security import decode_access_token
 from app.database.mongodb import get_db
-from bson import ObjectId
 
 security_bearer = HTTPBearer()
 security_bearer_optional = HTTPBearer(auto_error=False)
@@ -22,7 +23,7 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token payload",
         )
-    
+
     db = get_db()
     user = db["users"].find_one({"_id": ObjectId(user_id)})
     if not user:
@@ -30,7 +31,7 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found",
         )
-    
+
     return {
         "id": str(user["_id"]),
         "email": user["email"],
@@ -47,13 +48,13 @@ def get_current_user_flexible(
         raw_token = credentials.credentials
     elif token and token.strip():
         raw_token = token.strip()
-        
+
     if not raw_token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authentication token required via Bearer header or ?token= query parameter",
         )
-        
+
     payload = decode_access_token(raw_token)
     if not payload:
         raise HTTPException(
@@ -66,7 +67,7 @@ def get_current_user_flexible(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token payload",
         )
-    
+
     db = get_db()
     user = db["users"].find_one({"_id": ObjectId(user_id)})
     if not user:
@@ -74,7 +75,7 @@ def get_current_user_flexible(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found",
         )
-    
+
     return {
         "id": str(user["_id"]),
         "email": user["email"],

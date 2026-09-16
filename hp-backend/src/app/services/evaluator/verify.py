@@ -31,8 +31,10 @@ import logging
 import re
 
 from app.services.evaluator.sources import (
-    SUPERLATIVE_RE, COMPETITOR_RE, VERDICT_SUPPORTED, VERDICT_UNSUPPORTED,
-    VERDICT_RESTRICTED, VERDICT_NOT_CHECKABLE,
+    COMPETITOR_RE,
+    SUPERLATIVE_RE,
+    VERDICT_RESTRICTED,
+    VERDICT_UNSUPPORTED,
 )
 
 logger = logging.getLogger(__name__)

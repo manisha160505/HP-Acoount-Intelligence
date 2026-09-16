@@ -49,7 +49,7 @@ class EvidenceBuilder:
         self.dataset = dataset
         self.rows = []
 
-    def add(self, source_text, field=None, record_id=None,
+    def add(self, source_text, field=None, record_id=None,  # noqa: PLR0913, PLR0917 - long signature predates the lint gate
             publisher=None, source_url=None, dataset=None, quote=None,
             period=None, value=None, unit=None, page=None,
             filing_label=None, filing_period=None) -> str | None:
@@ -118,7 +118,7 @@ class EvidenceBuilder:
         self.rows.append(row)
         return eid
 
-    def line(self, source_text, field=None, record_id=None,
+    def line(self, source_text, field=None, record_id=None,  # noqa: PLR0913, PLR0917 - long signature predates the lint gate
              publisher=None, source_url=None, dataset=None, quote=None,
              period=None, value=None, unit=None, page=None,
              filing_label=None, filing_period=None) -> str:

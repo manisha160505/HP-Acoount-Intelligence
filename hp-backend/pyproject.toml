@@ -1,0 +1,186 @@
+# Backend lint and format configuration.
+#
+# Ruff replaces flake8 + isort + pyupgrade + pydocstyle and runs in a fraction
+# of a second over this tree, which is what makes a pre-push hook tolerable.
+#
+# The thresholds in [tool.ruff.lint.pylint] and `line-length` below are the
+# dials to turn. They were set from the code as it actually is, not from
+# defaults: the aim is a gate that catches new problems without flagging 900
+# existing lines on day one, because a linter that cries wolf gets disabled.
+#
+#   ruff check .          # what would fail
+#   ruff check . --fix    # fix what is mechanical
+#   ruff format .         # format
+
+[project]
+name = "hp-backend"
+version = "1.0.0"
+requires-python = ">=3.11"
+
+[tool.ruff]
+# p95 of the current tree is 85 and p99 is 114. At the default 88 there are 923
+# violations, at 100 there are 448, nearly all of them long string literals and
+# comments rather than real code. 100 keeps the rule meaningful without a
+# formatting churn commit touching every file.
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+exclude = [
+    ".venv",
+    "__pycache__",
+    "data",
+    "seed_data",
+    # Point-in-time scripts, not part of the service.
+    "scripts",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # pyflakes - unused imports, undefined names, f-string bugs
+    "I",      # isort - import ordering
+    "B",      # flake8-bugbear - real bug patterns
+    "C4",     # comprehension simplifications
+    "UP",     # pyupgrade - outdated syntax for the target version
+    "SIM",    # flake8-simplify
+    "RET",    # flake8-return
+    "ARG",    # unused arguments
+    "PTH",    # prefer pathlib over os.path
+    "PL",     # pylint - includes the size limits configured below
+    "RUF",    # ruff's own rules
+    "T20",    # flake8-print - no print() in a service that has a logger
+    "LOG",    # flake8-logging - logging misuse
+    "G",      # flake8-logging-format - f-strings in log calls
+    "BLE",    # blind except
+    "DTZ",    # naive datetimes
+]
+
+ignore = [
+    # The formatter owns line wrapping. Leaving E501 on would fight it over
+    # the long string literals that make up most of the current violations.
+    "E501",
+    # `if x: return True else: return False` collapsing - it often reads worse
+    # than the explicit form in the scoring code.
+    "RET505", "RET506", "RET507", "RET508",
+    # Magic numbers. This codebase is full of legitimate scoring weights and
+    # thresholds; the rule would fire on nearly all of them.
+    "PLR2004",
+    # `zip(strict=)` - added in 3.10 but noisy to retrofit across the extractors.
+    "B905",
+    # os.path is used consistently and correctly throughout; a pathlib
+    # migration is a separate piece of work, not a lint gate.
+    "PTH118", "PTH120", "PTH100", "PTH110", "PTH103", "PTH107", "PTH123",
+    "PTH109", "PTH122", "PTH119", "PTH202", "PTH208", "PTH112",
+
+    # 296 hits, none of them defects. "%s" % x and "...%d..." % (a, b) are
+    # ordinary formatting here, and the lazy logger.info("...%s", x) form is
+    # correct practice rather than something to migrate away from. Rewriting
+    # all of them would be pure churn across every file.
+    "UP031",
+
+    # 83 hits. Imports inside a function are used deliberately in this codebase
+    # to break circular imports between the extractors and to keep optional
+    # dependencies (lightrag, opentelemetry) out of module import time - which
+    # is exactly what makes the observability layer degrade gracefully.
+    "PLC0415",
+
+    # 35 hits, nearly all in tests, where sys.path must be adjusted before the
+    # app package can be imported at all.
+    "E402",
+
+    # Unused arguments are usually an interface being satisfied - a FastAPI
+    # dependency taking a request it does not read, or a handler matching a
+    # signature. Too weak a signal to gate a push on.
+    "ARG001", "ARG002",
+
+    # Module-level mutable state guarded by a global statement is how the
+    # observability singletons and the retrieval worker are written. Flagged
+    # here would mean 10 noqa comments on deliberate design.
+    "PLW0603",
+
+    # `except Exception` is used deliberately and pervasively here, and the
+    # pattern is sound: the extractors and the retrieval layer are designed so
+    # that one failing feature degrades to an empty widget rather than taking
+    # the request down, and every one of these handlers logs before it
+    # continues. BLE001 cannot tell that apart from a swallowed error, and the
+    # swallowing is what actually matters - which LOG and the `logger.exception`
+    # convention already cover.
+    "BLE001",
+
+    # Rebinding a loop variable inside its own loop. Legal, used intentionally
+    # in the normalisation code (`for row in rows: row = clean(row)`), and
+    # flagging it would mean rewriting working parsers for no behaviour change.
+    "PLW2901",
+
+    # Unicode look-alikes. The data genuinely contains typographic quotes and
+    # en-dashes from the source spreadsheets; that is content, not a mistake.
+    "RUF001", "RUF002", "RUF003",
+]
+
+# ---------------------------------------------------------------------------
+# The size dials. Raise or lower these deliberately.
+#
+# Measured over the 600 functions in src/ at the time of writing:
+#   median 14 lines, p90 70, max 810
+#   85 functions over 50 lines, 42 over 80, 25 over 120
+#
+# max-statements is set to 120 rather than the default 50 because the extractors
+# are genuinely long linear mapping code and 85 immediate failures would mean
+# the rule gets switched off within a week. It still catches the worst offenders
+# and, more importantly, stops anything NEW from reaching that size.
+#
+# The intended direction is to ratchet these DOWN over time as the long
+# extractors get split, not to raise them when something new trips the limit.
+# ---------------------------------------------------------------------------
+[tool.ruff.lint.pylint]
+max-statements = 120    # function body size. Default 50; the 810-line extractor is the outlier this targets.
+max-branches = 40       # if/elif/for/while paths through one function.
+max-args = 8            # the worst current offender takes 14; new code should not.
+max-returns = 12        # return statements in one function.
+max-locals = 40         # local variables in one function.
+max-public-methods = 25
+
+[tool.ruff.lint.mccabe]
+# Cyclomatic complexity. 25 is high by convention but proportionate to the
+# branch-heavy extractor code; it still flags anything pathological.
+max-complexity = 25
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+combine-as-imports = true
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's Depends()/Query()/File() are function calls in argument defaults by
+# design, so B008 must not fire on them.
+extend-immutable-calls = [
+    "fastapi.Depends", "fastapi.Query", "fastapi.Path", "fastapi.Body",
+    "fastapi.File", "fastapi.Form", "fastapi.Header", "fastapi.Cookie",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests: long assertions, fixture shadowing and unused arguments are normal.
+"tests/**" = ["PLR2004", "ARG001", "ARG002", "PLR0915", "S101", "T20"]
+# Seeding and one-off data loading legitimately print progress to a console.
+"src/app/database/seed.py" = ["T20"]
+"src/app/core/seeder.py" = ["T20", "PLR0915"]
+# Re-exports.
+"**/__init__.py" = ["F401"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "lf"
+# Format code inside docstrings too - this codebase's docstrings carry runnable
+# examples.
+docstring-code-format = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+]

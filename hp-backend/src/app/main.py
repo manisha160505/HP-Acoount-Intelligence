@@ -4,19 +4,24 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.config.settings import settings
-from app.database.mongodb import connect_to_mongo, close_mongo_connection, get_db
-from app.database.seed import seed_users
-from app.core.seeder import seed_database_if_empty
 from app.api.v1.router import api_v1_router
-
-# Nothing configured the root logger, so every logger.info in the extractors and
-# the seeder was discarded and only warnings reached stderr. The startup summary
-# below is worthless without this.
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(levelname)s [%(name)s] %(message)s",
+from app.config.settings import settings
+from app.core.seeder import seed_database_if_empty
+from app.database.mongodb import close_mongo_connection, connect_to_mongo, get_db
+from app.database.seed import seed_users
+from app.observability import setup_observability, shutdown_observability
+from app.observability.middleware import (
+    RequestLoggingMiddleware,
+    unhandled_exception_handler,
 )
+from app.observability.tracing import instrument_app
+
+# Called before anything else so that every log line from the imports below,
+# the seeder and the retrieval worker goes through the configured formatter.
+# Previously a bare basicConfig here emitted unstructured text: readable at a
+# terminal, unqueryable in a log store, and with nothing tying a line to the
+# request that produced it.
+setup_observability()
 logger = logging.getLogger(__name__)
 
 # The placeholder shipped in .env.example. It is a non-empty string, so it
@@ -84,6 +89,9 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.exception("Retrieval worker did not stop cleanly.")
     close_mongo_connection()
+    # Last: both exporters buffer, so the telemetry for the final requests
+    # before a redeploy is only kept if they are flushed explicitly.
+    shutdown_observability()
 
 
 app = FastAPI(
@@ -93,6 +101,12 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+# Starlette runs middleware in reverse order of registration, so this must be
+# added before CORS for CORS to be the outermost layer - otherwise a request
+# rejected by CORS would never reach the logger, and an exception raised inside
+# it would return a 500 without the CORS headers the browser needs to read it.
+app.add_middleware(RequestLoggingMiddleware)
+
 # CORS Middleware Setup
 app.add_middleware(
     CORSMiddleware,
@@ -100,7 +114,19 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    # The frontend reads this off a failed response to show the id a user can
+    # quote in a bug report. A cross-origin caller cannot see a header that is
+    # not explicitly exposed, so without this it reads as undefined.
+    expose_headers=["X-Request-ID"],
 )
+
+# After the middleware stack is assembled: the instrumentor wraps the app as it
+# stands when called.
+instrument_app(app)
+
+# FastAPI's default 500 is a bare "Internal Server Error" with no id, which
+# leaves a user-reported failure with nothing to search the logs on.
+app.add_exception_handler(Exception, unhandled_exception_handler)
 
 app.include_router(api_v1_router)
 

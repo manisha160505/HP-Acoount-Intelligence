@@ -1,13 +1,13 @@
-import os
-import io
-import csv
-import pandas as pd
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+
 from bson import ObjectId
+
 from app.database.mongodb import get_db
 from app.services.extractors.datasets import (
-    find_file_path, read_dataset_records, requires_local_datasets,
+    read_dataset_records,
+    requires_local_datasets,
 )
+
 
 def _read_dataset_records(account_id: str, dataset_key: str) -> list[dict]:
     """Rows for one dataset. Shared implementation - see datasets.py.
@@ -154,20 +154,20 @@ def _personas_from_hiring(job_records: list) -> list:
 )
 def extract_message_evaluator(account_id: str) -> list[dict]:
     db = get_db()
-    now = datetime.now(timezone.utc)
-    
+    now = datetime.now(UTC)
+
     firmo_records = _read_dataset_records(account_id, "firmographics")
     contacts_records = _read_dataset_records(account_id, "prospect_contacts")
-    
+
     results = []
 
     # Get dynamic company name
     account_doc = None
     if ObjectId.is_valid(account_id):
         account_doc = db["accounts"].find_one({"_id": ObjectId(account_id)})
-    
+
     company_name = account_doc.get("name", "Target Account") if account_doc else "Target Account"
-    
+
     if firmo_records and len(firmo_records) > 0:
         f_name = str(firmo_records[0].get("Company Name") or firmo_records[0].get("company_name") or "").strip()
         if f_name:
@@ -201,7 +201,7 @@ def extract_message_evaluator(account_id: str) -> list[dict]:
     business_context = {}
     if firmo_records and len(firmo_records) > 0:
         f = firmo_records[0]
-        
+
         c_name = str(f.get("Company Name") or f.get("company_name") or f.get("Name") or "").strip()
         domain_val = str(f.get("Company Domain") or f.get("company_domain") or f.get("Domain") or f.get("Website") or f.get("website") or "").strip()
 

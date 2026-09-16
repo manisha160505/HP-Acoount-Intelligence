@@ -1,10 +1,12 @@
-from datetime import datetime, timezone
 import re
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from datetime import UTC, datetime
+
 from bson import ObjectId
-from app.database.mongodb import get_db
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+
 from app.core.deps import require_admin_role, require_user_role
-from app.schemas.account import AccountCreate, AccountStatusUpdate, AccountResponse
+from app.database.mongodb import get_db
+from app.schemas.account import AccountCreate, AccountResponse, AccountStatusUpdate
 
 router = APIRouter(prefix="/accounts", tags=["Account Management"])
 
@@ -35,7 +37,7 @@ def list_accounts(
     if search and search.strip():
         regex_pattern = re.escape(search.strip())
         query["name"] = {"$regex": regex_pattern, "$options": "i"}
-    
+
     cursor = db["accounts"].find(query).sort("updated_at", -1)
     return [serialize_account(doc) for doc in cursor]
 
@@ -46,7 +48,7 @@ def create_account(
 ):
     db = get_db()
     account_name = account_in.name.strip()
-    
+
     # Check for duplicate name (case-insensitive)
     existing = db["accounts"].find_one({"name": {"$regex": f"^{re.escape(account_name)}$", "$options": "i"}})
     if existing:
@@ -54,18 +56,18 @@ def create_account(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"An account with the name '{account_name}' already exists."
         )
-    
-    now = datetime.now(timezone.utc)
+
+    now = datetime.now(UTC)
     new_doc = {
         "name": account_name,
         "status": "active",
         "created_at": now,
         "updated_at": now
     }
-    
+
     result = db["accounts"].insert_one(new_doc)
     new_doc["_id"] = result.inserted_id
-    
+
     return serialize_account(new_doc)
 
 @router.get("/{account_id}", response_model=AccountResponse)
@@ -75,12 +77,12 @@ def get_account(
 ):
     if not ObjectId.is_valid(account_id):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid account ID format")
-    
+
     db = get_db()
     account = db["accounts"].find_one({"_id": ObjectId(account_id)})
     if not account:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
-    
+
     return serialize_account(account)
 
 @router.patch("/{account_id}", response_model=AccountResponse)
@@ -91,10 +93,10 @@ def update_account(
 ):
     if not ObjectId.is_valid(account_id):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid account ID format")
-    
+
     db = get_db()
     account_name = account_in.name.strip()
-    
+
     # Check duplicate if name is changing
     existing = db["accounts"].find_one({
         "_id": {"$ne": ObjectId(account_id)},
@@ -105,17 +107,17 @@ def update_account(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"An account with the name '{account_name}' already exists."
         )
-    
-    now = datetime.now(timezone.utc)
+
+    now = datetime.now(UTC)
     updated = db["accounts"].find_one_and_update(
         {"_id": ObjectId(account_id)},
         {"$set": {"name": account_name, "updated_at": now}},
         return_document=True
     )
-    
+
     if not updated:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
-    
+
     return serialize_account(updated)
 
 @router.patch("/{account_id}/status", response_model=AccountResponse)
@@ -126,16 +128,16 @@ def update_account_status(
 ):
     if not ObjectId.is_valid(account_id):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid account ID format")
-    
+
     db = get_db()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     updated = db["accounts"].find_one_and_update(
         {"_id": ObjectId(account_id)},
         {"$set": {"status": status_in.status, "updated_at": now}},
         return_document=True
     )
-    
+
     if not updated:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
-    
+
     return serialize_account(updated)

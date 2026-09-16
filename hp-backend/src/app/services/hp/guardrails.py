@@ -18,7 +18,7 @@ can be cross-checked.
 
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 logger = logging.getLogger(__name__)
 
@@ -91,8 +91,7 @@ BENCHMARK_RE = re.compile(r"cinebench|procyon|mobilemark|internal testing|"
 FUTURE_RE = re.compile(r"\bplanned\b|\bexpected\b|\bfuture\b|\bwill be available\b|"
                        r"\bcoming\b|\blater this year\b", re.I)
 
-_MONTHS = ("january february march april may june july august september "
-           "october november december").split()
+_MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"]
 _EMBARGO_DATE_RE = re.compile(
     r"([A-Z][a-z]+)\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})", re.I)
 
@@ -114,7 +113,7 @@ def parse_embargo(raw: str):
         return None
     try:
         return datetime(int(m.group(3)), _MONTHS.index(month) + 1, int(m.group(2)),
-                        tzinfo=timezone.utc)
+                        tzinfo=UTC)
     except ValueError:
         return None
 
@@ -160,7 +159,7 @@ def approve_facts(slides, rule, account_country, now=None):
     `slides` are hp_product_knowledge documents already restricted to the deck
     this rule maps to. Returns (approved, rejected) as FactDecision lists.
     """
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     country = normalize_country(account_country)
     approved, rejected = [], []
 

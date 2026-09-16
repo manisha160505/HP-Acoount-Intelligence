@@ -73,7 +73,6 @@ decision traded away.
 """
 
 import logging
-import re
 
 logger = logging.getLogger(__name__)
 
@@ -184,7 +183,7 @@ def _build_classes():
 
         async def upsert(self, data):
             if not data:
-                return
+                return None
             scoped = {}
             for key, value in data.items():
                 payload = dict(value)
@@ -194,7 +193,7 @@ def _build_classes():
 
         async def delete(self, ids):
             if not ids:
-                return
+                return None
             return await super().delete([self._scope(i) for i in list(ids)])
 
         async def delete_entity(self, entity_name: str):
@@ -426,7 +425,6 @@ def _build_classes():
                 "[%s] skipping the per-workspace Atlas Search index - index "
                 "capacity is reserved for the shared vector indexes",
                 self.workspace)
-            return
 
     return HpSharedVectorStorage, HpMongoGraphStorage
 

@@ -135,7 +135,7 @@ async def update_index(account_id: str, index: str, full: bool = False,
     # Start from what is already recorded, so a document we do not touch keeps
     # its existing fingerprint and a failure does not mark it current.
     recorded = {} if full else dict(
-        (index_state.get(account_id, index).get("documents") or {}))
+        index_state.get(account_id, index).get("documents") or {})
 
     try:
         rag = await client.build_rag(account_id, index)

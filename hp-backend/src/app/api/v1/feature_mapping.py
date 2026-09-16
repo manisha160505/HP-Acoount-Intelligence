@@ -1,10 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+
 from app.core.deps import require_admin_role
 from app.schemas.account_data import DATASET_REGISTRY
 from app.schemas.feature_mapping import (
-    MappedField,
     FeatureMappingResponse,
-    ReverseDependencyResponse
+    ReverseDependencyResponse,
 )
 
 router = APIRouter(prefix="/features", tags=["Feature & Sourcing Mapping (Admin Only)"])
@@ -938,7 +938,7 @@ def list_reverse_dependencies(current_user: dict = Depends(require_admin_role)):
         for feat_key, feat_info in FEATURE_MAPPINGS.items():
             if key in feat_info["dependent_datasets"]:
                 mapped_feats.append(feat_key)
-        
+
         result.append({
             "dataset_key": key,
             "display_name": info["display_name"],

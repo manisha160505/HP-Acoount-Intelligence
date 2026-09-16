@@ -1,5 +1,5 @@
-from datetime import datetime
 from pydantic import BaseModel, Field
+
 
 class AccountInstructionsUpdate(BaseModel):
     instructions_text: str = Field(default="")

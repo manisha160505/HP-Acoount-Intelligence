@@ -1,22 +1,24 @@
-import os
-import io
-import re
-import csv
+import difflib
+import hashlib
 import json
 import logging
-import hashlib
-import difflib
+import re
 from collections import Counter
-import pandas as pd
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
+
 from bson import ObjectId
-from app.database.mongodb import get_db
+
 from app.core.llm import generate_gpt4o_json_completion
-from app.services.extractors.grounding import (
-    build_corpus, check_text, GroundingReport,
-)
+from app.database.mongodb import get_db
 from app.services.extractors.datasets import (
-    find_file_path, read_dataset_records, requires_local_datasets,
+    find_file_path,
+    read_dataset_records,
+    requires_local_datasets,
+)
+from app.services.extractors.grounding import (
+    GroundingReport,
+    build_corpus,
+    check_text,
 )
 
 logger = logging.getLogger(__name__)
@@ -129,8 +131,8 @@ def _parse_date(raw: str) -> datetime | None:
     s = raw.strip().replace("Z", "+00:00")
     for fmt in (None, "%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y", "%Y/%m/%d"):
         try:
-            dt = datetime.fromisoformat(s) if fmt is None else datetime.strptime(s, fmt)
-            return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt.astimezone(timezone.utc)
+            dt = datetime.fromisoformat(s) if fmt is None else datetime.strptime(s, fmt)  # noqa: DTZ007 - parses a date from source data that carries no timezone
+            return dt.replace(tzinfo=UTC) if dt.tzinfo is None else dt.astimezone(UTC)
         except (ValueError, TypeError):
             continue
     return None
@@ -417,7 +419,7 @@ def score_news_signals(account_id: str, signals: list[dict], company_name: str) 
     their rationales, a sales angle and a gate second-opinion. It is never asked
     for the composite, the tier, the category, the dates or any source field."""
     db = get_db()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     fingerprint = _signals_fingerprint(signals)
 
     existing = db["account_widgets"].find_one({
@@ -698,7 +700,7 @@ Output JSON:
 )
 def extract_recent_news_signals(account_id: str) -> list[dict]:
     db = get_db()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     account_doc = None
     if ObjectId.is_valid(account_id):

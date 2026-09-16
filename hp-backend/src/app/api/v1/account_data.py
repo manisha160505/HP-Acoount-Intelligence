@@ -1,32 +1,36 @@
-import os
-import io
 import csv
-import time
-import re
-import pandas as pd
-from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, status
-from fastapi.responses import FileResponse
-from bson import ObjectId
-from app.database.mongodb import get_db
+import io
 import logging
-from app.core.deps import require_admin_role, require_user_role, get_current_user_flexible
-from app.config.settings import settings
-from app.schemas.account_data import DATASET_REGISTRY, AccountDataFileResponse
+import os
+import re
+import time
+from datetime import UTC, datetime
+
+import pandas as pd
+from bson import ObjectId
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi.responses import FileResponse
+
 from app.api.v1.feature_mapping import FEATURE_MAPPINGS
+from app.config.settings import settings
+from app.core.deps import get_current_user_flexible, require_admin_role
+from app.database.mongodb import get_db
+from app.schemas.account_data import DATASET_REGISTRY, AccountDataFileResponse
 
 logger = logging.getLogger(__name__)
-from app.services.extractors.executive_dashboard import extract_executive_dashboard
-from app.services.extractors.recent_news_signals import extract_recent_news_signals
-from app.services.extractors.intent_demand_signals import extract_intent_demand_signals
-from app.services.extractors.solution_narrative_opportunity_map import extract_solution_narrative_opportunity_map, generate_opportunity_map_plays_with_gpt4o
-from app.services.extractors.stakeholder_map import extract_stakeholder_map
-from app.services.extractors.tech_landscape import extract_tech_landscape
-from app.services.extractors.objection_playbook import extract_objection_playbook
 from app.services.extractors.content_messaging import extract_content_messaging
 from app.services.extractors.content_studio import extract_content_studio
-from app.services.extractors.strategy_chat import extract_strategy_chat
+from app.services.extractors.executive_dashboard import extract_executive_dashboard
+from app.services.extractors.intent_demand_signals import extract_intent_demand_signals
 from app.services.extractors.message_evaluator import extract_message_evaluator
+from app.services.extractors.objection_playbook import extract_objection_playbook
+from app.services.extractors.recent_news_signals import extract_recent_news_signals
+from app.services.extractors.solution_narrative_opportunity_map import (
+    extract_solution_narrative_opportunity_map,
+)
+from app.services.extractors.stakeholder_map import extract_stakeholder_map
+from app.services.extractors.strategy_chat import extract_strategy_chat
+from app.services.extractors.tech_landscape import extract_tech_landscape
 
 router = APIRouter(prefix="/accounts/{account_id}/data", tags=["Raw Data Management (Admin Only)"])
 
@@ -34,7 +38,7 @@ def serialize_data_file(doc: dict) -> dict:
     dataset_key = doc.get("dataset_key") or doc.get("category", "")
     registry_item = DATASET_REGISTRY.get(dataset_key, {})
     display_name = doc.get("display_name") or registry_item.get("display_name", dataset_key)
-    
+
     return {
         "id": str(doc["_id"]),
         "account_id": doc["account_id"],
@@ -177,7 +181,7 @@ async def upload_account_data(
     # 1. Validate Account ID
     if not ObjectId.is_valid(account_id):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid account ID format")
-    
+
     db = get_db()
     account = db["accounts"].find_one({"_id": ObjectId(account_id)})
     if not account:
@@ -198,7 +202,7 @@ async def upload_account_data(
     # 3. Validate File Extension
     original_filename = file.filename or "uploaded_file"
     file_ext = os.path.splitext(original_filename)[1].lower()
-    
+
     if file_ext not in allowed_exts:
         exts_str = ", ".join(allowed_exts)
         raise HTTPException(
@@ -249,8 +253,8 @@ async def upload_account_data(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Error reading file structure: {str(e)}"
-        )
+            detail=f"Error reading file structure: {e!s}"
+        ) from e
 
     # 6. Storage Path & Filename Determination
     dataset_dir = os.path.join(settings.DATA_STORAGE_DIR, account_id, key_clean)
@@ -258,20 +262,19 @@ async def upload_account_data(
 
     if dataset_info["type"] == "single_file_csv":
         stored_filename = dataset_info["canonical_filename"]
-    else:
-        # Multi-file News Datasets
-        if file_id_to_replace and ObjectId.is_valid(file_id_to_replace):
-            old_doc = db["account_data_files"].find_one({"_id": ObjectId(file_id_to_replace)})
-            if old_doc and old_doc.get("stored_filename"):
-                stored_filename = old_doc["stored_filename"]
-            else:
-                timestamp = int(time.time())
-                sanitized_name = sanitize_filename(os.path.splitext(original_filename)[0])
-                stored_filename = f"{key_clean}_{timestamp}_{sanitized_name}{file_ext}"
+    # Multi-file News Datasets
+    elif file_id_to_replace and ObjectId.is_valid(file_id_to_replace):
+        old_doc = db["account_data_files"].find_one({"_id": ObjectId(file_id_to_replace)})
+        if old_doc and old_doc.get("stored_filename"):
+            stored_filename = old_doc["stored_filename"]
         else:
             timestamp = int(time.time())
             sanitized_name = sanitize_filename(os.path.splitext(original_filename)[0])
             stored_filename = f"{key_clean}_{timestamp}_{sanitized_name}{file_ext}"
+    else:
+        timestamp = int(time.time())
+        sanitized_name = sanitize_filename(os.path.splitext(original_filename)[0])
+        stored_filename = f"{key_clean}_{timestamp}_{sanitized_name}{file_ext}"
 
     relative_file_path = os.path.join("data", "accounts", account_id, key_clean, stored_filename).replace("\\", "/")
     absolute_file_path = os.path.join(dataset_dir, stored_filename)
@@ -280,7 +283,7 @@ async def upload_account_data(
     with open(absolute_file_path, "wb") as f:
         f.write(content)
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     # 7. Metadata Persistence in MongoDB
     if dataset_info["type"] == "single_file_csv":
@@ -372,10 +375,19 @@ def delete_account_data_file(
         if full_path and os.path.exists(full_path):
             try:
                 os.remove(full_path)
-            except Exception:
-                pass
+            except OSError:
+                # The record below is still marked deleted, so the file is now
+                # orphaned on disk with nothing pointing at it. Logged rather
+                # than swallowed: silently leaking files is how a data volume
+                # fills up with no trace of why. Not raised - the user asked
+                # for the record to go, and a stuck file should not fail that.
+                logger.warning(
+                    "Could not delete the file behind data file %s; the record is "
+                    "marked deleted but %s remains on disk.",
+                    file_id, full_path, exc_info=True,
+                )
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     db["account_data_files"].update_one(
         {"_id": ObjectId(file_id)},
         {"$set": {"status": "deleted", "updated_at": now}}

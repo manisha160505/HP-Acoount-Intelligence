@@ -1,12 +1,13 @@
-import os
-import io
-import csv
-from datetime import datetime, timezone
-from bson import ObjectId
+import contextlib
+from datetime import UTC, datetime
+
 from app.database.mongodb import get_db
 from app.services.extractors.datasets import (
-    find_file_path, read_dataset_records, requires_local_datasets,
+    find_file_path,
+    read_dataset_records,
+    requires_local_datasets,
 )
+
 
 def _find_file_path(rel_path: str) -> str | None:
     """Shared implementation - see datasets.py."""
@@ -44,10 +45,8 @@ def _cross_feature_counts(db, account_id: str) -> dict:
 
     signals = widget("news_signals_feed")
     if signals is not None and signals.get("total_signals_count") is not None:
-        try:
+        with contextlib.suppress(TypeError, ValueError):
             out["recent_signals_count"] = int(signals["total_signals_count"])
-        except (TypeError, ValueError):
-            pass
 
     return out
 
@@ -57,33 +56,33 @@ def _cross_feature_counts(db, account_id: str) -> dict:
 )
 def extract_executive_dashboard(account_id: str) -> list[dict]:
     db = get_db()
-    now = datetime.now(timezone.utc)
-    
+    now = datetime.now(UTC)
+
     firmo_rows = _read_dataset_csv(account_id, "firmographics")
     hier_rows = _read_dataset_csv(account_id, "company_hierarchy")
     job_rows = _read_dataset_csv(account_id, "job_openings")
     contact_rows = _read_dataset_csv(account_id, "prospect_contacts")
-    
+
     results = []
 
     # 1. exec_summary_card
     if firmo_rows and len(firmo_rows) > 0:
         row = firmo_rows[0]
-        
+
         # Extract location string
         city = (row.get("City Name") or row.get("city_name") or "").strip()
         region = (row.get("Region Name") or row.get("region_name") or "").strip()
         country = (row.get("Country Name") or row.get("country_name") or "").strip()
         loc_parts = [p for p in [city, region, country] if p]
         hq_location = ", ".join(loc_parts) if loc_parts else "N/A"
-        
+
         # Extract industry
         naics = (row.get("Naics Description") or row.get("naics_description") or "").strip()
         sic = (row.get("Sic Code Description") or row.get("sic_code_description") or "").strip()
         linkedin_ind = (row.get("Linkedin Industry Category") or row.get("linkedin_industry_category") or "").strip()
         ind_parts = [p for p in [linkedin_ind, naics, sic] if p]
         industry_classification = " / ".join(list(dict.fromkeys(ind_parts))) if ind_parts else "N/A"
-        
+
         # Hierarchy fields
         parent_company = ""
         ultimate_parent = ""
@@ -116,7 +115,7 @@ def extract_executive_dashboard(account_id: str) -> list[dict]:
             # dash rather than a number.
             **_cross_feature_counts(db, account_id),
         }
-        
+
         summary_payload = {
             "account_id": account_id,
             "feature_key": "executive_dashboard",
@@ -159,7 +158,7 @@ def extract_executive_dashboard(account_id: str) -> list[dict]:
             "employee_count": emp_count if emp_count else "N/A",
             "revenue": revenue if revenue else "N/A"
         }
-        
+
         metrics_payload = {
             "account_id": account_id,
             "feature_key": "executive_dashboard",
@@ -198,7 +197,7 @@ def extract_executive_dashboard(account_id: str) -> list[dict]:
             t = (r.get("title") or r.get("normalized_title") or "").strip()
             if t and t not in sample_roles:
                 sample_roles.append(t)
-        
+
         hiring_data = {
             "open_job_count": len(job_rows),
             "sample_roles": sample_roles

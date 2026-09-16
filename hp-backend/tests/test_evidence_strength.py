@@ -22,8 +22,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from app.services.dashboard import evidence_strength as es  # noqa: E402
-
+from app.services.dashboard import evidence_strength as es
 
 DOMAIN = "astra.co.id"
 SCORED_ON = date(2026, 9, 15)

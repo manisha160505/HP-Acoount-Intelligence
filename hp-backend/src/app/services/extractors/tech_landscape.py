@@ -1,14 +1,13 @@
-import os
-import io
-import re
 import logging
-import csv
-import pandas as pd
-from datetime import datetime, timezone
+import re
+from datetime import UTC, datetime
+
 from bson import ObjectId
+
 from app.database.mongodb import get_db
 from app.services.extractors.datasets import (
-    find_file_path, read_dataset_records, requires_local_datasets,
+    read_dataset_records,
+    requires_local_datasets,
 )
 
 logger = logging.getLogger(__name__)
@@ -109,7 +108,7 @@ def _derive_provenance(detected_as: list, techno_row: dict) -> str:
     return "technographics -> " + ", ".join(sorted(columns)[:3])
 
 
-def _normalise_hp_fields(categories: list, techno_row: dict = None) -> None:
+def _normalise_hp_fields(categories: list, techno_row: dict | None = None) -> None:
     """Replace the placeholder scaffolding with real deterministic values.
 
     Every vendor row used to carry "Inferred TBD" for its risk level, a
@@ -193,17 +192,17 @@ def _normalise_hp_fields(categories: list, techno_row: dict = None) -> None:
 @requires_local_datasets(
     "technographics", "technology_detections", "webstack",
 )
-def extract_tech_landscape(account_id: str) -> list[dict]:
+def extract_tech_landscape(account_id: str) -> list[dict]:  # noqa: PLR0912, PLR0915 - branch-heavy extractor predates the lint gate
     db = get_db()
-    now = datetime.now(timezone.utc)
-    
+    now = datetime.now(UTC)
+
     # Get dynamic account name
     account_doc = None
     if ObjectId.is_valid(account_id):
         account_doc = db["accounts"].find_one({"_id": ObjectId(account_id)})
-    
+
     account_name = account_doc.get("name", "Target Account") if account_doc else "Target Account"
-    
+
     # Try firmographics for exact company_name if present
     firmo_records = _read_dataset_records(account_id, "firmographics")
     if firmo_records and len(firmo_records) > 0:
@@ -214,7 +213,7 @@ def extract_tech_landscape(account_id: str) -> list[dict]:
     techno_records = _read_dataset_records(account_id, "technographics")
     detection_records = _read_dataset_records(account_id, "technology_detections")
     webstack_records = _read_dataset_records(account_id, "webstack")
-    
+
     results = []
 
     # Parse full tech stack list from account's technographics
@@ -641,7 +640,7 @@ def extract_tech_landscape(account_id: str) -> list[dict]:
         from app.services.hp.map_narrative import generate_map_narrative
         narrative_report = generate_map_narrative(
             hp_categories,
-            account_texts=full_tech_list + [account_name],
+            account_texts=[*full_tech_list, account_name],
             account_name=account_name,
         )
     except Exception:

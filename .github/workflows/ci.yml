@@ -1,0 +1,87 @@
+name: CI
+
+# The pre-push hook is the fast local gate, but it can be bypassed with
+# --no-verify and only exists on a clone where install-hooks.sh has been run.
+# This is the gate that actually holds.
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend-lint:
+    name: Backend lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          # Matches hp-backend/Dockerfile (python:3.11-slim). Testing on a
+          # newer version than the one that ships would let a 3.12-only
+          # construct pass CI and fail in the container.
+          python-version: "3.11"
+          cache: pip
+
+      # Only ruff - the lint job does not need the app's dependencies, which
+      # keeps it under about fifteen seconds and makes it usable as a required
+      # check on a PR.
+      - name: Install ruff
+        run: pip install -r hp-backend/requirements-dev.txt
+
+      - name: Lint
+        run: ruff check hp-backend --output-format=github
+
+  backend-tests:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          # Matches hp-backend/Dockerfile (python:3.11-slim). Testing on a
+          # newer version than the one that ships would let a 3.12-only
+          # construct pass CI and fail in the container.
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        working-directory: hp-backend
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Run tests
+        working-directory: hp-backend
+        run: python -m pytest tests/ -q
+
+  frontend:
+    name: Frontend typecheck and build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: hp-frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: hp-frontend
+        # npm ci rather than npm install: it honours the lockfile exactly, so
+        # CI cannot silently resolve a different dependency tree than a laptop.
+        run: npm ci
+
+      # tsc, not next lint: ESLint is not configured in this project (you chose
+      # backend-only linting), and the type checker is the stronger of the two
+      # checks anyway - it catches the same class of error and more.
+      - name: Typecheck
+        working-directory: hp-frontend
+        run: npx tsc --noEmit
+
+      - name: Build
+        working-directory: hp-frontend
+        run: npm run build

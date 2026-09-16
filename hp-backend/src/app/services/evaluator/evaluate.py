@@ -22,13 +22,10 @@ than estimated.
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.core.llm import generate_gpt4o_json_completion
-from app.services.evaluator import formats as F
-from app.services.evaluator import scoring as S
-from app.services.evaluator import sources as SRC
-from app.services.evaluator import storage, verify
+from app.services.evaluator import formats as F, scoring as S, sources as SRC, storage, verify
 
 logger = logging.getLogger(__name__)
 
@@ -390,7 +387,7 @@ def rewrite_message(account_id, fingerprint, selected_recommendations,
             {"account_id": account_id, "fingerprint": fingerprint},
             {"$set": {"rewrite": None,
                       "rewrite_faults": faults,
-                      "rewrite_attempted_at": datetime.now(timezone.utc)}})
+                      "rewrite_attempted_at": datetime.now(UTC)}})
         raise EvaluationError("the rewrite did not meet the %s format contract: %s"
                               % (evaluation["format_label"], "; ".join(faults)))
 
@@ -401,7 +398,7 @@ def rewrite_message(account_id, fingerprint, selected_recommendations,
             {"account_id": account_id, "fingerprint": fingerprint},
             {"$set": {"rewrite": None, "rewrite_faults": diff_faults,
                       "rewrite_diff": diff,
-                      "rewrite_attempted_at": datetime.now(timezone.utc)}})
+                      "rewrite_attempted_at": datetime.now(UTC)}})
         raise EvaluationError("the rewrite introduced claims the sources do not "
                               "support: %s" % "; ".join(diff_faults))
 
@@ -410,5 +407,5 @@ def rewrite_message(account_id, fingerprint, selected_recommendations,
         {"account_id": account_id, "fingerprint": fingerprint},
         {"$set": {"rewrite": rewrite, "rewrite_faults": [],
                   "rewrite_applied": selected,
-                  "rewrite_attempted_at": datetime.now(timezone.utc)}})
+                  "rewrite_attempted_at": datetime.now(UTC)}})
     return storage.find_existing(account_id, fingerprint)
