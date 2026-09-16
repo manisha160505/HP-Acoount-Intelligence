@@ -28,7 +28,9 @@ import logging
 
 from app.core.llm import generate_gpt4o_json_completion
 from app.services.extractors.grounding import (
-    HP_PRODUCT_LINES, corpus_from_texts, normalize_hp_product,
+    HP_PRODUCT_LINES,
+    corpus_from_texts,
+    normalize_hp_product,
 )
 
 logger = logging.getLogger(__name__)

@@ -1,22 +1,23 @@
-import os
-import io
-import re
-import csv
-import json
 import hashlib
-import pandas as pd
-from collections import Counter
-from datetime import datetime, timezone
-from bson import ObjectId
-from app.database.mongodb import get_db
-from app.core.llm import generate_gpt4o_json_completion
-from app.services.extractors.grounding import (
-    build_corpus, check_text, GroundingReport,
-)
-
+import json
 import logging
+import re
+from collections import Counter
+from datetime import UTC, datetime
+
+from bson import ObjectId
+
+from app.core.llm import generate_gpt4o_json_completion
+from app.database.mongodb import get_db
 from app.services.extractors.datasets import (
-    find_file_path, read_dataset_records, requires_local_datasets,
+    find_file_path,
+    read_dataset_records,
+    requires_local_datasets,
+)
+from app.services.extractors.grounding import (
+    GroundingReport,
+    build_corpus,
+    check_text,
 )
 
 logger = logging.getLogger(__name__)
@@ -550,7 +551,7 @@ def _build_account_context(account_id: str) -> tuple[str, set[str]]:
         dt = None
         for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y", "%Y/%m/%d"):
             try:
-                dt = datetime.strptime(d[:10], fmt)
+                dt = datetime.strptime(d[:10], fmt)  # noqa: DTZ007 - parses a date from source data that carries no timezone
                 break
             except (ValueError, TypeError):
                 continue
@@ -558,7 +559,7 @@ def _build_account_context(account_id: str) -> tuple[str, set[str]]:
         labels.add(h.lower())
 
     # Undated rows sort last rather than being dropped - they are still evidence.
-    triggers.sort(key=lambda t: t[0] or datetime.min, reverse=True)
+    triggers.sort(key=lambda t: t[0] or datetime.min, reverse=True)  # noqa: DTZ901 - sentinel bound, not a real instant
     if triggers:
         lines.append("Recent news and trigger events:\n"
                      + "\n".join(line for _dt, line in triggers[:10]))
@@ -572,7 +573,7 @@ def generate_stakeholder_talking_points(account_id: str, contacts: list[dict],
     """One GPT-4o call covering every contact. Returns the four inferred fields
     keyed by contact id. Never asked for scores, bands, or contact facts."""
     db = get_db()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     # Built before the fingerprint: it must be covered by it, or a news change
     # leaves the cached openers citing a trigger that is no longer current.
     account_context, evidence_labels = _build_account_context(account_id)
@@ -822,7 +823,7 @@ CRITICAL RULES:
 )
 def extract_stakeholder_map(account_id: str) -> list[dict]:
     db = get_db()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     contact_records = _read_dataset_records(account_id, "prospect_contacts")
 

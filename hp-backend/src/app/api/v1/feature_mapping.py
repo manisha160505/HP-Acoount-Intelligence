@@ -1,10 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+
 from app.core.deps import require_admin_role
 from app.schemas.account_data import DATASET_REGISTRY
 from app.schemas.feature_mapping import (
-    MappedField,
     FeatureMappingResponse,
-    ReverseDependencyResponse
+    ReverseDependencyResponse,
 )
 
 router = APIRouter(prefix="/features", tags=["Feature & Sourcing Mapping (Admin Only)"])
@@ -166,7 +166,7 @@ FEATURE_MAPPINGS = {
                 "dataset_key": "google_news",
                 "source_sheet": "google_news_rss_data",
                 "source_column": "event_headline (trailing suffix), else source_publisher",
-                "data_type": "DERIVED"
+                "data_type": "DETERMINISTIC"
             },
             {
                 "field_key": "source_confidence",
@@ -322,7 +322,7 @@ FEATURE_MAPPINGS = {
                 "dataset_key": "prospect_contacts",
                 "source_sheet": "14_Prospect_Contacts",
                 "source_column": "Prospect buying_committee_personas, Prospect job_title, Prospect job_level_main, Prospect job_department_main",
-                "data_type": "DERIVED"
+                "data_type": "DETERMINISTIC"
             },
             {
                 "field_key": "hp_relevance_band",
@@ -393,7 +393,7 @@ FEATURE_MAPPINGS = {
                 "dataset_key": None,
                 "source_sheet": None,
                 "source_column": None,
-                "data_type": "REFERENCE"
+                "data_type": "INFERRED / SYNTHESIZED"
             },
             {
                 "field_key": "severity",
@@ -402,7 +402,7 @@ FEATURE_MAPPINGS = {
                 "dataset_key": None,
                 "source_sheet": None,
                 "source_column": None,
-                "data_type": "DERIVED"
+                "data_type": "DETERMINISTIC"
             },
             {
                 "field_key": "scale_statement",
@@ -411,7 +411,7 @@ FEATURE_MAPPINGS = {
                 "dataset_key": "firmographics, technographics, intent_score, google_news",
                 "source_sheet": "1_Firmographics, 4_Technographics, 11_intent_score, Google News RSS",
                 "source_column": "Number Of Employees Range, Full Tech Stack, Topic / Composite Score, event_headline",
-                "data_type": "DERIVED"
+                "data_type": "DETERMINISTIC"
             },
             {
                 "field_key": "quantified_impact",
@@ -429,7 +429,7 @@ FEATURE_MAPPINGS = {
                 "dataset_key": "prospect_contacts",
                 "source_sheet": "14_Prospect_Contacts",
                 "source_column": "Prospect job_title, Prospect job_department_main",
-                "data_type": "DERIVED"
+                "data_type": "DETERMINISTIC"
             },
             {
                 "field_key": "narrative_context",
@@ -571,7 +571,7 @@ FEATURE_MAPPINGS = {
                 "dataset_key": "prospect_contacts",
                 "source_sheet": "3_Prospects",
                 "source_column": "Prospect job_title, Prospect job_department_main",
-                "data_type": "DERIVED"
+                "data_type": "DETERMINISTIC"
             },
             {
                 "field_key": "objection_synthesis",
@@ -938,7 +938,7 @@ def list_reverse_dependencies(current_user: dict = Depends(require_admin_role)):
         for feat_key, feat_info in FEATURE_MAPPINGS.items():
             if key in feat_info["dependent_datasets"]:
                 mapped_feats.append(feat_key)
-        
+
         result.append({
             "dataset_key": key,
             "display_name": info["display_name"],

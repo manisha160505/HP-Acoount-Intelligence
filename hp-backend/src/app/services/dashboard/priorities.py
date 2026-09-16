@@ -48,13 +48,12 @@ then forbids computing an overall score from incomplete drivers.
 import asyncio
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.core.llm import generate_gpt4o_json_completion
 from app.database.mongodb import get_db
 from app.services.dashboard import evidence_strength
-from app.services.retrieval import evidence as ev
-from app.services.retrieval import index_state, query
+from app.services.retrieval import evidence as ev, index_state, query
 
 logger = logging.getLogger(__name__)
 
@@ -203,7 +202,7 @@ def _recency(row: dict) -> str | None:
 # Step 3: candidates, then evidence validation
 # ---------------------------------------------------------------------------
 
-async def _candidate_priorities(account_id: str, mode: str = None) -> tuple:
+async def _candidate_priorities(account_id: str, mode: str | None = None) -> tuple:
     """(candidates, retrieval_result). Retrieval first - no filtering yet."""
     result = await query.retrieve(account_id, INDEX, PRIORITY_QUESTION,
                                   mode=mode, top_k=60)
@@ -603,7 +602,7 @@ def _reported_metrics(account_id: str) -> list:
     return metrics
 
 
-def _order_of(evidence_id) -> int:  # noqa: D401 - see `_reported_metrics`
+def _order_of(evidence_id) -> int:
     """Registration order, read from the evidence id's `#cN` suffix."""
     import re
     match = re.search(r"#c(\d+)$", str(evidence_id or ""))
@@ -625,8 +624,8 @@ def _format_value(value, unit) -> str:
     except (TypeError, ValueError):
         return _text(value)
 
-    written = ("{:,.0f}".format(number) if number == int(number)
-               else "{:,.2f}".format(number))
+    written = (f"{number:,.0f}" if number == int(number)
+               else f"{number:,.2f}")
     unit_text = _text(unit)
     if not unit_text:
         return written
@@ -732,10 +731,10 @@ def _executive_summary(company: str, priorities: list, metrics: list) -> dict:
 # Entry point
 # ---------------------------------------------------------------------------
 
-def generate_dashboard_intelligence(account_id: str, mode: str = None) -> dict:
+def generate_dashboard_intelligence(account_id: str, mode: str | None = None) -> dict:
     """Build the dashboard's priorities and reported metrics. Returns the widget."""
     db = get_db()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     state = index_state.get(account_id, INDEX)
     if state.get("status") not in (index_state.READY, index_state.STALE):

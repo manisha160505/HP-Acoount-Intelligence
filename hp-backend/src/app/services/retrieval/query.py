@@ -126,7 +126,7 @@ def _normalise(raw, mode, workspace, stale) -> RetrievalResult:
                            mode=mode, workspace=workspace, stale=stale)
 
 
-async def retrieve(account_id: str, index: str, question: str, mode: str = None,
+async def retrieve(account_id: str, index: str, question: str, mode: str | None = None,
                    top_k: int = DEFAULT_TOP_K, only_context: bool = False,
                    conversation_history=None) -> RetrievalResult:
     """Ask one index one question."""

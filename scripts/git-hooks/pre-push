@@ -1,0 +1,54 @@
+#!/bin/sh
+# Blocks a push when the backend lint gate is not clean.
+#
+# Installed by scripts/install-hooks.sh, which points core.hooksPath at this
+# directory. Committed to the repo rather than left in .git/hooks so the whole
+# team gets the same gate.
+#
+# Lint only - not the test suite. A push gate has to stay fast or it gets
+# bypassed, and `ruff check` over this tree takes well under a second. The full
+# suite belongs in CI.
+#
+# To bypass in a genuine emergency:  git push --no-verify
+
+set -e
+
+REPO_ROOT=$(git rev-parse --show-toplevel)
+BACKEND="$REPO_ROOT/hp-backend"
+
+# Prefer the project venv so the hook uses the pinned ruff rather than whatever
+# happens to be on PATH - a different version means different findings.
+if [ -x "$BACKEND/.venv/bin/ruff" ]; then
+    RUFF="$BACKEND/.venv/bin/ruff"
+elif command -v ruff >/dev/null 2>&1; then
+    RUFF="ruff"
+else
+    echo "pre-push: ruff is not installed - skipping the lint gate."
+    echo "          Install it with: hp-backend/.venv/bin/pip install ruff"
+    exit 0
+fi
+
+echo "pre-push: linting the backend..."
+
+if ! "$RUFF" check "$BACKEND" --quiet; then
+    echo ""
+    echo "  Push blocked: ruff found problems in hp-backend."
+    echo ""
+    echo "  Fix what is mechanical:   $RUFF check hp-backend --fix"
+    echo "  See everything:           $RUFF check hp-backend"
+    echo "  Bypass (emergencies):     git push --no-verify"
+    echo ""
+    exit 1
+fi
+
+# Formatting is deliberately NOT gated. `ruff format` would rewrite 73 of the
+# 82 files in this tree, because the codebase is hand-wrapped to keep the long
+# comment blocks and the scoring tables readable - and the formatter has no way
+# to know that. Gating on it would mean one enormous reformat commit that buries
+# every real change in the history behind it.
+#
+# `ruff format` remains available to run by choice on a file you are already
+# rewriting. The linter above is what gates.
+
+echo "pre-push: backend lint clean."
+exit 0

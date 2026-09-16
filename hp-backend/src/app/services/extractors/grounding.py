@@ -9,8 +9,8 @@ Nothing here is specific to any account - the corpus is whatever that account
 uploaded, read at runtime.
 """
 
-import re
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 

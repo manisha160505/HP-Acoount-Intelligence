@@ -23,11 +23,13 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from app.services.retrieval import shared_vdb  # noqa: E402
-from app.services.retrieval.shared_vdb import (  # noqa: E402
-    PARTITION_FIELD, SharedVectorConfigError, shared_collection_name,
-    shared_index_name)
-
+from app.services.retrieval import shared_vdb
+from app.services.retrieval.shared_vdb import (
+    PARTITION_FIELD,
+    SharedVectorConfigError,
+    shared_collection_name,
+    shared_index_name,
+)
 
 # ---------------------------------------------------------------------------
 # Fakes

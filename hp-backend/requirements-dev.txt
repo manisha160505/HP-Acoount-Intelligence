@@ -1,0 +1,11 @@
+# Development tooling. Not installed in the production image.
+#
+#   pip install -r requirements-dev.txt
+#   ../scripts/install-hooks.sh     # once per clone, enables the push gate
+#
+# Ruff is pinned rather than floated: a new minor version adds rules, and a
+# version drift between a laptop and CI means a push that passes locally and
+# fails in CI for reasons the developer cannot reproduce.
+ruff==0.16.7
+
+pytest>=8.0

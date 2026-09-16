@@ -39,14 +39,14 @@ import json
 import math
 import re
 from collections import Counter
-from datetime import datetime, timezone
-
-from bson import ObjectId
+from datetime import UTC, datetime
 
 from app.database.mongodb import get_db
 from app.services.extractors.datasets import (
     account_domain,
-    find_file_path, read_dataset_records, read_dataset_rows,
+    find_file_path,
+    read_dataset_records,
+    read_dataset_rows,
     requires_local_datasets,
 )
 from app.services.hp import intent_topic_map as tm
@@ -120,7 +120,7 @@ def _parse_date_stamp(raw: str) -> str | None:
     """Bombora's Date Stamp is YYYYMMDD. Anything else is kept raw, not guessed."""
     for fmt in ("%Y%m%d", "%Y-%m-%d"):
         try:
-            return datetime.strptime(raw, fmt).date().isoformat()
+            return datetime.strptime(raw, fmt).date().isoformat()  # noqa: DTZ007 - parses a date from source data that carries no timezone
         except ValueError:
             continue
     return None
@@ -625,7 +625,7 @@ def _hiring_widget(account_id: str, job_records: list[dict], now) -> dict:
 )
 def extract_intent_demand_signals(account_id: str) -> list[dict]:
     db = get_db()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     score_records = _read_dataset_records(account_id, "intent_score")
     topics_meta_records = _read_dataset_records(account_id, "intent_topics")

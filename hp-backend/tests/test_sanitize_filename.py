@@ -26,8 +26,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from app.api.v1.account_data import sanitize_filename  # noqa: E402
-
+from app.api.v1.account_data import sanitize_filename
 
 # ---------------------------------------------------------------------------
 # The letters the old class silently ate. This is the actual bug.

@@ -433,7 +433,7 @@ RULES = [
 RULES_BY_ID = {r["rule_id"]: r for r in RULES}
 
 
-def match_rules(evidence_texts: list, competitor_models: list = None) -> list:
+def match_rules(evidence_texts: list, competitor_models: list | None = None) -> list:
     """Rules whose signal appears in this account's verified evidence.
 
     `evidence_texts` must contain ONLY text drawn from the account's own

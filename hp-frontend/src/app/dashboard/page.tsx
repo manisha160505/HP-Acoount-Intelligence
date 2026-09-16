@@ -829,6 +829,15 @@ export default function UserDashboardPage() {
                   const metricsWidget = widgets.find(w => w.widget_key === 'exec_key_metrics');
                   const hiringWidget = widgets.find(w => w.widget_key === 'exec_hiring_velocity');
                   const prioritiesWidget = widgets.find(w => w.widget_key === 'exec_strategic_priorities');
+                  const urgencyWidget = widgets.find(w => w.widget_key === 'exec_urgency_score');
+
+                  // Read on 'partial' too. A urgency payload whose composite is
+                  // blocked by one unavailable driver still carries the four
+                  // that computed, and the card's job in that state is to name
+                  // the blocker - which needs the data, not an empty card.
+                  const urgencyData = (urgencyWidget && urgencyWidget.data
+                    && (urgencyWidget.status === 'available' || urgencyWidget.status === 'partial'))
+                    ? urgencyWidget.data : null;
 
                   const summaryData = (summaryWidget && summaryWidget.status === 'available' && summaryWidget.data) ? summaryWidget.data : null;
                   const metricsData = (metricsWidget && metricsWidget.status === 'available' && metricsWidget.data) ? metricsWidget.data : null;
@@ -1106,65 +1115,69 @@ export default function UserDashboardPage() {
                               <Flame className="w-4 h-4 text-amber-500" />
                               <span>URGENCY SCORE & DRIVER BREAKDOWN</span>
                             </h3>
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200">
-                              Derived Contract TBD
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
+                              urgencyData?.client_agreed
+                                ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                : 'bg-amber-50 text-amber-800 border-amber-200'
+                            }`}>
+                              {urgencyData ? 'Delivery-authored · not client-agreed' : 'Not yet computed'}
                             </span>
                           </div>
 
                           <div className="flex flex-col sm:flex-row items-center gap-6">
-                            <div className="w-24 h-24 rounded-full border-4 border-amber-400 flex flex-col items-center justify-center flex-shrink-0 bg-amber-50/50 shadow-inner">
-                              <span className="text-xl font-extrabold text-slate-800">TBD</span>
+                            <div className={`w-24 h-24 rounded-full border-4 flex flex-col items-center justify-center flex-shrink-0 shadow-inner ${
+                              urgencyData?.score != null
+                                ? 'border-amber-400 bg-amber-50/50'
+                                : 'border-slate-300 bg-slate-50'
+                            }`}>
+                              <span className={`font-extrabold ${
+                                urgencyData?.score != null ? 'text-3xl text-slate-800' : 'text-base text-slate-400'
+                              }`}>
+                                {urgencyData?.score ?? 'N/A'}
+                              </span>
                               <span className="text-[10px] font-bold text-slate-400">/100</span>
                             </div>
 
                             <div className="flex-1 w-full space-y-3 text-xs">
-                              {[
-                                {
-                                  id: 'fleet_refresh',
-                                  label: 'Fleet-Refresh & Dual-OS',
-                                  scoreText: 'TBD',
-                                  progressPct: '0%',
-                                  barColor: 'bg-slate-300',
-                                  rationale: `Fleet-refresh & dual-OS driver calculation: TBD for future runtime calculation. Current workforce size: ${metricsData ? metricsData.employee_count : 'Dataset not uploaded'}.`
-                                },
-                                {
-                                  id: 'ai_catalysts',
-                                  label: 'AI / Workstation Catalysts',
-                                  scoreText: 'TBD',
-                                  progressPct: '0%',
-                                  barColor: 'bg-slate-300',
-                                  rationale: `AI/workstation catalysts driver calculation: TBD for future runtime calculation.`
-                                },
-                                {
-                                  id: 'hiring_velocity',
-                                  label: 'Hiring Velocity',
-                                  scoreText: hiringData ? `${hiringData.open_job_count} postings seen` : 'TBD',
-                                  progressPct: hiringData ? '80%' : '0%',
-                                  barColor: hiringData ? 'bg-hp-navy' : 'bg-slate-300',
-                                  rationale: `Hiring velocity signal: ${hiringData ? `${hiringData.open_job_count} job postings seen in job_openings.csv (open and closed).` : 'No job openings dataset uploaded yet.'}`
-                                },
-                                {
-                                  id: 'expansion_triggers',
-                                  label: 'Expansion / Print Triggers',
-                                  scoreText: 'TBD',
-                                  progressPct: '0%',
-                                  barColor: 'bg-slate-300',
-                                  rationale: `Expansion / print triggers driver calculation: TBD for future runtime calculation.`
-                                },
-                                {
-                                  id: 'intent_intensity',
-                                  label: 'Intent Intensity',
-                                  scoreText: 'TBD',
-                                  progressPct: '0%',
-                                  barColor: 'bg-slate-300',
-                                  rationale: `Intent intensity driver calculation: TBD for future runtime calculation.`
-                                }
-                              ].map((driver) => (
+                              {(urgencyData?.drivers ?? []).map((d: any) => ({
+                                  id: d.key,
+                                  label: d.label,
+                                  available: d.available,
+                                  proxy: d.proxy,
+                                  scoreText: d.available ? `${d.value}/100` : 'Unavailable',
+                                  progressPct: d.available ? `${d.value}%` : '0%',
+                                  barColor: !d.available
+                                    ? 'bg-slate-300'
+                                    : d.proxy ? 'bg-amber-400' : 'bg-hp-navy',
+                                  // The whole working, so a seller who
+                                  // disagrees with the number can see which
+                                  // term to disagree with.
+                                  rationale: d.available
+                                    ? [
+                                        `Weight ${Math.round(d.weight * 100)}% of the total.`,
+                                        ...(d.terms ?? []).map((t: any) =>
+                                          `${t.label}: ${t.points}/${t.max_points} — ${t.basis}.`),
+                                        ...(d.proxy ? [`⚠ ${d.proxy_note}`] : []),
+                                        ...(d.notes ?? []),
+                                      ].join(' ')
+                                    : d.unavailable_reason,
+                                })).map((driver: any) => (
                                 <div key={driver.id} className="relative">
                                   <div className="flex justify-between items-center font-bold text-slate-700 text-[11px] mb-1">
                                     <div className="flex items-center space-x-1.5">
-                                      <span>{driver.label}</span>
-                                      
+                                      <span className={driver.available ? '' : 'text-slate-400'}>{driver.label}</span>
+
+                                      {/* A proxy driver scores something
+                                          adjacent to what its name promises -
+                                          fleet SIZE, not refresh due-ness. That
+                                          belongs on the face of the card, not
+                                          only inside the popover. */}
+                                      {driver.proxy && (
+                                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">
+                                          PROXY
+                                        </span>
+                                      )}
+
                                       {/* Interactive Info Icon Button */}
                                       <div className="relative inline-block">
                                         <button
@@ -1216,8 +1229,33 @@ export default function UserDashboardPage() {
                                   )}
                                 </div>
                               ))}
+
+                              {!urgencyData && (
+                                <p className="text-[11px] text-slate-400 leading-relaxed">
+                                  The urgency score has not been computed for this account yet.
+                                </p>
+                              )}
                             </div>
                           </div>
+
+                          {/* Why there is no total. ABX forbids scoring a
+                              missing driver as 0, so one unavailable driver
+                              blocks the composite - and the card has to say
+                              which one rather than showing an empty dial. */}
+                          {urgencyData && urgencyData.score == null && (
+                            <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-3 leading-relaxed">
+                              {urgencyData.unavailable_reason}
+                            </p>
+                          )}
+
+                          {urgencyData && (
+                            <p className="text-[10px] text-slate-400 leading-relaxed border-t border-slate-100 pt-3">
+                              {urgencyData.formula} The 20/25/15/15/25 weights are from the
+                              account-intelligence specification; the per-driver formulas are
+                              delivery-authored and not yet client-agreed.
+                              {urgencyData.proxy_drivers?.length > 0 && ' Drivers marked PROXY score something adjacent to their name — open each for what it actually measures.'}
+                            </p>
+                          )}
                         </div>
 
                         {/* Quick Stats Card */}

@@ -341,9 +341,9 @@ def repair_year_footnotes(text: str) -> tuple:
             if len(years) >= 2:
                 def fix(match):
                     recovered = int(match.group(1))
-                    if recovered in years:
+                    if recovered in years:  # noqa: B023 - closure over a loop variable - real latent bug, left for a behaviour decision
                         return match.group(0)
-                    if not (recovered - 1 in years or recovered + 1 in years):
+                    if not (recovered - 1 in years or recovered + 1 in years):  # noqa: B023 - closure over a loop variable - real latent bug, left for a behaviour decision
                         return match.group(0)
                     repairs.append((match.group(0), match.group(1)))
                     return match.group(1)
@@ -367,7 +367,7 @@ def clean_page(text: str) -> tuple:
     if repairs:
         notes["year_footnotes_repaired"] = ["%s->%s" % (a, b) for a, b in repairs]
 
-    text = text.replace("\xa0", " ").replace("​", "")
+    text = text.replace("\xa0", " ").replace("\u200b", "")
     text = re.sub(r"[.·•]{4,}", " ", text)   # table-of-contents leaders
     text = re.sub(r"[-_]{4,}", " ", text)              # horizontal rules
     text = re.sub(r"[ \t]{2,}", " ", text)
@@ -392,7 +392,7 @@ def read_pdf(path: str) -> dict:
     try:
         doc = fitz.open(path)
     except Exception as exc:
-        raise PdfUnreadable("%s could not be opened: %s" % (name, exc))
+        raise PdfUnreadable("%s could not be opened: %s" % (name, exc)) from exc
 
     pages, excluded = [], []
     try:

@@ -28,7 +28,7 @@ import logging
 import os
 import socket
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from app.database.mongodb import get_db
 
@@ -48,7 +48,7 @@ WORKER_ID = "%s:%d:%s" % (socket.gethostname(), os.getpid(), uuid.uuid4().hex[:6
 
 
 def _now():
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def ensure_indexes():
@@ -176,7 +176,7 @@ def fail(job_id, error: str):
                    str(error)[:200])
 
 
-def status(account_id: str, index: str = None) -> list:
+def status(account_id: str, index: str | None = None) -> list:
     db = get_db()
     query = {"account_id": account_id}
     if index:

@@ -23,3 +23,28 @@ lightrag-hku==1.5.7
 # with. Both were already relied on and neither was declared.
 pymupdf>=1.26,<2
 python-pptx>=1.0,<2
+
+# Observability. The app degrades cleanly without these - every OpenTelemetry
+# import is deferred into a function body and guarded, so a missing package
+# turns tracing or metrics off and logs one line rather than failing to start.
+# Structured JSON logging has no third-party dependency and always works.
+#
+# Floated within a major version deliberately: the instrumentation packages
+# track the SDK closely and pinning one without the others is what produces
+# the version-mismatch errors the guards above exist to survive.
+opentelemetry-api>=1.27,<2
+opentelemetry-sdk>=1.27,<2
+opentelemetry-instrumentation-fastapi>=0.48b0
+opentelemetry-instrumentation-pymongo>=0.48b0
+opentelemetry-instrumentation-httpx>=0.48b0
+opentelemetry-instrumentation-requests>=0.48b0
+
+# Google Cloud. Only needed where GCP_PROJECT_ID is set; a local run without
+# them still traces (spans stay in-process and correlate the logs) and still
+# writes JSON logs, which is all Cloud Logging needs once the container's
+# stdout is collected by the platform's built-in agent.
+opentelemetry-exporter-gcp-trace>=1.7
+opentelemetry-exporter-gcp-monitoring>=1.7
+
+# Exporting to a non-Google OTLP collector instead of, or alongside, the above.
+opentelemetry-exporter-otlp-proto-grpc>=1.27,<2

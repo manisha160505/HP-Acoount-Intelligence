@@ -1,27 +1,28 @@
-import os
-import io
-import csv
-import re
-import json
 import difflib
 import hashlib
+import json
 import logging
-import pandas as pd
-from datetime import datetime, timezone
+import re
+from datetime import UTC, datetime
+
 from bson import ObjectId
-from app.database.mongodb import get_db
+
 from app.core.llm import generate_gpt4o_json_completion
+from app.database.mongodb import get_db
 from app.services.extractors.grounding import (
-    build_corpus, check_text, GroundingReport,
+    GroundingReport,
+    build_corpus,
+    check_text,
 )
 
 logger = logging.getLogger(__name__)
+from app.services.extractors.datasets import (
+    read_dataset_records,
+    requires_local_datasets,
+)
 from app.services.extractors.stakeholder_map import (
     normalize_department,
     resolve_field,
-)
-from app.services.extractors.datasets import (
-    find_file_path, read_dataset_records, requires_local_datasets,
 )
 
 TECHNOGRAPHICS_CATEGORY_COLUMNS = [
@@ -313,7 +314,7 @@ def generate_objection_cards(account_id: str, areas: list[dict],
     and the counter question. The evidence, the vendor list, the area and the
     likely raiser are owned by Python and are never sent back for rewriting."""
     db = get_db()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     fingerprint = _evidence_fingerprint(areas, business_description)
 
     existing = db["account_widgets"].find_one({
@@ -574,8 +575,8 @@ def generate_objection_cards(account_id: str, areas: list[dict],
 )
 def extract_objection_playbook(account_id: str) -> list[dict]:
     db = get_db()
-    now = datetime.now(timezone.utc)
-    
+    now = datetime.now(UTC)
+
     techno_records = _read_dataset_records(account_id, "technographics")
     firmo_records = _read_dataset_records(account_id, "firmographics")
     contact_records = _read_dataset_records(account_id, "prospect_contacts")
@@ -584,7 +585,7 @@ def extract_objection_playbook(account_id: str) -> list[dict]:
     if ObjectId.is_valid(account_id):
         account_doc = db["accounts"].find_one({"_id": ObjectId(account_id)})
     company_name = account_doc.get("name", "Target Account") if account_doc else "Target Account"
-    
+
     results = []
 
     # 1. Widget: objection_incumbent_context (Deterministic)
@@ -605,10 +606,10 @@ def extract_objection_playbook(account_id: str) -> list[dict]:
     business_context = {}
     if firmo_records and len(firmo_records) > 0:
         f = firmo_records[0]
-        
+
         c_name = str(f.get("Company Name") or f.get("company_name") or f.get("Name") or "").strip()
         domain_val = str(f.get("Company Domain") or f.get("company_domain") or f.get("Domain") or f.get("Website") or f.get("website") or "").strip()
-        
+
         city = str(f.get("City Name") or f.get("city_name") or "").strip()
         region = str(f.get("Region Name") or f.get("region_name") or "").strip()
         country = str(f.get("Country Name") or f.get("country_name") or "").strip()

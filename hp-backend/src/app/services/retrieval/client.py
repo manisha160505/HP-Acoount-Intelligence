@@ -184,8 +184,8 @@ async def build_rag(account_id: str, index: str):
     every build.
     """
     from lightrag import LightRAG
-    from lightrag.utils import EmbeddingFunc
     from lightrag.kg.shared_storage import initialize_pipeline_status
+    from lightrag.utils import EmbeddingFunc
 
     from app.services.retrieval import shared_vdb
 
@@ -286,8 +286,7 @@ def drop_workspace(workspace: str) -> dict:
     indexes together, so a lingering one can starve the shared vector indexes.
     """
     from app.database.mongodb import get_db
-    from app.services.retrieval.shared_vdb import (
-        PARTITION_FIELD, shared_collection_name)
+    from app.services.retrieval.shared_vdb import PARTITION_FIELD, shared_collection_name
 
     if not workspace or not WORKSPACE_RE.match(workspace):
         raise RetrievalConfigError("refusing to drop %r - not a workspace name"

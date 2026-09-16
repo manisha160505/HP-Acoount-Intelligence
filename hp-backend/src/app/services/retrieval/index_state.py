@@ -25,7 +25,7 @@ they can promise:
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.database.mongodb import get_db
 
@@ -52,7 +52,7 @@ INCREMENTAL = "incremental"
 
 
 def _now():
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def get(account_id: str, index: str) -> dict:
@@ -185,7 +185,7 @@ def record_incremental(account_id: str, index: str, documents: dict,
     return state
 
 
-def fail_build(account_id: str, index: str, error: str, mode: str = None) -> dict:
+def fail_build(account_id: str, index: str, error: str, mode: str | None = None) -> dict:
     """Record a failed build.
 
     After a failed FULL rebuild the workspace has already been dropped, so there

@@ -70,7 +70,7 @@ def _parse(full_path: str) -> list[dict]:
     try:
         if ext in (".xlsx", ".xls"):
             return pd.read_excel(full_path).fillna("").to_dict(orient="records")
-        with open(full_path, "r", encoding="utf-8-sig", errors="replace") as fh:
+        with open(full_path, encoding="utf-8-sig", errors="replace") as fh:
             return list(csv.DictReader(fh))
     except Exception:
         logger.exception("Could not parse dataset file %s", full_path)
