@@ -1,5 +1,5 @@
 #!/bin/sh
-# Blocks a push when the backend lint gate is not clean.
+# Blocks a push to main, and a push whose backend lint gate is not clean.
 #
 # Installed by scripts/install-hooks.sh, which points core.hooksPath at this
 # directory. Committed to the repo rather than left in .git/hooks so the whole
@@ -15,6 +15,49 @@ set -e
 
 REPO_ROOT=$(git rev-parse --show-toplevel)
 BACKEND="$REPO_ROOT/hp-backend"
+
+PROTECTED_BRANCH="main"
+
+# --- Gate 1: main is PR-only -------------------------------------------------
+#
+# This is a local convenience, NOT a security control. Every developer can skip
+# it with --no-verify, and it does not exist at all for anyone who has not run
+# scripts/install-hooks.sh. Only GitHub branch protection on the remote can
+# actually enforce this; see docs/branch-protection.md. The hook is here to stop
+# the honest mistake - a reflexive `git push` while main happens to be checked
+# out - which is what nearly every direct-to-main push actually is.
+#
+# The refs being pushed arrive on stdin as:  <local ref> <local sha> <remote ref> <remote sha>
+# We read that rather than checking the CURRENT branch, because `git push
+# origin HEAD:main` targets main from any branch and would otherwise sail past.
+while read -r _local_ref _local_sha remote_ref _remote_sha; do
+    # An empty remote_ref means nothing is being pushed to a branch.
+    [ -z "$remote_ref" ] && continue
+
+    case "$remote_ref" in
+        "refs/heads/$PROTECTED_BRANCH")
+            echo ""
+            echo "  Push blocked: $PROTECTED_BRANCH takes pull requests, not direct pushes."
+            echo ""
+            echo "  Move this work onto a branch and open a PR:"
+            echo ""
+            echo "      git switch -c feat/your-change"
+            echo "      git push -u origin feat/your-change"
+            echo ""
+            echo "  If you already committed to $PROTECTED_BRANCH locally, those commits"
+            echo "  travel with you to the new branch. Afterwards reset your local"
+            echo "  $PROTECTED_BRANCH back to the remote:"
+            echo ""
+            echo "      git branch -f $PROTECTED_BRANCH origin/$PROTECTED_BRANCH"
+            echo ""
+            echo "  Bypass (emergencies):     git push --no-verify"
+            echo ""
+            exit 1
+            ;;
+    esac
+done
+
+# --- Gate 2: backend lint ----------------------------------------------------
 
 # Prefer the project venv so the hook uses the pinned ruff rather than whatever
 # happens to be on PATH - a different version means different findings.

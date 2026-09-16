@@ -724,7 +724,11 @@ export default function UserDashboardPage() {
 
                 if (!urgency) return null;
 
+                // The score always computes now: a missing input costs its own
+                // component 0 and nothing blocks the composite. The null branch
+                // is kept for a payload written before that rule changed.
                 const hasScore = urgency.score != null;
+                const missing: string[] = urgency.missing_inputs ?? [];
                 return (
                   <div
                     className={`inline-flex items-center space-x-1.5 px-3 py-1 rounded-full border text-xs font-bold ${
@@ -732,7 +736,13 @@ export default function UserDashboardPage() {
                         ? 'bg-amber-50 text-amber-800 border-amber-200/80'
                         : 'bg-slate-50 text-slate-600 border-slate-200'
                     }`}
-                    title={hasScore ? undefined : (urgency.unavailable_reason || undefined)}
+                    title={
+                      hasScore
+                        ? (missing.length
+                            ? `Scored 0 for want of data: ${missing.join('; ')}`
+                            : undefined)
+                        : (urgency.unavailable_reason || undefined)
+                    }
                   >
                     <span className="text-[11px]">Urgency Score</span>
                     <span className={`px-1.5 py-0.5 rounded font-mono text-[10px] ${
@@ -1193,7 +1203,7 @@ export default function UserDashboardPage() {
                               {!urgencyData
                                 ? 'Not yet computed'
                                 : urgencyData.client_agreed
-                                  ? 'Client-agreed formula'
+                                  ? 'Client-supplied formula'
                                   : 'Delivery-authored · not client-agreed'}
                             </span>
                           </div>
@@ -1213,45 +1223,47 @@ export default function UserDashboardPage() {
                             </div>
 
                             <div className="flex-1 w-full space-y-3 text-xs">
-                              {(urgencyData?.drivers ?? []).map((d: any) => ({
+                              {(urgencyData?.drivers ?? []).map((d: any) => {
+                                  // Components that scored 0 because nothing
+                                  // was on file. Under the client's
+                                  // missing-input rule they look identical to
+                                  // a genuine 0, so the count is surfaced.
+                                  const missing = (d.terms ?? []).filter((t: any) => t.missing_input);
+                                  return {
                                   id: d.key,
                                   label: d.label,
                                   available: d.available,
-                                  proxy: d.proxy,
-                                  scoreText: d.available ? `${d.value}/100` : 'Unavailable',
-                                  progressPct: d.available ? `${d.value}%` : '0%',
-                                  barColor: !d.available
-                                    ? 'bg-slate-300'
-                                    : d.proxy ? 'bg-amber-400' : 'bg-hp-navy',
+                                  partial: missing.length > 0,
+                                  scoreText: `${d.value}/100`,
+                                  progressPct: `${d.value}%`,
+                                  barColor: missing.length > 0 ? 'bg-amber-400' : 'bg-hp-navy',
                                   // The whole working, so a seller who
                                   // disagrees with the number can see which
                                   // term to disagree with.
-                                  rationale: d.available
-                                    ? [
-                                        `Weight ${Math.round(d.weight * 100)}% of the total.`,
-                                        ...(d.terms ?? []).map((t: any) =>
-                                          `${t.label}: ${t.points}/${t.max_points} — ${t.basis}.`),
-                                        ...(d.proxy ? [`⚠ ${d.proxy_note}`] : []),
-                                        ...(d.authored_by
-                                          ? [`Bands and point values for this driver were authored ${d.authored_by}-side.`]
-                                          : []),
-                                        ...(d.notes ?? []),
-                                      ].join(' ')
-                                    : d.unavailable_reason,
-                                })).map((driver: any) => (
+                                  rationale: [
+                                    `Weight ${Math.round(d.weight * 100)}% of the total.`,
+                                    ...(d.terms ?? []).map((t: any) =>
+                                      `${t.label}: ${t.points}/${t.max_points} — ${t.basis}${
+                                        t.missing_input ? ' (no input on file — scores 0 by the missing-input rule)' : ''}.`),
+                                    ...(d.notes ?? []),
+                                    ...(d.caveats ?? []).map((c: string) => `⚠ ${c}`),
+                                  ].join(' '),
+                                };
+                                }).map((driver: any) => (
                                 <div key={driver.id} className="relative">
                                   <div className="flex justify-between items-center font-bold text-slate-700 text-[11px] mb-1">
                                     <div className="flex items-center space-x-1.5">
                                       <span className={driver.available ? '' : 'text-slate-400'}>{driver.label}</span>
 
-                                      {/* A proxy driver scores something
-                                          adjacent to what its name promises -
-                                          fleet SIZE, not refresh due-ness. That
-                                          belongs on the face of the card, not
-                                          only inside the popover. */}
-                                      {driver.proxy && (
+                                      {/* At least one component scored 0 for
+                                          want of data rather than for a weak
+                                          signal. That changes how the driver's
+                                          number should be read, so it belongs
+                                          on the face of the card, not only
+                                          inside the popover. */}
+                                      {driver.partial && (
                                         <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">
-                                          PROXY
+                                          PARTIAL DATA
                                         </span>
                                       )}
 
@@ -1315,20 +1327,49 @@ export default function UserDashboardPage() {
                             </div>
                           </div>
 
-                          {/* Why there is no total. ABX forbids scoring a
-                              missing driver as 0, so one unavailable driver
-                              blocks the composite - and the card has to say
-                              which one rather than showing an empty dial. */}
-                          {urgencyData && urgencyData.score == null && (
-                            <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-3 leading-relaxed">
-                              {urgencyData.unavailable_reason}
+                          {/* Which components scored 0 for want of data. The
+                              score always computes now - a missing input costs
+                              only its own component - so a low number can mean
+                              "little evidence" rather than "weak account", and
+                              the card has to let a reader tell them apart. */}
+                          {urgencyData && urgencyData.missing_inputs?.length > 0 && (
+                            <div className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-3 leading-relaxed">
+                              <span className="font-semibold">
+                                Scored 0 for want of data, not for a weak signal:
+                              </span>{' '}
+                              {urgencyData.missing_inputs.join('; ')}.
+                            </div>
+                          )}
+
+                          {/* The arithmetic, shown adding up. The contributions
+                              printed here are the same figures the API
+                              publishes and they sum to the headline score, so a
+                              reader checking the column by hand reaches the
+                              number on the dial rather than a near miss. */}
+                          {urgencyData && urgencyData.weighted_contributions && (
+                            <p className="text-[10px] text-slate-500 font-mono leading-relaxed border-t border-slate-100 pt-3">
+                              {(urgencyData.drivers ?? [])
+                                .map((d: any) =>
+                                  `${d.value} × ${Math.round(d.weight * 100)}% = ${
+                                    urgencyData.weighted_contributions[d.key]}`)
+                                .join('  +  ')}
+                              {'  =  '}
+                              <span className="font-bold text-slate-700">
+                                {urgencyData.exact_score ?? urgencyData.score}
+                              </span>
+                              {urgencyData.exact_score != null
+                                && urgencyData.exact_score !== urgencyData.score
+                                && ` → ${urgencyData.score} rounded`}
                             </p>
                           )}
 
                           {urgencyData && (
                             <p className="text-[10px] text-slate-400 leading-relaxed border-t border-slate-100 pt-3">
+                              {/* The authority sentence comes from the payload
+                                  rather than being written here: the backend
+                                  owns which document the formula is from, and
+                                  a copy in the UI would drift from it. */}
                               {urgencyData.formula}{' '}{urgencyData.formula_authority}
-                              {urgencyData.proxy_drivers?.length > 0 && ' Drivers marked PROXY score something adjacent to their name — open each for what it actually measures.'}
                             </p>
                           )}
                         </div>
