@@ -1120,7 +1120,11 @@ export default function UserDashboardPage() {
                                 ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
                                 : 'bg-amber-50 text-amber-800 border-amber-200'
                             }`}>
-                              {urgencyData ? 'Delivery-authored · not client-agreed' : 'Not yet computed'}
+                              {!urgencyData
+                                ? 'Not yet computed'
+                                : urgencyData.client_agreed
+                                  ? 'Client-agreed formula'
+                                  : 'Delivery-authored · not client-agreed'}
                             </span>
                           </div>
 
@@ -1158,6 +1162,9 @@ export default function UserDashboardPage() {
                                         ...(d.terms ?? []).map((t: any) =>
                                           `${t.label}: ${t.points}/${t.max_points} — ${t.basis}.`),
                                         ...(d.proxy ? [`⚠ ${d.proxy_note}`] : []),
+                                        ...(d.authored_by
+                                          ? [`Bands and point values for this driver were authored ${d.authored_by}-side.`]
+                                          : []),
                                         ...(d.notes ?? []),
                                       ].join(' ')
                                     : d.unavailable_reason,
@@ -1250,9 +1257,7 @@ export default function UserDashboardPage() {
 
                           {urgencyData && (
                             <p className="text-[10px] text-slate-400 leading-relaxed border-t border-slate-100 pt-3">
-                              {urgencyData.formula} The 20/25/15/15/25 weights are from the
-                              account-intelligence specification; the per-driver formulas are
-                              delivery-authored and not yet client-agreed.
+                              {urgencyData.formula}{' '}{urgencyData.formula_authority}
                               {urgencyData.proxy_drivers?.length > 0 && ' Drivers marked PROXY score something adjacent to their name — open each for what it actually measures.'}
                             </p>
                           )}
