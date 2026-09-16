@@ -1,5 +1,9 @@
 export type WidgetClassification = 'deterministic' | 'derived' | 'inferred';
-export type WidgetStatus = 'available' | 'empty' | 'pending';
+// `partial` is a widget that computed some of itself and is publishing that
+// much: `exec_urgency_score` emits it when one of the five drivers is
+// unavailable, which blocks the composite but leaves the other four worth
+// showing. Distinct from `empty`, which has nothing to show at all.
+export type WidgetStatus = 'available' | 'partial' | 'empty' | 'pending';
 
 export interface WidgetContract {
   widget_key: string;
