@@ -55,19 +55,45 @@ INDEX_TIMEOUT_SECONDS = 600
 
 
 def find_legacy_collections(db):
-    """(collection_name, workspace, namespace) for every per-workspace vector set."""
+    """(collection_name, workspace, namespace) for every per-workspace vector set.
+
+    Matched on CONTENT, not on name alone. A vector store is a collection whose
+    documents carry a `vector` field; nothing else is one, whatever it is called.
+
+    The name suffix on its own is not enough, because four of LightRAG's KV
+    collections end in `_chunks` or `_entities` too - `text_chunks`,
+    `entity_chunks`, `relation_chunks` and `full_entities`. Selecting by name
+    alone matched all of them, which had two consequences on a real database:
+
+      * it reported "7 collections across 5 workspaces" for a single workspace,
+        because stripping `_chunks` off `..._strategy_entity_chunks` invents a
+        workspace called `..._strategy_entity`;
+      * step 4 would then have renamed those KV collections to `_bak_*`, and
+        LightRAG needs them in place - the index would have kept its vectors and
+        lost the text they point at.
+
+    The module docstring in `shared_vdb.py` already states the intent exactly:
+    "Everything else - KV, graph, doc-status - stays exactly where it is." This
+    is that sentence, enforced.
+    """
     found = []
     for name in db.list_collection_names():
         if not name.startswith("acct_") or name.startswith(BACKUP_PREFIX):
             continue
         for namespace in NAMESPACES:
             suffix = "_" + namespace
-            if name.endswith(suffix):
-                # The workspace is the collection name minus the namespace
-                # suffix - identical to what `workspace_name()` produces at
-                # runtime, which is what makes the partition values line up.
-                found.append((name, name[:-len(suffix)], namespace))
+            if not name.endswith(suffix):
+                continue
+            sample = db[name].find_one({}, {"vector": 1})
+            if sample is not None and "vector" not in sample:
+                logger.debug("skipping %s - no vector field, so not a vector "
+                             "store", name)
                 break
+            # The workspace is the collection name minus the namespace
+            # suffix - identical to what `workspace_name()` produces at
+            # runtime, which is what makes the partition values line up.
+            found.append((name, name[:-len(suffix)], namespace))
+            break
     return sorted(found)
 
 

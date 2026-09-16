@@ -1,4 +1,5 @@
 import contextlib
+import logging
 from datetime import UTC, datetime
 
 from app.database.mongodb import get_db
@@ -7,6 +8,8 @@ from app.services.extractors.datasets import (
     read_dataset_records,
     requires_local_datasets,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _find_file_path(rel_path: str) -> str | None:
@@ -347,5 +350,23 @@ def extract_executive_dashboard(account_id: str) -> list[dict]:
         upsert=True
     )
     results.append(hiring_payload)
+
+    # The urgency score. `build_urgency_score` computes and persists
+    # `exec_urgency_score` itself, reading the datasets directly - it needs no
+    # retrieval and no index. It was complete but unreferenced: nothing called
+    # it, so the widget was never written and the card rendered empty.
+    #
+    # Wired here rather than left to be run by hand so it refreshes with the
+    # rest of the feature whenever its datasets change.
+    #
+    # Never fatal. An account missing a driver's dataset gets an unavailable
+    # driver and no composite, which is ABX's own missing-input rule; an
+    # unexpected failure costs the account its urgency card, not its dashboard.
+    try:
+        from app.services.dashboard.urgency import build_urgency_score
+        results.append(build_urgency_score(account_id))
+    except Exception:
+        logger.exception("executive_dashboard: urgency score failed for %s",
+                         account_id)
 
     return results

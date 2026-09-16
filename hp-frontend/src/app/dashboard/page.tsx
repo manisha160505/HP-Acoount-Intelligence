@@ -1365,10 +1365,11 @@ export default function UserDashboardPage() {
 
                           {urgencyData && (
                             <p className="text-[10px] text-slate-400 leading-relaxed border-t border-slate-100 pt-3">
-                              {urgencyData.formula}{' '}
-                              {urgencyData.client_agreed
-                                ? 'The weights, bands and point values are the client’s, from the final urgency-score logic document.'
-                                : 'The per-driver formulas are delivery-authored and not yet client-agreed.'}
+                              {/* The authority sentence comes from the payload
+                                  rather than being written here: the backend
+                                  owns which document the formula is from, and
+                                  a copy in the UI would drift from it. */}
+                              {urgencyData.formula}{' '}{urgencyData.formula_authority}
                             </p>
                           )}
                         </div>
