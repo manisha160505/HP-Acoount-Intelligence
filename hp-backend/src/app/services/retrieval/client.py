@@ -125,6 +125,11 @@ async def _llm_model_func(prompt, system_prompt=None, history_messages=None,
     The SDK call is blocking, so it runs in a thread rather than stalling the
     event loop LightRAG drives its pipeline with - same shape as the supplied
     reference rig.
+
+    Timed against whatever step timer is in scope, and free when there is none.
+    LightRAG makes several of these per question and they dominate retrieval, so
+    "3 LLM calls, 18.4s" is the difference between a diagnosable 20-second
+    question and an opaque one.
     """
     client = _openai_client()
     model = _model_override or retrieval_model()
@@ -139,29 +144,37 @@ async def _llm_model_func(prompt, system_prompt=None, history_messages=None,
         return client.chat.completions.create(
             model=model, messages=messages, **extra)
 
-    try:
-        response = await asyncio.to_thread(_call, model not in _NO_TEMPERATURE)
-    except Exception as exc:
-        if model in _NO_TEMPERATURE or _TEMPERATURE_REJECTED not in str(exc) \
-                or "temperature" not in str(exc):
-            raise
-        logger.info("retrieval: %s rejects a custom temperature - using its "
-                    "default for the rest of this process", model)
-        _NO_TEMPERATURE.add(model)
-        response = await asyncio.to_thread(_call, False)
+    from app.observability import steps
+
+    with steps.measure("retrieval.llm", model=model):
+        try:
+            response = await asyncio.to_thread(_call, model not in _NO_TEMPERATURE)
+        except Exception as exc:
+            if model in _NO_TEMPERATURE or _TEMPERATURE_REJECTED not in str(exc) \
+                    or "temperature" not in str(exc):
+                raise
+            logger.info("retrieval: %s rejects a custom temperature - using its "
+                        "default for the rest of this process", model)
+            _NO_TEMPERATURE.add(model)
+            response = await asyncio.to_thread(_call, False)
 
     return response.choices[0].message.content
 
 
 async def _embedding_func(texts):
+    """Embeddings for LightRAG, timed when something is measuring."""
     import numpy as np
 
+    from app.observability import steps
+
     client = _openai_client()
-    response = await asyncio.to_thread(
-        client.embeddings.create,
-        model=settings.OPENAI_EMBEDDING_MODEL,
-        input=list(texts),
-    )
+    batch = list(texts)
+    with steps.measure("retrieval.embedding", batch_size=len(batch)):
+        response = await asyncio.to_thread(
+            client.embeddings.create,
+            model=settings.OPENAI_EMBEDDING_MODEL,
+            input=batch,
+        )
     return np.array([item.embedding for item in response.data])
 
 

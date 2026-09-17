@@ -62,9 +62,17 @@ class StrategyChatRequest(BaseModel):
     invalidated the moment the selected account changes. A client that switches
     account simply stops sending the old turns.
 
-    `mode` is carried from the start even though only the advisor is
-    implemented, so the roleplay personas of Feature 18 can be added later
-    without changing this contract.
+    `mode` was carried from the start so the roleplay personas could be added
+    without breaking this contract, and they were: `persona_id` is optional and
+    every existing client keeps working untouched.
+
+    `mode` is a Literal rather than the bare `str` it began as. As a free string
+    a client typo - "Roleplay", "roleplay " - silently produced advisor
+    behaviour while echoing the typo back, so a seller could believe they were
+    rehearsing while talking to the advisor. A 422 is the better answer.
     """
     messages: list[StrategyChatMessage]
-    mode: str = "advisor"
+    mode: Literal["advisor", "roleplay"] = "advisor"
+    # Which stakeholder to play. Required for roleplay and rejected for
+    # advisor - see the endpoint, which refuses rather than falling back.
+    persona_id: str | None = None

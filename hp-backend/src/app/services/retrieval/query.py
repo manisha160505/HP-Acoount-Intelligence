@@ -163,9 +163,33 @@ def _normalise(raw, mode, workspace, stale, only_context=False) -> RetrievalResu
 
 async def retrieve(account_id: str, index: str, question: str, mode: str | None = None,
                    top_k: int = DEFAULT_TOP_K, only_context: bool = False,
-                   conversation_history=None) -> RetrievalResult:
-    """Ask one index one question."""
+                   conversation_history=None, timer=None) -> RetrievalResult:
+    """Ask one index one question.
+
+    `timer` is handed in rather than picked up from context, and that is not a
+    style choice. This coroutine is submitted to a long-lived loop on another
+    thread by `client.run_on_query_loop`, and a ContextVar set while handling
+    the request does not cross that boundary - the embedding and LLM timings
+    would come back empty, which reads as "retrieval made no calls" rather than
+    as "the recorder never arrived". Installing it here puts it back in context
+    for everything LightRAG spawns below this point.
+    """
+    from app.observability import steps
+
+    if timer is not None:
+        with steps.use(timer):
+            return await _retrieve(account_id, index, question, mode, top_k,
+                                   only_context, conversation_history)
+    return await _retrieve(account_id, index, question, mode, top_k,
+                           only_context, conversation_history)
+
+
+async def _retrieve(account_id: str, index: str, question: str, mode: str | None,
+                    top_k: int, only_context: bool,
+                    conversation_history) -> RetrievalResult:
     from lightrag import QueryParam
+
+    from app.observability import steps
 
     state = index_state.get(account_id, index)
     workspace = state.get("workspace")
@@ -193,7 +217,13 @@ async def retrieve(account_id: str, index: str, question: str, mode: str | None 
     # It is NOT finalised afterwards: the whole point is that the next question
     # reuses it. `client.forget_query_handle` releases it when the workspace is
     # dropped or rebuilt.
-    rag = await client.query_handle(account_id, index)
+    # Timed separately because it is a cliff, not a cost: the first question of
+    # a process pays to build the handle and every question after it pays
+    # nothing. Folded into `retrieval` it looks like wildly variable retrieval;
+    # split out, a cold start is obvious.
+    with steps.measure("retrieval.handle", workspace=workspace or ""):
+        rag = await client.query_handle(account_id, index)
+
     if True:
         param = QueryParam(
             mode=mode,
@@ -210,7 +240,11 @@ async def retrieve(account_id: str, index: str, question: str, mode: str | None 
         # response string and throws the references away. aquery_llm() is the
         # real entry point and returns the structured result, which is where
         # include_references actually lands.
-        raw = await rag.aquery_llm(question, param=param)
+        # Vector search plus, in every mode except naive, the entity and
+        # relationship reads. This is the step the N+1 in the graph reads lived
+        # inside, and it was invisible because nothing timed it.
+        with steps.measure("retrieval.query", mode=mode):
+            raw = await rag.aquery_llm(question, param=param)
 
     result = _normalise(raw, mode, workspace, stale, only_context=only_context)
     logger.info("retrieval: %s/%s answered in %s mode (%d refs, %d evidence ids)",
