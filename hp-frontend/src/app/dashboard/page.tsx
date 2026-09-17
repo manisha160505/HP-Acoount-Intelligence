@@ -151,8 +151,22 @@ interface ProvenanceEntry {
 // shorthand a third. Each variant that the pattern did not anticipate rendered
 // the whole tag raw in the seller's face. Matching the bracket and extracting
 // what is inside it is indifferent to what sits between the ids.
-const CITATION_BRACKET_RE = /\[[^[\]]*?[A-Za-z0-9_]+#c\d+[^[\]]*\]/g;
-const EVIDENCE_ID_RE = /[A-Za-z0-9_]+#c\d+/g;
+// A citation now names the SECTION of the account payload it came from -
+// `[exec_urgency_score]`, `[stakeholder_contacts_grid, stakeholder_influence_map]`
+// - rather than a chunk of a retrieval index (`a6a997c3b_objection_a8e9..#c5`).
+// Strategy Chat reads the whole account in one pass, so there are no chunks left
+// to address.
+//
+// These two must stay the mirror of `_CITATION_RE` and `_SECTION_KEY_RE` in
+// services/strategy/chat.py. When they disagree the backend validates a tag the
+// frontend then fails to match, and the answer renders the raw bracket
+// mid-sentence - which is exactly what these markers exist to prevent.
+//
+// The underscore is required, not decorative: without it every bracketed aside
+// the model writes - `[see below]`, `[estimated]` - would be read as a citation,
+// match nothing, and be silently deleted from the sentence.
+const CITATION_BRACKET_RE = /\[[^[\]]*?[a-z][a-z0-9]*(?:_[a-z0-9]+)+[^[\]]*\]/g;
+const EVIDENCE_ID_RE = /[a-z][a-z0-9]*(?:_[a-z0-9]+)+/g;
 
 /**
  * The chat answer with its evidence tags turned into footnote markers.
@@ -160,7 +174,7 @@ const EVIDENCE_ID_RE = /[A-Za-z0-9_]+#c\d+/g;
  * Every factual sentence carries the address of the sentence it came from -
  * that traceability is the feature, and the validator rejects an answer whose
  * tags do not resolve. But a seller should not be reading database keys
- * mid-sentence: `[a6a997c3b_objection_a8e9508a48e5#c5]` says nothing to them
+ * mid-sentence: `[stakeholder_contacts_grid]` is a database key, not
  * and breaks the line.
  *
  * So the tag becomes a superscript number linking to its row in Sources below,

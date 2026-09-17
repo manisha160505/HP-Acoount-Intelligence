@@ -25,7 +25,6 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from app.api.v1.widgets import WIDGET_REGISTRY
 from app.services.retrieval import registry
 
 # Excluded by instruction: these publish a user's own draft message and the
@@ -39,45 +38,15 @@ NOT_IN_CHAT = {"message_evaluator", "content_studio"}
 # itself` guards for generated widgets.
 SELF = {"strategy_chat"}
 
-
-def strategy_widgets():
-    return set(registry.spec(registry.STRATEGY).get("widgets") or [])
-
-
-# --- every feature reaches the chat ---------------------------------------
-
-
-def test_every_contributing_feature_has_at_least_one_widget_in_the_chat():
-    wanted = strategy_widgets()
-    missing = sorted(feature for feature, contracts in WIDGET_REGISTRY.items()
-                     if feature not in NOT_IN_CHAT | SELF
-                     and not any(c["widget_key"] in wanted for c in contracts))
-    assert not missing, "features feeding nothing into Strategy Chat: %s" % missing
+# The three membership guarantees that used to live here - every contributing
+# feature reaches the chat, every one of its widgets does, and the excluded
+# features stay out - moved with the thing they guard. Strategy Chat has no
+# index and no corpus list any more; what it sends is assembled live in
+# services/strategy/context.py, so the checks now run against that module in
+# tests/test_strategy_context.py. They were not dropped.
 
 
-def test_every_widget_of_every_contributing_feature_is_listed():
-    """Not just one widget per feature - all of them.
-
-    This is the check that would have caught the eleven. A feature can be
-    represented by its headline widget while its other outputs never reach the
-    chat, which is exactly the state this test was written to end.
-    """
-    wanted = strategy_widgets()
-    missing = sorted(c["widget_key"] for feature, contracts in WIDGET_REGISTRY.items()
-                     if feature not in NOT_IN_CHAT | SELF
-                     for c in contracts if c["widget_key"] not in wanted)
-    assert not missing, "widgets not feeding Strategy Chat: %s" % missing
-
-
-def test_excluded_features_stay_excluded():
-    wanted = strategy_widgets()
-    leaked = sorted(c["widget_key"] for feature in NOT_IN_CHAT | SELF
-                    for c in WIDGET_REGISTRY.get(feature, [])
-                    if c["widget_key"] in wanted)
-    assert not leaked, "excluded features reached the chat: %s" % leaked
-
-
-def test_the_index_does_not_feed_itself():
+def test_an_index_does_not_feed_itself():
     """A generated widget in its own corpus changes it on every build."""
     for index in registry.INDEX_KEYS:
         own = (registry.generates(index) or {}).get("widget_key")
@@ -88,37 +57,63 @@ def test_the_index_does_not_feed_itself():
 
 
 # --- the widget -> index mapping -------------------------------------------
+#
+# This mapping is what turns a republished widget into a queued rebuild. It
+# still matters for the two indexes that remain; it stopped mattering for
+# Strategy Chat, which reads every widget live on each question and therefore
+# has nothing to keep warm.
+
+
+def _an_index_reading(widget_key: str) -> str:
+    """Whichever remaining index reads this widget - the registry decides."""
+    found = registry.dependents(widget_key)
+    assert found, "no enabled index reads %s" % widget_key
+    return found[0]
 
 
 def test_dependents_maps_a_widget_to_the_indexes_that_read_it():
-    assert registry.dependents("exec_urgency_score") == [registry.STRATEGY]
-    assert registry.STRATEGY in registry.dependents("exec_strategic_priorities")
+    index = _an_index_reading("messaging_context_card")
+    assert index in registry.INDEX_KEYS
+    assert registry.dependents("messaging_context_card") == [index]
 
 
-def test_dependents_of_an_unread_widget_is_empty():
-    """Content Studio's output must not queue anything."""
+def test_a_widget_no_enabled_index_reads_queues_nothing():
+    """Content Studio's output, and - since the rewrite - Strategy Chat's."""
     assert registry.dependents("content_generated_assets") == []
     assert registry.dependents("") == []
     assert registry.dependents(None) == []
 
 
+def test_the_retired_strategy_index_queues_nothing(monkeypatch):
+    """Removing the index must not leave a widget queueing a build that is gone.
+
+    `exec_urgency_score` was read only by Strategy Chat. Now that the chat reads
+    it live, republishing it should queue nothing at all - not a rebuild of an
+    index that no longer exists.
+    """
+    assert not hasattr(registry, "STRATEGY")
+    assert "strategy" not in registry.INDEX_KEYS
+    assert registry.dependents("exec_urgency_score") == []
+
+
 def test_dependents_skips_disabled_indexes():
-    entry = registry.INDEX_REGISTRY[registry.STRATEGY]
+    widget = "messaging_context_card"
+    index = _an_index_reading(widget)
+    entry = registry.INDEX_REGISTRY[index]
     was = entry["enabled"]
     entry["enabled"] = False
     try:
-        assert registry.dependents("exec_urgency_score") == []
-        assert registry.dependents("exec_urgency_score", enabled_only=False) == [
-            registry.STRATEGY]
+        assert registry.dependents(widget) == []
+        assert registry.dependents(widget, enabled_only=False) == [index]
     finally:
         entry["enabled"] = was
 
 
 def test_dependents_of_dedupes_and_keeps_registry_order():
     several = registry.dependents_of(
-        ["exec_key_metrics", "exec_urgency_score", "not_a_widget"])
+        ["messaging_context_card", "technographic_map", "not_a_widget"])
     assert several == sorted(set(several), key=several.index)
-    assert registry.STRATEGY in several
+    assert several, "no index reads any of these widgets"
     assert registry.dependents_of([]) == []
 
 
@@ -208,11 +203,15 @@ def test_requeue_dependents_queues_each_index_once(monkeypatch):
                         lambda _account_id, index, **_kw:
                         calls.append(index) or {"index": index})
 
-    queued = ingest.requeue_dependents(
-        "acct", ["exec_urgency_score", "exec_key_metrics"])
+    # Two widgets that at least one remaining index reads, so there is
+    # something to dedupe. Picked from the registry rather than named, so this
+    # test does not need editing the next time an index is added or retired.
+    widgets = [k for index in registry.INDEX_KEYS
+               for k in (registry.spec(index).get("widgets") or [])][:2]
+    queued = ingest.requeue_dependents("acct", widgets)
     assert calls == queued
     assert len(calls) == len(set(calls)), "an index was queued twice"
-    assert registry.STRATEGY in queued
+    assert queued, "no index was queued for %s" % widgets
 
 
 def test_requeue_dependents_skips_the_index_that_republished(monkeypatch):
@@ -221,9 +220,12 @@ def test_requeue_dependents_skips_the_index_that_republished(monkeypatch):
 
     monkeypatch.setattr(ingest, "request_update",
                         lambda _account_id, index, **_kw: {"i": index})
-    queued = ingest.requeue_dependents(
-        "acct", "exec_strategic_priorities", skip=registry.STRATEGY)
-    assert registry.STRATEGY not in queued
+    widget = next(k for index in registry.INDEX_KEYS
+                  for k in (registry.spec(index).get("widgets") or [])
+                  if registry.dependents(k))
+    reader = registry.dependents(widget)[0]
+    assert reader in ingest.requeue_dependents("acct", widget)
+    assert reader not in ingest.requeue_dependents("acct", widget, skip=reader)
 
 
 def test_requeue_dependents_never_raises(monkeypatch):
@@ -234,7 +236,7 @@ def test_requeue_dependents_never_raises(monkeypatch):
         raise RuntimeError("queue is down")
 
     monkeypatch.setattr(ingest, "request_update", boom)
-    assert ingest.requeue_dependents("acct", "exec_urgency_score") == []
+    assert ingest.requeue_dependents("acct", "messaging_context_card") == []
 
 
 def test_requeue_dependents_ignores_empty_input():
@@ -245,125 +247,160 @@ def test_requeue_dependents_ignores_empty_input():
     assert ingest.requeue_dependents("acct", "") == []
 
 
-@pytest.mark.parametrize("widget_key", sorted(strategy_widgets()))
-def test_every_listed_widget_resolves_to_the_strategy_index(widget_key):
-    """The list and the mapping cannot drift apart."""
-    assert registry.STRATEGY in registry.dependents(widget_key)
+@pytest.mark.parametrize("index", registry.INDEX_KEYS)
+def test_every_listed_widget_resolves_back_to_its_index(index):
+    """A corpus list and the widget -> index mapping cannot drift apart."""
+    for widget_key in (registry.spec(index).get("widgets") or []):
+        assert index in registry.dependents(widget_key), (
+            "%s lists %s but dependents() does not map it back"
+            % (index, widget_key))
+
 
 
 # ---------------------------------------------------------------------------
-# Abbreviated citations
+# Citations, now that they name a payload section
 #
-# The model writes a second citation from the same document in shorthand -
-# "[doc#c2, c3]" - and every step read ids with a pattern matching a complete
-# `doc#cN`, so the abbreviated half was invisible. It was never resolved, never
-# validated, and never reached the seller's source list, while the answer
-# quoted the sentence it stood for. The bracket also failed the UI's pattern and
-# rendered raw.
-# ---------------------------------------------------------------------------
-
-def test_shorthand_second_citation_is_expanded():
-    from app.services.strategy.chat import _EVIDENCE_REF_RE, _expand_citations
-
-    out = _expand_citations("Counter with X [a6_objection_x#c2, c3].")
-    assert _EVIDENCE_REF_RE.findall(out) == ["a6_objection_x#c2", "a6_objection_x#c3"]
-
-
-def test_shorthand_with_a_hash_is_expanded():
-    from app.services.strategy.chat import _EVIDENCE_REF_RE, _expand_citations
-
-    out = _expand_citations("[a6_x#c1, #c4]")
-    assert _EVIDENCE_REF_RE.findall(out) == ["a6_x#c1", "a6_x#c4"]
-
-
-def test_several_shorthands_all_inherit_the_last_document():
-    from app.services.strategy.chat import _EVIDENCE_REF_RE, _expand_citations
-
-    out = _expand_citations("[a6_x#c1, c2, c3]")
-    assert _EVIDENCE_REF_RE.findall(out) == ["a6_x#c1", "a6_x#c2", "a6_x#c3"]
-
-
-def test_full_ids_are_left_alone():
-    from app.services.strategy.chat import _expand_citations
-
-    for text in ("[a6_x#c1, a6_y#c2]", "[a6_x#c9]", "no citations here"):
-        assert _expand_citations(text) == text
-
-
-def test_a_shorthand_with_no_preceding_document_is_not_invented():
-    """Nothing to inherit from, so it must not be guessed at."""
-    from app.services.strategy.chat import _EVIDENCE_REF_RE, _expand_citations
-
-    out = _expand_citations("[c3]")
-    assert _EVIDENCE_REF_RE.findall(out) == []
-
-
-def test_unrecognised_reference_survives_to_fail_loudly():
-    """Dropping it would hide a bad citation from `resolve`."""
-    from app.services.strategy.chat import _expand_citations
-
-    assert "nonsense" in _expand_citations("[a6_x#c1, nonsense]")
-
-
-# ---------------------------------------------------------------------------
-# Markdown in a plain-text answer
+# The evidence-id scheme (`doc#cN`) went with the retrieval layer. What has not
+# changed is what a citation is FOR: a factual sentence must point at the thing
+# it came from, and a pointer at something absent must be caught rather than
+# quietly dropped.
 #
-# The prompt asks for "FACTS:" and the model mostly writes it, but about one
-# run in three it reaches for "### FACTS". The UI renders the answer as plain
-# text, so the seller reads the hashes - and the verification suite, which looks
-# for an uppercase label ending in a colon, fails intermittently on a perfectly
-# good answer. `**bold**` was already stripped for the same reason; headings
-# were not.
+# These pin the properties that took a day to get right under the old scheme
+# and would be as easy to lose under this one. The model varies its separator
+# between runs - ", " one time, "; " the next, sometimes " and " - and every
+# pattern that anticipated a particular separator rendered the others raw in
+# the seller's face.
 # ---------------------------------------------------------------------------
 
-def markdown_cleaned(text):
-    """The heading rewrite exactly as `_validate` applies it."""
-    import re
-    return re.sub(r"^\s{0,3}#{1,6}\s*(.+?)\s*:?\s*$",
-                  lambda m: "%s:" % m.group(1).rstrip(":"), text, flags=re.M)
+def test_a_single_section_is_cited():
+    from app.services.strategy.chat import _section_refs
+
+    assert _section_refs("Revenue fell [exec_key_metrics].") == ["exec_key_metrics"]
 
 
-def test_a_markdown_heading_becomes_a_labelled_section():
-    """Rewritten, not stripped - a heading should stay a heading."""
-    assert markdown_cleaned("### FACTS") == "FACTS:"
-    assert markdown_cleaned("## RECOMMENDATION:") == "RECOMMENDATION:"
+def test_several_sections_in_one_bracket_whatever_the_separator():
+    from app.services.strategy.chat import _section_refs
+
+    for text in ("[exec_key_metrics, news_signals_feed]",
+                 "[exec_key_metrics; news_signals_feed]",
+                 "[ exec_key_metrics ; news_signals_feed ]",
+                 "[exec_key_metrics and news_signals_feed]"):
+        assert _section_refs(text) == ["exec_key_metrics", "news_signals_feed"], text
 
 
-def test_the_rewritten_heading_satisfies_the_published_contract():
-    """The same pattern the verification suite checks for."""
-    import re
-    body = markdown_cleaned("### FACTS ABOUT REVENUE\n1. Something [a6_x#c1].")
-    assert re.findall(r"^[A-Z][A-Z ,'/&-]{5,}:", body, re.M) == ["FACTS ABOUT REVENUE:"]
+def test_adjacent_brackets_are_both_read():
+    from app.services.strategy.chat import _section_refs
+
+    assert _section_refs("A [exec_key_metrics][news_signals_feed].") == [
+        "exec_key_metrics", "news_signals_feed"]
 
 
-def test_ordinary_lines_are_untouched():
-    for line in ("no heading here", "1. A numbered line",
-                 "C# is a language", "a sentence with # inside"):
-        assert markdown_cleaned(line) == line
+def test_a_section_cited_twice_is_listed_once():
+    from app.services.strategy.chat import _section_refs
+
+    assert _section_refs("[a_section] and again [a_section]") == ["a_section"]
 
 
-def test_semicolon_separated_citations_are_expanded():
-    """The model varies the separator between runs; both must work.
+def test_ordinary_bracketed_prose_is_not_a_citation():
+    """Otherwise an aside becomes a citation that cannot resolve."""
+    from app.services.strategy.chat import _section_refs
 
-    A comma-only split left "[x#c2; c3]" with its shorthand intact, so the
-    second citation stayed invisible to resolution and to the source list - and
-    the bracket rendered raw in the UI, which is how it was noticed.
+    for text in ("[see below]", "[1]", "[TBD]", "a sentence with no brackets"):
+        assert _section_refs(text) == [], text
+
+
+def test_an_unknown_section_is_rejected_not_dropped():
+    """The whole point of the check.
+
+    Silently dropping an unresolvable citation would publish a factual sentence
+    whose source does not exist - the failure this feature exists to prevent.
     """
-    from app.services.strategy.chat import _EVIDENCE_REF_RE, _expand_citations
+    from app.services.strategy.chat import _validate
 
-    out = _expand_citations("[a6_x#c2; c3]")
-    assert _EVIDENCE_REF_RE.findall(out) == ["a6_x#c2", "a6_x#c3"]
-
-
-def test_mixed_separators_in_one_bracket():
-    from app.services.strategy.chat import _EVIDENCE_REF_RE, _expand_citations
-
-    out = _expand_citations("[a6_x#c1, c2; c3]")
-    assert _EVIDENCE_REF_RE.findall(out) == ["a6_x#c1", "a6_x#c2", "a6_x#c3"]
+    ok, reason, _, _ = _validate(
+        "FACTS:\n1. Something true [made_up_section].",
+        "===== exec_key_metrics (feature: executive_dashboard) =====\n{}",
+        ["exec_key_metrics"])
+    assert ok is False
+    assert "made_up_section" in reason
 
 
-def test_semicolon_between_two_full_ids_is_left_resolvable():
-    from app.services.strategy.chat import _EVIDENCE_REF_RE, _expand_citations
+def test_a_figure_absent_from_the_payload_is_rejected():
+    """Grounding survives the move off retrieval, unchanged in spirit."""
+    from app.services.strategy.chat import _validate
 
-    out = _expand_citations("[a6_x#c2; a6_y#c3]")
-    assert _EVIDENCE_REF_RE.findall(out) == ["a6_x#c2", "a6_y#c3"]
+    payload = ('===== exec_key_metrics (feature: executive_dashboard) =====\n'
+               '{"revenue":"323392"}')
+    ok, reason, _, _ = _validate(
+        "FACTS:\n1. Revenue grew 4271 percent [exec_key_metrics].",
+        payload, ["exec_key_metrics"])
+    assert ok is False
+    assert "4271" in reason
+
+
+def test_a_figure_present_in_the_payload_passes_despite_formatting():
+    """"IDR 323,392 billion" must match a payload holding 323392."""
+    from app.services.strategy.chat import _validate
+
+    payload = ('===== exec_key_metrics (feature: executive_dashboard) =====\n'
+               '{"value_text":"IDR 323,392 billion","period":"FY2025"}')
+    ok, reason, cited, _ = _validate(
+        "FACTS:\n1. Net revenue for FY2025 was IDR 323,392 billion "
+        "[exec_key_metrics].", payload, ["exec_key_metrics"])
+    assert ok is True, reason
+    assert cited == ["exec_key_metrics"]
+
+
+def test_facts_without_any_citation_are_rejected():
+    from app.services.strategy.chat import _validate
+
+    ok, reason, _, _ = _validate(
+        "FACTS:\n1. The COO is Irvan Nr.",
+        "===== stakeholder_contacts_grid (feature: stakeholder_map) =====\n{}",
+        ["stakeholder_contacts_grid"])
+    assert ok is False
+    assert "without citing" in reason
+
+
+def test_an_uncited_claim_is_rejected_even_without_a_facts_header():
+    """The hole the live verification found.
+
+    The gate used to apply only when the model had written the word "fact" in
+    its opening lines - so an answer that began straight into prose asserted the
+    account's people and figures with the citation requirement switched off. A
+    model must not be able to disable a gate by omitting a header.
+    """
+    from app.services.strategy.chat import _validate
+
+    ok, reason, _, _ = _validate(
+        "PT Example's Chief Operating Officer is Someone Invented, and they "
+        "own the endpoint refresh.",
+        "===== stakeholder_contacts_grid (feature: stakeholder_map) =====\n{}",
+        ["stakeholder_contacts_grid"])
+    assert ok is False
+    assert "without citing" in reason
+
+
+def test_a_refusal_needs_no_citation():
+    """The one answer that legitimately grounds nothing: it claims nothing."""
+    from app.services.strategy.chat import _validate
+
+    ok, reason, cited, _ = _validate(
+        "The platform does not hold a personal mobile number for the CEO.",
+        "===== stakeholder_contacts_grid (feature: stakeholder_map) =====\n{}",
+        ["stakeholder_contacts_grid"])
+    assert ok is True, reason
+    assert cited == []
+
+
+def test_a_cited_claim_without_a_facts_header_still_passes():
+    """Widening the gate must not reject a correctly grounded answer."""
+    from app.services.strategy.chat import _validate
+
+    ok, reason, cited, _ = _validate(
+        "Irvan Nr is Chief Operating Officer [stakeholder_contacts_grid].",
+        '===== stakeholder_contacts_grid (feature: stakeholder_map) =====\n'
+        '{"name":"Irvan Nr","title":"Chief Operating Officer"}',
+        ["stakeholder_contacts_grid"])
+    assert ok is True, reason
+    assert cited == ["stakeholder_contacts_grid"]

@@ -12,6 +12,19 @@ python-dotenv>=1.0.0
 pandas>=2.2.0
 openai>=1.99.0
 
+# Strategy Chat only. That feature answers over ~113k tokens of widget JSON in
+# one pass, which needs a 1M context window; every other feature stays on the
+# Azure OpenAI client above.
+#
+# `google-genai`, not the older `google-generativeai`: the latter is the
+# deprecated SDK, and the two share neither an import path nor a client shape.
+#
+# Floated within the major, per the policy above - but verify it resolves ON
+# RENDER before merging, not only in CI. The exporter block below is here
+# because a green CI run is not evidence that a requirement line installs in
+# production.
+google-genai>=1.0,<2
+
 # The retrieval layer. Pinned exactly, not floated: LightRAG's storage
 # backends read their own environment variables and its query surface changed
 # shape between releases - 1.5.7 is the version the retrieval layer was written

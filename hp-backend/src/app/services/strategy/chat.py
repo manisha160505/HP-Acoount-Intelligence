@@ -39,20 +39,19 @@ account evidence, and on approved HP product facts where it names a product.
 
 import logging
 
-from app.core.llm import generate_chat_completion, generate_gpt4o_json_completion
+from app.config.settings import settings
+from app.core import gemini
+from app.core.llm import generate_gpt4o_json_completion
 from app.database.mongodb import get_db
 from app.services.extractors import grounding
-from app.services.retrieval import evidence as ev, index_state, query
+from app.services.strategy import context as account_context
 
 logger = logging.getLogger(__name__)
 
-INDEX = "strategy"
 PROMPT_VERSION = 1
 
-TOP_K = 25
 MAX_HISTORY_TURNS = 12
 MAX_VALIDATION_ATTEMPTS = 3
-MAX_CONTEXT_CHARS = 60000
 
 # LightRAG refuses a query under three characters, and a seller opening with
 # "hi" is not a malformed request - it is how a conversation starts. Greetings
@@ -143,8 +142,11 @@ def _resolve_question(messages: list) -> tuple:
 
 ANSWER_SYSTEM = """You are an ABM strategy assistant for HP Inc., helping an HP seller plan their approach to {company}.
 
-You answer ONLY from the RETRIEVED ACCOUNT EVIDENCE supplied with the question. That evidence is
-everything this platform knows about {company}.
+You answer ONLY from the ACCOUNT DATA supplied with the question. That is the finished output of
+every intelligence feature this platform runs on {company} - its filings and priorities, its people,
+its technology, its intent signals, recent events, opportunity plays, objections and messaging - and
+it is everything the platform knows about them. If something is not in there, the platform does not
+hold it.
 
 SEPARATE FACT FROM RECOMMENDATION. They are held to different standards:
 - A FACT about the account - a name, title, vendor, number, date, event - must come from the evidence.
@@ -154,12 +156,19 @@ SEPARATE FACT FROM RECOMMENDATION. They are held to different standards:
 Write recommendations so a reader can tell which is which: "Irvan Nr is Chief Operating Officer"
 versus "Irvan Nr may be the strongest entry point because...".
 
-CITATIONS: each evidence line in the context ends with its own tag in square brackets, shaped
-[<document>#c<number>]. EVERY sentence in a FACTS section must end with one.
+Label them. Put every statement about the account under a line reading FACTS: and every piece of
+advice under a line reading RECOMMENDATION:. Use both labels whenever the answer contains both.
+This is not decoration - a seller repeats facts to a customer and weighs recommendations themselves,
+and an answer that blurs the two gets the platform's inferences quoted as the customer's own filings.
 
-Copy tags character for character from the context above. Never invent a tag, never adapt one, and
-never use a tag that does not appear in the context - a tag written from memory or from an example
-resolves to nothing and the whole answer is discarded.
+CITATIONS: the account data is divided into sections, each introduced by a line reading
+===== <section_name> (feature: ...) =====
+EVERY sentence in a FACTS section must end with the section it came from, in square brackets - for
+example [exec_urgency_score]. Cite several when a sentence rests on several: [a_section, b_section].
+
+Copy section names character for character from those header lines. Never invent one, never adapt
+one, and never use a name that does not appear as a header above - a name that does not match a
+section is rejected and the whole answer is discarded.
 
 HP RULES:
 - You represent HP Inc. Never describe a competitor's product as ours.
@@ -177,11 +186,15 @@ def _answer_once(company: str, question: str, context: str, messages: list,
                  correction: str = "") -> str:
     """One generation attempt."""
     user = "\n".join([
-        "RETRIEVED ACCOUNT EVIDENCE:",
-        context[:MAX_CONTEXT_CHARS],
+        # Not truncated. The payload is the whole account and it fits the
+        # window whole - that is the point of the model choice. A cap here
+        # would silently drop whichever feature sorted last, and the answer
+        # would be confidently wrong about it rather than visibly short.
+        "ACCOUNT DATA:",
+        context,
         "",
         ("CORRECTION - your previous answer was rejected: %s Write it again "
-         "using only the evidence above." % correction) if correction else "",
+         "using only the account data above." % correction) if correction else "",
         "QUESTION: %s" % question,
     ])
 
@@ -190,8 +203,7 @@ def _answer_once(company: str, question: str, context: str, messages: list,
              and _text(m.get("content"))][-MAX_HISTORY_TURNS:]
     turns.append({"role": "user", "content": user})
 
-    return generate_chat_completion(
-        ANSWER_SYSTEM.format(company=company), turns) or ""
+    return gemini.generate(ANSWER_SYSTEM.format(company=company), turns)
 
 
 # ---------------------------------------------------------------------------
@@ -200,126 +212,124 @@ def _answer_once(company: str, question: str, context: str, messages: list,
 
 import re
 
-# One bracket can hold several ids - "[a6_x#c1, a6_y#c2]" - and the model does
-# that whenever a sentence rests on two pieces of evidence.
+# A citation names the payload section it came from - "[exec_urgency_score]" -
+# and one bracket can hold several when a sentence rests on two sections.
 #
-# The original pattern required a bracket to contain EXACTLY one id, so a
-# multi-id citation matched nothing, and both uses below failed silently:
+# Matched as "a bracket, then whatever keys are inside it", never as a
+# separator-delimited list. The model varies the separator run to run: ", " one
+# time, "; " the next, sometimes " and ". Every pattern that anticipated one
+# separator rendered the others raw in the seller's face, and each fix only
+# moved the problem to the next variant. Matching the bracket and extracting
+# what is in it is indifferent to what sits between.
 #
-#   * `findall` missed those ids, so they were never resolved. An id that does
-#     not exist would pass validation as long as it shared a bracket with one
-#     that does, and the sources never reached the published citation list - the
-#     UI showed fewer than the answer claimed.
-#   * `sub` left the id text in the answer, so the grounding check read the
-#     account prefix as a figure. "a6a997c3b_play_daas#c1" contributed "997",
-#     and the answer was rejected for stating a number nobody wrote. About one
-#     run in five died this way.
+# A section key must contain an underscore. That is what separates a cited
+# section from ordinary bracketed prose: every widget key is snake_case
+# (`exec_key_metrics`, `news_signals_feed`), and "[see below]", "[TBD]" and
+# "[1]" are not. A length rule alone is not enough - "below" passed one.
 #
-# Two patterns rather than one: the ids are what gets resolved, the whole
-# bracket is what gets removed before counting figures.
-_EVIDENCE_REF_RE = re.compile(r"[A-Za-z0-9_]+#c\d+")
-_CITATION_RE = re.compile(r"\[[^\[\]]*?[A-Za-z0-9_]+#c\d+[^\[\]]*\]")
+# The trade is explicit: a widget key with no underscore would not be seen as a
+# citation. All twenty-five have one, and the failure would be loud rather than
+# silent - the sentence would be read as uncited and the answer rejected for
+# stating facts without evidence, not published with a broken link.
+_SECTION_KEY_RE = re.compile(r"[a-z][a-z0-9]*(?:_[a-z0-9]+)+")
+_CITATION_RE = re.compile(
+    r"\[[^\[\]]*?[a-z][a-z0-9]*(?:_[a-z0-9]+)+[^\[\]]*\]")
 
 
-# A bracket of citations, whatever is inside it. Parsed rather than matched, so
-# that a form nobody anticipated is reported instead of silently skipped.
-_CITATION_BRACKET_RE = re.compile(r"\[([^\[\]]*#c\d+[^\[\]]*)\]")
-# One reference inside a bracket: a full id, or the shorthand the model uses for
-# a second citation from the same document - "c3", "#c3".
-_FULL_ID_RE = re.compile(r"^([A-Za-z0-9_]+)#c(\d+)$")
-_SHORT_ID_RE = re.compile(r"^#?c(\d+)$")
+def _section_refs(answer: str) -> list:
+    """Every section key cited, in order, deduplicated."""
+    out = []
+    for bracket in _CITATION_RE.findall(answer or ""):
+        for key in _SECTION_KEY_RE.findall(bracket):
+            if key not in out:
+                out.append(key)
+    return out
 
 
-def _expand_citations(answer: str) -> str:
-    """Rewrite abbreviated citations into full evidence ids.
+class _SectionFinder:
+    """`findall`-shaped, so `_validate` reads the same as it did."""
 
-    The model writes a second citation from the same document in shorthand:
+    @staticmethod
+    def findall(answer):
+        return _section_refs(answer)
 
-        [a6a997c3b_objection_066389c0779d#c2, c3]
 
-    Every step here reads ids with `_EVIDENCE_REF_RE`, which matches a complete
-    `doc#cN` and therefore saw only the first half. The consequences were silent
-    and all bad: `c3` was never resolved, so it was never validated and never
-    reached the seller's source list - the answer quoted a counter-question with
-    no citation behind it - and the bracket did not match the UI's pattern
-    either, so it rendered raw as `[a6a997c3b_objection_066389c0779d#c2, c3]`.
+_SECTION_REF_RE = _SectionFinder()
 
-    Expanding here rather than forbidding it in the prompt: the shorthand is a
-    reasonable thing for a model to write, and a rule it breaks once in twenty
-    answers would cost a whole regeneration. Normalising is cheap and the
-    published answer then carries well-formed ids, which is what the UI and the
-    citation list both want.
 
-    A reference that is neither form is left exactly as written, so it reaches
-    `resolve` and fails loudly rather than being quietly dropped.
-    """
-    def expand(match):
-        inside, last_doc, out = match.group(1), "", []
-        # Comma or semicolon: the model uses both, sometimes in the same answer.
-        # Splitting on one of them meant a "[x#c2; c3]" bracket kept its
-        # shorthand and the second citation stayed invisible.
-        for ref in re.split(r"[;,]", inside):
-            ref = ref.strip()
-            full = _FULL_ID_RE.match(ref)
-            if full:
-                last_doc = full.group(1)
-                out.append(ref)
-                continue
-            short = _SHORT_ID_RE.match(ref)
-            if short and last_doc:
-                out.append("%s#c%s" % (last_doc, short.group(1)))
-                continue
-            out.append(ref)
-        return "[%s]" % ", ".join(o for o in out if o)
+# `_expand_citations` is gone with the evidence ids it expanded. The model used
+# to abbreviate a second citation from the same document ("[doc#c2, c3]") and
+# the abbreviated half was invisible to every step that read ids. Section keys
+# carry no such shorthand - there is nothing to inherit - so the bracket parser
+# above is the whole mechanism.
 
-    return _CITATION_BRACKET_RE.sub(expand, answer or "")
+
+# A refusal is the one answer that legitimately cites nothing: it asserts
+# nothing about the account, so there is nothing to ground.
+_REFUSAL_PHRASES = ("does not hold", "not hold", "no information",
+                    "not available", "does not have", "does not include",
+                    "is not in the account data", "no data")
 
 
 def _asserts_facts(answer: str) -> bool:
     """Whether this answer claims something about the account.
 
-    A refusal ("the platform does not hold that") and a pure recommendation are
-    both legitimate without citations. A FACTS section is not.
+    Everything except a refusal does. That is deliberately the wide reading.
+
+    This used to return True only when the literal word "fact" appeared in the
+    first 400 characters - effectively trusting the model to have written a
+    "FACTS:" header before the citation requirement applied to it. An answer
+    that opened straight into prose ("PT Astra International Tbk's revenue is
+    in the range...") asserted the account's figures while this returned False,
+    and the uncited-facts check below never ran on it. The figure gate still
+    bit, but an uncited NAME or TITLE - the thing this feature must never
+    invent - had nothing standing in its way.
+
+    The prompt now requires the labels, but a gate that a model can talk past by
+    omitting a header is not a gate. So the label is no longer what decides it.
+
+    The cost of the wide reading is that an answer which is purely advice, with
+    no account facts at all, must still cite what the advice rests on. The
+    prompt already asks for exactly that, and erring this way rejects an answer
+    that was fine rather than publishing one that was not.
     """
     body = _text(answer).lower()
-    if any(phrase in body for phrase in
-           ("does not hold", "not hold", "no information", "not available")):
-        return False
-    return "fact" in body[:400]
+    return not any(phrase in body for phrase in _REFUSAL_PHRASES)
 
 
-def _validate(account_id: str, answer: str, passages: list) -> tuple:
-    """(ok, reason, cited_rows, cleaned). Deterministic, and the last word.
+def _validate(answer: str, payload: str, widget_keys: list) -> tuple:
+    """(ok, reason, cited_keys, cleaned). Deterministic, and the last word.
 
-    Two independent checks:
+    The model reads the whole account and writes the prose. It has no authority
+    over any fact in it, and that is enforced here rather than requested in the
+    prompt - a validation step a model can talk past is not a validation step.
 
-    **Citations** are resolved through `evidence.resolve`, which scopes its query
-    by account - so a citation belonging to another account does not resolve
-    here, it is reported invalid. That is ABX's after-generation account
-    isolation, enforced by the query rather than by a comparison we could forget.
+    Two independent checks, both unchanged in spirit from the retrieval design:
+
+    **Citations** must name a section that is actually in this payload. The
+    payload is built scoped to one account, so a tag naming anything else -
+    another account's widget, or one the model invented - does not resolve and
+    the answer is sent back. That is the same after-generation isolation the
+    evidence registry gave, enforced by membership rather than by a query.
 
     **Figures** are checked with `grounding.Corpus`, the same helper the
-    extractors use. It normalises digits and judges percentages strictly rather
-    than demanding literal string equality, so "IDR 323,392 billion" matches
-    evidence holding "323,392" while an invented 42% still fails. A literal
-    comparison would have rejected our own formatting.
+    extractors use, built over the payload itself. It normalises digits and
+    judges percentages strictly rather than demanding literal string equality,
+    so "IDR 323,392 billion" matches a payload holding 323392 while an invented
+    42% still fails. A literal comparison would reject our own formatting.
     """
     body = _text(answer)
     if not body:
         return False, "the model returned nothing", [], ""
 
-    # Shorthand expanded before anything reads the ids. See `_expand_citations`:
-    # the model abbreviates a second citation from the same document, and the
-    # abbreviated half was invisible to every step below.
-    answer = _expand_citations(answer)
-
-    # Every id in the answer, bracketed singly or several to a bracket.
-    cited = list(dict.fromkeys(_EVIDENCE_REF_RE.findall(answer)))
-    resolved, invalid = ev.resolve(account_id, INDEX, cited)
+    valid = set(widget_keys or [])
+    cited = list(dict.fromkeys(_SECTION_REF_RE.findall(answer)))
+    invalid = [c for c in cited if c not in valid]
     if invalid:
         return (False,
-                "it cited %d evidence id(s) that do not resolve for this account: %s"
+                "it cited %d section(s) that are not in this account's data: %s"
                 % (len(invalid), ", ".join(invalid[:3])), [], "")
+    resolved = [c for c in cited if c in valid]
 
     # An answer that asserts account facts and cites nothing is the failure this
     # feature exists to prevent, and it passes every other check trivially -
@@ -333,11 +343,12 @@ def _validate(account_id: str, answer: str, passages: list) -> tuple:
                 "it states facts about the account without citing any evidence",
                 [], "")
 
-    corpus = grounding.corpus_from_texts(passages)
-    # Citations out before figures are counted: an evidence id is not a
-    # claim, and its digits are not numbers the model asserted. Bare ids
-    # are stripped too, in case one is written outside a bracket.
-    countable = _EVIDENCE_REF_RE.sub("", _CITATION_RE.sub("", answer))
+    corpus = grounding.corpus_from_texts([payload])
+    # Citations out before figures are counted. A section tag is not a claim,
+    # and a widget key like `exec_key_metrics` contributes no digits - but
+    # `intent_topics_table` would have, and a tag is not something the model
+    # asserted.
+    countable = _CITATION_RE.sub("", answer)
     unsourced = corpus.unsourced_numbers(countable)
     if unsourced:
         return (False,
@@ -378,12 +389,6 @@ def answer(account_id: str, messages: list, mode: str | None = None) -> dict:
     """Answer one question about one account. Returns the published payload."""
     db = get_db()
 
-    state = index_state.get(account_id, INDEX)
-    if state.get("status") not in (index_state.READY, index_state.STALE):
-        raise ChatUnavailable(
-            "the Strategy index is %s - %s"
-            % (state.get("status"), state.get("last_error") or "build it first"))
-
     company = _text((db["account_widgets"].find_one(
         {"account_id": account_id, "widget_key": "exec_summary_card"}) or {}
     ).get("data", {}).get("company_name")) or "this account"
@@ -393,51 +398,36 @@ def answer(account_id: str, messages: list, mode: str | None = None) -> dict:
     if _is_small_talk(question):
         return _greeting(company, question)
 
-    # Retrieval runs on the RESOLVED question. The history shaped that question
-    # and contributes nothing else - what the assistant said earlier is not a
-    # source for what it says now.
+    # The whole account, in one payload. No retrieval, no index, no graph.
     #
-    # `only_context=True` skips LightRAG's own answer generation. It writes one
-    # on every query by default, and we discard it - the answer a seller reads
-    # is written afterwards, against validated evidence. Paying for prose we
-    # throw away cost about 3 seconds of every question.
-    try:
-        result = query.ask(account_id, INDEX, question,
-                           top_k=TOP_K, only_context=True)
-    except query.IndexNotReady as exc:
-        raise ChatUnavailable(str(exc)) from exc
-    except Exception as exc:
-        # Retrieval can refuse a question for its own reasons - a query it
-        # considers too short, a transient backend error. None of those is a
-        # server fault, and a 500 tells a seller nothing. Answer that we could
-        # not look it up.
-        logger.exception("strategy chat: retrieval failed for %r", question[:80])
+    # The eight contributing features publish about 113,000 tokens of finished
+    # JSON between them, which fits the model's window whole - so the question
+    # is answered against everything the platform knows rather than against the
+    # fragments that happened to resemble it. A multi-hop question no longer
+    # depends on one chunk joining a person to a topic to a technology.
+    #
+    # The resolved question is what gets asked. History shaped it and
+    # contributes nothing else: what the assistant said earlier is not a source
+    # for what it says now.
+    payload, sections = account_context.build(account_id)
+    widget_keys = [row["widget_key"] for row in sections]
+    if not payload:
         return _unavailable(company, question, topic,
-                            "retrieval failed: %s" % exc)
-
-    # Two different bodies of text, for two different jobs.
-    #
-    # The model reasons over the GRAPH context - entities and relationships as
-    # well as chunks. That is what makes a multi-hop question answerable: "who
-    # should I approach about AI workstations" needs a person joined to an
-    # intent topic joined to a technology, and no single chunk holds that join.
-    # Until now this was retrieved on every question and discarded, so the chat
-    # was vector RAG paying for a graph it never read.
-    #
-    # Figures are still checked against the CHUNKS alone. An entity description
-    # is a model's paraphrase written during extraction, not the account's own
-    # words, so allowing it to ground a number would let an extraction-time
-    # invention be republished as a filed fact. Widening what the model can
-    # reason from must not widen what counts as evidence.
-    reasoning_context = _reasoning_context(result)
-    passages = [p for p in [result.context] if _text(p)]
-    if not passages:
-        return _unavailable(company, question, topic, "no evidence was retrieved")
+                            "no feature has published anything for this account yet")
 
     attempts, correction, last_reason = [], "", "no attempt was made"
     for attempt in range(MAX_VALIDATION_ATTEMPTS):
-        raw = _answer_once(company, question, reasoning_context, messages, correction)
-        ok, reason, cited, cleaned = _validate(account_id, raw, passages)
+        try:
+            raw = _answer_once(company, question, payload, messages, correction)
+        except gemini.GeminiTruncated as exc:
+            # Named rather than left to the validator, which would have rejected
+            # the cut-off answer for a missing citation and spent the remaining
+            # attempts reproducing it.
+            logger.error("strategy chat: %s", exc)
+            return _unavailable(company, question, topic, str(exc), attempts)
+        except gemini.GeminiUnavailable as exc:
+            return _unavailable(company, question, topic, str(exc), attempts)
+        ok, reason, cited, cleaned = _validate(raw, payload, widget_keys)
         attempts.append({"attempt": attempt + 1, "accepted": ok, "reason": reason})
         if ok:
             return {
@@ -445,13 +435,13 @@ def answer(account_id: str, messages: list, mode: str | None = None) -> dict:
                 "question": question,
                 "topic": topic,
                 "mode": _text(mode) or "advisor",
-                "citations": [_citation(row) for row in cited],
+                "citations": [_citation(key, sections) for key in cited],
                 "available": True,
                 "generation": {
                     "prompt_version": PROMPT_VERSION,
-                    "retrieval_mode": result.mode,
-                    "index_workspace": result.workspace,
-                    "index_stale": result.stale,
+                    "model": settings.GEMINI_MODEL_NAME,
+                    "widgets_in_context": len(widget_keys),
+                    "context_chars": len(payload),
                     "attempts": attempts,
                 },
             }
@@ -462,43 +452,6 @@ def answer(account_id: str, messages: list, mode: str | None = None) -> dict:
     # Bounded retries, then stop. A third failure means the evidence does not
     # support the answer the model keeps wanting to give.
     return _unavailable(company, question, topic, last_reason, attempts)
-
-
-# LightRAG assembles its context in this order, and puts the only citable part
-# last. `_answer_once` then trims to MAX_CONTEXT_CHARS, which cut the tail.
-_CHUNKS_MARKER = "Document Chunks"
-
-
-def _reasoning_context(result) -> str:
-    """The graph context, reordered so the citable evidence survives trimming.
-
-    LightRAG emits entities, then relationships, then the document chunks, then
-    the reference list. On a real question that ran to 97,938 characters with
-    the chunks not starting until 60,817 - past the trim - so **every one of the
-    184 citation tags was cut off**. The model was left holding entity JSON with
-    nothing it was allowed to cite, produced a FACTS section with no tags, and
-    was rejected three times for stating facts without evidence. It was obeying
-    the prompt; the evidence simply was not there.
-
-    So the chunks go first. Whatever is dropped is then graph colour rather than
-    the account's own sentences and the tags that make them checkable.
-
-    Falls back to the chunk text alone if the marker is not found, which is the
-    safe direction: an answer with less graph reasoning, not one that cannot
-    cite. That matters on a LightRAG upgrade, where this heading could change.
-    """
-    graph = _text_block(getattr(result, "graph_context", ""))
-    chunks = _text_block(getattr(result, "context", ""))
-    if not graph:
-        return chunks
-
-    at = graph.find(_CHUNKS_MARKER)
-    if at < 0:
-        logger.warning(
-            "strategy chat: %r not found in the retrieved context - using chunks "
-            "only. Check the LightRAG context format.", _CHUNKS_MARKER)
-        return chunks or graph
-    return "%s\n\n%s" % (graph[at:], graph[:at])
 
 
 def _text_block(value) -> str:
@@ -558,12 +511,71 @@ def _unavailable(company, question, topic, reason, attempts=None) -> dict:
     }
 
 
-def _citation(row: dict) -> dict:
-    """One citation as the UI shows it."""
-    out = {"evidence_id": row["evidence_id"],
-           "source_text": row.get("source_text"),
-           "dataset": row.get("dataset")}
-    for key in ("source_url", "publisher", "page", "filing_label", "period"):
-        if row.get(key):
-            out[key] = row[key]
-    return out
+def _citation(widget_key: str, sections: list) -> dict:
+    """One citation as the UI shows it.
+
+    `evidence_id` keeps its name even though it now holds a section key. The
+    frontend matches the tokens inside a citation bracket against this field to
+    place its footnote markers; renaming it would stop every marker rendering
+    while the answer itself still looked correct.
+    """
+    feature = next((row.get("feature_key") for row in (sections or [])
+                    if row.get("widget_key") == widget_key), "")
+    return {
+        "evidence_id": widget_key,
+        "source_text": SECTION_LABELS.get(widget_key,
+                                          widget_key.replace("_", " ")),
+        # The UI prints this as the source's bold label, so it must be the name
+        # of the screen a seller can click through to - not the database key.
+        "dataset": _feature_label(feature),
+        # The key itself, for anything grouping citations by feature.
+        "feature_key": feature,
+    }
+
+
+def _feature_label(feature_key: str) -> str:
+    """"executive_dashboard" -> "Executive Dashboard".
+
+    Read from the feature mapping rather than duplicated here: that table is
+    already the one place a feature's display name is defined, and a second copy
+    would drift the moment a feature is renamed in one of them.
+    """
+    if not feature_key:
+        return "Account intelligence"
+    from app.api.v1.feature_mapping import FEATURE_MAPPINGS
+    entry = FEATURE_MAPPINGS.get(feature_key) or {}
+    return entry.get("display_name") or feature_key.replace("_", " ").title()
+
+
+# What each section is, in a seller's words. A citation reading
+# "exec_urgency_score" is a database key; one reading "Urgency score and its
+# drivers" answers "where did that come from". A key with no entry falls back to
+# itself with the underscores removed, so a new widget is readable rather than
+# blocked on someone remembering this table.
+SECTION_LABELS = {
+    "exec_summary_card": "Account profile and corporate structure",
+    "exec_key_metrics": "Reported financials and size bands",
+    "exec_strategic_priorities": "Strategic priorities and their filed evidence",
+    "exec_urgency_score": "Urgency score and its drivers",
+    "exec_hiring_velocity": "Hiring velocity",
+    "stakeholder_contacts_grid": "Stakeholder contacts",
+    "stakeholder_influence_map": "Buying group and influence",
+    "stakeholder_talking_points": "Talking points per stakeholder",
+    "news_signals_feed": "Recent news signals",
+    "news_relevance_summary": "Why each signal matters",
+    "opportunity_narrative_plays": "HP opportunity plays",
+    "opportunity_trigger_signals": "Opportunity trigger signals",
+    "opportunity_context_card": "Opportunity context",
+    "objection_reframe_cards": "Objections and reframes",
+    "objection_incumbent_context": "Incumbent vendors behind each objection",
+    "technographic_map": "Technology map",
+    "technographic_hp_recommendations": "HP product recommendations",
+    "tech_stack_matrix": "Installed technology by category",
+    "webstack_breakdown": "Public website technology",
+    "tech_detections_reference": "Technology detection history",
+    "intent_topics_table": "Intent topics",
+    "intent_category_summary": "Intent by HP category",
+    "intent_hiring_demand": "Hiring demand signal",
+    "messaging_pillars_output": "Message house pillars",
+    "messaging_context_card": "Messaging context",
+}

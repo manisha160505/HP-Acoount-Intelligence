@@ -53,6 +53,32 @@ class Settings(BaseSettings):
     # what the other ten features run on.
     OPENAI_RETRIEVAL_MODEL: str = ""
 
+    # --- Gemini, for Strategy Chat only ------------------------------------
+    #
+    # Strategy Chat answers over the finished output of eight features at once -
+    # about 113,000 tokens of widget JSON. That does not fit gpt-4o's 128K
+    # window with any room for the conversation, so the feature reads the whole
+    # account in one pass from a model with a 1M window instead of retrieving
+    # fragments of it. Every other feature stays on Azure OpenAI above.
+    #
+    # Empty key disables the feature rather than degrading it: an ungrounded
+    # answer is worse than a refusal that says the model is not configured.
+    GEMINI_API_KEY: str = ""
+    # Verified against the live API for this project's key. `gemini-2.5-flash-lite`
+    # and `gemini-2.0-flash` 404 on it - do not reintroduce either.
+    GEMINI_MODEL_NAME: str = "gemini-2.5-flash"
+    # A second capacity pool, not a cheaper tier. The flash models return 429
+    # and 503 when Google is saturated, and retrying the same model against the
+    # same saturated pool mostly fails again.
+    GEMINI_FALLBACK_MODEL: str = "gemini-3.1-flash-lite"
+    # Set explicitly because Gemini's default is small and gpt-4o's is not, so
+    # nothing in this codebase has ever needed a token cap. Too low truncates
+    # the answer mid-sentence, which strips its trailing citation, fails
+    # validation, burns all three retries, and surfaces as a grounding error -
+    # a failure that looks like anything except a token limit.
+    GEMINI_MAX_OUTPUT_TOKENS: int = 16384
+    GEMINI_TEMPERATURE: float = 0.3
+
     # --- Observability -----------------------------------------------------
     # Stamped onto every log record, span and metric so that signals from the
     # backend stay distinguishable once other services share a project.

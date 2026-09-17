@@ -44,6 +44,26 @@ services:
       - key: OPENAI_RETRIEVAL_MODEL
         value: gpt-5.6-sol
 
+      # Strategy Chat only. It reads the whole account - ~113k tokens of widget
+      # JSON from eight features - in one pass rather than retrieving fragments
+      # of it, which needs a 1M context window. Empty disables the feature
+      # rather than degrading it.
+      - key: GEMINI_API_KEY
+        sync: false
+      # Verified against the live API. `gemini-2.5-flash-lite` and
+      # `gemini-2.0-flash` 404 on this project's key.
+      - key: GEMINI_MODEL_NAME
+        value: gemini-2.5-flash
+      # A second capacity pool for 429/503, not a cheaper tier.
+      - key: GEMINI_FALLBACK_MODEL
+        value: gemini-3.1-flash-lite
+      # Always set - Gemini's default cap is small, and a truncated answer
+      # surfaces as a grounding failure rather than as a token limit.
+      - key: GEMINI_MAX_OUTPUT_TOKENS
+        value: "16384"
+      - key: GEMINI_TEMPERATURE
+        value: "0.3"
+
   - type: web
     name: hp-frontend
     runtime: node
