@@ -154,14 +154,25 @@ ck("no stray markdown emphasis survives", "**" not in body,
    body[:44].replace("\n", " "))
 
 # A mutation test, because asserting "the published answer has no bad figure"
-# against its own citations passes trivially - the answer was already validated,
-# so the check cannot fail and proves nothing. Corrupting it and requiring the
-# SAME validator to reject shows the gate is live for this specific answer.
-cited_texts = [c["source_text"] for c in result["citations"]]
-ok_clean, _, _, _ = chat._validate(AID, body, cited_texts)
+# passes trivially against the evidence it was validated on - the answer was
+# already validated, so the check cannot fail and proves nothing. Corrupting it
+# and requiring the SAME validator to reject shows the gate is live for this
+# specific answer.
+#
+# Validated against the RETRIEVED CONTEXT, which is what production checks
+# against (`chat.answer` passes `[result.context]`). An earlier version used
+# only the cited source texts, which is a strictly NARROWER set: a figure
+# grounded elsewhere in the retrieved context but not inside the sentence's own
+# quoted snippet failed here while being perfectly valid in production. That
+# made this check fail about one run in five for a reason the chat was right
+# about, and the first instinct on seeing it was to suspect the chat.
+retrieved = query.ask(AID, INDEX, result["question"],
+                      top_k=chat.TOP_K, only_context=True)
+passages = [p for p in [retrieved.context] if p]
+ok_clean, clean_reason, _, _ = chat._validate(AID, body, passages)
 corrupted = body + " Revenue grew 4271% year on year."
-ok_dirty, dirty_reason, _, _ = chat._validate(AID, corrupted, cited_texts)
-ck("the gate accepts the published answer", ok_clean)
+ok_dirty, dirty_reason, _, _ = chat._validate(AID, corrupted, passages)
+ck("the gate accepts the published answer", ok_clean, clean_reason[:46])
 ck("and rejects the same answer with a figure added",
    not ok_dirty, dirty_reason[:46])
 

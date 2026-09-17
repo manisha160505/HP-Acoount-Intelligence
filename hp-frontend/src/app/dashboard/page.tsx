@@ -142,6 +142,77 @@ interface ProvenanceEntry {
   url: string;
 }
 
+// Evidence tags, as the model writes them: [a6a997c3b_objection_x#c5], and
+// several to a bracket when a sentence rests on more than one source.
+//
+// Matched as "a bracket containing at least one id", then the ids are pulled
+// out of it - rather than as a comma-separated list of ids. The model varies
+// the separator run to run: ", " one time, "; " the next, and a bare "c3"
+// shorthand a third. Each variant that the pattern did not anticipate rendered
+// the whole tag raw in the seller's face. Matching the bracket and extracting
+// what is inside it is indifferent to what sits between the ids.
+const CITATION_BRACKET_RE = /\[[^[\]]*?[A-Za-z0-9_]+#c\d+[^[\]]*\]/g;
+const EVIDENCE_ID_RE = /[A-Za-z0-9_]+#c\d+/g;
+
+/**
+ * The chat answer with its evidence tags turned into footnote markers.
+ *
+ * Every factual sentence carries the address of the sentence it came from -
+ * that traceability is the feature, and the validator rejects an answer whose
+ * tags do not resolve. But a seller should not be reading database keys
+ * mid-sentence: `[a6a997c3b_objection_a8e9508a48e5#c5]` says nothing to them
+ * and breaks the line.
+ *
+ * So the tag becomes a superscript number linking to its row in Sources below,
+ * which is where the quoted source sentence already is. The tags stay in the
+ * model's output untouched - they are what validation runs on.
+ *
+ * A tag naming evidence that is not in this answer's citation list is dropped
+ * rather than shown: it would be a marker pointing at nothing. That should not
+ * happen (validation resolves every tag first), so it is a display guard, not
+ * a substitute for the check.
+ */
+function AnswerWithCitations({ text, citations, idPrefix }:
+  { text: string; citations: any[]; idPrefix: string }) {
+  const position = new Map<string, number>();
+  (citations || []).forEach((c, i) => {
+    if (c?.evidence_id) position.set(String(c.evidence_id), i + 1);
+  });
+
+  const parts: React.ReactNode[] = [];
+  let cursor = 0;
+  let key = 0;
+  for (const match of Array.from(text.matchAll(CITATION_BRACKET_RE))) {
+    const at = match.index ?? 0;
+    if (at > cursor) parts.push(text.slice(cursor, at));
+    const numbers = (match[0].match(EVIDENCE_ID_RE) || [])
+      .map(id => position.get(id))
+      .filter((n): n is number => typeof n === 'number');
+    if (numbers.length > 0) {
+      parts.push(
+        <sup key={`c${key++}`} className="ml-0.5">
+          {numbers.map((n, i) => (
+            <span key={n}>
+              {i > 0 && <span className="text-slate-400">,</span>}
+              <a
+                href={`#${idPrefix}-src-${n}`}
+                title="Jump to this source"
+                className="text-hp-navy no-underline hover:underline font-bold px-0.5"
+              >
+                {n}
+              </a>
+            </span>
+          ))}
+        </sup>
+      );
+    }
+    cursor = at + match[0].length;
+  }
+  if (cursor < text.length) parts.push(text.slice(cursor));
+
+  return <p className="text-xs leading-relaxed whitespace-pre-wrap">{parts}</p>;
+}
+
 // A widget that never generated stores the reason on its payload. Showing it
 // turns an unexplained empty panel into something a reader can act on - most
 // often a missing OPENAI_API_KEY, or source files absent from this machine.
@@ -310,7 +381,11 @@ export default function UserDashboardPage() {
   const [expandedCalc, setExpandedCalc] = useState<Record<string, boolean>>({});
 
   // Strategy Chat State
-  const [chatAdvisorMode, setChatAdvisorMode] = useState<string>('Strategy Advisor');
+  //
+  // No mode state: the advisor is the only mode implemented, and the selector
+  // that used to hold one was never wired to the request. It comes back with
+  // the roleplay personas, which is the point at which there is a second mode
+  // to hold.
   const [chatInput, setChatInput] = useState<string>('');
   const [chatMessages, setChatMessages] = useState<Array<{ id: string; sender: 'user' | 'assistant'; text: string; timestamp: string; citations?: any[]; available?: boolean }>>([]);
   const [chatPending, setChatPending] = useState(false);
@@ -6201,20 +6276,24 @@ export default function UserDashboardPage() {
 
                       {/* Grounding Bar */}
                       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
+                        {/* The mode the chat actually runs in.
+
+                            This was a four-option dropdown - Competitive
+                            Defender, Executive Pitcher, ABM Campaign Planner -
+                            but the selection was never sent: the request
+                            hardcodes `mode: 'advisor'`, so three of the four
+                            changed nothing when picked. Shown as a label rather
+                            than a one-item select, because a chevron invites a
+                            click that has nowhere to go.
+
+                            The roleplay personas of Feature 18 are the reason
+                            this stays a distinct element. `StrategyChatRequest`
+                            already carries `mode`, so restoring a real selector
+                            is a UI change and not a contract change. */}
                         <div className="flex items-center gap-2">
-                          <div className="relative">
-                            <select
-                              value={chatAdvisorMode}
-                              onChange={(e) => setChatAdvisorMode(e.target.value)}
-                              className="px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-extrabold text-slate-800 focus:outline-none focus:ring-2 focus:ring-hp-navy appearance-none pr-8 cursor-pointer shadow-xs"
-                            >
-                              <option value="Strategy Advisor">🤖 Strategy Advisor</option>
-                              <option value="Competitive Defender">🛡️ Competitive Defender</option>
-                              <option value="Executive Pitcher">🎯 Executive Pitcher</option>
-                              <option value="ABM Campaign Planner">📅 ABM Campaign Planner</option>
-                            </select>
-                            <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-3 pointer-events-none" />
-                          </div>
+                          <span className="px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-extrabold text-slate-800 shadow-xs">
+                            🤖 Strategy Advisor
+                          </span>
                         </div>
 
                         <div className="flex items-center gap-1.5 text-slate-500 font-medium">
@@ -6292,8 +6371,13 @@ export default function UserDashboardPage() {
                                     {/* The answer is plain text with UPPERCASE
                                         headers and numbered lists, so it is
                                         rendered as written rather than parsed
-                                        as markdown. */}
-                                    <p className="text-xs leading-relaxed whitespace-pre-wrap">{msg.text}</p>
+                                        as markdown - except for the evidence
+                                        tags, which become footnote markers. */}
+                                    <AnswerWithCitations
+                                      text={msg.text}
+                                      citations={msg.citations || []}
+                                      idPrefix={msg.id}
+                                    />
 
                                     {(msg.citations?.length ?? 0) > 0 && (
                                       <div className="pt-2 border-t border-slate-200/80 space-y-1.5">
@@ -6301,7 +6385,9 @@ export default function UserDashboardPage() {
                                           Sources ({msg.citations!.length})
                                         </span>
                                         {msg.citations!.map((c: any, ci: number) => (
-                                          <div key={ci} className="text-[10px] text-slate-600 leading-relaxed">
+                                          <div key={ci} id={`${msg.id}-src-${ci + 1}`}
+                                               className="text-[10px] text-slate-600 leading-relaxed scroll-mt-24">
+                                            <span className="font-bold text-slate-400 mr-1">{ci + 1}.</span>
                                             {c.source_url ? (
                                               <a href={c.source_url} target="_blank" rel="noopener noreferrer"
                                                  className="text-hp-navy hover:underline inline-flex items-center gap-1">

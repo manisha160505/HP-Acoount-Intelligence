@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 WORKSPACE_RE = re.compile(r"^[A-Za-z0-9_]+$")
 
 # Kept modest: these bound how much of the LLM budget one ingest can spend.
-LLM_MAX_ASYNC = 4
+LLM_MAX_ASYNC = 2
 EMBEDDING_MAX_ASYNC = 8
 EMBEDDING_BATCH_NUM = 32
 

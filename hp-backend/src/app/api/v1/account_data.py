@@ -153,14 +153,20 @@ def _queue_retrieval_updates(account_id: str, dataset_key: str, regenerated: lis
     must not fail the upload.
     """
     from app.services.retrieval import registry
-    from app.services.retrieval.ingest import request_update
+    from app.services.retrieval.ingest import request_update, requeue_dependents
 
+    # Two reasons an index is behind, and they are not the same reason.
+    #
+    # A dataset it reads directly changed - that is this loop, matched on
+    # `datasets`. Or a widget it reads was republished by one of the extractors
+    # that just ran - that is `requeue_dependents` below, which resolves widget
+    # -> index through the registry. Both paths now share that one mapping with
+    # the `/regenerate` endpoint and with `_run_generator`, so a widget added to
+    # a registry entry becomes visible to all three at once.
     for index, spec in registry.INDEX_REGISTRY.items():
         if not spec.get("enabled"):
             continue
-        touches = (dataset_key in (spec.get("datasets") or [])
-                   or any(f in regenerated for f in _features_behind(index)))
-        if not touches:
+        if dataset_key not in (spec.get("datasets") or []):
             continue
         try:
             request_update(account_id, index,
@@ -168,15 +174,16 @@ def _queue_retrieval_updates(account_id: str, dataset_key: str, regenerated: lis
         except Exception:
             logger.exception("could not queue a retrieval update for %s", index)
 
+    requeue_dependents(account_id, _widgets_of(regenerated),
+                       reason="%s changed" % dataset_key)
 
-def _features_behind(index: str) -> set:
-    """Features whose widgets feed this index."""
+
+def _widgets_of(features) -> list:
+    """Every widget key the given features publish."""
     from app.api.v1.widgets import WIDGET_REGISTRY
-    from app.services.retrieval import registry
 
-    wanted = set(registry.spec(index).get("widgets") or [])
-    return {feature for feature, contracts in WIDGET_REGISTRY.items()
-            if any(c["widget_key"] in wanted for c in contracts)}
+    return [c["widget_key"] for feature in (features or [])
+            for c in WIDGET_REGISTRY.get(feature, []) if c.get("widget_key")]
 
 
 @router.post("", response_model=AccountDataFileResponse, status_code=status.HTTP_201_CREATED)

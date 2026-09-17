@@ -50,6 +50,39 @@ from app.services.retrieval import (
 
 router = APIRouter(tags=["Widget Contracts & Dashboard Shell"])
 
+
+def _queue_indexes_for(account_id: str, feature_key: str = "", widget_keys=None) -> list:
+    """Tell the retrieval layer that a feature's widgets were just republished.
+
+    Regenerating a feature used to leave every index built on it silently
+    behind: only a dataset file upload or delete queued anything, so a widget
+    refreshed through this API never reached Strategy Chat and the chat kept
+    answering from the previous version.
+
+    Feature-grained on purpose. The indexes decide per DOCUMENT what actually
+    changed - `update_index` re-ingests only documents whose fingerprint moved -
+    so queuing the index is cheap even when little changed, and working out
+    which documents a widget touches is both unnecessary and unreliable (several
+    documents mix widgets, and several unit keys are positional).
+
+    Never raises: the widgets are written and correct, and a queueing failure
+    must not turn a successful regenerate into a 500.
+    """
+    keys = list(widget_keys or [])
+    if feature_key and not keys:
+        keys = [c["widget_key"] for c in WIDGET_REGISTRY.get(feature_key, [])
+                if c.get("widget_key")]
+    if not keys:
+        return []
+    try:
+        from app.services.retrieval import ingest as retrieval_ingest_mod
+        return retrieval_ingest_mod.requeue_dependents(
+            account_id, keys, reason="%s regenerated" % (feature_key or "widget"))
+    except Exception:
+        logger.exception("could not queue retrieval updates after %s regenerated",
+                         feature_key or ", ".join(keys[:3]))
+        return []
+
 WIDGET_REGISTRY = {
     "executive_dashboard": [
         {
@@ -589,6 +622,10 @@ def regenerate_account_feature_widgets(
             log_context={"feature": key_clean, "account_id": account_id},
         ) from exc
 
+    # Only after the extractor succeeded. Queuing before would index the
+    # previous widgets and record them as current.
+    _queue_indexes_for(account_id, feature_key=key_clean)
+
     return get_account_feature_widgets(account_id, key_clean, current_user)
 
 
@@ -606,6 +643,8 @@ def generate_opportunity_map_endpoint(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company account not found")
 
     ext_doc = generate_opportunity_map_plays_with_gpt4o(account_id)
+    _queue_indexes_for(account_id,
+                       widget_keys=["opportunity_narrative_plays"])
     updated_at_val = ext_doc.get("updated_at")
     updated_at_str = updated_at_val.isoformat() if isinstance(updated_at_val, datetime) else str(updated_at_val or "")
 
@@ -1014,6 +1053,9 @@ def generate_content_messaging(
         # request - 409 says the call was fine and the data is not ready.
         raise APIError(ErrorCode.NO_SOURCE_DATA, str(exc),
                        log_context={"account_id": account_id}) from exc
+
+    _queue_indexes_for(account_id,
+                       widget_keys=[messaging_pillars.WIDGET_KEY])
 
     contract = next(c for c in WIDGET_REGISTRY["content_messaging"]
                     if c["widget_key"] == messaging_pillars.WIDGET_KEY)

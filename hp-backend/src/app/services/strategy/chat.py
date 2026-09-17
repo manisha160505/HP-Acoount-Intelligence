@@ -154,8 +154,12 @@ SEPARATE FACT FROM RECOMMENDATION. They are held to different standards:
 Write recommendations so a reader can tell which is which: "Irvan Nr is Chief Operating Officer"
 versus "Irvan Nr may be the strongest entry point because...".
 
-CITATIONS: each evidence line is tagged like [a1b2c3_contact_x#c4]. When a sentence states a fact
-from the evidence, put that tag at the end of the sentence. Copy tags exactly. Never invent one.
+CITATIONS: each evidence line in the context ends with its own tag in square brackets, shaped
+[<document>#c<number>]. EVERY sentence in a FACTS section must end with one.
+
+Copy tags character for character from the context above. Never invent a tag, never adapt one, and
+never use a tag that does not appear in the context - a tag written from memory or from an example
+resolves to nothing and the whole answer is discarded.
 
 HP RULES:
 - You represent HP Inc. Never describe a competitor's product as ours.
@@ -196,7 +200,79 @@ def _answer_once(company: str, question: str, context: str, messages: list,
 
 import re
 
-_CITATION_RE = re.compile(r"\[([A-Za-z0-9_]+#c\d+)\]")
+# One bracket can hold several ids - "[a6_x#c1, a6_y#c2]" - and the model does
+# that whenever a sentence rests on two pieces of evidence.
+#
+# The original pattern required a bracket to contain EXACTLY one id, so a
+# multi-id citation matched nothing, and both uses below failed silently:
+#
+#   * `findall` missed those ids, so they were never resolved. An id that does
+#     not exist would pass validation as long as it shared a bracket with one
+#     that does, and the sources never reached the published citation list - the
+#     UI showed fewer than the answer claimed.
+#   * `sub` left the id text in the answer, so the grounding check read the
+#     account prefix as a figure. "a6a997c3b_play_daas#c1" contributed "997",
+#     and the answer was rejected for stating a number nobody wrote. About one
+#     run in five died this way.
+#
+# Two patterns rather than one: the ids are what gets resolved, the whole
+# bracket is what gets removed before counting figures.
+_EVIDENCE_REF_RE = re.compile(r"[A-Za-z0-9_]+#c\d+")
+_CITATION_RE = re.compile(r"\[[^\[\]]*?[A-Za-z0-9_]+#c\d+[^\[\]]*\]")
+
+
+# A bracket of citations, whatever is inside it. Parsed rather than matched, so
+# that a form nobody anticipated is reported instead of silently skipped.
+_CITATION_BRACKET_RE = re.compile(r"\[([^\[\]]*#c\d+[^\[\]]*)\]")
+# One reference inside a bracket: a full id, or the shorthand the model uses for
+# a second citation from the same document - "c3", "#c3".
+_FULL_ID_RE = re.compile(r"^([A-Za-z0-9_]+)#c(\d+)$")
+_SHORT_ID_RE = re.compile(r"^#?c(\d+)$")
+
+
+def _expand_citations(answer: str) -> str:
+    """Rewrite abbreviated citations into full evidence ids.
+
+    The model writes a second citation from the same document in shorthand:
+
+        [a6a997c3b_objection_066389c0779d#c2, c3]
+
+    Every step here reads ids with `_EVIDENCE_REF_RE`, which matches a complete
+    `doc#cN` and therefore saw only the first half. The consequences were silent
+    and all bad: `c3` was never resolved, so it was never validated and never
+    reached the seller's source list - the answer quoted a counter-question with
+    no citation behind it - and the bracket did not match the UI's pattern
+    either, so it rendered raw as `[a6a997c3b_objection_066389c0779d#c2, c3]`.
+
+    Expanding here rather than forbidding it in the prompt: the shorthand is a
+    reasonable thing for a model to write, and a rule it breaks once in twenty
+    answers would cost a whole regeneration. Normalising is cheap and the
+    published answer then carries well-formed ids, which is what the UI and the
+    citation list both want.
+
+    A reference that is neither form is left exactly as written, so it reaches
+    `resolve` and fails loudly rather than being quietly dropped.
+    """
+    def expand(match):
+        inside, last_doc, out = match.group(1), "", []
+        # Comma or semicolon: the model uses both, sometimes in the same answer.
+        # Splitting on one of them meant a "[x#c2; c3]" bracket kept its
+        # shorthand and the second citation stayed invisible.
+        for ref in re.split(r"[;,]", inside):
+            ref = ref.strip()
+            full = _FULL_ID_RE.match(ref)
+            if full:
+                last_doc = full.group(1)
+                out.append(ref)
+                continue
+            short = _SHORT_ID_RE.match(ref)
+            if short and last_doc:
+                out.append("%s#c%s" % (last_doc, short.group(1)))
+                continue
+            out.append(ref)
+        return "[%s]" % ", ".join(o for o in out if o)
+
+    return _CITATION_BRACKET_RE.sub(expand, answer or "")
 
 
 def _asserts_facts(answer: str) -> bool:
@@ -232,7 +308,13 @@ def _validate(account_id: str, answer: str, passages: list) -> tuple:
     if not body:
         return False, "the model returned nothing", [], ""
 
-    cited = _CITATION_RE.findall(answer)
+    # Shorthand expanded before anything reads the ids. See `_expand_citations`:
+    # the model abbreviates a second citation from the same document, and the
+    # abbreviated half was invisible to every step below.
+    answer = _expand_citations(answer)
+
+    # Every id in the answer, bracketed singly or several to a bracket.
+    cited = list(dict.fromkeys(_EVIDENCE_REF_RE.findall(answer)))
     resolved, invalid = ev.resolve(account_id, INDEX, cited)
     if invalid:
         return (False,
@@ -252,7 +334,11 @@ def _validate(account_id: str, answer: str, passages: list) -> tuple:
                 [], "")
 
     corpus = grounding.corpus_from_texts(passages)
-    unsourced = corpus.unsourced_numbers(_CITATION_RE.sub("", answer))
+    # Citations out before figures are counted: an evidence id is not a
+    # claim, and its digits are not numbers the model asserted. Bare ids
+    # are stripped too, in case one is written outside a bracket.
+    countable = _EVIDENCE_REF_RE.sub("", _CITATION_RE.sub("", answer))
+    unsourced = corpus.unsourced_numbers(countable)
     if unsourced:
         return (False,
                 "it states figure(s) that are not in the evidence: %s"
@@ -265,6 +351,14 @@ def _validate(account_id: str, answer: str, passages: list) -> tuple:
     # spend a whole generation on nothing.
     cleaned = re.sub(r"\*\*(.+?)\*\*", r"\1", answer)
     cleaned = re.sub(r"(?<!\*)\*(?!\*)", "", cleaned)
+    # Markdown headings too. The prompt asks for "FACTS:" and the model mostly
+    # writes that, but perhaps one run in three it reaches for "### FACTS"
+    # instead - and the UI renders plain text, so the seller reads the hashes.
+    # Rewritten to the labelled form rather than just stripped, so a heading
+    # stays a heading: "### FACTS" -> "FACTS:".
+    cleaned = re.sub(r"^\s{0,3}#{1,6}\s*(.+?)\s*:?\s*$",
+                     lambda m: "%s:" % m.group(1).rstrip(":"),
+                     cleaned, flags=re.M)
 
     return True, "ok", resolved, cleaned
 
@@ -321,13 +415,28 @@ def answer(account_id: str, messages: list, mode: str | None = None) -> dict:
         return _unavailable(company, question, topic,
                             "retrieval failed: %s" % exc)
 
+    # Two different bodies of text, for two different jobs.
+    #
+    # The model reasons over the GRAPH context - entities and relationships as
+    # well as chunks. That is what makes a multi-hop question answerable: "who
+    # should I approach about AI workstations" needs a person joined to an
+    # intent topic joined to a technology, and no single chunk holds that join.
+    # Until now this was retrieved on every question and discarded, so the chat
+    # was vector RAG paying for a graph it never read.
+    #
+    # Figures are still checked against the CHUNKS alone. An entity description
+    # is a model's paraphrase written during extraction, not the account's own
+    # words, so allowing it to ground a number would let an extraction-time
+    # invention be republished as a filed fact. Widening what the model can
+    # reason from must not widen what counts as evidence.
+    reasoning_context = _reasoning_context(result)
     passages = [p for p in [result.context] if _text(p)]
     if not passages:
         return _unavailable(company, question, topic, "no evidence was retrieved")
 
     attempts, correction, last_reason = [], "", "no attempt was made"
     for attempt in range(MAX_VALIDATION_ATTEMPTS):
-        raw = _answer_once(company, question, result.context, messages, correction)
+        raw = _answer_once(company, question, reasoning_context, messages, correction)
         ok, reason, cited, cleaned = _validate(account_id, raw, passages)
         attempts.append({"attempt": attempt + 1, "accepted": ok, "reason": reason})
         if ok:
@@ -353,6 +462,48 @@ def answer(account_id: str, messages: list, mode: str | None = None) -> dict:
     # Bounded retries, then stop. A third failure means the evidence does not
     # support the answer the model keeps wanting to give.
     return _unavailable(company, question, topic, last_reason, attempts)
+
+
+# LightRAG assembles its context in this order, and puts the only citable part
+# last. `_answer_once` then trims to MAX_CONTEXT_CHARS, which cut the tail.
+_CHUNKS_MARKER = "Document Chunks"
+
+
+def _reasoning_context(result) -> str:
+    """The graph context, reordered so the citable evidence survives trimming.
+
+    LightRAG emits entities, then relationships, then the document chunks, then
+    the reference list. On a real question that ran to 97,938 characters with
+    the chunks not starting until 60,817 - past the trim - so **every one of the
+    184 citation tags was cut off**. The model was left holding entity JSON with
+    nothing it was allowed to cite, produced a FACTS section with no tags, and
+    was rejected three times for stating facts without evidence. It was obeying
+    the prompt; the evidence simply was not there.
+
+    So the chunks go first. Whatever is dropped is then graph colour rather than
+    the account's own sentences and the tags that make them checkable.
+
+    Falls back to the chunk text alone if the marker is not found, which is the
+    safe direction: an answer with less graph reasoning, not one that cannot
+    cite. That matters on a LightRAG upgrade, where this heading could change.
+    """
+    graph = _text_block(getattr(result, "graph_context", ""))
+    chunks = _text_block(getattr(result, "context", ""))
+    if not graph:
+        return chunks
+
+    at = graph.find(_CHUNKS_MARKER)
+    if at < 0:
+        logger.warning(
+            "strategy chat: %r not found in the retrieved context - using chunks "
+            "only. Check the LightRAG context format.", _CHUNKS_MARKER)
+        return chunks or graph
+    return "%s\n\n%s" % (graph[at:], graph[:at])
+
+
+def _text_block(value) -> str:
+    """Like `_text` but keeps the line breaks the context is structured by."""
+    return str(value if value is not None else "").strip()
 
 
 def _is_small_talk(question: str) -> bool:
