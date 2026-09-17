@@ -92,14 +92,83 @@ INDEX_REGISTRY = {
     },
     STRATEGY: {
         "label": "Strategy",
-        "enabled": False,
-        "builder": None,
+        "enabled": True,
+        "builder": corpus.strategy_documents,
+        # Deliberately empty. `datasets` exists to queue a rebuild the moment a
+        # raw file is uploaded, and this index must NOT rebuild then: its corpus
+        # is the other features' finished widgets, and at upload time those have
+        # not regenerated yet. Rebuilding on the file would index the previous
+        # answers and call them current.
+        #
+        # The right trigger fires one step later. `dependents()` below maps a
+        # republished widget to the indexes that read it, and all three paths
+        # that republish widgets use it - the dataset endpoints, the
+        # `/regenerate` endpoint, and `_run_generator` after an index build. A
+        # new filing therefore reaches the chat as: PDF -> dashboard rebuilds ->
+        # exec_strategic_priorities republished -> strategy queued by
+        # `requeue_dependents` -> strategy rebuilds.
+        #
+        # That last arrow was missing until the trigger work: the chain read
+        # correctly here but nothing implemented it, and it appeared to hold
+        # only because a data change queued both indexes at once and the worker
+        # happened to run them in the right order.
         "datasets": [],
-        "widgets": [],
-        "required_widgets": [],
-        "default_mode": "mix",
-        "notice": ("Corpus is the finished widgets of every other feature. Built "
-                   "last, once those outputs are final."),
+        # The finished outputs of the other ten features. ABX: "Use the finished
+        # account intelligence: facts, priorities, stakeholders, technology,
+        # signals, narratives, objections, intent and HP recommendations."
+        #
+        # EVERY widget of all eight contributing features. Message Evaluator and
+        # Content Studio are excluded by instruction: they publish a user's own
+        # draft message and generated assets, which are outputs of the platform
+        # rather than intelligence about the account.
+        #
+        # Three entries here are listed but deliberately NOT built into separate
+        # documents - `opportunity_context_card`, `opportunity_trigger_signals`
+        # and `messaging_context_card`. Their content is already in the corpus
+        # via the widget that consumed them; `opportunity_trigger_signals`
+        # ["triggers"] IS `news_signals_feed`["signals"], the same published
+        # list. Listing them still gets a rebuild queued when they change, so
+        # nothing goes stale, without the graph holding two witnesses to one
+        # fact. `corpus.py` names what covers each where it declines to build.
+        "widgets": ["exec_summary_card", "exec_strategic_priorities",
+                    "exec_key_metrics", "exec_hiring_velocity",
+                    "exec_urgency_score",
+                    "stakeholder_contacts_grid", "stakeholder_influence_map",
+                    "stakeholder_talking_points",
+                    "news_signals_feed", "news_relevance_summary",
+                    "opportunity_narrative_plays", "opportunity_context_card",
+                    "opportunity_trigger_signals",
+                    "objection_reframe_cards", "objection_incumbent_context",
+                    "technographic_map", "technographic_hp_recommendations",
+                    "tech_stack_matrix", "tech_detections_reference",
+                    "webstack_breakdown",
+                    "intent_topics_table", "intent_category_summary",
+                    "intent_hiring_demand",
+                    "messaging_pillars_output", "messaging_context_card"],
+        # Enough of an account to be worth asking questions about. Not the whole
+        # list: a feature that has not run yet narrows the corpus, and the chat
+        # says what it does not know rather than refusing to open.
+        "required_widgets": ["exec_summary_card", "stakeholder_contacts_grid"],
+        # `naive` is vector search over the chunks and nothing else - no entity
+        # walk, no relation walk, no graph in the context at all.
+        #
+        # It is by far the fastest (measured ~2s against mix's ~3s warm and
+        # ~6-9s cold), because it skips the work every other mode does. What it
+        # gives up is the reason this index is a graph: a question like "who
+        # should I approach about AI workstations" needs a person joined to an
+        # intent topic joined to a technology, and that join exists only in the
+        # relationships. Under naive the answer can only draw on whatever a
+        # single chunk happens to say.
+        #
+        # Worth knowing: if this stays, the graph is dead weight. Extraction
+        # builds it on every index rebuild - an LLM call per chunk, the bulk of
+        # a 17-minute build - and naive never reads it.
+        #
+        # Set to naive on request, to be evaluated against real questions.
+        # Put back to "mix" to restore the blended behaviour.
+        "default_mode": "naive",
+        # No `generates` hook. This index answers questions; it does not produce
+        # a widget, and a widget it produced would feed its own corpus.
     },
 }
 
@@ -137,6 +206,42 @@ def preconditions(db, account_id: str, index: str) -> tuple:
         return False, ("waiting on %s - run the feature that produces it first"
                        % ", ".join(missing))
     return True, "ready to build"
+
+
+def dependents(widget_key: str, enabled_only: bool = True) -> list:
+    """Indexes whose corpus is built from this widget, in registry order.
+
+    The inverse of each entry's `widgets` list, and the one place that answers
+    "what goes stale when this widget is republished". It existed before only as
+    a scan in the API layer that answered a coarser question - which FEATURES
+    feed an index - so a single widget write could not be traced to the indexes
+    that actually read it.
+
+    `enabled_only` because a disabled index cannot be built: `request_update`
+    would discard the job anyway, and queuing one would only look like work.
+    """
+    key = str(widget_key or "").strip()
+    if not key:
+        return []
+    return [index for index, entry in INDEX_REGISTRY.items()
+            if key in (entry.get("widgets") or [])
+            and (not enabled_only or entry.get("enabled"))]
+
+
+def dependents_of(widget_keys, enabled_only: bool = True) -> list:
+    """`dependents` for several widgets at once, deduped, in registry order.
+
+    A regeneration republishes a feature's widgets together, and the caller
+    wants one job per index rather than one per widget. The queue coalesces
+    duplicates anyway, but asking for the same build five times makes the logs
+    read as though five were needed.
+    """
+    wanted = {k for k in (widget_keys or []) if str(k or "").strip()}
+    if not wanted:
+        return []
+    return [index for index, entry in INDEX_REGISTRY.items()
+            if wanted & set(entry.get("widgets") or [])
+            and (not enabled_only or entry.get("enabled"))]
 
 
 def build_documents(account_id: str, index: str) -> list:

@@ -42,6 +42,18 @@ class FakeCursor:
     async def to_list(self, length=None):
         return list(self._docs)
 
+    # The driver's cursors are async-iterable as well as awaitable-to-list, and
+    # the graph batch reads stream with `async for` rather than materialising.
+    def __aiter__(self):
+        self._iter = iter(list(self._docs))
+        return self
+
+    async def __anext__(self):
+        try:
+            return next(self._iter)
+        except StopIteration:
+            raise StopAsyncIteration from None
+
 
 class FakeCollection:
     """Enough of an AsyncCollection to observe what the storage does."""
@@ -383,3 +395,125 @@ def test_graph_storage_creates_no_atlas_search_index():
 
     asyncio.run(storage.create_search_index_if_not_exists())
     assert storage.collection.created_indexes == []
+
+
+# ---------------------------------------------------------------------------
+# The batch graph reads LightRAG never implemented for Mongo
+#
+# `BaseGraphStorage` supplies both as sequential loops with an `await` inside,
+# and Mongo does not override them, so on a remote Atlas cluster every relation
+# cost its own round trip: one question spent 147 seconds on 1,659 of them.
+#
+# What these pin is the PYTHON mapping - which asked-for pair each returned
+# document belongs to, and what an absent one does. Whether the aggregation
+# itself matches `count_documents({"$or": ...})` cannot honestly be tested
+# against a fake, because a fake would only be testing my model of Mongo; that
+# equivalence is checked against the real graph, including a self-loop, by the
+# batch-equivalence run in the verification script.
+# ---------------------------------------------------------------------------
+
+class FakeEdgeCollection:
+    """Records what it was asked, and answers from a canned edge list."""
+
+    def __init__(self, edges=None, degrees=None):
+        self.edges = list(edges or [])
+        self.degrees = dict(degrees or {})
+        self.find_queries = []
+        self.pipelines = []
+
+    def find(self, query, projection=None):
+        self.find_queries.append(query)
+        clauses = query.get("$or") or []
+        hits = [dict(e) for e in self.edges
+                if any(all(e.get(k) == v for k, v in c.items()) for c in clauses)]
+        return FakeCursor(hits)
+
+    async def aggregate(self, pipeline, **kwargs):
+        self.pipelines.append(pipeline)
+        return FakeCursor([{"_id": node, "degree": n}
+                           for node, n in self.degrees.items()])
+
+
+def graph_storage(collection):
+    shared_vdb.register()
+    cls = shared_vdb.HpMongoGraphStorage
+    storage = cls.__new__(cls)
+    storage.workspace = "acct_x_strategy"
+    storage.edge_collection = collection
+    return storage
+
+
+def edge_doc(lo, hi, **extra):
+    return {"_id": "oid", "edge_lo": lo, "edge_hi": hi,
+            "source_node_id": lo, "target_node_id": hi,
+            "description": "%s-%s" % (lo, hi), **extra}
+
+
+def test_get_edges_batch_asks_once_for_every_pair():
+    collection = FakeEdgeCollection([edge_doc("A", "B"), edge_doc("B", "C")])
+    got = asyncio.run(graph_storage(collection).get_edges_batch(
+        [{"src": "A", "tgt": "B"}, {"src": "B", "tgt": "C"}]))
+    assert set(got) == {("A", "B"), ("B", "C")}
+    assert len(collection.find_queries) == 1, "one query, not one per pair"
+
+
+def test_get_edges_batch_matches_a_reversed_pair():
+    """(A,B) and (B,A) are one undirected edge, and both keys are wanted."""
+    collection = FakeEdgeCollection([edge_doc("A", "B")])
+    got = asyncio.run(graph_storage(collection).get_edges_batch(
+        [{"src": "B", "tgt": "A"}, {"src": "A", "tgt": "B"}]))
+    assert set(got) == {("A", "B"), ("B", "A")}
+    assert got[("A", "B")]["description"] == got[("B", "A")]["description"]
+
+
+def test_get_edges_batch_omits_a_pair_with_no_edge():
+    """Absent, not None - the base leaves a missing pair out of the dict."""
+    collection = FakeEdgeCollection([edge_doc("A", "B")])
+    got = asyncio.run(graph_storage(collection).get_edges_batch(
+        [{"src": "A", "tgt": "B"}, {"src": "X", "tgt": "Y"}]))
+    assert set(got) == {("A", "B")}
+
+
+def test_get_edges_batch_strips_the_mongo_id():
+    """`get_edge` pops it so a fetched edge can be re-upserted."""
+    collection = FakeEdgeCollection([edge_doc("A", "B")])
+    got = asyncio.run(graph_storage(collection).get_edges_batch(
+        [{"src": "A", "tgt": "B"}]))
+    assert "_id" not in got[("A", "B")]
+
+
+def test_edge_degrees_batch_sums_both_endpoints():
+    collection = FakeEdgeCollection(degrees={"A": 3, "B": 5})
+    got = asyncio.run(graph_storage(collection).edge_degrees_batch([("A", "B")]))
+    assert got == {("A", "B"): 8}
+    assert len(collection.pipelines) == 1, "one aggregation, not two per pair"
+
+
+def test_edge_degrees_batch_treats_an_unknown_node_as_zero():
+    """`count_documents` returns 0 for a node with no edges."""
+    collection = FakeEdgeCollection(degrees={"A": 2})
+    got = asyncio.run(graph_storage(collection).edge_degrees_batch(
+        [("A", "MISSING"), ("MISSING", "ALSO_MISSING")]))
+    assert got == {("A", "MISSING"): 2, ("MISSING", "ALSO_MISSING"): 0}
+
+
+def test_edge_degrees_batch_dedupes_endpoints_before_counting():
+    """The pipeline must `$setUnion` an edge's endpoints.
+
+    `node_degree` counts with `$or`, which counts a self-loop ONCE. Grouping on
+    the two endpoint fields separately would count it twice, so a self-loop
+    would silently score double and rank higher than it should.
+    """
+    collection = FakeEdgeCollection(degrees={"A": 1})
+    asyncio.run(graph_storage(collection).edge_degrees_batch([("A", "A")]))
+    stages = collection.pipelines[0]
+    assert any("$setUnion" in str(stage) for stage in stages), (
+        "endpoints are not deduplicated - a self-loop will count twice")
+
+
+def test_batch_reads_handle_empty_input():
+    collection = FakeEdgeCollection()
+    storage = graph_storage(collection)
+    assert asyncio.run(storage.get_edges_batch([])) == {}
+    assert asyncio.run(storage.edge_degrees_batch([])) == {}
+    assert not collection.find_queries and not collection.pipelines

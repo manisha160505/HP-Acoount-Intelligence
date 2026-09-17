@@ -29,6 +29,7 @@ import asyncio
 import logging
 import os
 import re
+import threading
 
 from app.config.settings import settings
 
@@ -37,7 +38,7 @@ logger = logging.getLogger(__name__)
 WORKSPACE_RE = re.compile(r"^[A-Za-z0-9_]+$")
 
 # Kept modest: these bound how much of the LLM budget one ingest can spend.
-LLM_MAX_ASYNC = 4
+LLM_MAX_ASYNC = 2
 EMBEDDING_MAX_ASYNC = 8
 EMBEDDING_BATCH_NUM = 32
 
@@ -117,7 +118,8 @@ _NO_TEMPERATURE = set()
 _TEMPERATURE_REJECTED = "does not support"
 
 
-async def _llm_model_func(prompt, system_prompt=None, history_messages=None, **kwargs):
+async def _llm_model_func(prompt, system_prompt=None, history_messages=None,
+                          _model_override=None, **kwargs):
     """What LightRAG calls for entity extraction and answer generation.
 
     The SDK call is blocking, so it runs in a thread rather than stalling the
@@ -125,7 +127,7 @@ async def _llm_model_func(prompt, system_prompt=None, history_messages=None, **k
     reference rig.
     """
     client = _openai_client()
-    model = retrieval_model()
+    model = _model_override or retrieval_model()
     messages = []
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
@@ -176,7 +178,29 @@ def _apply_mongo_env():
     os.environ["MONGO_DATABASE"] = settings.DB_NAME
 
 
-async def build_rag(account_id: str, index: str):
+def query_model() -> str:
+    """The model LightRAG uses at QUERY time, as distinct from build time.
+
+    Answering a question still costs a model call inside LightRAG - it extracts
+    keywords from the question before it searches. On the retrieval model that
+    call is several seconds of a seller's wait, and it is doing something far
+    simpler than entity extraction.
+
+    Safe to differ from the build model: the graph is already written, and
+    nothing at query time changes it. Extraction stays on the retrieval model so
+    the graph is built consistently; the question is parsed by the faster one.
+    """
+    return (settings.OPENAI_MODEL_NAME or "gpt-4o").strip()
+
+
+async def _query_llm_model_func(prompt, system_prompt=None, history_messages=None,
+                                **kwargs):
+    """The same call as `_llm_model_func`, on the query-time model."""
+    return await _llm_model_func(prompt, system_prompt, history_messages,
+                                 _model_override=query_model(), **kwargs)
+
+
+async def build_rag(account_id: str, index: str, for_query: bool = False):
     """An initialised LightRAG handle for one workspace.
 
     The caller owns the handle and must `finalize_storages()` it. Nothing is
@@ -229,8 +253,14 @@ async def build_rag(account_id: str, index: str):
         # with an Atlas pre-filter. This is what makes account #2 possible: the
         # index cost is now constant rather than three per account per index.
         vector_storage="HpSharedVectorStorage",
-        llm_model_func=_llm_model_func,
-        llm_model_name=retrieval_model(),
+        # Both sides of the merge belong here. The storage classes above came
+        # with the shared-vector migration; the model split below came with
+        # Strategy Chat, where a query handle answers on `query_model()` while a
+        # build still extracts on `retrieval_model()`. They are independent
+        # choices - which collections the vectors live in, and which model reads
+        # them - so taking either alone would have silently dropped a feature.
+        llm_model_func=_query_llm_model_func if for_query else _llm_model_func,
+        llm_model_name=query_model() if for_query else retrieval_model(),
         llm_model_max_async=LLM_MAX_ASYNC,
         embedding_func=EmbeddingFunc(
             embedding_dim=settings.OPENAI_EMBEDDING_DIM,
@@ -265,6 +295,104 @@ def _working_dir() -> str:
     return path
 
 
+# ---------------------------------------------------------------------------
+# A warm handle for querying
+# ---------------------------------------------------------------------------
+#
+# Opening a LightRAG handle costs 8.2 seconds, measured: it connects, lists
+# collections thirteen times, checks and creates indexes, and initialises every
+# storage backend. Doing that per question made it more than half the wait -
+# more than the vector search and the graph reads put together.
+#
+# It cannot simply be cached, because LightRAG's Mongo backend is an
+# `AsyncMongoClient`, and that binds to the event loop it was created on:
+#
+#     Cannot use AsyncMongoClient in different event loop.
+#
+# `asyncio.run()` creates a fresh loop per call, so a handle built on one call's
+# loop is dead by the next. The fix is therefore not just a cache - it is a
+# cache plus a loop that outlives the request. One background thread owns a
+# permanent event loop, every handle is created on it, and queries are submitted
+# to it from whichever thread FastAPI happens to use.
+#
+# Ingest deliberately does NOT use this. A build mutates storage, runs for the
+# better part of an hour and then finalises; it keeps its own short-lived handle
+# so a failed build can never leave a poisoned one behind for queries.
+
+_query_loop = None
+_query_thread = None
+_query_handles = {}
+_query_lock = threading.Lock()
+
+
+def _ensure_query_loop():
+    """The long-lived loop that owns every cached handle."""
+    global _query_loop, _query_thread
+    with _query_lock:
+        if _query_loop is not None and _query_loop.is_running():
+            return _query_loop
+        loop = asyncio.new_event_loop()
+
+        def run():
+            asyncio.set_event_loop(loop)
+            loop.run_forever()
+
+        thread = threading.Thread(target=run, name="retrieval-query-loop",
+                                  daemon=True)
+        thread.start()
+        _query_loop, _query_thread = loop, thread
+        logger.info("retrieval: started the query event loop")
+        return loop
+
+
+def run_on_query_loop(coro, timeout: float = 180.0):
+    """Await a coroutine on the shared query loop, from any thread."""
+    loop = _ensure_query_loop()
+    return asyncio.run_coroutine_threadsafe(coro, loop).result(timeout)
+
+
+async def query_handle(account_id: str, index: str):
+    """A warm LightRAG handle for one workspace, created once per process.
+
+    A coroutine, not a blocking call, and that distinction is load-bearing. It is
+    awaited from inside `retrieve`, which is itself already running on the query
+    loop - so a version that submitted work to that loop and blocked on the
+    result deadlocked instantly, waiting for a loop that was waiting for it.
+
+    The handle it returns is bound to whichever loop awaits this, which is the
+    query loop by construction, because that is the only place `retrieve` runs.
+    """
+    workspace = workspace_name(account_id, index)
+    handle = _query_handles.get(workspace)
+    if handle is not None:
+        return handle
+
+    handle = await build_rag(account_id, index, for_query=True)
+    # No lock needed around this: every creation happens on the single query
+    # loop, so there is no concurrent writer to race with.
+    _query_handles[workspace] = handle
+    return handle
+
+
+def forget_query_handle(workspace: str):
+    """Drop the cached handle for a workspace.
+
+    Called whenever a workspace is dropped or rebuilt. A handle kept across a
+    rebuild would answer from storage that no longer exists, which reads as "no
+    such fact" rather than as an error.
+    """
+    with _query_lock:
+        handle = _query_handles.pop(workspace, None)
+    if handle is None:
+        return
+    try:
+        run_on_query_loop(handle.finalize_storages(), timeout=30)
+    except Exception:
+        logger.warning("retrieval: could not finalise the cached handle for %s",
+                       workspace)
+    logger.info("retrieval: released the cached query handle for %s", workspace)
+
+
 def drop_workspace(workspace: str) -> dict:
     """Erase one workspace: its own collections, and its rows in the shared ones.
 
@@ -291,6 +419,8 @@ def drop_workspace(workspace: str) -> dict:
     if not workspace or not WORKSPACE_RE.match(workspace):
         raise RetrievalConfigError("refusing to drop %r - not a workspace name"
                                    % workspace)
+    forget_query_handle(workspace)
+
     db = get_db()
     dropped = {"workspace": workspace, "search_indexes": 0, "collections": 0,
                "vectors": 0}

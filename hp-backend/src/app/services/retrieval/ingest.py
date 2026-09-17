@@ -307,7 +307,25 @@ def _run_generator(account_id: str, index: str, stats: dict) -> dict:
         index_state.clear_generation_error(account_id, index)
         logger.info("retrieval: regenerated %s for account %s after an index build",
                     hook.get("feature_key") or index, account_id)
-        return {"ran": True, "widget_key": hook.get("widget_key")}
+        # The widget this index just republished feeds other indexes, and until
+        # now nothing told them.
+        #
+        # `registry.py` describes the chain "PDF -> dashboard rebuilds ->
+        # exec_strategic_priorities republished -> strategy rebuilds", but no
+        # code implemented the last arrow. It appeared to work because a data
+        # change queued both indexes at once and the worker runs them in
+        # request order, so the dashboard's generator happened to write the new
+        # priorities before the strategy job was claimed. Nothing guaranteed
+        # that: a dashboard rebuild started on its own - which is how this
+        # feature is usually rebuilt - left the chat answering from the previous
+        # priorities indefinitely. Astra's chat sat three widgets behind exactly
+        # this way.
+        queued = requeue_dependents(account_id, hook.get("widget_key"),
+                                    skip=index,
+                                    reason="%s republished by %s"
+                                           % (hook.get("widget_key"), index))
+        return {"ran": True, "widget_key": hook.get("widget_key"),
+                "queued": queued}
     except Exception as exc:
         detail = "%s: %s" % (type(exc).__name__, exc)
         logger.warning("retrieval: %s built, but regenerating %s failed - %s. "
@@ -361,6 +379,51 @@ class suppressed:
 
 def is_suppressed() -> bool:
     return _SUPPRESSED
+
+
+def requeue_dependents(account_id: str, widget_keys, skip: str = "",
+                       reason: str = "") -> list:
+    """Queue every index whose corpus is built from these widgets.
+
+    The one entry point for "a widget was republished, so whatever reads it is
+    now behind". Feature code calls this instead of reasoning about indexes:
+    which index consumes which widget is declared in the registry, and a new
+    widget becomes visible to the chat by being listed there rather than by
+    anyone remembering to add a call here.
+
+    Never raises and never builds inline. A queueing failure must not fail the
+    regeneration that triggered it - the widget is already written and correct,
+    and the index catching up later is a smaller problem than a 500 on a
+    successful regenerate.
+
+    `skip` omits the index that did the republishing, which would otherwise
+    queue itself: a generated widget feeding its own corpus changes the corpus
+    on every build and triggers the next one.
+
+    Returns the indexes queued, so a caller can log or assert on them. Note the
+    queue coalesces, so several widgets from one regeneration produce one job
+    per index, not one per widget.
+    """
+    keys = [widget_keys] if isinstance(widget_keys, str) else list(widget_keys or [])
+    keys = [k for k in keys if k]
+    if not keys:
+        return []
+
+    queued = []
+    for index in registry.dependents_of(keys):
+        if skip and index == skip:
+            continue
+        try:
+            if request_update(account_id, index,
+                              reason=reason or "%s republished" % ", ".join(keys[:3])):
+                queued.append(index)
+        except Exception:
+            logger.exception("retrieval: could not queue %s after %s changed",
+                             index, ", ".join(keys[:3]))
+    if queued:
+        logger.info("retrieval: %s changed - queued %s for account %s",
+                    ", ".join(keys[:3]), ", ".join(queued), account_id)
+    return queued
 
 
 def request_update(account_id: str, index: str, reason: str = "", full: bool = False):

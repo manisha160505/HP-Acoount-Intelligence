@@ -108,7 +108,17 @@ def _build_classes():
     never drags in LightRAG - `client.py` is imported by request paths that must
     not pay that cost, and the library is a heavy import.
     """
-    from lightrag.kg.mongo_impl import MongoGraphStorage, MongoVectorDBStorage
+    import contextlib
+
+    # `_canonical_edge_endpoints` is the library's own sorted-pair helper, the
+    # one `get_edge` uses to hit the unique `(edge_lo, edge_hi)` index. Imported
+    # rather than reimplemented so a change to its rule cannot leave the batch
+    # override looking up a key the single-edge path no longer writes.
+    from lightrag.kg.mongo_impl import (
+        MongoGraphStorage,
+        MongoVectorDBStorage,
+        _canonical_edge_endpoints,
+    )
 
     class HpSharedVectorStorage(MongoVectorDBStorage):
         """One shared collection per namespace, partitioned by workspace.
@@ -426,6 +436,106 @@ def _build_classes():
                 "capacity is reserved for the shared vector indexes",
                 self.workspace)
 
+        async def initialize(self):
+            await super().initialize()
+            # `node_degrees_batch` groups on these two fields, and nothing
+            # indexes them - the base builds only the unique `(edge_lo,
+            # edge_hi)` index. Without this every degree lookup is a collection
+            # scan.
+            #
+            # An ordinary index, not an Atlas Search or vector index, so it
+            # costs none of the capacity this module exists to protect: the
+            # cluster's cap counts search and vector indexes only.
+            with contextlib.suppress(Exception):
+                await self.edge_collection.create_index(
+                    [("source_node_id", 1)], name="hp_edge_source_idx")
+                await self.edge_collection.create_index(
+                    [("target_node_id", 1)], name="hp_edge_target_idx")
+
+        # -------------------------------------------------------------------
+        # The two batch reads LightRAG never implemented for Mongo.
+        #
+        # `BaseGraphStorage` supplies both as sequential `for` loops with an
+        # `await` inside - "Override this method for better performance in
+        # storage backends that support batch operations" - and Neo4j and
+        # Postgres do override them. Mongo does not, so on a remote Atlas
+        # cluster every relation cost its own network round trip.
+        #
+        # One Strategy Chat question retrieved 553 relations and spent 147
+        # seconds on 1,659 sequential round trips: 553 `find_one` for the edges
+        # and 1,106 unindexed `count_documents` for their degrees, at ~130ms
+        # each. The same work is three queries.
+        #
+        # Both must return exactly what the base returns, including which pairs
+        # are absent - retrieval ranks on these numbers, so a subtly different
+        # degree is a subtly different answer rather than a visible failure.
+        # -------------------------------------------------------------------
+
+        async def get_edges_batch(self, pairs: list) -> dict:
+            """Every edge in one query, keyed by the pair as it was asked for.
+
+            Matches `get_edge`: canonical `(edge_lo, edge_hi)` lookup served by
+            the existing unique index, `_id` stripped so a fetched edge can be
+            re-upserted without pushing an immutable field into `$set`, and a
+            pair with no edge simply absent from the result.
+            """
+            wanted = [(str(p["src"]), str(p["tgt"])) for p in (pairs or [])]
+            if not wanted:
+                return {}
+
+            clauses, by_canonical = [], {}
+            for src, tgt in wanted:
+                lo, hi = _canonical_edge_endpoints(src, tgt)
+                if (lo, hi) not in by_canonical:
+                    clauses.append({"edge_lo": lo, "edge_hi": hi})
+                # Several asked-for pairs can share one canonical edge - (A,B)
+                # and (B,A) are the same undirected edge - and each of them
+                # wants its own key in the result.
+                by_canonical.setdefault((lo, hi), []).append((src, tgt))
+
+            out = {}
+            # `find` hands back a cursor directly; only `aggregate` is awaitable.
+            cursor = self.edge_collection.find({"$or": clauses})
+            async for doc in cursor:
+                key = (doc.get("edge_lo"), doc.get("edge_hi"))
+                doc.pop("_id", None)
+                for pair in by_canonical.get(key, []):
+                    out[pair] = dict(doc)
+            return out
+
+        async def edge_degrees_batch(self, edge_pairs: list) -> dict:
+            """Degree of both endpoints of every pair, in one aggregation.
+
+            The base computes `node_degree(src) + node_degree(tgt)` per pair,
+            and `node_degree` counts edges matching `source == id OR target ==
+            id`. That `$or` counts a SELF-LOOP ONCE, while grouping on the two
+            endpoint fields separately would count it twice. `$setUnion`
+            deduplicates an edge's endpoints before counting, which is what
+            keeps this identical to the base rather than merely close to it.
+            """
+            pairs = [(str(s), str(t)) for s, t in (edge_pairs or [])]
+            if not pairs:
+                return {}
+
+            nodes = sorted({n for pair in pairs for n in pair})
+            degrees = {}
+            cursor = await self.edge_collection.aggregate([
+                {"$match": {"$or": [{"source_node_id": {"$in": nodes}},
+                                    {"target_node_id": {"$in": nodes}}]}},
+                {"$project": {"ends": {"$setUnion": [["$source_node_id"],
+                                                     ["$target_node_id"]]}}},
+                {"$unwind": "$ends"},
+                {"$match": {"ends": {"$in": nodes}}},
+                {"$group": {"_id": "$ends", "degree": {"$sum": 1}}},
+            ], allowDiskUse=True)
+            async for doc in cursor:
+                degrees[doc.get("_id")] = doc.get("degree") or 0
+
+            # A node with no edges is absent from the aggregation and scores 0,
+            # exactly as `count_documents` would return 0 for it.
+            return {(src, tgt): degrees.get(src, 0) + degrees.get(tgt, 0)
+                    for src, tgt in pairs}
+
     return HpSharedVectorStorage, HpMongoGraphStorage
 
 
@@ -501,5 +611,14 @@ def __getattr__(name):
 #      filter parameter (if upstream adds one, delete the override and use it).
 #   3. Run tests/test_shared_vdb.py, including the two-workspace isolation case
 #      against a real Atlas cluster.
+#   4. Re-check the graph batch reads. `HpMongoGraphStorage` overrides
+#      `get_edges_batch` and `edge_degrees_batch` because `MongoGraphStorage`
+#      never implemented them and `BaseGraphStorage`'s fallbacks are sequential
+#      loops - one question spent 147 seconds on 1,659 round trips. If a bump
+#      implements them for Mongo, DELETE these overrides and use upstream's.
+#      If it changes their signatures or the canonical `(edge_lo, edge_hi)`
+#      scheme they rely on, the overrides break quietly: retrieval would keep
+#      working while ranking on different degree numbers. The equivalence check
+#      against the live graph is what catches that, not the unit tests.
 #
 # The version warning in `register()` is the tripwire, not a substitute for this.
