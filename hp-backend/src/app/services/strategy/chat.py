@@ -44,11 +44,11 @@ from app.core import gemini
 from app.core.llm import generate_gpt4o_json_completion
 from app.database.mongodb import get_db
 from app.services.extractors import grounding
-from app.services.strategy import context as account_context
+from app.services.strategy import context as account_context, personas as strategy_personas
 
 logger = logging.getLogger(__name__)
 
-PROMPT_VERSION = 1
+PROMPT_VERSION = 2
 
 MAX_HISTORY_TURNS = 12
 MAX_VALIDATION_ATTEMPTS = 3
@@ -182,8 +182,84 @@ FORMAT: plain text. UPPERCASE section headers, numbered lists. No markdown, no a
 Keep it tight - a seller is reading this between meetings."""
 
 
+# A separate constant rather than a branch inside ANSWER_SYSTEM, for three
+# reasons. The advisor's FACTS:/RECOMMENDATION: labelling is the opposite of
+# what dialogue needs. A persona block appended after that prompt's FORMAT
+# section would be the last and most salient instruction the model reads,
+# sitting downstream of the citation law - which is precisely how a model gets
+# talked out of citing. And ANSWER_SYSTEM goes through str.format, so every
+# brace added to it is a hazard.
+#
+# What carries over deliberately and word-for-word: the ACCOUNT DATA grounding
+# paragraph, the rule that section names are copied character for character,
+# and the HP rules. Only the identity and the output shape differ.
+ROLEPLAY_SYSTEM = """You are playing a role so that an HP seller can rehearse a real conversation.
+
+{persona}
+
+You are a SIMULATION OF THIS ROLE at {company}. You are not a named person, you are not speaking for
+anyone, and you never claim to be a specific individual. If the seller asks who you are, answer with
+the role.
+
+You answer ONLY from the ACCOUNT DATA supplied with the question. That is the finished output of
+every intelligence feature this platform runs on {company} - its filings and priorities, its people,
+its technology, its intent signals, recent events, opportunity plays, objections and messaging - and
+it is everything the platform knows about them. If something is not in there, the platform does not
+hold it.
+
+HOW YOU SPEAK IS YOURS. Tone, register, how blunt or patient or sceptical this role would be, the
+questions you ask back, how you open and close - all of that is yours to write, and it should sound
+like the role rather than like a report.
+
+WHAT YOU SAY IS NOT YOURS. Every concern, objection, priority, constraint, vendor, product, number
+or piece of context you mention must come from the ACCOUNT DATA. You do not know anything else. You
+do not have a budget, a timeline, a contract term, a renewal date, a team size, a colleague, a
+previous conversation with HP or a personal opinion unless the account data gives you one. Inventing
+one to make the conversation feel real is the single worst thing you can do here - the seller will
+take it into a real meeting.
+
+CITATIONS: the account data is divided into sections, each introduced by a line reading
+===== <section_name> (feature: ...) =====
+EVERY sentence in which you say something substantive must end with the section it came from, in
+square brackets - for example [objection_reframe_cards]. Cite several when a sentence rests on
+several: [a_section, b_section].
+
+Copy section names character for character from those header lines. Never invent one, never adapt
+one, and never use a name that does not appear as a header above - a name that does not match a
+section is rejected and the whole answer is discarded.
+
+Questions you ask the seller need no citation. Short conversational replies need no citation. Every
+other sentence needs one.
+
+IF THE SELLER ASKS SOMETHING THE ACCOUNT DATA DOES NOT COVER: say so in character - that it is not
+something this role can speak to, or not something you have in front of you. Do not guess and do not
+fill the gap. That is a correct answer, not a failure.
+
+HP RULES:
+- The seller represents HP Inc. You do not. Never argue HP's case for them.
+- Name a product only if it appears in the evidence.
+- Never concede that {company} already uses HP unless the evidence says so.
+
+FORMAT: plain text, first person, as spoken. No stage directions, no narration, no markdown, no
+asterisks, no hashes. Do not prefix your lines with a name or a role label."""
+
+
+def _system_prompt(company: str, persona: dict | None) -> str:
+    """Which voice this turn is answered in.
+
+    The single render point for both prompts. Both go through `str.format`, so
+    a persona block containing a literal brace would raise here rather than
+    quietly producing a broken prompt - `personas.prompt_block` builds from
+    account text, which is why it is worth knowing that is the failure mode.
+    """
+    if not persona:
+        return ANSWER_SYSTEM.format(company=company)
+    return ROLEPLAY_SYSTEM.format(
+        company=company, persona=strategy_personas.prompt_block(persona))
+
+
 def _answer_once(company: str, question: str, context: str, messages: list,
-                 correction: str = "") -> str:
+                 correction: str = "", persona: dict | None = None) -> str:
     """One generation attempt."""
     user = "\n".join([
         # Not truncated. The payload is the whole account and it fits the
@@ -203,7 +279,7 @@ def _answer_once(company: str, question: str, context: str, messages: list,
              and _text(m.get("content"))][-MAX_HISTORY_TURNS:]
     turns.append({"role": "user", "content": user})
 
-    return gemini.generate(ANSWER_SYSTEM.format(company=company), turns)
+    return gemini.generate(_system_prompt(company, persona), turns)
 
 
 # ---------------------------------------------------------------------------
@@ -297,6 +373,192 @@ def _asserts_facts(answer: str) -> bool:
     return not any(phrase in body for phrase in _REFUSAL_PHRASES)
 
 
+# --- validating dialogue ----------------------------------------------------
+#
+# Roleplay gets its own validator rather than an extra check bolted onto
+# `_validate`, because `_validate` is wrong for dialogue in both directions.
+#
+# It is too strict: `_asserts_facts` treats anything that is not a refusal as
+# asserting facts, so "Hmm. Go on." - two words that claim nothing - is
+# rejected for citing nothing, retried three times, and surfaces as a failure.
+# A persona that cannot say "go on" cannot hold a conversation.
+#
+# And it is too loose: it needs ONE resolvable citation for a whole answer. A
+# persona could tag one sentence and invent three around it - "we are locked
+# into a three-year agreement", "my team does not own that", "we looked at this
+# last year". None carries a digit, so the figure check never sees them, and a
+# seller repeats them in a real meeting.
+#
+# The rule the user set is that the language may be the role's but the substance
+# must come from a source. That is enforced here, per sentence, in Python.
+
+_DIALOGUE_SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
+
+# Lines that say nothing about the account and need no source. Closed list, not
+# a length heuristic: "Our refresh cycle is four years" is short too.
+_GLUE_RE = re.compile(
+    r"^(ok|okay|right|sure|fine|hmm+|look|well|go on|i see|i am listening|"
+    r"understood|noted|fair enough|fair|alright|thanks|thank you|carry on|"
+    r"go ahead|maybe|perhaps|possibly|of course|indeed|true|agreed|"
+    r"that is fair|that's fair|say more|and\?|so\?)[\s.,!?-]*$",
+    re.I)
+
+# A word long enough to carry meaning. Used to decide whether a sentence said
+# anything at all, and to compare what it said against the section it cited.
+_CONTENT_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z'-]{3,}|\d{2,}")
+_STOPWORDS = frozenset({
+    "that", "this", "these", "those", "they", "them", "their", "there", "then",
+    "than", "with", "from", "have", "has", "had", "been", "being", "were",
+    "will", "would", "could", "should", "what", "when", "where", "which",
+    "your", "yours", "our", "ours", "you", "about", "into", "over", "just",
+    "like", "want", "need", "know", "think", "said", "says", "tell", "told",
+    "here", "very", "much", "more", "most", "some", "any", "not", "but", "and",
+    "for", "the", "are", "was", "does", "did", "doing", "going", "get", "got",
+})
+
+# Whether a cited sentence must share vocabulary with the section it cited.
+#
+# A tag proves the model ASSERTED an attribution; it does not prove the sentence
+# is in that section. Nothing in this codebase checked that before - not even in
+# advisor mode - and without it a fabricated claim survives simply by carrying a
+# plausible tag.
+#
+# It is a flag because it has a real false-positive cost: "That is not my call
+# [stakeholder_influence_map]" shares no content word with that section and is
+# rejected, so the persona is pushed toward the evidence's own vocabulary and
+# some turns read stiffer. Every rejection is logged with the sentence so the
+# rate can be measured against real conversations rather than guessed at.
+ROLEPLAY_REQUIRE_SECTION_OVERLAP = True
+
+
+def _content_tokens(text: str) -> set:
+    return {t.lower() for t in _CONTENT_TOKEN_RE.findall(text or "")
+            if t.lower() not in _STOPWORDS}
+
+
+def _section_texts(payload: str) -> dict:
+    """{widget_key: that section's text}, by re-splitting the payload.
+
+    Done here rather than by changing what `context.build` returns, so the
+    payload stays one string and this stays a detail of validation.
+    """
+    found, key, buffer = {}, None, []
+    for line in (payload or "").split("\n"):
+        if line.startswith("=====") and "(feature:" in line:
+            if key:
+                found[key] = "\n".join(buffer)
+            key = line.split("=====")[1].split("(feature:")[0].strip()
+            buffer = []
+        elif key:
+            buffer.append(line)
+    if key:
+        found[key] = "\n".join(buffer)
+    return found
+
+
+def _validate_roleplay(answer: str, payload: str, widget_keys: list,
+                       banned_names: list) -> tuple:
+    """(ok, reason, cited_keys, cleaned). The gate for in-character dialogue.
+
+    Same spirit as `_validate`, different unit: a sentence rather than an
+    answer. Figures are checked by exactly the same helper on exactly the same
+    payload - roleplay does not get a weaker numeric rule, and a future refactor
+    that drops it should fail a test rather than pass review.
+    """
+    body = _text_block(answer)
+    if not body.strip():
+        return False, "the model returned nothing", [], ""
+
+    valid = set(widget_keys or [])
+    cited = list(dict.fromkeys(_SECTION_REF_RE.findall(body)))
+    invalid = [c for c in cited if c not in valid]
+    if invalid:
+        return (False,
+                "it cited %d section(s) that are not in this account's data: %s"
+                % (len(invalid), ", ".join(invalid[:3])), [], "")
+    resolved = [c for c in cited if c in valid]
+
+    # No real person is quoted, named or spoken for - not the role being played
+    # and not a colleague. This is Message Evaluator's rule
+    # (`evaluator/sources.py`: never what that person "thinks, wants or has
+    # said") applied to the whole roster, because "talk to Budi about it" puts
+    # words about a named employee into a simulated conversation just as surely
+    # as signing the reply with their name would.
+    for name in (banned_names or []):
+        if re.search(r"\b%s\b" % re.escape(name), body, re.I):
+            return (False,
+                    "it named a real person (%s) - the role speaks, never the "
+                    "individual" % name, [], "")
+
+    sections = _section_texts(payload) if ROLEPLAY_REQUIRE_SECTION_OVERLAP else {}
+    unsourced, unsupported = [], []
+    for raw in _DIALOGUE_SENTENCE_RE.split(body):
+        sentence = raw.strip()
+        if not sentence or _GLUE_RE.match(sentence):
+            continue
+        bare = _CITATION_RE.sub("", sentence).strip()
+        tokens = _content_tokens(bare)
+        if not tokens:
+            # Punctuation, an interjection, a bare name of nothing. Says nothing
+            # about the account, so there is nothing to source.
+            continue
+
+        tags = [key for key in _section_refs(sentence) if key in valid]
+        if not tags:
+            # A question asserts nothing, and asking is how this role finds out
+            # what the seller is proposing. Requiring a source for "what would
+            # switching actually gain us" leaves the persona unable to ask
+            # anything the account data does not already contain, which is the
+            # end of the rehearsal.
+            #
+            # The residue, stated plainly: a question CAN smuggle a claim -
+            # "are you asking me to break a three-year agreement?". The figure
+            # check and the name ban below run over the whole reply and catch
+            # the numeric and the named versions of that. A non-numeric claim
+            # phrased as a question is what gets through, and closing it would
+            # mean deciding in Python which questions are rhetorical.
+            if bare.endswith("?"):
+                continue
+            unsourced.append(bare)
+            continue
+
+        if ROLEPLAY_REQUIRE_SECTION_OVERLAP and not any(
+                tokens & _content_tokens(sections.get(tag, "")) for tag in tags):
+            unsupported.append((bare, tags[0]))
+
+    if unsourced:
+        return (False,
+                "it said %d thing(s) in character with no source: %s"
+                % (len(unsourced), " / ".join(s[:70] for s in unsourced[:2])),
+                [], "")
+    # Figures before the overlap check, so an invented number is reported as an
+    # invented number. Both would reject it; only one says why usefully, and the
+    # reason is fed straight back to the model as the correction for its next
+    # attempt.
+    corpus = grounding.corpus_from_texts([payload])
+    countable = _CITATION_RE.sub("", body)
+    unsourced_numbers = corpus.unsourced_numbers(countable)
+    if unsourced_numbers:
+        return (False,
+                "it states figure(s) that are not in the evidence: %s"
+                % ", ".join(unsourced_numbers[:4]), [], "")
+
+    if unsupported:
+        for sentence, tag in unsupported:
+            logger.info("strategy chat (roleplay): %r cited %s but shares "
+                        "nothing with it", sentence[:120], tag)
+        return (False,
+                "it cited a section that does not support what it said: %s"
+                % unsupported[0][0][:90], [], "")
+
+    cleaned = re.sub(r"\*\*(.+?)\*\*", r"\1", body)
+    cleaned = re.sub(r"(?<!\*)\*(?!\*)", "", cleaned)
+    # A speaker label the model prefixed its own line with - "COO:", "Irvan:".
+    # The UI already says who is speaking, and a label is the one place a name
+    # would reappear after being kept out of the prompt.
+    cleaned = re.sub(r"^\s*[A-Z][A-Za-z ./&-]{2,40}:\s*", "", cleaned)
+    return True, "ok", resolved, cleaned.strip()
+
 def _validate(answer: str, payload: str, widget_keys: list) -> tuple:
     """(ok, reason, cited_keys, cleaned). Deterministic, and the last word.
 
@@ -385,9 +647,20 @@ UNAVAILABLE = (
     "{closest}")
 
 
-def answer(account_id: str, messages: list, mode: str | None = None) -> dict:
-    """Answer one question about one account. Returns the published payload."""
+def answer(account_id: str, messages: list, mode: str | None = None,
+           persona_id: str | None = None) -> dict:
+    """Answer one question about one account. Returns the published payload.
+
+    With a `persona_id` the chat stops advising and starts rehearsing: it plays
+    that stakeholder's ROLE and pushes back, so a seller can find out where the
+    pitch breaks before a customer does. The persona is resolved against this
+    account only - one belonging to another account does not resolve, and the
+    turn is answered as the advisor rather than silently as someone else.
+    """
     db = get_db()
+    persona = (strategy_personas.resolve(account_id, persona_id)
+               if persona_id else None)
+    resolved_mode = "roleplay" if persona else (_text(mode) or "advisor")
 
     company = _text((db["account_widgets"].find_one(
         {"account_id": account_id, "widget_key": "exec_summary_card"}) or {}
@@ -396,7 +669,7 @@ def answer(account_id: str, messages: list, mode: str | None = None) -> dict:
     question, topic = _resolve_question(messages)
 
     if _is_small_talk(question):
-        return _greeting(company, question)
+        return _greeting(company, question, resolved_mode, persona)
 
     # The whole account, in one payload. No retrieval, no index, no graph.
     #
@@ -413,28 +686,38 @@ def answer(account_id: str, messages: list, mode: str | None = None) -> dict:
     widget_keys = [row["widget_key"] for row in sections]
     if not payload:
         return _unavailable(company, question, topic,
-                            "no feature has published anything for this account yet")
+                            "no feature has published anything for this account yet",
+                            mode=resolved_mode, persona=persona)
 
     attempts, correction, last_reason = [], "", "no attempt was made"
     for attempt in range(MAX_VALIDATION_ATTEMPTS):
         try:
-            raw = _answer_once(company, question, payload, messages, correction)
+            raw = _answer_once(company, question, payload, messages, correction,
+                               persona=persona)
         except gemini.GeminiTruncated as exc:
             # Named rather than left to the validator, which would have rejected
             # the cut-off answer for a missing citation and spent the remaining
             # attempts reproducing it.
             logger.error("strategy chat: %s", exc)
-            return _unavailable(company, question, topic, str(exc), attempts)
+            return _unavailable(company, question, topic, str(exc), attempts,
+                                mode=resolved_mode, persona=persona)
         except gemini.GeminiUnavailable as exc:
-            return _unavailable(company, question, topic, str(exc), attempts)
-        ok, reason, cited, cleaned = _validate(raw, payload, widget_keys)
+            return _unavailable(company, question, topic, str(exc), attempts,
+                                mode=resolved_mode, persona=persona)
+        if persona:
+            ok, reason, cited, cleaned = _validate_roleplay(
+                raw, payload, widget_keys,
+                strategy_personas.banned_names(account_id))
+        else:
+            ok, reason, cited, cleaned = _validate(raw, payload, widget_keys)
         attempts.append({"attempt": attempt + 1, "accepted": ok, "reason": reason})
         if ok:
             return {
                 "answer": cleaned,
                 "question": question,
                 "topic": topic,
-                "mode": _text(mode) or "advisor",
+                "mode": resolved_mode,
+                "persona": _persona_summary(persona),
                 "citations": [_citation(key, sections) for key in cited],
                 "available": True,
                 "generation": {
@@ -451,7 +734,8 @@ def answer(account_id: str, messages: list, mode: str | None = None) -> dict:
 
     # Bounded retries, then stop. A third failure means the evidence does not
     # support the answer the model keeps wanting to give.
-    return _unavailable(company, question, topic, last_reason, attempts)
+    return _unavailable(company, question, topic, last_reason, attempts,
+                        mode=resolved_mode, persona=persona)
 
 
 def _text_block(value) -> str:
@@ -467,7 +751,30 @@ def _is_small_talk(question: str) -> bool:
     return stripped in _SMALL_TALK
 
 
-def _greeting(company: str, question: str) -> dict:
+def _persona_summary(persona: dict | None) -> dict | None:
+    """Who the seller is rehearsing with, for the UI to render.
+
+    The name travels HERE and not into the prompt. A seller preparing for a
+    meeting is preparing for a person and the screen should say so; the model is
+    told only the role, so nothing it writes can be read as that person's own
+    words. The disclaimer is the Objection Playbook's, verbatim, because it is
+    the same claim about the same data.
+    """
+    if not persona:
+        return None
+    return {
+        "persona_id": persona.get("persona_id"),
+        "name": persona.get("name"),
+        "title": persona.get("title"),
+        "department": persona.get("department"),
+        "influence_type": persona.get("influence_type"),
+        "disclaimer": ("A simulation of this role, built from the account's own "
+                       "evidence. Not statements made by any contact."),
+    }
+
+
+def _greeting(company: str, question: str, mode: str = "advisor",
+              persona: dict | None = None) -> dict:
     """The opener, written here rather than retrieved.
 
     Deterministic on purpose: there is no evidence behind "hello", so there is
@@ -483,11 +790,18 @@ def _greeting(company: str, question: str) -> dict:
         "something, I will say so rather than guess.\n\n"
         "Try asking who to approach, what to sell, which signals to act on, or "
         "what objections to expect." % company)
+    if persona:
+        # In character even here. A seller who opens a rehearsal with "hi"
+        # should not be answered by the advisor introducing itself - that
+        # breaks the exercise before it starts.
+        body = ("You have my attention. I am the %s here. What did you want "
+                "to talk about?" % (persona.get("title") or "person you asked for"))
     return {
         "answer": body,
         "question": _text(question),
         "topic": "greeting",
-        "mode": "advisor",
+        "mode": mode,
+        "persona": _persona_summary(persona),
         "citations": [],
         "available": True,
         "generation": {"prompt_version": PROMPT_VERSION,
@@ -496,14 +810,32 @@ def _greeting(company: str, question: str) -> dict:
     }
 
 
-def _unavailable(company, question, topic, reason, attempts=None) -> dict:
+def _unavailable(company, question, topic, reason, attempts=None,
+                 mode: str = "advisor", persona: dict | None = None) -> dict:
     closest = ("You could look at the Stakeholder Map, Tech Landscape or Recent "
                "Signals for the nearest related evidence.")
+    body = UNAVAILABLE.format(company=company, closest=closest)
+    if persona:
+        # Deliberately OUT of character, and this is the one place the
+        # simulation breaks on purpose.
+        #
+        # This path is reached when three attempts failed validation - not when
+        # the role legitimately has nothing to say, which the prompt handles in
+        # character. Dressing a platform failure as the character stonewalling
+        # would read to the seller as an in-scene signal ("he is not biting")
+        # and teach them something about a customer that never happened. The
+        # simulation may be empty; it may never be wrong.
+        body = ("The rehearsal stopped here. Nothing in %s's account "
+                "intelligence supports an in-character answer to that, and "
+                "rather than let the role invent one I have stopped. Try "
+                "rephrasing, or switch to Strategy Advisor to ask directly."
+                % company)
     return {
-        "answer": UNAVAILABLE.format(company=company, closest=closest),
+        "answer": body,
         "question": question,
         "topic": topic,
-        "mode": "advisor",
+        "mode": mode,
+        "persona": _persona_summary(persona),
         "citations": [],
         "available": False,
         "generation": {"prompt_version": PROMPT_VERSION, "reason": reason,

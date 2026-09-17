@@ -406,12 +406,15 @@ export default function UserDashboardPage() {
 
   // Strategy Chat State
   //
-  // No mode state: the advisor is the only mode implemented, and the selector
-  // that used to hold one was never wired to the request. It comes back with
-  // the roleplay personas, which is the point at which there is a second mode
-  // to hold.
+  // `chatPersonaId` empty means the advisor. Anything else is a rehearsal
+  // against that stakeholder's ROLE - the list is the account's own roster,
+  // served live by the backend, and is empty for an account with no contacts.
   const [chatInput, setChatInput] = useState<string>('');
-  const [chatMessages, setChatMessages] = useState<Array<{ id: string; sender: 'user' | 'assistant'; text: string; timestamp: string; citations?: any[]; available?: boolean }>>([]);
+  const [chatPersonaId, setChatPersonaId] = useState<string>('');
+  const [chatPersonas, setChatPersonas] = useState<any[]>([]);
+  // `personaTitle` is stamped on each message rather than read from the current
+  // selection, so a bubble keeps saying who said it after the selector moves.
+  const [chatMessages, setChatMessages] = useState<Array<{ id: string; sender: 'user' | 'assistant'; text: string; timestamp: string; citations?: any[]; available?: boolean; personaTitle?: string }>>([]);
   const [chatPending, setChatPending] = useState(false);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
 
@@ -535,7 +538,22 @@ export default function UserDashboardPage() {
   useEffect(() => {
     setChatMessages([]);
     setChatInput('');
+    setChatPersonaId('');
   }, [selectedAccountId]);
+
+  // Who this account's seller can rehearse against. Served live rather than
+  // read from a widget: the strategy_chat extractor does not depend on
+  // prospect_contacts, so a widget copy would go stale at exactly the moment a
+  // new roster was uploaded. Empty list is a valid answer - an account with no
+  // contacts gets no personas rather than a default set of roles.
+  useEffect(() => {
+    if (!selectedAccountId || activeFeatureKey !== 'strategy_chat') return;
+    let cancelled = false;
+    api.get(`/accounts/${selectedAccountId}/widgets/strategy_chat/personas`)
+      .then(res => { if (!cancelled) setChatPersonas(res.data?.personas || []); })
+      .catch(() => { if (!cancelled) setChatPersonas([]); });
+    return () => { cancelled = true; };
+  }, [selectedAccountId, activeFeatureKey]);
 
   const handleSelectAccount = (acc: CompanyAccount) => {
     setSelectedAccountId(acc.id);
@@ -6548,7 +6566,19 @@ export default function UserDashboardPage() {
 
                   const contextData = contextWidget?.data || {};
                   const groundingMeta = contextData.grounding_metadata || {};
-                  const suggestedPrompts: any[] = contextData.suggested_prompts || [
+                  // Who is being rehearsed with, if anyone. Looked up rather
+                  // than stored so it cannot drift from the selector.
+                  const activePersona = chatPersonaId
+                    ? chatPersonas.find((p: any) => p.persona_id === chatPersonaId)
+                    : null;
+                  // A rehearsal needs openers a seller would SAY, not questions
+                  // about the account. They are built per persona from that
+                  // person's own evidence, by the backend, deterministically.
+                  const suggestedPrompts: any[] = (
+                    activePersona?.starter_prompts?.length
+                      ? activePersona.starter_prompts
+                      : contextData.suggested_prompts
+                  ) || [
                     {
                       id: 'entry_point',
                       title: 'Best entry point',
@@ -6620,7 +6650,9 @@ export default function UserDashboardPage() {
                     try {
                       const res = await api.post(
                         `/accounts/${selectedAccount.id}/widgets/strategy_chat/ask`,
-                        { messages: history, mode: 'advisor' }
+                        chatPersonaId
+                          ? { messages: history, mode: 'roleplay', persona_id: chatPersonaId }
+                          : { messages: history, mode: 'advisor' }
                       );
                       setChatMessages(prev => [...prev, {
                         id: `asst_${Date.now()}`,
@@ -6629,6 +6661,12 @@ export default function UserDashboardPage() {
                         timestamp: stamp(),
                         citations: res.data?.citations || [],
                         available: res.data?.available !== false,
+                        // From the response, not the current selection: a
+                        // rejected rehearsal comes back out of character and
+                        // must not be labelled as the role having said it.
+                        personaTitle: res.data?.available === false
+                          ? undefined
+                          : res.data?.persona?.title,
                       }]);
                     } catch (err: any) {
                       setChatMessages(prev => [...prev, {
@@ -6675,9 +6713,40 @@ export default function UserDashboardPage() {
                             already carries `mode`, so restoring a real selector
                             is a UI change and not a contract change. */}
                         <div className="flex items-center gap-2">
-                          <span className="px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-extrabold text-slate-800 shadow-xs">
-                            🤖 Strategy Advisor
-                          </span>
+                          {/* Role first, name as provenance. "Chief Operating
+                              Officer - from Irvan Nr's record" says the seller
+                              is preparing for that person WITHOUT framing the
+                              dialogue as that person speaking, which is the
+                              distinction the whole feature rests on. */}
+                          <select
+                            value={chatPersonaId}
+                            onChange={(e) => {
+                              const next = e.target.value;
+                              if (next === chatPersonaId) return;
+                              // Switching ends the conversation, for the same
+                              // reason switching account does: the backend
+                              // rewrites a follow-up using the prior turns, so
+                              // "and what about the cost of that?" would be
+                              // resolved against a different role's answer.
+                              if (chatMessages.length > 0 &&
+                                  !window.confirm('Switching will clear this conversation. Continue?')) {
+                                return;
+                              }
+                              setChatPersonaId(next);
+                              setChatMessages([]);
+                              setChatInput('');
+                            }}
+                            className="px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-extrabold text-slate-800 shadow-xs focus:outline-none focus:ring-2 focus:ring-hp-blue/30"
+                          >
+                            <option value="">🤖 Strategy Advisor</option>
+                            {chatPersonas.length === 0 ? (
+                              <option value="" disabled>No contacts on this account</option>
+                            ) : chatPersonas.map((p: any) => (
+                              <option key={p.persona_id} value={p.persona_id}>
+                                🎭 {p.title}{p.name ? ` — from ${p.name}'s record` : ''}
+                              </option>
+                            ))}
+                          </select>
                         </div>
 
                         <div className="flex items-center gap-1.5 text-slate-500 font-medium">
@@ -6699,11 +6768,28 @@ export default function UserDashboardPage() {
                                 <MessageSquare className="w-7 h-7 text-hp-navy" />
                               </div>
                               <h4 className="text-lg font-black text-slate-900">
-                                ABM Strategy Assistant
+                                {activePersona ? `Rehearsal: ${activePersona.title}` : 'ABM Strategy Assistant'}
                               </h4>
-                              <p className="text-xs text-slate-600 leading-relaxed font-medium">
-                                Ask me anything about {companyName}, HP Inc. positioning, competitive strategy, or ABM campaign planning. I&apos;m grounded in {companyName}&apos;s actual data and strategic priorities.
-                              </p>
+                              {activePersona ? (
+                                /* The disclaimer is the Objection Playbook's,
+                                   verbatim, because it is the same claim about
+                                   the same data - these are anticipated
+                                   positions, not things anyone said. Naming the
+                                   record it was built from keeps the provenance
+                                   visible without framing the dialogue as that
+                                   person speaking. */
+                                <p className="text-xs text-slate-600 leading-relaxed font-medium">
+                                  You are practising against the <strong className="text-slate-800">{activePersona.title}</strong> role at {companyName}
+                                  {activePersona.name ? <> , built from {activePersona.name}&apos;s record</> : null}.
+                                  <span className="block mt-1.5 text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
+                                    A simulation of this role, built from the account&apos;s own evidence. Not statements made by any contact.
+                                  </span>
+                                </p>
+                              ) : (
+                                <p className="text-xs text-slate-600 leading-relaxed font-medium">
+                                  Ask me anything about {companyName}, HP Inc. positioning, competitive strategy, or ABM campaign planning. I&apos;m grounded in {companyName}&apos;s actual data and strategic priorities.
+                                </p>
+                              )}
                             </div>
 
                             {/* 6 Suggested Prompt Cards Grid */}
@@ -6745,7 +6831,7 @@ export default function UserDashboardPage() {
                                     <div className="flex items-center justify-between gap-2 border-b border-slate-200/80 pb-2">
                                       <span className="text-xs font-black text-hp-navy flex items-center gap-1.5">
                                         <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-                                        <span>ABM Strategy Assistant</span>
+                                        <span>{msg.personaTitle || 'ABM Strategy Assistant'}</span>
                                       </span>
                                       {msg.available === false && (
                                         <span className="text-[10px] font-bold text-amber-800 bg-amber-50 px-2.5 py-0.5 rounded-full border border-amber-200">
