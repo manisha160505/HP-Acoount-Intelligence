@@ -367,3 +367,57 @@ def test_semicolon_between_two_full_ids_is_left_resolvable():
 
     out = _expand_citations("[a6_x#c2; a6_y#c3]")
     assert _EVIDENCE_REF_RE.findall(out) == ["a6_x#c2", "a6_y#c3"]
+
+# -------------------------------------------------------------------------
+# The uncited-facts gate
+#
+# `_validate` rejects an answer that asserts things about the account and cites
+# nothing. Whether an answer "asserts things" used to be decided by looking for
+# the literal word "fact" in its opening 400 characters - which trusted the
+# model to have written a "FACTS:" header before the requirement applied to it.
+#
+# Demonstrated against the live account before this was changed: the sentence
+# "The Chief Financial Officer is Someone Invented." - a fabricated name and a
+# fabricated title, no citation - passed validation in 8ms. The figure check
+# still bit, because an invented NUMBER is caught wherever it appears. An
+# invented NAME, TITLE or VENDOR had nothing standing in its way, and those are
+# exactly what ABX says "cannot come from model memory".
+#
+# A gate a model can disable by omitting a header is not a gate.
+# ---------------------------------------------------------------------------
+
+def test_an_answer_that_asserts_anything_is_treated_as_asserting_facts():
+    from app.services.strategy.chat import _asserts_facts
+
+    assert _asserts_facts("The Chief Financial Officer is Someone Invented.")
+    assert _asserts_facts("Irvan Nr is Chief Operating Officer.")
+    assert _asserts_facts("FACTS:\n1. Revenue fell.")
+    # Advice with no account facts in it still has to say what it rests on.
+    assert _asserts_facts("You should lead with security.")
+
+
+def test_a_refusal_asserts_nothing_and_needs_no_citation():
+    """The one answer that legitimately grounds nothing: it claims nothing."""
+    from app.services.strategy.chat import _asserts_facts
+
+    for refusal in (
+        "The platform does not hold a personal mobile number for the CEO.",
+        "That is not available in this account's evidence.",
+        "The platform has no information about that.",
+        "The account data does not include their budget.",
+    ):
+        assert not _asserts_facts(refusal), refusal
+
+
+def test_the_gate_does_not_depend_on_the_model_writing_a_header():
+    """The regression this replaced.
+
+    Both of these assert a name and a title. The first happens to contain the
+    word "fact" and the second does not, and under the old rule that alone
+    decided whether the citation requirement applied.
+    """
+    from app.services.strategy.chat import _asserts_facts
+
+    with_header = "FACTS:\n1. The CFO is Someone Invented."
+    without_header = "The CFO is Someone Invented."
+    assert _asserts_facts(with_header) == _asserts_facts(without_header) is True

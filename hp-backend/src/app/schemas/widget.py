@@ -22,7 +22,21 @@ class WidgetResponse(BaseModel):
     description: str
     widget_type: str
     data_classification: Literal['deterministic', 'derived', 'inferred']
-    status: Literal['available', 'empty', 'pending']
+    # `partial` is what the urgency score writes when it computed what it could
+    # but some inputs were missing (`urgency.py`: "available" if available else
+    # "partial"), and it was absent from this literal.
+    #
+    # The consequence was not a bad field, it was a blank feature. FastAPI
+    # validates the WHOLE response array, so one widget carrying an unlisted
+    # status made `GET /accounts/{id}/widgets/executive_dashboard` return 500 -
+    # and the frontend treats a failed widget fetch as non-blocking, so every
+    # panel rendered its "no data yet" placeholder while the data sat in Mongo
+    # intact. An account whose urgency score could not be computed lost its
+    # company profile, its metrics and its priorities along with it.
+    #
+    # Added rather than removed from the writer: "computed, but on incomplete
+    # inputs" is a real state, worth telling a seller apart from "not computed".
+    status: Literal['available', 'empty', 'pending', 'partial']
     data: dict[str, Any]
     source_datasets: list[str]
     source_fields: list[str]
@@ -65,9 +79,17 @@ class StrategyChatRequest(BaseModel):
     invalidated the moment the selected account changes. A client that switches
     account simply stops sending the old turns.
 
-    `mode` is carried from the start even though only the advisor is
-    implemented, so the roleplay personas of Feature 18 can be added later
-    without changing this contract.
+    `mode` was carried from the start so the roleplay personas could be added
+    without breaking this contract, and they were: `persona_id` is optional and
+    every existing client keeps working untouched.
+
+    `mode` is a Literal rather than the bare `str` it began as. As a free string
+    a client typo - "Roleplay", "roleplay " - silently produced advisor
+    behaviour while echoing the typo back, so a seller could believe they were
+    rehearsing while talking to the advisor. A 422 is the better answer.
     """
     messages: list[StrategyChatMessage]
-    mode: str = "advisor"
+    mode: Literal["advisor", "roleplay"] = "advisor"
+    # Which stakeholder to play. Required for roleplay and rejected for
+    # advisor - see the endpoints, which refuse rather than falling back.
+    persona_id: str | None = None

@@ -38,6 +38,7 @@ account evidence, and on approved HP product facts where it names a product.
 """
 
 import logging
+import re
 import time
 
 from app.core.llm import (
@@ -48,6 +49,7 @@ from app.core.llm import (
 from app.database.mongodb import get_db
 from app.services.extractors import grounding
 from app.services.retrieval import evidence as ev, index_state, query
+from app.services.strategy import personas as strategy_personas
 
 logger = logging.getLogger(__name__)
 
@@ -178,8 +180,337 @@ FORMAT: plain text. UPPERCASE section headers, numbered lists. No markdown, no a
 Keep it tight - a seller is reading this between meetings."""
 
 
+ROLEPLAY_SYSTEM = """You are playing a role so that an HP seller can rehearse a real conversation.
+
+{persona}
+
+You are a SIMULATION OF THIS ROLE at {company}. You are not a named person, you are not speaking for
+anyone, and you never claim to be a specific individual. If the seller asks who you are, answer with
+the role.
+
+You answer ONLY from the CONTEXT supplied with the question - this account's retrieved evidence. If
+something is not in there, the platform does not hold it and neither do you.
+
+HOW YOU SPEAK IS YOURS. Tone, register, how blunt or patient or sceptical this role would be, the
+questions you ask back, how you open and close - all of that is yours to write, and it should sound
+like the role rather than like a report.
+
+WHAT YOU SAY IS NOT YOURS. Every concern, objection, priority, constraint, vendor, product, number
+or piece of context you mention must come from the CONTEXT. You do not know anything else. You do
+not have a budget, a timeline, a contract term, a renewal date, a team size, a colleague, a previous
+conversation with HP or a personal opinion unless the evidence gives you one. Inventing one to make
+the conversation feel real is the single worst thing you can do here - the seller will take it into
+a real meeting.
+
+CITATIONS: each evidence line in the context ends with its own tag in square brackets, shaped
+[<document>#c<number>]. EVERY sentence in which you say something substantive must end with the tag
+of the line it came from. Cite several when a sentence rests on several: [a#c1, b#c2].
+
+Copy tags character for character from the context above. Never invent a tag, never adapt one, and
+never use a tag that does not appear in the context - a tag written from memory is rejected and the
+whole reply is discarded.
+
+Say what the line you tagged actually says, in your own register. A checker compares each sentence
+against the evidence you tagged it with, so tagging a line that does not support what you said fails
+exactly as inventing the claim would.
+
+Questions you ask the seller need no tag. Short conversational replies - "go on", "fair enough" -
+need no tag. Every other sentence needs one.
+
+IF THE SELLER ASKS SOMETHING THE EVIDENCE DOES NOT COVER: say so in character - that it is not
+something this role can speak to, or not something you have in front of you. Do not guess and do not
+fill the gap. That is a correct answer, not a failure.
+
+HP RULES:
+- The seller represents HP Inc. You do not. Never argue HP's case for them.
+- Name a product only if it appears in the evidence.
+- Never concede that {company} already uses HP unless the evidence says so.
+
+FORMAT: plain text, first person, as spoken. No stage directions, no narration, no markdown, no
+asterisks, no hashes. Do not prefix your lines with a name or a role label."""
+
+
+def _system_prompt(company: str, persona: dict | None) -> str:
+    """Which voice this turn is answered in - the single render point.
+
+    Both prompts go through `str.format`, so a persona block containing a
+    literal brace raises here rather than quietly producing a broken prompt.
+    `personas.prompt_block` builds from account text, which is why that is worth
+    knowing as the failure mode.
+    """
+    if not persona:
+        return ANSWER_SYSTEM.format(company=company)
+    return ROLEPLAY_SYSTEM.format(
+        company=company, persona=strategy_personas.prompt_block(persona))
+
+
+# --- validating dialogue ----------------------------------------------------
+#
+# Roleplay gets its own validator rather than an extra check bolted onto
+# `_validate`, because `_validate` is wrong for dialogue in both directions.
+#
+# It is too strict: `_asserts_facts` treats anything that is not a refusal as
+# asserting facts, so "Hmm. Go on." - two words that claim nothing - is rejected
+# for citing nothing, retried three times, and surfaces as a failure. A persona
+# that cannot say "go on" cannot hold a conversation.
+#
+# And it is too loose: it needs ONE resolvable citation for a whole answer. A
+# persona could tag one sentence and invent three around it - "we are locked
+# into a three-year agreement", "my team does not own that", "we looked at this
+# last year". None carries a digit, so the figure check never sees them, and a
+# seller repeats them in a real meeting.
+#
+# The rule is that the language may be the role's but the substance must come
+# from a source. That is enforced here, per sentence, in Python.
+
+_DIALOGUE_SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
+
+# Lines that say nothing about the account and need no source. A closed list,
+# not a length heuristic: "Our refresh cycle is four years" is short too.
+# Pleasantries that open or close a turn. A separate pattern from the clause
+# list below because these carry an object ("happy to CONNECT", "thanks for
+# your TIME") and so cannot be enumerated as bare interjections.
+#
+# This is a list, and a list is guessable-at rather than principled - but the
+# failure mode decides whether that is acceptable, and here it fails SAFE. A
+# pleasantry the list misses is a rejected turn, which is visible and annoying;
+# it is never a fabrication published to a seller. The reverse rule - inferring
+# "this sentence says nothing about the account" from vocabulary - would let
+# "we are locked into a three-year agreement" through, because none of those
+# words are in the evidence either.
+_PLEASANTRY_RE = re.compile(
+    r"^\s*(of course|certainly|sure|absolutely|no problem|happy to|glad to|"
+    r"good to|nice to|pleased to|my pleasure|thanks for|thank you for|"
+    r"appreciate|let's|lets|shall we|fire away|over to you|"
+    r"i'm listening|im listening|go ahead|take me through|talk me through)"
+    r"[^.!?]*[.!?]?\s*$", re.I)
+
+_GLUE_CLAUSE = (
+    r"ok|okay|right|sure|fine|hmm+|look|well|go on|go ahead|i see|"
+    r"i'm listening|i am listening|understood|noted|fair enough|fair|"
+    r"alright|thanks|thank you|carry on|maybe|perhaps|possibly|of course|"
+    r"indeed|true|agreed|that is fair|that's fair|say more|and|so|"
+    r"let's hear it|let us hear it|i'm all ears|i am all ears|please do")
+# Several clauses to a line, because that is how people speak: "Go ahead, I'm
+# listening." is two glue clauses joined by a comma and matched none of them
+# when the pattern anchored a whole sentence to a single alternative.
+_GLUE_RE = re.compile(
+    r"^\s*(%s)([\s,;-]+(%s))*[\s.,!?-]*$" % (_GLUE_CLAUSE, _GLUE_CLAUSE), re.I)
+
+# What the prompt asks the persona to say when the evidence does not cover
+# something - "that is not something I can speak to". Without this the prompt
+# and the gate contradict each other: the persona is instructed to deflect in
+# character and then rejected for deflecting without a citation. An answer that
+# declines to claim anything has nothing to ground.
+_ROLEPLAY_REFUSAL_RE = re.compile(
+    r"\b(i (don't|do not|can't|cannot|couldn't|could not) (have|see|speak|"
+    r"comment|answer|say|tell|know|recall|share)"
+    r"|not something i (can|could)"
+    r"|nothing (in front of me|i can (share|speak to))"
+    r"|that'?s? not (mine|my call|something i)"
+    r"|no information|not in front of me|i'd have to come back"
+    r"|i would have to come back|you'?d have to ask)", re.I)
+
+# A word long enough to carry meaning. Used to decide whether a sentence said
+# anything at all, and to compare what it said against the evidence it cited.
+_CONTENT_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z'-]{3,}|\d{2,}")
+_STOPWORDS = frozenset({
+    "that", "this", "these", "those", "they", "them", "their", "there", "then",
+    "than", "with", "from", "have", "has", "had", "been", "being", "were",
+    "will", "would", "could", "should", "what", "when", "where", "which",
+    "your", "yours", "our", "ours", "you", "about", "into", "over", "just",
+    "like", "want", "need", "know", "think", "said", "says", "tell", "told",
+    "here", "very", "much", "more", "most", "some", "any", "not", "but", "and",
+    "for", "the", "are", "was", "does", "did", "doing", "going", "get", "got",
+})
+
+# Whether a cited sentence must share vocabulary with the evidence it cited.
+#
+# A tag proves the model ASSERTED an attribution; it does not prove the sentence
+# is in that evidence. Nothing in this codebase checked that before - not even
+# in advisor mode - and without it a fabricated claim survives simply by
+# carrying a plausible tag.
+#
+# This branch can check it more precisely than a whole-payload design could:
+# `evidence.resolve` returns each cited row's own `source_text`, so a sentence
+# is compared against the exact line it pointed at rather than against a whole
+# section.
+#
+# It is a flag because it has a real false-positive cost: "That is not my call
+# [a#c1]" shares no content word with that line and is rejected, so the persona
+# is pushed toward the evidence's own vocabulary and some turns read stiffer.
+# Every rejection is logged with the sentence so the rate can be measured
+# against real conversations rather than guessed at.
+ROLEPLAY_REQUIRE_EVIDENCE_OVERLAP = True
+
+
+def _content_tokens(text: str) -> set:
+    return {t.lower() for t in _CONTENT_TOKEN_RE.findall(text or "")
+            if t.lower() not in _STOPWORDS}
+
+
+def _validate_roleplay(account_id: str, answer: str, passages: list,
+                       banned_names: list) -> tuple:
+    """(ok, reason, cited_rows, cleaned). The gate for in-character dialogue.
+
+    Same spirit as `_validate`, different unit: a sentence rather than an
+    answer. Citations resolve through `evidence.resolve` exactly as they do for
+    the advisor, so after-generation account isolation is unchanged, and figures
+    go through the same grounding helper on the same passages - roleplay does
+    not get a weaker numeric rule.
+    """
+    body = _text(answer)
+    if not body:
+        return False, "the model returned nothing", [], ""
+
+    answer = _expand_citations(answer)
+    cited = list(dict.fromkeys(_EVIDENCE_REF_RE.findall(answer)))
+    resolved, invalid = ev.resolve(account_id, INDEX, cited)
+    if invalid:
+        return (False,
+                "it cited %d evidence id(s) that do not resolve for this account: %s"
+                % (len(invalid), ", ".join(invalid[:3])), [], "")
+
+    # No real person is quoted, named or spoken for - not the role being played
+    # and not a colleague. Message Evaluator's rule (`evaluator/sources.py`:
+    # never what that person "thinks, wants or has said") applied to the whole
+    # roster, because "talk to Budi about it" puts words about a named employee
+    # into a simulated conversation just as surely as signing with their name.
+    for name in (banned_names or []):
+        if re.search(r"\b%s\b" % re.escape(name), answer, re.I):
+            return (False,
+                    "it named a real person (%s) - the role speaks, never the "
+                    "individual" % name, [], "")
+
+    source_text = {row.get("evidence_id"): _text(row.get("source_text"))
+                   for row in (resolved or [])}
+
+    unsourced, unsupported = [], []
+    for raw in _DIALOGUE_SENTENCE_RE.split(_text_block(answer)):
+        # The model writes a curly apostrophe about half the time, which made
+        # "I'm listening" miss a pattern spelled with a straight one.
+        sentence = raw.strip().replace("’", "'")
+        if not sentence or _GLUE_RE.match(sentence)                 or _PLEASANTRY_RE.match(sentence):
+            continue
+        if _ROLEPLAY_REFUSAL_RE.search(sentence):
+            continue
+        bare = _CITATION_RE.sub("", sentence)
+        bare = _EVIDENCE_REF_RE.sub("", bare).strip()
+        tokens = _content_tokens(bare)
+        if not tokens:
+            continue
+
+        tags = [t for t in _EVIDENCE_REF_RE.findall(sentence) if t in source_text]
+        if not tags:
+            # A question asserts nothing, and asking is how this role finds out
+            # what the seller is proposing. Requiring a source for "what would
+            # switching actually gain us" leaves the persona unable to ask
+            # anything the evidence does not already contain, which is the end
+            # of the rehearsal.
+            #
+            # The residue, stated plainly: a question CAN smuggle a claim -
+            # "are you asking me to break a three-year agreement?". The figure
+            # check and the name ban run over the whole reply and catch the
+            # numeric and the named versions. A non-numeric claim phrased as a
+            # question is what gets through, and closing it would mean deciding
+            # in Python which questions are rhetorical.
+            if bare.endswith("?"):
+                continue
+            unsourced.append(bare)
+            continue
+
+        if ROLEPLAY_REQUIRE_EVIDENCE_OVERLAP and not any(
+                tokens & _content_tokens(source_text.get(tag, "")) for tag in tags):
+            unsupported.append((bare, tags[0]))
+
+    if unsourced:
+        return (False,
+                "it said %d thing(s) in character with no source: %s"
+                % (len(unsourced), " / ".join(s[:70] for s in unsourced[:2])),
+                [], "")
+
+    # Figures before the overlap check, so an invented number is reported as an
+    # invented number. Both would reject it; only one says why usefully, and the
+    # reason is fed straight back as the correction for the next attempt.
+    corpus = grounding.corpus_from_texts(passages)
+    countable = _EVIDENCE_REF_RE.sub("", _CITATION_RE.sub("", answer))
+    unsourced_numbers = corpus.unsourced_numbers(countable)
+    if unsourced_numbers:
+        return (False,
+                "it states figure(s) that are not in the evidence: %s"
+                % ", ".join(unsourced_numbers[:4]), [], "")
+
+    if unsupported:
+        for sentence, tag in unsupported:
+            logger.info("strategy chat (roleplay): %r cited %s but shares "
+                        "nothing with it", sentence[:120], tag)
+        return (False,
+                "it cited evidence that does not support what it said: %s"
+                % unsupported[0][0][:90], [], "")
+
+    cleaned = re.sub(r"\*\*(.+?)\*\*", r"\1", _text_block(answer))
+    cleaned = re.sub(r"(?<!\*)\*(?!\*)", "", cleaned)
+    # A speaker label the model prefixed its own line with - "COO:", "Irvan:".
+    # The UI already says who is speaking, and a label is the one place a name
+    # would reappear after being kept out of the prompt.
+    cleaned = re.sub(r"^\s*[A-Z][A-Za-z ./&-]{2,40}:\s*", "", cleaned)
+    return True, "ok", resolved, cleaned.strip()
+
+
+def _persona_summary(persona: dict | None) -> dict | None:
+    """Who the seller is rehearsing with, for the UI to render.
+
+    The name travels HERE and not into the prompt. A seller preparing for a
+    meeting is preparing for a person and the screen should say so; the model is
+    told only the role, so nothing it writes can be read as that person's own
+    words. The disclaimer is the Objection Playbook's, verbatim, because it is
+    the same claim about the same data.
+    """
+    if not persona:
+        return None
+    return {
+        "persona_id": persona.get("persona_id"),
+        "name": persona.get("name"),
+        "title": persona.get("title"),
+        "department": persona.get("department"),
+        "influence_type": persona.get("influence_type"),
+        "disclaimer": ("A simulation of this role, built from the account's own "
+                       "evidence. Not statements made by any contact."),
+    }
+
+def _retrieval_query(question: str, persona: dict | None) -> str:
+    """What to search for - widened by the role when one is being played.
+
+    On the whole-account design the persona's ammunition is citable by
+    construction: everything in its prompt is also in the context. Retrieval
+    splits those apart, and the split has a specific failure.
+
+    `personas.resolve` reads the role's objections and pain points straight from
+    Mongo, so the persona KNOWS them. The evidence the persona may CITE is
+    whatever the question retrieved. Observed: a seller opens with "we can cut
+    your refresh cost, what is stopping you?", retrieval returns cost and
+    refresh chunks, and the persona answers with the ManageEngine objection it
+    holds - which is real, and recorded against this exact role - but cannot
+    tag, because that chunk was not fetched. The gate then rejects a true
+    statement for being unsourced, and three attempts later the rehearsal stops.
+
+    So the role's own terms join the query. The seller still sees their own
+    question; only what is searched for is widened, and it is widened toward
+    evidence the account genuinely holds about this role rather than toward
+    anything the model fancies.
+    """
+    if not persona:
+        return question
+    terms = [question, persona.get("title") or ""]
+    terms += [card.get("area") or "" for card in (persona.get("objections") or [])]
+    terms += [_text(point) for point in (persona.get("pain_points") or [])[:2]]
+    if persona.get("hp_play_focus"):
+        terms.append(persona["hp_play_focus"])
+    return " ".join(t for t in terms if t).strip()
+
+
 def _answer_once(company: str, question: str, context: str, messages: list,
-                 correction: str = "") -> str:
+                 correction: str = "", persona: dict | None = None) -> str:
     """One generation attempt."""
     user = "\n".join([
         "RETRIEVED ACCOUNT EVIDENCE:",
@@ -196,14 +527,12 @@ def _answer_once(company: str, question: str, context: str, messages: list,
     turns.append({"role": "user", "content": user})
 
     return generate_chat_completion(
-        ANSWER_SYSTEM.format(company=company), turns) or ""
+        _system_prompt(company, persona), turns) or ""
 
 
 # ---------------------------------------------------------------------------
 # Step 5 - validation, which the model cannot talk past
 # ---------------------------------------------------------------------------
-
-import re
 
 # One bracket can hold several ids - "[a6_x#c1, a6_y#c2]" - and the model does
 # that whenever a sentence rests on two pieces of evidence.
@@ -280,17 +609,43 @@ def _expand_citations(answer: str) -> str:
     return _CITATION_BRACKET_RE.sub(expand, answer or "")
 
 
+# A refusal is the one answer that legitimately cites nothing: it asserts
+# nothing about the account, so there is nothing to ground.
+_REFUSAL_PHRASES = ("does not hold", "not hold", "no information",
+                    "not available", "does not have", "does not include",
+                    "is not in the account data", "no data")
+
+
 def _asserts_facts(answer: str) -> bool:
     """Whether this answer claims something about the account.
 
-    A refusal ("the platform does not hold that") and a pure recommendation are
-    both legitimate without citations. A FACTS section is not.
+    Everything except a refusal does. That is deliberately the wide reading.
+
+    This used to return True only when the literal word "fact" appeared in the
+    first 400 characters - effectively trusting the model to have written a
+    "FACTS:" header before the citation requirement applied to it. An answer
+    that opened straight into prose asserted the account's people and figures
+    while this returned False, and the uncited-facts check below never ran on
+    it. Demonstrated against the live account: "The Chief Financial Officer is
+    Someone Invented." - a fabricated name and title, no citation - passed
+    validation in 8ms. The figure gate still bit, because an invented NUMBER is
+    caught wherever it appears; an invented NAME, TITLE or VENDOR had nothing
+    standing in its way, and ABX is explicit that those in particular "cannot
+    come from model memory".
+
+    **Streaming makes this worse, which is why it is fixed here.** Since
+    `_validated_prefix` runs `_validate` against short prefixes, `body[:400]`
+    is a far larger share of a fragment than of a whole answer - so a prefix
+    that has not yet reached its FACTS header is exactly the case the old rule
+    waved through, and it is now the common case rather than the rare one.
+
+    The cost of the wide reading is that an answer which is purely advice, with
+    no account facts at all, must still cite what the advice rests on. The
+    prompt already asks for that, and erring this way rejects an answer that was
+    fine rather than publishing one that was not.
     """
     body = _text(answer).lower()
-    if any(phrase in body for phrase in
-           ("does not hold", "not hold", "no information", "not available")):
-        return False
-    return "fact" in body[:400]
+    return not any(phrase in body for phrase in _REFUSAL_PHRASES)
 
 
 def _validate(account_id: str, answer: str, passages: list) -> tuple:
@@ -380,7 +735,7 @@ UNAVAILABLE = (
 
 
 def _answer_once_stream(company: str, question: str, context: str, messages: list,
-                        correction: str = ""):
+                        correction: str = "", persona: dict | None = None):
     """`_answer_once`, yielding deltas. The prompt is identical."""
     user = "\n".join([
         "RETRIEVED ACCOUNT EVIDENCE:",
@@ -396,10 +751,12 @@ def _answer_once_stream(company: str, question: str, context: str, messages: lis
              and _text(m.get("content"))][-MAX_HISTORY_TURNS:]
     turns.append({"role": "user", "content": user})
 
-    yield from stream_chat_completion(ANSWER_SYSTEM.format(company=company), turns)
+    yield from stream_chat_completion(_system_prompt(company, persona), turns)
 
 
-def _validated_prefix(account_id: str, buffer: str, passages: list) -> tuple:
+def _validated_prefix(account_id: str, buffer: str, passages: list,
+                      persona: dict | None = None,
+                      banned_names: list | None = None) -> tuple:
     """(text safe to publish, whether it validated). Never a partial sentence.
 
     This is what makes streaming compatible with a guarantee that nothing
@@ -413,19 +770,36 @@ def _validated_prefix(account_id: str, buffer: str, passages: list) -> tuple:
     follows it, at which point it is validated like anything else, or the answer
     ends and the full check rejects it.
 
-    The prefix is validated by the same `_validate` the final answer goes
-    through. Nothing is relaxed for streaming - it is the identical function,
-    run earlier and more often, which it can afford to be at about 60ms.
+    The prefix is validated by the same check the final answer goes through.
+    Nothing is relaxed for streaming - it is the identical function, run earlier
+    and more often, which it can afford to be at about 60ms.
+
+    **In a rehearsal that function is `_validate_roleplay`.** The release UNIT
+    is unchanged - still text up to the last closed bracket - but what has to be
+    true about it is stricter, because a persona writes dialogue rather than a
+    FACTS list and its rule is that every substantive sentence carries its own
+    source. Releasing a persona's words under the advisor's check would let a
+    turn through in which one sentence is cited and three are invented, which is
+    exactly the failure the roleplay gate exists to prevent.
+
+    The two line up because a persona ends each substantive sentence with
+    `[doc#cN].` - so the bracket cut lands one character before the sentence
+    terminator, and the fragment being judged still carries its own citation.
     """
     end = buffer.rfind("]")
     if end == -1:
         return "", False
     candidate = buffer[:end + 1]
-    ok, _reason, _cited, cleaned = _validate(account_id, candidate, passages)
+    if persona:
+        ok, _reason, _cited, cleaned = _validate_roleplay(
+            account_id, candidate, passages, banned_names or [])
+    else:
+        ok, _reason, _cited, cleaned = _validate(account_id, candidate, passages)
     return (cleaned, True) if ok else ("", False)
 
 
-def answer_stream(account_id: str, messages: list, mode: str | None = None):
+def answer_stream(account_id: str, messages: list, mode: str | None = None,
+                  persona_id: str | None = None):
     """`answer`, yielding the answer as it is written.
 
     Yields dicts the transport can serialise directly:
@@ -445,6 +819,9 @@ def answer_stream(account_id: str, messages: list, mode: str | None = None):
     same attempt, in practice the replacement is the same text plus its tail.
     """
     db = get_db()
+    persona = (strategy_personas.resolve(account_id, persona_id)
+               if persona_id else None)
+    resolved_mode = "roleplay" if persona else (_text(mode) or "advisor")
 
     state = index_state.get(account_id, INDEX)
     if state.get("status") not in (index_state.READY, index_state.STALE):
@@ -459,19 +836,23 @@ def answer_stream(account_id: str, messages: list, mode: str | None = None):
     question, topic = _resolve_question(messages)
 
     if _is_small_talk(question):
-        yield {"type": "done", **_greeting(company, question)}
+        yield {"type": "done",
+               **_greeting(company, question, resolved_mode, persona)}
         return
 
     yield {"type": "stage", "stage": "retrieving"}
     try:
-        result = query.ask(account_id, INDEX, question,
+        result = query.ask(account_id, INDEX,
+                           _retrieval_query(question, persona),
                            top_k=TOP_K, only_context=True)
     except query.IndexNotReady as exc:
         raise ChatUnavailable(str(exc)) from exc
     except Exception as exc:
         logger.exception("strategy chat: retrieval failed for %r", question[:80])
         yield {"type": "done",
-               **_unavailable(company, question, topic, "retrieval failed: %s" % exc)}
+               **_unavailable(company, question, topic,
+                              "retrieval failed: %s" % exc,
+                              mode=resolved_mode, persona=persona)}
         return
 
     reasoning_context = _reasoning_context(result)
@@ -480,6 +861,10 @@ def answer_stream(account_id: str, messages: list, mode: str | None = None):
         yield {"type": "done",
                **_unavailable(company, question, topic, "no evidence was retrieved")}
         return
+
+    # Read once, not once per attempt: the roster cannot change between them,
+    # and this is inside a loop that runs up to three times.
+    banned = strategy_personas.banned_names(account_id) if persona else []
 
     attempts, correction, last_reason = [], "", "no attempt was made"
     for attempt in range(MAX_VALIDATION_ATTEMPTS):
@@ -499,27 +884,35 @@ def answer_stream(account_id: str, messages: list, mode: str | None = None):
             # A new `]` is the only event that can extend the safe prefix.
             buffer, published, last_end = "", "", -1
             for chunk in _answer_once_stream(company, question, reasoning_context,
-                                             messages, correction):
+                                             messages, correction,
+                                             persona=persona):
                 buffer += chunk
                 end = buffer.rfind("]")
                 if end == last_end:
                     continue
                 last_end = end
-                safe, ok = _validated_prefix(account_id, buffer, passages)
+                safe, ok = _validated_prefix(account_id, buffer, passages,
+                                             persona=persona,
+                                             banned_names=banned)
                 if ok and len(safe) > len(published):
                     published = safe
                     yield {"type": "delta", "text": published}
             raw = buffer
         else:
             raw = _answer_once(company, question, reasoning_context, messages,
-                               correction)
+                               correction, persona=persona)
 
         yield {"type": "stage", "stage": "checking"}
-        ok, reason, cited, cleaned = _validate(account_id, raw, passages)
+        if persona:
+            ok, reason, cited, cleaned = _validate_roleplay(
+                account_id, raw, passages, banned)
+        else:
+            ok, reason, cited, cleaned = _validate(account_id, raw, passages)
         attempts.append({"attempt": attempt + 1, "accepted": ok, "reason": reason})
         if ok:
             yield {"type": "done", "answer": cleaned, "question": question,
-                   "topic": topic, "mode": _text(mode) or "advisor",
+                   "topic": topic, "mode": resolved_mode,
+                   "persona": _persona_summary(persona),
                    "citations": [_citation(row) for row in cited],
                    "available": True,
                    "generation": {"prompt_version": PROMPT_VERSION,
@@ -533,10 +926,12 @@ def answer_stream(account_id: str, messages: list, mode: str | None = None):
         logger.info("strategy chat: attempt %d rejected - %s", attempt + 1, reason)
 
     yield {"type": "done",
-           **_unavailable(company, question, topic, last_reason, attempts)}
+           **_unavailable(company, question, topic, last_reason, attempts,
+                          mode=resolved_mode, persona=persona)}
 
 
-def answer(account_id: str, messages: list, mode: str | None = None) -> dict:
+def answer(account_id: str, messages: list, mode: str | None = None,
+           persona_id: str | None = None) -> dict:
     """Answer one question about one account. Returns the published payload."""
     # Where the time goes, per stage. A total is not diagnostic here: the same
     # ten seconds can be one slow retrieval or three fast generations thrown
@@ -550,6 +945,9 @@ def answer(account_id: str, messages: list, mode: str | None = None) -> dict:
         return round((time.perf_counter() - mark) * 1000)
 
     db = get_db()
+    persona = (strategy_personas.resolve(account_id, persona_id)
+               if persona_id else None)
+    resolved_mode = "roleplay" if persona else (_text(mode) or "advisor")
 
     state = index_state.get(account_id, INDEX)
     if state.get("status") not in (index_state.READY, index_state.STALE):
@@ -568,7 +966,7 @@ def answer(account_id: str, messages: list, mode: str | None = None) -> dict:
     timings["resolve_question_ms"] = _since(_t)
 
     if _is_small_talk(question):
-        return _greeting(company, question)
+        return _greeting(company, question, resolved_mode, persona)
 
     # Retrieval runs on the RESOLVED question. The history shaped that question
     # and contributes nothing else - what the assistant said earlier is not a
@@ -580,7 +978,8 @@ def answer(account_id: str, messages: list, mode: str | None = None) -> dict:
     # throw away cost about 3 seconds of every question.
     _t = time.perf_counter()
     try:
-        result = query.ask(account_id, INDEX, question,
+        result = query.ask(account_id, INDEX,
+                           _retrieval_query(question, persona),
                            top_k=TOP_K, only_context=True)
         timings["retrieval_ms"] = _since(_t)
     except query.IndexNotReady as exc:
@@ -596,7 +995,8 @@ def answer(account_id: str, messages: list, mode: str | None = None) -> dict:
         logger.exception("strategy chat: retrieval failed for %r", question[:80])
         timings["total_ms"] = _since(t_start)
         return _unavailable(company, question, topic,
-                            "retrieval failed: %s" % exc, timings=timings)
+                            "retrieval failed: %s" % exc, timings=timings,
+                            mode=resolved_mode, persona=persona)
 
     # Two different bodies of text, for two different jobs.
     #
@@ -619,6 +1019,9 @@ def answer(account_id: str, messages: list, mode: str | None = None) -> dict:
         return _unavailable(company, question, topic, "no evidence was retrieved",
                             timings=timings)
 
+    # Read once, not once per attempt: the roster cannot change between them.
+    banned = strategy_personas.banned_names(account_id) if persona else []
+
     attempts, correction, last_reason = [], "", "no attempt was made"
     for attempt in range(MAX_VALIDATION_ATTEMPTS):
         # Generation and validation are timed apart because only one of them is
@@ -626,11 +1029,16 @@ def answer(account_id: str, messages: list, mode: str | None = None) -> dict:
         # discarded, so the per-attempt figures are what show whether latency
         # is the model being slow or the loop running more than once.
         _t = time.perf_counter()
-        raw = _answer_once(company, question, reasoning_context, messages, correction)
+        raw = _answer_once(company, question, reasoning_context, messages,
+                           correction, persona=persona)
         generate_ms = _since(_t)
 
         _t = time.perf_counter()
-        ok, reason, cited, cleaned = _validate(account_id, raw, passages)
+        if persona:
+            ok, reason, cited, cleaned = _validate_roleplay(
+                account_id, raw, passages, banned)
+        else:
+            ok, reason, cited, cleaned = _validate(account_id, raw, passages)
         validate_ms = _since(_t)
 
         attempts.append({"attempt": attempt + 1, "accepted": ok, "reason": reason,
@@ -648,7 +1056,8 @@ def answer(account_id: str, messages: list, mode: str | None = None) -> dict:
                 "answer": cleaned,
                 "question": question,
                 "topic": topic,
-                "mode": _text(mode) or "advisor",
+                "mode": resolved_mode,
+                "persona": _persona_summary(persona),
                 "citations": [_citation(row) for row in cited],
                 "available": True,
                 "generation": {
@@ -674,7 +1083,8 @@ def answer(account_id: str, messages: list, mode: str | None = None) -> dict:
         timings.get("retrieval_ms", 0), len(attempts),
         sum(a.get("generate_ms", 0) for a in attempts),
         sum(a.get("validate_ms", 0) for a in attempts))
-    return _unavailable(company, question, topic, last_reason, attempts, timings)
+    return _unavailable(company, question, topic, last_reason, attempts,
+                        timings, mode=resolved_mode, persona=persona)
 
 
 # LightRAG assembles its context in this order, and puts the only citable part
@@ -727,7 +1137,8 @@ def _is_small_talk(question: str) -> bool:
     return stripped in _SMALL_TALK
 
 
-def _greeting(company: str, question: str) -> dict:
+def _greeting(company: str, question: str, mode: str = "advisor",
+              persona: dict | None = None) -> dict:
     """The opener, written here rather than retrieved.
 
     Deterministic on purpose: there is no evidence behind "hello", so there is
@@ -743,11 +1154,18 @@ def _greeting(company: str, question: str) -> dict:
         "something, I will say so rather than guess.\n\n"
         "Try asking who to approach, what to sell, which signals to act on, or "
         "what objections to expect." % company)
+    if persona:
+        # In character even here. A seller who opens a rehearsal with "hi"
+        # should not be answered by the advisor introducing itself - that
+        # breaks the exercise before it starts.
+        body = ("You have my attention. I am the %s here. What did you want "
+                "to talk about?" % (persona.get("title") or "person you asked for"))
     return {
         "answer": body,
         "question": _text(question),
         "topic": "greeting",
-        "mode": "advisor",
+        "mode": mode,
+        "persona": _persona_summary(persona),
         "citations": [],
         "available": True,
         "generation": {"prompt_version": PROMPT_VERSION,
@@ -757,7 +1175,8 @@ def _greeting(company: str, question: str) -> dict:
 
 
 def _unavailable(company, question, topic, reason, attempts=None,
-                 timings=None) -> dict:
+                 timings=None, mode: str = "advisor",
+                 persona: dict | None = None) -> dict:
     closest = ("You could look at the Stakeholder Map, Tech Landscape or Recent "
                "Signals for the nearest related evidence.")
     generation = {"prompt_version": PROMPT_VERSION, "reason": reason,
@@ -767,11 +1186,25 @@ def _unavailable(company, question, topic, reason, attempts=None,
     # nothing.
     if timings:
         generation["timings"] = timings
+    body = UNAVAILABLE.format(company=company, closest=closest)
+    if persona:
+        # Deliberately OUT of character, and the one place the simulation
+        # breaks on purpose. This path is reached when every attempt failed
+        # validation - not when the role legitimately has nothing to say, which
+        # the prompt handles in character. Dressing a platform failure as the
+        # character stonewalling would read as an in-scene signal ("he is not
+        # biting") and teach the seller something about a customer that never
+        # happened. The simulation may be empty; it may never be wrong.
+        body = ("The rehearsal stopped here. Nothing in %s's retrieved evidence "
+                "supports an in-character answer to that, and rather than let "
+                "the role invent one I have stopped. Try rephrasing, or switch "
+                "to Strategy Advisor to ask directly." % company)
     return {
-        "answer": UNAVAILABLE.format(company=company, closest=closest),
+        "answer": body,
         "question": question,
         "topic": topic,
-        "mode": "advisor",
+        "mode": mode,
+        "persona": _persona_summary(persona),
         "citations": [],
         "available": False,
         "generation": generation,
