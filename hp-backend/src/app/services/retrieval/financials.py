@@ -173,6 +173,56 @@ def detect_title_unit(filename: str) -> tuple:
     return None, None
 
 
+# A row whose label states its own unit. These sit in a financial-highlights
+# table under a page-level caption such as "(dalam miliar Rupiah)", but they are
+# not in billions of rupiah and the label says so in its own parentheses.
+#
+# Read as (label pattern, unit, why). Order matters: "per Share (Rp)" is checked
+# before a bare "(Rp)" so the more specific unit wins.
+LABEL_UNITS = [
+    (r"\(x\)\s*$", "x",
+     "the label ends in '(x)', stating the figure is a ratio"),
+    (r"per\s+share\s*\(rp\)\s*$", "IDR per share",
+     "the label states rupiah per share"),
+    (r"\(rp\)\s*$", "IDR",
+     "the label states rupiah, not the page's scaled unit"),
+    (r"shares?\s*\(in\s+millions?\)\s*$", "million shares",
+     "the label states a share count in millions"),
+]
+
+
+def detect_label_unit(label: str) -> tuple:
+    """(unit, quote) the row's own label states, or (None, None).
+
+    A financial-highlights page carries one caption fixing the unit for its
+    money columns - "expressed in billions of Rupiah" - and `detect_unit` reads
+    it. But the same table also carries ratios, per-share amounts and share
+    counts, and those rows say so in their own labels.
+
+    Applying the page unit to every non-percentage row published
+
+        Earnings per Share (Rp)     IDR 810 billion
+        Current Ratio (x)           IDR 1.20 billion
+        Outstanding Share (in ...)  IDR 40,214 billion
+
+    where the figures are Rp 810 per share, a ratio of 1.20, and 40,214 million
+    shares. The numbers were right and the units were wrong by about a trillion,
+    which is worse than publishing nothing: a seller quoting earnings per share
+    off that card would be repeating a figure the filing never stated.
+
+    So a unit the row declares outranks the unit the page declares. The row is
+    the more specific statement, and the page caption was never claiming to
+    describe the ratio rows.
+    """
+    text = " ".join(str(label or "").split())
+    if not text:
+        return None, None
+    for pattern, unit, why in LABEL_UNITS:
+        if re.search(pattern, text, re.I):
+            return unit, "%s: '%s'" % (why, text)
+    return None, None
+
+
 def _header_periods(tokens: list) -> tuple:
     """(periods, has_trailing_label) for a header row, or (None, False).
 
@@ -321,8 +371,14 @@ def page_claims(page: dict, file_name: str) -> tuple:
                 skipped += 1
                 continue
 
+            # Most specific statement wins. The value's own notation settles it
+            # first, then the row's label, then the page caption, then the
+            # document title.
+            label_unit, label_quote = detect_label_unit(label)
             if percent:
                 row_unit, row_quote = "%", "value is written as a percentage"
+            elif label_unit:
+                row_unit, row_quote = label_unit, label_quote
             elif unit:
                 row_unit, row_quote = unit, unit_quote
             elif title_unit:

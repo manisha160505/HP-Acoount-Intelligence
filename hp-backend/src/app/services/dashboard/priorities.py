@@ -635,6 +635,11 @@ def _format_value(value, unit) -> str:
     currency = re.match(r"^([A-Z]{3})\s+(.*)$", unit_text)
     if currency:
         return "%s %s %s" % (currency.group(1), written, currency.group(2))
+    # A currency with no scale after it - a figure stated in the currency's own
+    # units rather than in billions. It still leads its amount: "IDR 390", not
+    # "390 IDR".
+    if re.fullmatch(r"[A-Z]{3}", unit_text):
+        return "%s %s" % (unit_text, written)
     return "%s %s" % (written, unit_text)
 
 

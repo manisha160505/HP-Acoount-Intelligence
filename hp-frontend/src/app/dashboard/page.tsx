@@ -1892,12 +1892,20 @@ export default function UserDashboardPage() {
                     Strategic: 'bg-indigo-100 text-indigo-700',
                     Competitive: 'bg-orange-100 text-orange-700',
                   };
+                  // Keyed by dimension name; the renderer skips any key absent
+                  // from a signal's scores, so the three dimensions the scoring
+                  // rewrite dropped stay listed here deliberately. A widget
+                  // cached before the change still carries them, and removing
+                  // the labels would render those breakdowns blank until the
+                  // account is re-extracted.
                   const dimLabels: Record<string, string> = {
                     recency: 'Recency',
+                    relevance_impact: 'Relevance & Impact',
+                    source_reliability: 'Source Reliability',
+                    // Superseded by relevance_impact - see above.
                     hp_relevance: 'HP Relevance',
                     strategic_impact: 'Strategic Impact',
                     actionability: 'Actionability',
-                    source_reliability: 'Source Reliability',
                   };
 
                   // Categories present in the data, never a hardcoded list.

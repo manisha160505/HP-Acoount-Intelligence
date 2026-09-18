@@ -22,7 +22,13 @@ class WidgetResponse(BaseModel):
     description: str
     widget_type: str
     data_classification: Literal['deterministic', 'derived', 'inferred']
-    status: Literal['available', 'empty', 'pending']
+    # 'partial' is written by `dashboard/urgency.py` when the composite computes
+    # but at least one component had no input - the client's missing-input rule
+    # says the remaining components are still calculated and the score still
+    # publishes. It was absent from this Literal, and because FastAPI validates
+    # the WHOLE response array, a single widget carrying it made the entire
+    # feature return 500 and the dashboard render as an empty account.
+    status: Literal['available', 'empty', 'pending', 'partial']
     data: dict[str, Any]
     source_datasets: list[str]
     source_fields: list[str]

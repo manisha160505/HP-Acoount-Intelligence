@@ -10,6 +10,7 @@ from bson import ObjectId
 
 from app.core.llm import generate_gpt4o_json_completion
 from app.database.mongodb import get_db
+from app.services.extractors import signal_scoring
 from app.services.extractors.datasets import (
     find_file_path,
     read_dataset_records,
@@ -91,18 +92,31 @@ NEWS_EVENTS_CATEGORY_MAP = {
 DEFAULT_CATEGORY = "Strategic"
 
 # ==============================================================================
-# SCORING - the /api/news D1-D5 methodology is the sole scoring authority.
-# The model returns the five dimension scores; Python computes the composite
-# and the tier. No alternate scale is mixed in.
+# SCORING - `HP_Live_Signal_Scoring_Logic.docx` is the sole scoring authority.
+#
+# Three drivers, and only ONE of them is a model judgement:
+#
+#   Recency            30%   computed from the date      (signal_scoring)
+#   Relevance & Impact 50%   judged by the model         (this module)
+#   Source Reliability 20%   looked up from the domain   (signal_scoring)
+#
+# This replaced a five-dimension model-scored set (recency, hp_relevance,
+# strategic_impact, actionability, source_reliability at 25/30/20/15/10). Two of
+# those dimensions were asking GPT-4o for things Python can decide exactly: how
+# old a date is, and how reputable a domain is. `actionability` and
+# `strategic_impact` are gone entirely - the specification folds the second into
+# relevance and does not keep the first.
+#
+# Python still owns the composite and the tier. The model is never asked for a
+# total, a tier, a date or a source field.
 # ==============================================================================
 
-SCORE_WEIGHTS = {
-    "recency": 0.25,
-    "hp_relevance": 0.30,
-    "strategic_impact": 0.20,
-    "actionability": 0.15,
-    "source_reliability": 0.10,
-}
+SCORE_WEIGHTS = signal_scoring.WEIGHTS
+
+# The only dimension the model scores. Recency and source reliability are
+# computed and injected, so asking for them would invite a second opinion on a
+# question that already has an exact answer.
+MODEL_SCORED_DIMS = ("relevance_impact",)
 TIER_THRESHOLDS = [(8.0, "S"), (6.0, "A"), (4.0, "B"), (2.0, "C")]
 MIN_CONFIDENCE_TO_PUBLISH = 2.0
 MAX_SIGNALS = 20
@@ -110,7 +124,10 @@ GATE_MAX_AGE_DAYS = 365
 DEDUP_SIMILARITY = 0.85
 
 # Bump when the scoring prompt changes so cached output is regenerated.
-SIGNAL_SCORING_PROMPT_VERSION = 9
+# 10 - three drivers per HP_Live_Signal_Scoring_Logic.docx. The model now
+#      scores only Relevance and Impact, on the document's 0/3/6/8/10 scale;
+#      recency and source reliability are computed in `signal_scoring`.
+SIGNAL_SCORING_PROMPT_VERSION = 10
 
 # Whether the event has actually happened. A plant that "will be built" and one
 # that "has opened" are different sales conversations, so the card must not read
@@ -348,8 +365,44 @@ def _signals_fingerprint(signals: list[dict]) -> str:
 
 
 def _composite(scores: dict) -> float:
-    """Python owns the weighted composite - the model is never asked for it."""
-    return round(sum(float(scores[k]) * w for k, w in SCORE_WEIGHTS.items()), 2)
+    """Python owns the weighted composite - the model is never asked for it.
+
+    Delegates to `signal_scoring` so the weights live in exactly one place: the
+    module that carries the specification. A second copy here would be a second
+    thing to forget when the document changes.
+    """
+    return signal_scoring.composite(
+        scores["recency"], scores["relevance_impact"], scores["source_reliability"])
+
+
+def _deterministic_dims(signal: dict, now: datetime,
+                        company_name: str = "") -> tuple[dict, dict]:
+    """The two drivers Python decides, with the basis for each.
+
+    Returns `(scores, bases)`. Source reliability can come back as None when the
+    domain is real but unclassified; that is not the same as a missing source,
+    so it falls back to "structured third-party evidence" - the band the
+    specification already uses for a record whose provenance is usable but
+    unconfirmed - rather than to zero. Scoring an unrecognised regional outlet
+    as unverifiable would quietly bury every signal from one.
+    """
+    recency, recency_basis = signal_scoring.recency_points(signal.get("_event_dt"), now)
+
+    points, source_basis, resolved = signal_scoring.source_reliability_points(
+        url=signal.get("source_url") or "",
+        publisher=signal.get("source_publisher") or "",
+        dataset=signal.get("dataset") or "",
+        company_name=company_name,
+    )
+    if points is signal_scoring.UNKNOWN:
+        points = signal_scoring.STRUCTURED_THIRD_PARTY
+        source_basis = source_basis + "; scored as structured third-party evidence"
+
+    return (
+        {"recency": recency, "source_reliability": points},
+        {"recency": recency_basis, "source_reliability": source_basis,
+         "resolved_source_url": resolved or None},
+    )
 
 
 def _tier(confidence: float) -> str:
@@ -471,32 +524,34 @@ CONTEXT: HP Inc. is targeting {company_name} to sell client devices (Z by HP Wor
 GATE VALIDATION (a second opinion - hard filtering has already been applied):
 Set "gate_pass" to false only if the signal does not reference a verifiable event, or does not concern {company_name} or a direct subsidiary. Otherwise true.
 
-SCORING DIMENSIONS (each scored 1-10):
+THE ONE DIMENSION YOU SCORE: SIGNAL RELEVANCE AND IMPACT
 
-D1 - RECENCY
-10 = last 30 days | 8 = 1-3 months ago | 6 = 3-6 months | 4 = 6-9 months | 2 = 9-12 months
+Recency and source reliability are computed from the data and are NOT yours to score. Do not return them.
 
-D2 - HP RELEVANCE
-Score BUYING CONTEXT, not product keywords. A signal does not have to mention a laptop to be relevant - most purchase decisions are preceded by events that never name a device. Ask: does this event change who decides, what gets funded, how many people need equipping, or where they work?
-10 = explicit device refresh, endpoint security or workforce-transformation need
- 8 = IT or device investment, a vendor evaluation, or a named IT/digital leader appointed
- 6 = an event that reliably precedes a device or IT decision - leadership change (CEO/CFO/COO/CIO), capex increase, geographic or headcount expansion, M&A, a new office/plant/facility, an IT-infrastructure or data-centre joint venture, a large hiring programme
- 4 = broad digital-transformation or technology-partnership news with no clear buying consequence
- 2 = an event with no plausible path to a device, security or workforce decision (shareholder returns, community or sponsorship activity, product news in an unrelated line)
+Choose exactly one level - 10, 8, 6, 3 or 0. These are the only permitted values; there is no 9, 7, 5, 4, 2 or 1.
 
-D3 - STRATEGIC IMPACT
-10 = board-level initiative (expansion, workforce strategy) | 8 = C-suite decision or budget allocation | 6 = department-level initiative | 4 = operational change | 2 = routine business
+10 - DIRECT HP-ADDRESSABLE NEED. A current requirement, procurement, refresh, replacement, deployment, support need or solution requirement is EXPLICITLY STATED.
+  Products: PC/notebook refresh, business-PC or AI-PC procurement, desktop/AiO replacement, workstation requirement, print-fleet refresh, Poly requirement.
+  Services: device support, onsite or predictive support, deployment, factory imaging, provisioning, BIOS configuration, asset tagging, Autopilot/Intune registration, installation, lifecycle or device recovery.
+  Solutions: workforce-experience or DEX requirement, endpoint-security requirement, secure print, print/scan workflow, enterprise or employee AI requirement.
 
-D4 - ACTIONABILITY
-Apply this literally. A newly appointed C-suite executive IS a 10, not background context - new leadership resets strategy and reopens budgets, and that is exactly when a seller makes contact. Do not mark an event down to 4 merely because it does not name HP.
-10 = immediate outreach trigger - vendor evaluation, RFP, or a newly appointed CEO/CFO/COO/CIO/CISO
- 8 = supports an active deal (budget approved, pain confirmed, refresh cycle disclosed)
- 6 = useful in a conversation - gives the seller a specific, timely thing to open with
- 4 = background context only, with nothing a seller could open on
- 2 = no clear action
+8 - HP-RELEVANT TECHNOLOGY OR WORKPLACE INITIATIVE. A specific initiative directly related to an HP-addressable area is explicitly stated, but no actual procurement or requirement is.
+  Enterprise AI/GenAI, employee or on-device AI, AI compute, workstation/HPC initiative; digital workplace transformation, DEX, endpoint modernisation, Windows migration, device management, VDI; endpoint security, Zero Trust, ransomware or device-security initiative; print/scan or document-workflow modernisation; endpoint-support modernisation, fleet sustainability, device-reliability initiative.
 
-D5 - SOURCE RELIABILITY
-10 = official company source (earnings, press release) | 8 = tier-1 media (Reuters, Bloomberg) | 6 = industry publication | 4 = analyst report | 2 = blog/social/unverified
+6 - MAJOR BUSINESS CHANGE THAT COULD CREATE HP DEMAND. A significant account change is explicitly stated, but no HP-related technology requirement is.
+  New office, HQ, factory, facility or site; geographic or capacity expansion; significant hiring or workforce growth; major capex or investment tied to growth, operations or capacity; acquisition, merger, JV, new business unit or major operational capability.
+
+3 - GENERAL ACCOUNT SIGNAL WITH WEAK HP CONNECTION. Useful account intelligence, but no HP-addressable need or initiative is established.
+  General strategic partnership, customer-facing AI or product launch, general cloud partnership, executive appointment, award, consumer-facing digital initiative, general corporate announcement.
+
+0 - NO MEANINGFUL HP CONNECTION. No identifiable HP product, service or solution opportunity.
+  Share-price movement, dividend announcement, routine earnings with no relevant initiative, sponsorship, consumer promotion, unrelated legal or corporate news.
+
+TWO RULES THAT DECIDE THE LEVEL:
+
+TAKE THE HIGHEST LEVEL, NEVER ADD. A signal carrying several pieces of evidence scores the highest level any single piece supports. "New factory" (6) plus "hiring growth" (6) is 6, not 12. "New factory" (6) plus "enterprise AI initiative" (8) is 8, not 14. List every matched category in "matched_categories" regardless of which one set the score.
+
+DO NOT SCORE A NEED THAT MERELY FOLLOWS LOGICALLY. The score may not rise because a requirement would plausibly result from the event. A large capex announcement is 6 even though new facilities will eventually need equipping, because the capex statement does not itself establish a PC, workstation, support, security or print requirement. Only what the signal explicitly states counts.
 
 SIGNALS TO SCORE:
 {chr(10).join(roster)}
@@ -526,7 +581,7 @@ Return null whenever the evidence gives no honest basis for choosing one - a div
   - "rumoured"   - reported second-hand or unconfirmed ("reportedly", "sources say", "is said to be", "speculation")
   - "unknown"    - the wording does not settle it
 Judge the EVENT, not the article: a story published today about a factory that opened last year is "completed". Do not infer from the date alone. If the tense is genuinely ambiguous return "unknown" - that is a correct answer, not a failure, and is far better than guessing. Never use a status to make a signal sound more urgent than its wording supports.
-3. Do NOT return a weighted total, an overall confidence, a tier, a category, a date, a headline, an evidence sentence, a URL or a publisher. Those are computed or held elsewhere. Return only what the schema below asks for.
+3. Do NOT return a weighted total, an overall confidence, a tier, a category, a date, a headline, an evidence sentence, a URL or a publisher. Do NOT return a recency or source-reliability score - both are computed from the data and yours would be discarded. Return only what the schema below asks for.
 4. Never rewrite, paraphrase or "clean up" the evidence sentence. You are reading it, not editing it.
 5. Return one entry per supplied id, using the id exactly as given.
 
@@ -538,12 +593,9 @@ Output JSON:
       "gate_pass": true,
       "gate_reject_reason": null,
       "scores": {{
-        "recency": {{"score": 8, "rationale": "..."}},
-        "hp_relevance": {{"score": 6, "rationale": "..."}},
-        "strategic_impact": {{"score": 6, "rationale": "..."}},
-        "actionability": {{"score": 4, "rationale": "..."}},
-        "source_reliability": {{"score": 6, "rationale": "..."}}
+        "relevance_impact": {{"score": 6, "rationale": "Name the level and say what the signal explicitly states - and what it does not."}}
       }},
+      "matched_categories": ["major business change: new facility", "workforce growth"],
       "sales_angle": "Two to three sentences: what this evidences, what it does not, and whether it warrants an HP conversation.",
       "hp_play": null,
       "event_status": "announced"
@@ -560,6 +612,9 @@ Output JSON:
     llm_res = generate_gpt4o_json_completion(system_prompt, user_prompt)
 
     valid_ids = {s["signal_id"] for s in signals}
+    # The signal behind each id, so the computed drivers can read its date and
+    # source without a second pass over the list.
+    by_id = {s["signal_id"]: s for s in signals}
     scored: dict = {}
     angle_stems: set = set()
     angle_faults: dict = {}
@@ -577,7 +632,7 @@ Output JSON:
                 continue
 
             dims, rationales, ok = {}, {}, True
-            for dim in SCORE_WEIGHTS:
+            for dim in MODEL_SCORED_DIMS:
                 block = raw.get(dim)
                 val = block.get("score") if isinstance(block, dict) else block
                 try:
@@ -590,10 +645,27 @@ Output JSON:
             if not ok:
                 continue
 
+            # Recency and source reliability are computed, not asked for. They
+            # are injected after the model's answer so a model that returns them
+            # anyway cannot override the arithmetic.
+            computed, bases = _deterministic_dims(by_id[sid], now, company_name)
+            dims.update(computed)
             confidence = _composite(dims)
+
             rationales, withheld = _grounded_rationales(ground, report, sid, rationales)
             if withheld:
                 rationale_faults[sid] = withheld
+
+            # The computed drivers' bases are attached AFTER grounding, not
+            # before. Grounding exists to stop the model asserting a number the
+            # account's own data does not carry - but "148 days old" is Python's
+            # arithmetic on a date this signal already holds, not a claim about
+            # the account, and the news corpus naturally contains no such
+            # figure. Running these through the check withheld every recency
+            # basis that mentioned an age, which is most of them, and left the
+            # score on screen with nothing explaining it.
+            rationales["recency"] = bases["recency"]
+            rationales["source_reliability"] = bases["source_reliability"]
             _pending_angle = _grounded_angle(ground, report, sid, entry)
             scored[sid] = {
                 "signal_id": sid,

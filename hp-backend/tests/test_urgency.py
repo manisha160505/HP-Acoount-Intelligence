@@ -744,3 +744,60 @@ def test_acronym_families_do_not_match_inside_unrelated_words():
         SCORED_ON)
 
     assert driver["terms"][0]["points"] == 0
+
+
+def test_the_partial_status_this_module_writes_is_an_allowed_widget_status():
+    """The score publishes with components missing - and the API must survive it.
+
+    `build_urgency_score` marks the widget `partial` whenever the composite
+    computed but some component had no input, which is the client's own
+    missing-input rule: the remaining components are still calculated and the
+    score still publishes.
+
+    `WidgetResponse.status` did not list 'partial'. FastAPI validates the WHOLE
+    response array, so one widget carrying it made
+    /widgets/executive_dashboard return 500 for the entire feature - and the
+    dashboard rendered that as an empty account: no company name, no metrics,
+    no priorities, "urgency has not been computed yet". Every widget was
+    present and correct in the database.
+
+    It stayed hidden because Astra had no missing components under the previous
+    five-driver formula. The client's four-driver model added a component fed by
+    `extended_company`, which Astra does not have, so the first regeneration
+    onto the new model emptied the dashboard.
+
+    This asserts the two ends agree rather than trusting either alone.
+    """
+    from app.schemas.widget import WidgetResponse
+
+    statuses = set(WidgetResponse.model_fields["status"].annotation.__args__)
+    assert "partial" in statuses, (
+        "urgency.py writes 'partial'; WidgetResponse must accept it or the "
+        "whole feature 500s")
+
+    WidgetResponse(
+        account_id="0" * 24, feature_key="executive_dashboard",
+        widget_key=u.WIDGET_KEY, widget_name="Urgency Score",
+        description="d", widget_type="score", data_classification="derived",
+        status="partial", data={}, source_datasets=[], source_fields=[],
+        display_order=1)
+
+
+def test_a_score_with_a_missing_component_still_publishes():
+    """The missing-input rule, stated by the client document: "Missing inputs
+    contribute 0 points only to the affected component. The remaining available
+    components are still calculated."
+
+    The composite must exist, and the affected component must be named so a low
+    score can be read rather than merely doubted.
+    """
+    drivers = [
+        u.workplace_os(["Microsoft Windows"], "10001-49999"),
+        u.ai_workstation([], [], None, [], SCORED_ON),
+        u.growth_expansion([], [], None, SCORED_ON),
+        u.hp_solution_intent([]),
+    ]
+    payload = u.score(drivers, SCORED_ON)
+
+    assert payload["score"] is not None
+    assert payload["missing_inputs"], "the components with no input must be named"
