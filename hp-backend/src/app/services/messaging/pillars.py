@@ -209,14 +209,29 @@ def _hp_resource(pillar: dict, plays: list) -> dict | None:
 
 
 def _sourced_count(pillar: dict) -> dict:
-    """How many of this pillar's proof points actually carry a source.
+    """How many of this pillar's proof points carry a source, out of how many the
+    model proposed.
 
     Counted, never generated - the badge in the UI is arithmetic over the
     resolved registry rows, so it cannot flatter the pillar.
+
+    The denominator includes proofs DROPPED for unresolvable evidence ids. A
+    published proof always carries a source (see _shape: a proof that resolves
+    to nothing is discarded, not labelled), so counting only survivors made the
+    badge read "3/3" on every pillar forever - decorative, and unable to show
+    that anything had been thrown away. `proposed` restores the signal: 3/5
+    says two claims were made and could not be stood behind.
     """
     proofs = pillar.get("proof_points") or []
+    dropped = pillar.get("dropped_proofs") or []
     with_source = sum(1 for p in proofs if p.get("sources"))
-    return {"sourced": with_source, "total": len(proofs)}
+    return {
+        "sourced": with_source,
+        "total": len(proofs),
+        # Everything the model put forward for this pillar, before validation.
+        "proposed": len(proofs) + len(dropped),
+        "dropped": len(dropped),
+    }
 
 
 # ---------------------------------------------------------------------------

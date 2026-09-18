@@ -34,6 +34,9 @@ class ContentGenerateRequest(BaseModel):
     content_type: str
     topic: str
     additional_context: str = ""
+    # The angle the seller picked in the co-creation step. Optional, so a direct
+    # generate (no angle chosen) keeps working exactly as before.
+    selected_angle: str = ""
 
 
 class MessageEvaluateRequest(BaseModel):

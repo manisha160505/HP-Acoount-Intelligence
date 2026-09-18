@@ -23,5 +23,11 @@ fi
 git config core.hooksPath scripts/git-hooks
 chmod +x "$REPO_ROOT"/scripts/git-hooks/* 2>/dev/null || true
 
-echo "Hooks installed. A push now requires a clean backend lint."
+echo "Hooks installed. A push to main is now refused, and a push requires a"
+echo "clean backend lint."
+echo ""
+echo "The hook is a local convenience and can be skipped with --no-verify."
+echo "Only GitHub branch protection enforces this for everyone - the repo owner"
+echo "sets that up once; see docs/branch-protection.md."
+echo ""
 echo "Disable with: git config --unset core.hooksPath"

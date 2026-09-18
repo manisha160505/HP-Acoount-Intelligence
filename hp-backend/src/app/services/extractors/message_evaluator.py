@@ -255,27 +255,19 @@ def extract_message_evaluator(account_id: str) -> list[dict]:
     )
     results.append(persona_payload)
 
-    # Widget 2: evaluator_feedback_score (Inferred - Left as Pending / TBD)
-    score_payload = {
-        "account_id": account_id,
-        "feature_key": "message_evaluator",
-        "widget_key": "evaluator_feedback_score",
-        "data_classification": "inferred",
-        "status": "pending",
-        "data": {
-            "feedback_score": "Inferred TBD",
-            "notice": "Message effectiveness scoring, guardrail rules evaluation, and rewrite recommendations using LLM prompts are TBD for Step 8 AI model execution."
-        },
-        "source_datasets": ["prospect_contacts", "job_openings"],
-        "extracted_at": now,
-        "updated_at": now
-    }
-
-    db["account_widgets"].update_one(
-        {"account_id": account_id, "widget_key": "evaluator_feedback_score"},
-        {"$set": score_payload},
-        upsert=True
-    )
-    results.append(score_payload)
-
+    # `evaluator_feedback_score` is deliberately NOT written here.
+    #
+    # This extractor used to upsert an "Inferred TBD" stub onto that key, from
+    # when scoring was still unbuilt. It is built - services/evaluator/ computes
+    # the objective-weighted composite, locates phrase feedback and guards the
+    # simulated reaction - and services/evaluator/storage.py owns that same
+    # widget key, where it keeps a pointer to the latest evaluation
+    # (fingerprint, version, composite).
+    #
+    # Two writers on one key meant a refresh of this account overwrote that
+    # pointer with the stub, so a feature that had real evaluations reported
+    # itself pending and the dashboard lost its way back to them. Ownership now
+    # sits with storage.save() alone: the widget appears when the first
+    # evaluation is stored, and is absent until then rather than claiming a
+    # status on the evaluator's behalf.
     return results

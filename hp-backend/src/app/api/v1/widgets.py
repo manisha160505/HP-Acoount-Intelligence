@@ -29,7 +29,11 @@ from app.services.evaluator import (
     storage as evaluator_storage,
 )
 from app.services.extractors.content_messaging import extract_content_messaging
-from app.services.extractors.content_studio import extract_content_studio, generate_content_asset
+from app.services.extractors.content_studio import (
+    extract_content_studio,
+    generate_content_asset,
+    suggest_content_angles,
+)
 from app.services.extractors.executive_dashboard import extract_executive_dashboard
 from app.services.extractors.intent_demand_signals import extract_intent_demand_signals
 from app.services.extractors.message_evaluator import extract_message_evaluator
@@ -124,15 +128,18 @@ WIDGET_REGISTRY = {
             "widget_key": "exec_urgency_score",
             "widget_name": "Urgency & Opportunity Score",
             "feature_key": "executive_dashboard",
-            "description": "Composite account urgency: 20% Fleet Refresh + 25% AI/Workstation + 15% Hiring + 15% Expansion + 25% Intent. Weights are ABX Feature 1 Step 5; the per-driver formulas are delivery-authored and NOT yet client-agreed. Unavailable drivers block the composite rather than scoring 0.",
+            "description": "Composite account urgency: 20% Workplace Technology and OS + 25% AI and Workstation + 30% Growth and Expansion + 25% HP Solution Intent. Weights, bands and point values are the client's, from HP_Urgency_Score_Updated_Final.pdf. A missing input scores 0 in its own component only; the remaining components are still calculated and the overall score still publishes.",
             "widget_type": "urgency_meter",
             "data_classification": "derived",
             "source_datasets": ["firmographics", "technographics", "webstack",
                                 "job_openings", "intent_score",
-                                "hp_category_intent", "google_news", "news_events"],
-            "source_fields": ["Number Of Employees Range", "Yearly Revenue Range",
-                              "status", "normalized_title", "categories",
-                              "posted_at", "Intent Score (/100)", "event_headline"],
+                                "hp_category_intent", "extended_company",
+                                "google_news", "news_events"],
+            "source_fields": ["Number Of Employees Range", "status",
+                              "posted_at", "first_seen_at", "social_stats",
+                              "associated_members", "Intent Score (/100)",
+                              "Intent Trend", "Buying Stage",
+                              "Research Volume", "event_headline"],
             "display_order": 4
         },
         {
@@ -350,6 +357,17 @@ WIDGET_REGISTRY = {
             "source_datasets": ["prospect_contacts", "job_openings"],
             "source_fields": ["named_persona", "role_type_proxy"],
             "display_order": 2
+        },
+        {
+            "widget_key": "content_angle_options",
+            "widget_name": "Suggested Content Angles",
+            "feature_key": "content_studio",
+            "description": "Two to three short angles proposed from the account's evidence for the seller to choose between before the asset is written. The co-creation step: brief -> suggested options -> the seller selects or adjusts -> generation.",
+            "widget_type": "asset_generator",
+            "data_classification": "inferred",
+            "source_datasets": ["prospect_contacts", "job_openings", "firmographics"],
+            "source_fields": ["named_persona", "role_type_proxy", "company_context"],
+            "display_order": 3
         }
     ],
     "strategy_chat": [
@@ -392,7 +410,16 @@ WIDGET_REGISTRY = {
             "widget_key": "evaluator_feedback_score",
             "widget_name": "Message Scoring & Guardrails Tool",
             "feature_key": "message_evaluator",
-            "description": "Inferred message evaluator contract. Message effectiveness scoring and guardrails analysis are TBD for future AI generation.",
+            # Written by services/evaluator/storage.py when an evaluation is
+            # stored, not by the extractor - it holds a pointer to the latest
+            # evaluation rather than the evaluation itself, which lives in the
+            # message_evaluations collection.
+            "description": (
+                "Objective-weighted message score with phrase-level Keep/Improve/Change "
+                "feedback, coded structure checks and a guarded simulated persona "
+                "reaction. Carries a pointer to the latest evaluation; the evaluations "
+                "themselves are served from the message_evaluator endpoints."
+            ),
             "widget_type": "evaluator_form",
             "data_classification": "inferred",
             "source_datasets": ["prospect_contacts", "job_openings"],
@@ -684,7 +711,8 @@ def generate_content_studio_endpoint(
 
     try:
         ext_doc = generate_content_asset(
-            account_id, body.persona_id, body.content_type, body.topic, body.additional_context)
+            account_id, body.persona_id, body.content_type, body.topic, body.additional_context,
+            body.selected_angle)
     except ValueError as e:
         # The message is raised for a seller to read (an unknown persona or
         # content type), so it is passed through rather than replaced.
@@ -701,6 +729,55 @@ def generate_content_studio_endpoint(
         "account_id": account_id,
         "feature_key": "content_studio",
         "widget_key": "content_generated_assets",
+        "widget_name": contract["widget_name"],
+        "description": contract["description"],
+        "widget_type": contract["widget_type"],
+        "data_classification": contract["data_classification"],
+        "status": ext_doc.get("status", "pending"),
+        "data": ext_doc.get("data", {}),
+        "source_datasets": contract["source_datasets"],
+        "source_fields": contract["source_fields"],
+        "display_order": contract["display_order"],
+        "updated_at": updated_at_str
+    }
+
+
+@router.post("/accounts/{account_id}/widgets/content_studio/angles", response_model=WidgetResponse)
+def suggest_content_angles_endpoint(
+    account_id: str,
+    body: ContentGenerateRequest,
+    current_user: dict = Depends(require_user_role)
+):
+    """Co-creation step 2: propose angles for the seller to choose between.
+
+    Takes the same brief as /generate and returns options, not an asset. The
+    seller then calls /generate with the chosen angle in `selected_angle`.
+    """
+    if not ObjectId.is_valid(account_id):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid account ID format")
+
+    db = get_db()
+    account = db["accounts"].find_one({"_id": ObjectId(account_id)})
+    if not account:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company account not found")
+
+    try:
+        ext_doc = suggest_content_angles(
+            account_id, body.persona_id, body.content_type, body.topic, body.additional_context)
+    except ValueError as e:
+        raise APIError(ErrorCode.INVALID_PARAMETER, str(e),
+                       log_context={"account_id": account_id}) from e
+
+    updated_at_val = ext_doc.get("updated_at")
+    updated_at_str = updated_at_val.isoformat() if isinstance(updated_at_val, datetime) else str(updated_at_val or "")
+
+    contract = next(c for c in WIDGET_REGISTRY["content_studio"]
+                    if c["widget_key"] == "content_angle_options")
+
+    return {
+        "account_id": account_id,
+        "feature_key": "content_studio",
+        "widget_key": "content_angle_options",
         "widget_name": contract["widget_name"],
         "description": contract["description"],
         "widget_type": contract["widget_type"],

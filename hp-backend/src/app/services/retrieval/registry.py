@@ -79,13 +79,11 @@ INDEX_REGISTRY = {
         # is absent from `widgets` above for the same reason
         # `exec_strategic_priorities` is.
         #
-        # It was out of scope until now: ABX fixes the weights but leaves the
-        # raw-data-to-driver transformation undefined - "The current POC does
-        # not define a reusable raw-data-to-driver formula for all accounts" -
-        # and directs that one not be invented here. That direction has been
-        # knowingly overridden on instruction; the driver formulas are
-        # delivery-authored, every payload says so, and they need client
-        # sign-off before the number is presented as HP's.
+        # It was out of scope while ABX fixed the weights but left the
+        # raw-data-to-driver transformation undefined. That gap is now closed:
+        # HP_Urgency_Score_Updated_Final.pdf supplies the full formula - four
+        # drivers at 20/25/30/25, with every band and point value specified -
+        # so the score is the client's rather than delivery-authored.
         "generates": {
             "feature_key": "executive_dashboard",
             "widget_key": "exec_strategic_priorities",

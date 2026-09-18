@@ -1,8 +1,10 @@
 export type WidgetClassification = 'deterministic' | 'derived' | 'inferred';
 // `partial` is a widget that computed some of itself and is publishing that
-// much: `exec_urgency_score` emits it when one of the five drivers is
-// unavailable, which blocks the composite but leaves the other four worth
-// showing. Distinct from `empty`, which has nothing to show at all.
+// much: `exec_urgency_score` emits it when any scoring component had no input
+// to read. The composite still computes - a missing input scores 0 in its own
+// component only - so `partial` here means "some components scored 0 for want
+// of data", and `missing_inputs` in the payload names which.
+// Distinct from `empty`, which has nothing to show at all.
 export type WidgetStatus = 'available' | 'partial' | 'empty' | 'pending';
 
 export interface WidgetContract {
