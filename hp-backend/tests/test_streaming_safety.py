@@ -28,7 +28,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from app.services.strategy import chat as sc  # noqa: E402
+from app.services.strategy import chat as sc
 
 ACCOUNT = "000000000000000000000000"
 PASSAGES = [

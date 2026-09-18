@@ -41,7 +41,8 @@ import logging
 import time
 
 from app.core.llm import (
-    generate_chat_completion, generate_gpt4o_json_completion,
+    generate_chat_completion,
+    generate_gpt4o_json_completion,
     stream_chat_completion,
 )
 from app.database.mongodb import get_db

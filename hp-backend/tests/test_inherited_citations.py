@@ -24,8 +24,9 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from app.services.retrieval.evidence import (  # noqa: E402
-    EVIDENCE_ID_RE, strip_citations,
+from app.services.retrieval.evidence import (
+    EVIDENCE_ID_RE,
+    strip_citations,
 )
 
 
