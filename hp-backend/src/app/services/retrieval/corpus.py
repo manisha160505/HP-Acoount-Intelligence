@@ -1210,3 +1210,957 @@ def _signal_documents(db, account_id, index, company) -> list:
 
     return [_build(account_id, index, "executive_dashboard", "recent_signals",
                    "Recent signals - %s" % company, merged, fill_signals)]
+
+
+# ---------------------------------------------------------------------------
+# Strategy Chat corpus
+# ---------------------------------------------------------------------------
+
+# Widgets deliberately kept out of the corpus.
+#
+#   strategy_chat's own       - a generated widget feeding its own corpus would
+#                               change it on every build and trigger the next
+#                               one forever. Same rule the other two indexes
+#                               follow.
+#   content_generated_assets  - drafts the seller wrote, not account
+#   evaluator_feedback_score    intelligence. Indexing them would let the chat
+#                               cite a generated email as evidence for a fact
+#                               about the account.
+STRATEGY_EXCLUDED_WIDGETS = {
+    "strategy_snapshot_context", "strategy_chat_interface",
+    "content_generated_assets", "evaluator_feedback_score",
+}
+
+# A sanity target, not a splitting rule. A coherent unit that runs past it stays
+# whole - splitting a stakeholder or a priority mid-record to satisfy a byte
+# count destroys the thing retrieval needs to return.
+STRATEGY_DOC_SIZE_TARGET = 25_000
+
+MAX_SIGNALS_PER_DOC = 4
+MAX_TOPICS_PER_THEME_DOC = 30
+
+
+def strategy_documents(account_id: str, index: str = "strategy") -> list:
+    """The documents that feed Strategy Chat.
+
+    The corpus is the finished widget JSON of every other feature, which is what
+    the meeting asked for: *"now these answers raw data can't give, because raw
+    data we analyzed and made all the outputs. So now we will make this rack the
+    final one on the dashboard outputs... we have to put all the JSON widgets."*
+
+    One document per LOGICAL unit - a priority, a stakeholder, a play, an
+    objection - rather than one per widget. A seller's question is usually
+    multi-hop ("who should I message for AI PCs" needs people, intent, tech and
+    HP plays at once), so the units have to be small enough to retrieve
+    independently and whole enough to mean something on their own.
+    """
+    db = get_db()
+    docs = []
+
+    summary = _widget(db, account_id, "exec_summary_card")
+    company = _text(summary.get("company_name")) or _text(
+        (db["accounts"].find_one({"_id": _oid(account_id)}) or {}).get("name"))
+
+    docs.extend(_strategy_account_documents(db, account_id, index, company, summary))
+    docs.extend(_strategy_priority_documents(db, account_id, index, company))
+    docs.extend(_strategy_people_documents(db, account_id, index, company))
+    docs.extend(_strategy_signal_documents(db, account_id, index, company))
+    docs.extend(_strategy_opportunity_documents(db, account_id, index, company))
+    docs.extend(_strategy_technology_documents(db, account_id, index, company))
+    docs.extend(_strategy_intent_documents(db, account_id, index, company))
+    docs.extend(_strategy_messaging_documents(db, account_id, index, company))
+
+    return [d for d in docs if not d.is_empty()]
+
+
+def _sd(account_id, index, unit_key, title, payload, fill):
+    """One Strategy Chat document."""
+    return _build(account_id, index, "strategy", unit_key, title, payload, fill)
+
+
+def _strategy_account_documents(db, account_id, index, company, summary) -> list:
+    """Identity, and the figures the account actually filed."""
+    docs = []
+
+    # The size bands live in `exec_key_metrics`, not in the summary card, and
+    # they are the only grounded answer to "how big is this account". They are
+    # rendered on the profile rather than in their own document so that the two
+    # halves of the same question - who they are, how big they are - retrieve
+    # together.
+    key_metrics = _widget(db, account_id, "exec_key_metrics")
+    if summary or key_metrics:
+        def fill_profile(b, key_metrics=key_metrics):
+            out = []
+            for field, label in (("business_description", "Business description"),
+                                 ("industry_classification", "Industry"),
+                                 ("hq_location", "Headquarters"),
+                                 ("domain", "Website"),
+                                 ("parent_company", "Parent company"),
+                                 ("ultimate_parent", "Ultimate parent")):
+                value = _text(summary.get(field))
+                if value:
+                    out.append("%s: %s" % (label, b.line(value, field=field,
+                                                         dataset="firmographics")))
+            # Said as a BAND, in the same words the dashboard corpus uses. The
+            # filed figures are in `reported_financials`, and a bare "Revenue:
+            # 10B-100B" beside "Net Revenue FY2025: IDR 323,392 billion" reads
+            # as a contradiction rather than as two different kinds of fact.
+            for field, label in (("employee_count", "Employee count band"),
+                                 ("revenue", "Revenue band")):
+                value = _text(key_metrics.get(field))
+                if value and value != "N/A":
+                    out.append("%s reported by the firmographics dataset (a "
+                               "band, not a filed figure): %s"
+                               % (label, b.line(value, field=field,
+                                                dataset="firmographics")))
+            return out
+        docs.append(_sd(account_id, index, "account_profile",
+                        "Account profile - %s" % company,
+                        {"summary": summary, "key_metrics": key_metrics},
+                        fill_profile))
+
+    # Reported financials, read from the dashboard's published metrics. These
+    # already passed its evidence gate - metric, period, value and unit bound
+    # together - so they arrive here checkable rather than as loose numbers.
+    priorities = _widget(db, account_id, "exec_strategic_priorities")
+    metrics = [m for m in (priorities.get("reported_metrics") or [])
+               if _text(m.get("metric")) and _text(m.get("value_text"))]
+    if metrics:
+        def fill_metrics(b):
+            out = ["Financial figures %s reported in its filings." % company]
+            for i, m in enumerate(metrics):
+                sentence = "%s for %s: %s" % (_text(m.get("metric")),
+                                              _text(m.get("period")),
+                                              _text(m.get("value_text")))
+                if _text(m.get("change_text")):
+                    sentence += " (%s against %s)" % (_text(m["change_text"]),
+                                                      _text(m.get("previous_period")))
+                out.append(b.line(sentence, field=_text(m.get("metric")),
+                                  record_id=i, dataset="compliance_filings",
+                                  quote=_text(m.get("quote")),
+                                  period=_text(m.get("period")),
+                                  value=m.get("value"), unit=_text(m.get("unit")),
+                                  page=m.get("page"),
+                                  filing_label=_text(m.get("filing_label"))))
+            return out
+        docs.append(_sd(account_id, index, "reported_financials",
+                        "Reported financials - %s" % company, metrics, fill_metrics))
+
+    hiring = _widget(db, account_id, "intent_hiring_demand")
+    # `exec_hiring_velocity` counts the same job_openings rows: its
+    # `open_job_count` and this widget's `postings_seen` are the same number
+    # over the same dataset. Only `sample_roles` is new, so it joins the
+    # existing document rather than opening a second one that would disagree
+    # with this one by rounding or by gate.
+    velocity = _widget(db, account_id, "exec_hiring_velocity")
+    if hiring or velocity:
+        def fill_hiring(b, velocity=velocity):
+            out = []
+            for field, label in (("postings_seen", "Job postings seen"),
+                                 ("open_postings", "Open postings"),
+                                 ("open_postings_rule", "What counts as open"),
+                                 ("first_seen", "First posting seen"),
+                                 ("last_seen", "Most recent posting seen")):
+                value = _text(hiring.get(field))
+                if value:
+                    out.append("%s: %s" % (label, b.line(value, field=field,
+                                                         dataset="job_openings")))
+            for key, label in (("seniority_breakdown", "Hiring by seniority"),
+                               ("category_breakdown", "Hiring by function")):
+                block = hiring.get(key)
+                if isinstance(block, dict) and block:
+                    out.append("%s: %s" % (label, b.line(
+                        ", ".join("%s %s" % (k, v) for k, v in sorted(block.items())),
+                        field=key, dataset="job_openings")))
+            roles = [_text(r) for r in (velocity.get("sample_roles") or []) if _text(r)]
+            if roles:
+                out.append("Roles %s is hiring for include: %s" % (company, b.line(
+                    "; ".join(roles), field="sample_roles",
+                    dataset="job_openings")))
+            return out
+        docs.append(_sd(account_id, index, "hiring_demand",
+                        "Hiring demand - %s" % company,
+                        {"hiring": hiring, "velocity": velocity}, fill_hiring))
+
+    docs.extend(_strategy_urgency_documents(db, account_id, index, company))
+    return docs
+
+
+def _strategy_urgency_documents(db, account_id, index, company) -> list:
+    """The account urgency composite, and one document per driver.
+
+    Nothing else in the corpus carries this. Without it the chat cannot answer
+    "how urgent is this account, and why" at all - it would have the hiring and
+    intent evidence the drivers are computed FROM, and no way to say what they
+    add up to.
+
+    Split into a composite plus one document per driver because a seller asks
+    about one driver at a time ("why is fleet refresh high?"), and a single
+    document holding all five would return the other four as noise every time.
+
+    Every line says who authored the number. The weights are ABX's; each
+    driver's bands and point values were authored delivery-side and are not
+    client-agreed, and two drivers measure something adjacent to their own name.
+    A seller must not read a delivery-authored score as the specification's, so
+    the authorship travels with the figure rather than sitting in a footnote.
+    """
+    urgency = _widget(db, account_id, "exec_urgency_score")
+    if not urgency:
+        return []
+
+    docs = []
+    authority = _text(urgency.get("formula_authority"))
+    agreed = urgency.get("client_agreed")
+
+    def fill_score(b):
+        out = []
+        score = urgency.get("score")
+        if score is None:
+            reason = _text(urgency.get("unavailable_reason"))
+            out.append("No urgency score is published for %s. %s"
+                       % (company, reason or "An input was unavailable."))
+        else:
+            out.append("Urgency score for %s: %s out of %s."
+                       % (company, b.line("%s" % score, field="score",
+                                          value=score,
+                                          unit="points out of %s"
+                                               % urgency.get("max_score")),
+                          urgency.get("max_score")))
+        formula = _text(urgency.get("formula"))
+        if formula:
+            out.append("How it is calculated: %s" % formula)
+        if authority:
+            out.append("Who authored it: %s" % authority)
+        out.append("This score is %s by the client."
+                   % ("agreed" if agreed else "NOT yet agreed"))
+        for driver in (urgency.get("drivers") or []):
+            label = _text(driver.get("label"))
+            if not label:
+                continue
+            if driver.get("available"):
+                out.append("%s contributes %s/%s at a weight of %s%%."
+                           % (label, driver.get("value"),
+                              driver.get("max_value"),
+                              round(float(driver.get("weight") or 0) * 100)))
+            else:
+                out.append("%s is unavailable: %s"
+                           % (label, _text(driver.get("unavailable_reason"))))
+        proxies = [k for k in (urgency.get("proxy_drivers") or []) if _text(k)]
+        if proxies:
+            out.append("Drivers measuring something adjacent to their own name: "
+                       "%s. Each says what it actually measures." % ", ".join(proxies))
+        return out
+
+    docs.append(_sd(account_id, index, "urgency_score",
+                    "Urgency score - %s" % company,
+                    {k: v for k, v in urgency.items() if k != "drivers"},
+                    fill_score))
+
+    for driver in (urgency.get("drivers") or []):
+        key = _slug(driver.get("key") or "")[:40]
+        label = _text(driver.get("label"))
+        if not key or not label:
+            continue
+
+        def fill_driver(b, driver=driver, label=label):
+            if not driver.get("available"):
+                return ["Urgency driver %s for %s is unavailable: %s"
+                        % (label, company,
+                           _text(driver.get("unavailable_reason"))
+                           or "a required input is missing."),
+                        "ABX: an unavailable input keeps the composite "
+                        "unavailable rather than scoring zero."]
+            out = ["Urgency driver for %s: %s scores %s out of %s, weighted %s%% "
+                   "of the account's urgency score."
+                   % (company, label, driver.get("value"),
+                      driver.get("max_value"),
+                      round(float(driver.get("weight") or 0) * 100))]
+            for term in (driver.get("terms") or []):
+                basis = _text(term.get("basis"))
+                if not basis:
+                    continue
+                out.append("%s: %s of %s points - %s"
+                           % (_text(term.get("label")), term.get("points"),
+                              term.get("max_points"),
+                              b.line(basis, field=_text(term.get("label")),
+                                     record_id=_text(driver.get("key")),
+                                     value=term.get("points"))))
+            if driver.get("proxy") and _text(driver.get("proxy_note")):
+                out.append("What this driver actually measures: %s"
+                           % _text(driver.get("proxy_note")))
+            for note in (driver.get("notes") or []):
+                if _text(note):
+                    out.append(_text(note))
+            out.append("The %s%% weight is from the account-intelligence "
+                       "specification; this driver's bands and point values "
+                       "were authored %s-side and are %s client-agreed."
+                       % (round(float(driver.get("weight") or 0) * 100),
+                          _text(driver.get("authored_by")) or "delivery",
+                          "" if agreed else "NOT"))
+            return out
+
+        docs.append(_sd(account_id, index, "urgency_driver_%s" % key,
+                        "Urgency driver - %s" % label, driver, fill_driver))
+
+    return docs
+
+
+def _strategy_priority_documents(db, account_id, index, company) -> list:
+    """One document per strategic priority, each with its own evidence."""
+    data = _widget(db, account_id, "exec_strategic_priorities")
+    docs = []
+
+    for i, priority in enumerate(data.get("priorities") or []):
+        title = _text(priority.get("title"))
+        if not title:
+            continue
+
+        def fill(b, priority=priority, title=title):
+            out = ["Strategic priority for %s: %s." % (company, title)]
+            theme = _text(priority.get("theme"))
+            if theme and theme != "other":
+                out.append("Theme: %s." % theme)
+            body = _text((priority.get("description") or {}).get("text"))
+            if body:
+                out.append(body)
+            why = _text(priority.get("why_now"))
+            if why:
+                out.append("Why now: %s" % why)
+            for j, source in enumerate(priority.get("sources") or []):
+                line = b.line(_text(source.get("source_text")),
+                              field="supporting_sentence", record_id=j,
+                              dataset=_text(source.get("dataset")) or "compliance_filings",
+                              source_url=_text(source.get("source_url")),
+                              publisher=_text(source.get("publisher")),
+                              page=source.get("page"),
+                              filing_label=_text(source.get("filing_label")),
+                              period=_text(source.get("period")))
+                if line:
+                    out.append("Supporting evidence: %s" % line)
+            measures = priority.get("measures") or {}
+            if measures:
+                out.append("Evidence behind this priority: %s supporting sentence(s) "
+                           "across %s document section(s)."
+                           % (measures.get("support_count"),
+                              measures.get("distinct_sections")))
+            return out
+
+        docs.append(_sd(account_id, index, "priority_%d" % (i + 1),
+                        "Strategic priority - %s" % title, priority, fill))
+    return docs
+
+
+def _strategy_people_documents(db, account_id, index, company) -> list:
+    """The buying group, then one document per contact.
+
+    A contact is its own document because "who should I approach" is answered by
+    one person, and a single 33 KB grid would return all twenty-three of them
+    together with no way to rank one above another.
+    """
+    grid = _widget(db, account_id, "stakeholder_contacts_grid")
+    influence = _widget(db, account_id, "stakeholder_influence_map")
+    points = (_widget(db, account_id, "stakeholder_talking_points")
+              .get("talking_points") or {})
+    docs = []
+
+    if influence:
+        def fill_map(b):
+            out = []
+            coverage = influence.get("buying_group_coverage")
+            if _text(coverage):
+                out.append("Buying-group coverage at %s: %s"
+                           % (company, b.line(coverage, field="buying_group_coverage",
+                                              dataset="prospect_contacts")))
+            for key, label in (("influence_breakdown", "Stakeholders by influence type"),
+                               ("seniority_breakdown", "Stakeholders by seniority")):
+                block = influence.get(key)
+                if isinstance(block, dict) and block:
+                    out.append("%s: %s" % (label, b.line(
+                        ", ".join("%s %s" % (k, v) for k, v in sorted(block.items())),
+                        field=key, dataset="prospect_contacts")))
+            for i, group in enumerate(influence.get("department_groups") or []):
+                department = _text(group.get("department"))
+                total = _text(group.get("total_count"))
+                if department and total:
+                    out.append("%s department: %s contact(s), %s HP-relevant."
+                               % (department,
+                                  b.line(total, field="department_total",
+                                         record_id=i, dataset="prospect_contacts"),
+                                  _text(group.get("hp_relevant_count")) or "0"))
+            return out
+        docs.append(_sd(account_id, index, "buying_group",
+                        "Buying group - %s" % company, influence, fill_map))
+
+    for contact in (grid.get("contacts") or []):
+        name = _text(contact.get("full_name"))
+        contact_id = _text(contact.get("contact_id"))
+        if not name:
+            continue
+        talking = points.get(contact_id) or {}
+
+        def fill_contact(b, contact=contact, name=name, talking=talking):
+            out = []
+            title = _text(contact.get("title"))
+            department = _text(contact.get("department"))
+            seniority = _text(contact.get("seniority"))
+            identity = ", ".join(x for x in (title, department, seniority) if x)
+            if identity:
+                out.append("%s at %s: %s" % (
+                    name, company,
+                    b.line(identity, field="title", record_id=contact.get("contact_id"),
+                           dataset="prospect_contacts")))
+            persona = _text(contact.get("buying_committee_persona"))
+            if persona:
+                out.append("Buying-committee role: %s"
+                           % b.line(persona, field="buying_committee_persona",
+                                    record_id=contact.get("contact_id"),
+                                    dataset="prospect_contacts"))
+            if _text(contact.get("linkedin_url")):
+                out.append("LinkedIn profile on file for %s." % name)
+            for key, label in (("how_to_open", "How to open with %s" % name),
+                               ("hp_play_focus", "HP focus for %s" % name),
+                               ("decision_power", "Decision power")):
+                value = _text(talking.get(key))
+                if value:
+                    out.append("%s: %s" % (label, b.line(
+                        value, field=key, record_id=contact.get("contact_id"),
+                        dataset="prospect_contacts")))
+            pains = [_text(p) for p in (talking.get("pain_points") or []) if _text(p)]
+            if pains:
+                out.append("What %s is likely weighing: %s" % (name, b.line(
+                    "; ".join(pains), field="pain_points",
+                    record_id=contact.get("contact_id"),
+                    dataset="prospect_contacts")))
+            return out
+
+        docs.append(_sd(account_id, index,
+                        "contact_%s" % _slug(name)[:40],
+                        "Stakeholder - %s" % name, {"contact": contact,
+                                                    "talking": talking},
+                        fill_contact))
+    return docs
+
+
+def _strategy_signal_documents(db, account_id, index, company) -> list:
+    """Recent events, a few per document so each keeps its own date and link."""
+    feed = _widget(db, account_id, "news_signals_feed")
+    signals = [s for s in (feed.get("signals") or [])
+               if isinstance(s, dict) and _text(s.get("headline"))]
+
+    # Why each event matters, joined onto the event it is about.
+    #
+    # The feed says what happened; `news_relevance_summary` holds the sales
+    # angle, the HP play and the per-dimension reasoning for the same events,
+    # keyed by `signal_id`. Kept on the same document rather than given its own:
+    # a seller asking "what should I do about this news" wants both halves in
+    # one retrieval, and two documents about one event would make the graph hold
+    # two witnesses to it.
+    #
+    # `opportunity_trigger_signals` is deliberately not read anywhere: its
+    # `triggers` list IS this same `news_signals_feed["signals"]`, republished
+    # unchanged by the opportunity feature. It stays in the registry's `widgets`
+    # list so a change still re-indexes these documents.
+    relevance = _widget(db, account_id, "news_relevance_summary")
+    scores = relevance.get("scores") if isinstance(relevance.get("scores"), dict) else {}
+    docs = []
+
+    for start in range(0, len(signals), MAX_SIGNALS_PER_DOC):
+        group = signals[start:start + MAX_SIGNALS_PER_DOC]
+
+        def fill(b, group=group, scores=scores):
+            out = ["Recent events involving %s." % company]
+            for i, signal in enumerate(group):
+                headline = _text(signal.get("headline"))
+                date = _text(signal.get("event_date")) or _text(signal.get("publication_date"))
+                category = _text(signal.get("category"))
+                sentence = "%s%s%s" % (headline,
+                                       " (%s)" % date if date else "",
+                                       " - category: %s" % category if category else "")
+                out.append(b.line(sentence, field="headline", record_id=i,
+                                  dataset=_text(signal.get("dataset")) or "google_news",
+                                  publisher=_text(signal.get("source_publisher")),
+                                  source_url=_text(signal.get("source_url")),
+                                  quote=_text(signal.get("raw_headline")),
+                                  period=date))
+                evidence = _text(signal.get("evidence_sentence"))
+                if evidence:
+                    out.append("  Reported: %s" % b.line(
+                        evidence, field="evidence_sentence", record_id=i,
+                        publisher=_text(signal.get("source_publisher")),
+                        source_url=_text(signal.get("source_url"))))
+
+                scored = scores.get(_text(signal.get("signal_id"))) or {}
+                angle = _text(scored.get("sales_angle"))
+                if angle:
+                    out.append("  Why it matters: %s" % b.line(
+                        angle, field="sales_angle", record_id=i,
+                        dataset="google_news"))
+                play = _text(scored.get("hp_play"))
+                if play:
+                    out.append("  HP play for this event: %s" % b.line(
+                        play, field="hp_play", record_id=i))
+                for dim, why in sorted((scored.get("rationales") or {}).items()):
+                    if _text(why):
+                        out.append("  %s: %s" % (dim, b.line(
+                            _text(why), field="rationale", record_id="%s:%s" % (i, dim),
+                            dataset="google_news")))
+                tier = _text(scored.get("tier"))
+                if tier:
+                    out.append("  Relevance tier: %s (confidence %s)"
+                               % (tier, scored.get("confidence")))
+            return out
+
+        docs.append(_sd(account_id, index, "signals_%d" % (start // MAX_SIGNALS_PER_DOC + 1),
+                        "Recent signals - %s" % company,
+                        {"signals": group,
+                         "relevance": [scores.get(_text(s.get("signal_id")))
+                                       for s in group]}, fill))
+    return docs
+
+
+def _strategy_opportunity_documents(db, account_id, index, company) -> list:
+    """One document per opportunity play, and one per objection."""
+    plays = _widget(db, account_id, "opportunity_narrative_plays")
+    objections = _widget(db, account_id, "objection_reframe_cards")
+
+    # Who at this account would raise each objection.
+    #
+    # `objection_incumbent_context` resolves a likely raiser per objection area
+    # from the contact list. That is the one genuinely new thing it holds - its
+    # `business_context` and `incumbent_technologies` are the account profile and
+    # the tech stack again - and it belongs on the objection it is about, where
+    # it bridges to the contact documents for a question like "who will push
+    # back on this, and what do I say".
+    #
+    # `opportunity_context_card` is deliberately not read: its
+    # `business_description`, `full_tech_stack_sample` and `top_intent_topics`
+    # are already carried by `account_profile`, the technology documents and the
+    # intent documents respectively.
+    incumbents = _widget(db, account_id, "objection_incumbent_context")
+    raisers = {}
+    for area in (incumbents.get("area_evidence") or []):
+        if isinstance(area, dict) and _text(area.get("area")):
+            raisers[_text(area["area"]).lower()] = area
+    docs = []
+
+    for play in (plays.get("opportunity_plays") or []):
+        title = _text(play.get("title"))
+        if not title:
+            continue
+
+        def fill_play(b, play=play, title=title):
+            out = ["HP opportunity play for %s: %s (%s)." % (
+                company, title, _text(play.get("category_label")))]
+
+            # An opportunity play carries the whole argument - what the account
+            # has, what HP does about it, who would weigh it, and at what scale.
+            # Rendering only the title and a proof point left these documents at
+            # 160 characters, which retrieves as noise.
+            for field, label in (("hp_capability", "What HP offers here"),
+                                 ("inference", "What the evidence suggests"),
+                                 ("owner_angle", "Who would weigh this"),
+                                 ("scale_statement", "Scale of the estate"),
+                                 ("timing_note", "Timing"),
+                                 ("severity", "Checks met")):
+                value = _text(play.get(field))
+                if value:
+                    out.append("%s: %s" % (label, b.line(
+                        value, field=field, record_id=play.get("play_key"))))
+
+            products = [_text(p) for p in (play.get("hp_products") or []) if _text(p)]
+            if products:
+                out.append("HP lines this play sells: %s" % b.line(
+                    ", ".join(products), field="hp_products",
+                    record_id=play.get("play_key"),
+                    source_url=_text(play.get("hp_resource_url")),
+                    dataset="hp_product_knowledge"))
+
+            proof = _text(play.get("hp_proof_point"))
+            if proof:
+                out.append("HP proof point: %s" % b.line(
+                    proof, field="hp_proof_point", record_id=play.get("play_key"),
+                    dataset="hp_product_knowledge"))
+
+            # `statement` is the sentence and `quote` the cell it was read from.
+            # An earlier version looked for a "text" key, which does not exist,
+            # so every play lost its account evidence silently.
+            for i, evidence in enumerate(play.get("account_evidence") or []):
+                if not isinstance(evidence, dict):
+                    continue
+                statement = _text(evidence.get("statement"))
+                if statement:
+                    out.append("Account evidence: %s" % b.line(
+                        statement, field="account_evidence", record_id=i,
+                        dataset=_text(evidence.get("dataset")),
+                        quote=_text(evidence.get("quote")),
+                        source_url=_text(evidence.get("source_url"))))
+
+            entry = play.get("entry_path") or {}
+            contacts = [_text(c.get("name")) for c in (entry.get("target_contacts") or [])
+                        if isinstance(c, dict) and _text(c.get("name"))]
+            if contacts:
+                out.append("Suggested entry path (%s): %s" % (
+                    _text(entry.get("timeline")) or "no timeline stated",
+                    b.line(", ".join(contacts), field="entry_path",
+                           record_id=play.get("play_key"),
+                           dataset="prospect_contacts")))
+            return out
+
+        docs.append(_sd(account_id, index, "play_%s" % _slug(play.get("play_key") or title)[:40],
+                        "Opportunity play - %s" % title, play, fill_play))
+
+    for card in (objections.get("cards") or []):
+        objection = _text(card.get("objection"))
+        if not objection:
+            continue
+
+        area = raisers.get(_text(card.get("area")).lower()) if _text(card.get("area")) else None
+
+        def fill_card(b, card=card, objection=objection, area=area):
+            out = ["Objection %s may raise: %s" % (
+                company, b.line(objection, field="objection",
+                                record_id=card.get("card_id"),
+                                source_url=_text(card.get("evidence_source_link")),
+                                period=_text(card.get("evidence_date"))))]
+            for field, label in (("reframe", "How to reframe it"),
+                                 ("counter_question", "Counter question"),
+                                 ("why_expected", "Why this objection is expected"),
+                                 ("recommended_next_step", "Recommended next step"),
+                                 ("hp_proof_point", "HP proof point")):
+                value = _text(card.get(field))
+                if value:
+                    out.append("%s: %s" % (label, b.line(
+                        value, field=field, record_id=card.get("card_id"))))
+            if area:
+                raiser = _text(area.get("likely_raiser"))
+                # `_resolve_likely_raiser` falls back to the area's own name
+                # when no contact matches, so this field can hold "Endpoint
+                # Security" - a product category, not a person. Rendering that
+                # would have the chat name a technology as the human who will
+                # push back. A raiser that merely repeats its own area is not a
+                # raiser, so it is dropped rather than guessed at.
+                if raiser.lower() == _text(area.get("area")).lower():
+                    raiser = ""
+                if raiser:
+                    out.append("Who at %s is most likely to raise it: %s"
+                               % (company, b.line(
+                                   raiser, field="likely_raiser",
+                                   record_id=_text(area.get("area")),
+                                   dataset="prospect_contacts",
+                                   quote=_text(area.get("likely_raiser_source")))))
+            return out
+
+        docs.append(_sd(account_id, index, "objection_%s" % _slug(card.get("card_id") or objection)[:40],
+                        "Objection - %s" % objection[:60],
+                        {"card": card, "area": area}, fill_card))
+    return docs
+
+
+def _strategy_technology_documents(db, account_id, index, company) -> list:
+    """Technology in place, and the HP recommendations built on it."""
+    techmap = _widget(db, account_id, "technographic_map")
+    recs = _widget(db, account_id, "technographic_hp_recommendations")
+    docs = []
+
+    for category in (techmap.get("categories") or []):
+        name = _text(category.get("category_name"))
+        if not name:
+            continue
+
+        def fill_category(b, category=category, name=name):
+            out = ["Technology category at %s: %s." % (company, name)]
+            for field, label in (("status_badge", "HP status"),
+                                 ("what_it_means", "What it means for HP"),
+                                 ("hp_relationship", "HP relationship")):
+                value = _text(category.get(field))
+                if value:
+                    out.append("%s: %s" % (label, b.line(
+                        value, field=field, record_id=category.get("category_key"),
+                        dataset="technographics")))
+            for i, vendor in enumerate(category.get("vendors") or []):
+                vendor_name = _text(vendor.get("vendor_name"))
+                detected = ", ".join(_text(x) for x in (vendor.get("detected_as") or []) if _text(x))
+                if vendor_name and detected:
+                    out.append("%s detected at %s as %s (confidence: %s)." % (
+                        vendor_name, company,
+                        b.line(detected, field="detected_as", record_id=i,
+                               dataset="technographics"),
+                        _text(vendor.get("confidence")) or "not stated"))
+                play = vendor.get("hp_play") or {}
+                if _text(play.get("play_text")):
+                    out.append("HP play against %s: %s" % (
+                        vendor_name,
+                        b.line(play.get("play_text"), field="hp_play", record_id=i)))
+            return out
+
+        docs.append(_sd(account_id, index,
+                        "technology_%s" % _slug(category.get("category_key") or name)[:40],
+                        "Technology - %s" % name, category, fill_category))
+
+    for i, rec in enumerate(recs.get("recommendations") or []):
+        family = _text(rec.get("hp_family"))
+        if not family:
+            continue
+
+        def fill_rec(b, rec=rec, family=family, i=i):
+            out = ["HP recommendation for %s: %s %s, for the %s category." % (
+                company, family, _text(rec.get("device_type")),
+                _text(rec.get("category_name")))]
+            rationale = _text(rec.get("rationale"))
+            if rationale:
+                out.append("Why it fits this account: %s" % b.line(
+                    rationale, field="rationale", record_id=i,
+                    dataset="technographics"))
+            for j, fact in enumerate(rec.get("approved_facts") or []):
+                if fact.get("kept") and _text(fact.get("text")):
+                    out.append("Approved HP fact: %s" % b.line(
+                        fact["text"], field="approved_fact", record_id=fact.get("slide_id") or j,
+                        dataset="hp_product_knowledge"))
+            return out
+
+        docs.append(_sd(account_id, index, "hp_recommendation_%d" % (i + 1),
+                        "HP recommendation - %s" % family, rec, fill_rec))
+
+    docs.extend(_strategy_stack_documents(db, account_id, index, company))
+    return docs
+
+
+def _strategy_stack_documents(db, account_id, index, company) -> list:
+    """The installed stack below HP's own taxonomy, and the public web stack.
+
+    `technographic_map` above answers "what does HP care about here" - it only
+    surfaces technologies that matched one of HP's seven fixed categories, and
+    says so (`categories_are_fixed_taxonomy`). Everything the account runs that
+    matched nothing is absent from the corpus entirely, so the chat cannot
+    answer "what else are they running" or "what is on their website".
+
+    Three widgets fill that gap:
+      tech_stack_matrix         the vendor taxonomy, 19 columns
+      webstack_breakdown        public website technologies and spend
+      tech_detections_reference when each technology was first and last seen
+    """
+    docs = []
+
+    matrix = _widget(db, account_id, "tech_stack_matrix")
+    for column, items in sorted((matrix.get("category_matrix") or {}).items()):
+        names = [_text(x) for x in (items or []) if _text(x)]
+        if not _text(column) or not names:
+            continue
+
+        def fill_column(b, column=column, names=names):
+            return ["Technologies %s runs in the %s category, as recorded by the "
+                    "technographics vendor: %s"
+                    % (company, _text(column),
+                       b.line("; ".join(names), field="category_matrix",
+                              record_id=_text(column), dataset="technographics")),
+                    "%d technology(ies) in this category."
+                    % len(names)]
+
+        docs.append(_sd(account_id, index,
+                        "technology_matrix_%s" % _slug(column)[:40],
+                        "Installed technology - %s" % _text(column),
+                        {"column": column, "items": names}, fill_column))
+
+    web = _widget(db, account_id, "webstack_breakdown")
+    if web:
+        def fill_web(b):
+            out = []
+            techs = [_text(x) for x in (web.get("technologies") or []) if _text(x)]
+            if techs:
+                out.append("Technologies detected on %s's public website: %s"
+                           % (company, b.line("; ".join(techs),
+                                              field="technologies",
+                                              dataset="webstack")))
+            cats = [_text(x) for x in (web.get("categories_list") or []) if _text(x)]
+            if cats:
+                out.append("Website technology categories: %s"
+                           % b.line("; ".join(cats), field="categories_list",
+                                    dataset="webstack"))
+            for field, label in (("total_web_tech_count",
+                                  "Total website technologies"),
+                                 ("premium_tech_count",
+                                  "Premium website technologies")):
+                value = _text(web.get(field))
+                if value:
+                    out.append("%s: %s" % (label, b.line(
+                        value, field=field, dataset="webstack",
+                        value=web.get(field))))
+            # A spend figure carries its unit, so a reader can tell an estimate
+            # denominated in dollars from a bare count.
+            spend = _text(web.get("web_spend_estimate"))
+            if spend:
+                out.append("Estimated spend on website technologies: %s"
+                           % b.line(spend, field="web_spend_estimate",
+                                    dataset="webstack", value=spend,
+                                    unit="vendor estimate"))
+            return out
+        docs.append(_sd(account_id, index, "web_technology",
+                        "Website technology - %s" % company, web, fill_web))
+
+    # Detection dating. The rows carry an opaque detection id and ONET codes
+    # rather than vendor names, so only the dating is rendered - an id nothing
+    # can resolve is noise in a graph, not evidence.
+    detections = _widget(db, account_id, "tech_detections_reference")
+    rows = [d for d in (detections.get("detections") or [])
+            if _text(d.get("first_seen_at")) or _text(d.get("last_seen_at"))]
+    if rows:
+        def fill_detections(b, rows=rows):
+            seen = sorted({_text(d.get("first_seen_at")) for d in rows if _text(d.get("first_seen_at"))})
+            last = sorted({_text(d.get("last_seen_at")) for d in rows if _text(d.get("last_seen_at"))})
+            out = ["Technology detection history for %s, as recorded by the "
+                   "technology-detections vendor." % company,
+                   b.line("%d technology detection(s) are on file." % len(rows),
+                          field="total_detections_count",
+                          dataset="technology_detections",
+                          value=len(rows))]
+            if seen:
+                out.append("Earliest detection on file: %s"
+                           % b.line(seen[0], field="first_seen_at",
+                                    dataset="technology_detections",
+                                    period=seen[0]))
+            if last:
+                out.append("Most recent detection on file: %s"
+                           % b.line(last[-1], field="last_seen_at",
+                                    dataset="technology_detections",
+                                    period=last[-1]))
+            return out
+        docs.append(_sd(account_id, index, "technology_detections",
+                        "Technology detection history - %s" % company,
+                        rows, fill_detections))
+
+    return docs
+
+
+def _strategy_intent_documents(db, account_id, index, company) -> list:
+    """Intent grouped by theme, and the HP category scores."""
+    table = _widget(db, account_id, "intent_topics_table")
+    summary = _widget(db, account_id, "intent_category_summary")
+    docs = []
+
+    by_theme = {}
+    for topic in (table.get("topics") or []):
+        if not _text(topic.get("topic_name")):
+            continue
+        by_theme.setdefault(_text(topic.get("theme")) or "Unthemed", []).append(topic)
+
+    for theme, topics in sorted(by_theme.items()):
+        topics = sorted(topics, key=lambda t: -(t.get("composite_score") or 0))
+        for start in range(0, len(topics), MAX_TOPICS_PER_THEME_DOC):
+            group = topics[start:start + MAX_TOPICS_PER_THEME_DOC]
+
+            def fill_topics(b, group=group, theme=theme):
+                out = ["Research topics at %s in the theme %s." % (company, theme)]
+                for i, topic in enumerate(group):
+                    name = _text(topic.get("topic_name"))
+                    score = topic.get("composite_score")
+                    category = _text(topic.get("hp_category"))
+                    sentence = "%s (composite score %s%s)" % (
+                        name, score,
+                        ", HP category %s" % category if category else "")
+                    out.append(b.line(sentence, field="topic_name", record_id=i,
+                                      dataset="intent_score", quote=name, value=score))
+                return out
+
+            suffix = "" if len(topics) <= MAX_TOPICS_PER_THEME_DOC else "_%d" % (
+                start // MAX_TOPICS_PER_THEME_DOC + 1)
+            docs.append(_sd(account_id, index,
+                            "intent_%s%s" % (_slug(theme)[:32], suffix),
+                            "Intent topics - %s" % theme, group, fill_topics))
+
+    categories = summary.get("hp_categories") or []
+    if categories:
+        def fill_categories(b):
+            out = ["HP category intent scores for %s, as supplied by the category "
+                   "intent file." % company]
+            for i, category in enumerate(categories):
+                name = _text(category.get("category"))
+                primary = category.get("primary") or {}
+                score = primary.get("score")
+                if name and score is not None:
+                    out.append(b.line(
+                        "%s category intent score: %s out of 100 (buying stage %s, "
+                        "research volume %s)" % (
+                            name, score, _text(primary.get("stage")) or "not stated",
+                            _text(primary.get("research_volume")) or "not stated"),
+                        field="category_score", record_id=i,
+                        dataset="hp_category_intent", value=score))
+                elif name:
+                    out.append("%s: no score in the category file. Mapped HP play: %s."
+                               % (name, _text(category.get("hp_play"))))
+            disclaimer = _text(summary.get("disclaimer"))
+            if disclaimer:
+                out.append(disclaimer)
+            return out
+        docs.append(_sd(account_id, index, "intent_hp_categories",
+                        "HP category intent - %s" % company, categories,
+                        fill_categories))
+    return docs
+
+
+def _strategy_messaging_documents(db, account_id, index, company) -> list:
+    """The message house: the umbrella message and one document per pillar."""
+    house = _widget(db, account_id, "messaging_pillars_output")
+    docs = []
+
+    umbrella = _text(house.get("umbrella_message"))
+    if umbrella:
+        def fill_umbrella(b):
+            out = ["Umbrella message for %s: %s" % (
+                company, b.line(umbrella, field="umbrella_message"))]
+            for i, item in enumerate(house.get("why_hp_items") or []):
+                if isinstance(item, dict):
+                    sentence = " - ".join(x for x in (_text(item.get("title")),
+                                                      _text(item.get("description")))
+                                          if x)
+                else:
+                    sentence = _text(item)
+                if sentence:
+                    out.append("Why HP: %s" % b.line(sentence, field="why_hp",
+                                                     record_id=i))
+            return out
+        docs.append(_sd(account_id, index, "message_house",
+                        "Message house - %s" % company, house, fill_umbrella))
+
+    for i, pillar in enumerate(house.get("pillars") or []):
+        title = _text(pillar.get("pillar_title"))
+        if not title:
+            continue
+
+        def fill_pillar(b, pillar=pillar, title=title, i=i):
+            out = ["Messaging pillar for %s: %s." % (company, title)]
+            for field, label in (("challenge", "Account challenge"),
+                                 ("hp_benefit", "HP benefit"),
+                                 ("target_role", "Who it is for"),
+                                 ("next_step", "Next step")):
+                value = _text(pillar.get(field))
+                if value:
+                    out.append("%s: %s" % (label, b.line(
+                        value, field=field, record_id=i)))
+            solutions = [_text(s) for s in (pillar.get("hp_solutions") or []) if _text(s)]
+            if solutions:
+                out.append("HP solutions for this pillar: %s" % b.line(
+                    ", ".join(solutions), field="hp_solutions", record_id=i,
+                    dataset="hp_product_knowledge"))
+
+            # The proof sentence is under "proof", not "text".
+            for j, proof in enumerate(pillar.get("proof_points") or []):
+                sentence = _text(proof.get("proof") if isinstance(proof, dict) else proof)
+                if sentence:
+                    out.append("Proof point: %s" % b.line(
+                        sentence, field="proof_point", record_id="%d_%d" % (i, j),
+                        dataset="hp_product_knowledge"))
+
+            for j, evidence in enumerate(pillar.get("challenge_evidence") or []):
+                if not isinstance(evidence, dict):
+                    continue
+                sentence = _text(evidence.get("source_text"))
+                if sentence:
+                    out.append("Evidence for the challenge: %s" % b.line(
+                        sentence, field="challenge_evidence",
+                        record_id="%d_%d" % (i, j),
+                        dataset=_text(evidence.get("dataset"))))
+            return out
+
+        docs.append(_sd(account_id, index, "pillar_%d" % (i + 1),
+                        "Messaging pillar - %s" % title, pillar, fill_pillar))
+    return docs

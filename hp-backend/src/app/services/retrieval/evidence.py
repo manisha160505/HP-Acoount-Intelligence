@@ -30,9 +30,32 @@ COLLECTION = "retrieval_evidence"
 # doc_id#cN - the only shape a citation may take.
 EVIDENCE_ID_RE = re.compile(r"^(?P<doc_id>[A-Za-z0-9_]+)#c(?P<n>\d+)$")
 
+# The same shape as it appears mid-sentence, bracketed and possibly in a list:
+# "[a_opportunity_plays#c9, a_opportunity_plays#c10]".
+_INHERITED_CITATION_RE = re.compile(
+    r"\s*\[\s*[A-Za-z0-9_]+#c\d+(?:\s*,\s*[A-Za-z0-9_]+#c\d+)*\s*\]")
+
 
 def evidence_id(doc_id: str, n: int) -> str:
     return "%s#c%d" % (doc_id, n)
+
+
+def strip_citations(value) -> str:
+    """Text with any citation already written into it removed.
+
+    A feature's finished widget text carries that feature's citation tags, and
+    another index that reuses the sentence inherits them. The tags are valid -
+    for the index that issued them. Resolved against the reusing index they are
+    unciteable, so the model reads a citation it is entitled to trust, cites it,
+    and `resolve` correctly rejects it: a whole generation paid for and thrown
+    away, and on a bad question three of them and then a refusal.
+
+    So an inherited tag is removed at the point of reuse rather than left for
+    the validator to catch. Nothing is lost by it - the reusing index registers
+    its own id for the same sentence, which is what `line` appends. This only
+    ever *removes* a reference; what counts as evidence is unchanged.
+    """
+    return _text(_INHERITED_CITATION_RE.sub("", str(value or "")))
 
 
 def _text(value) -> str:
@@ -122,7 +145,12 @@ class EvidenceBuilder:
              publisher=None, source_url=None, dataset=None, quote=None,
              period=None, value=None, unit=None, page=None,
              filing_label=None, filing_period=None) -> str:
-        """A corpus line with its citation appended, or "" when there is nothing."""
+        """A corpus line with its citation appended, or "" when there is nothing.
+
+        Any citation the source text arrived with is dropped first, so the line
+        carries exactly one - this index's own, registered by `add` just above.
+        """
+        source_text = strip_citations(source_text)
         eid = self.add(source_text, field, record_id, publisher, source_url,
                        dataset, quote, period, value, unit, page, filing_label,
                        filing_period)

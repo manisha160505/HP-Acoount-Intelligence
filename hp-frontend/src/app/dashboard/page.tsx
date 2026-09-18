@@ -4,7 +4,7 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { ProtectedRoute } from '@/components/common/ProtectedRoute';
 import { useAuth } from '@/providers/AuthProvider';
-import api from '@/services/api';
+import api, { postStream } from '@/services/api';
 import { CompanyAccount } from '@/types/account';
 import { 
   WidgetResponse, 
@@ -140,6 +140,77 @@ interface ProvenanceEntry {
   date: string;
   confidence: string;
   url: string;
+}
+
+// Evidence tags, as the model writes them: [a6a997c3b_objection_x#c5], and
+// several to a bracket when a sentence rests on more than one source.
+//
+// Matched as "a bracket containing at least one id", then the ids are pulled
+// out of it - rather than as a comma-separated list of ids. The model varies
+// the separator run to run: ", " one time, "; " the next, and a bare "c3"
+// shorthand a third. Each variant that the pattern did not anticipate rendered
+// the whole tag raw in the seller's face. Matching the bracket and extracting
+// what is inside it is indifferent to what sits between the ids.
+const CITATION_BRACKET_RE = /\[[^[\]]*?[A-Za-z0-9_]+#c\d+[^[\]]*\]/g;
+const EVIDENCE_ID_RE = /[A-Za-z0-9_]+#c\d+/g;
+
+/**
+ * The chat answer with its evidence tags turned into footnote markers.
+ *
+ * Every factual sentence carries the address of the sentence it came from -
+ * that traceability is the feature, and the validator rejects an answer whose
+ * tags do not resolve. But a seller should not be reading database keys
+ * mid-sentence: `[a6a997c3b_objection_a8e9508a48e5#c5]` says nothing to them
+ * and breaks the line.
+ *
+ * So the tag becomes a superscript number linking to its row in Sources below,
+ * which is where the quoted source sentence already is. The tags stay in the
+ * model's output untouched - they are what validation runs on.
+ *
+ * A tag naming evidence that is not in this answer's citation list is dropped
+ * rather than shown: it would be a marker pointing at nothing. That should not
+ * happen (validation resolves every tag first), so it is a display guard, not
+ * a substitute for the check.
+ */
+function AnswerWithCitations({ text, citations, idPrefix }:
+  { text: string; citations: any[]; idPrefix: string }) {
+  const position = new Map<string, number>();
+  (citations || []).forEach((c, i) => {
+    if (c?.evidence_id) position.set(String(c.evidence_id), i + 1);
+  });
+
+  const parts: React.ReactNode[] = [];
+  let cursor = 0;
+  let key = 0;
+  for (const match of Array.from(text.matchAll(CITATION_BRACKET_RE))) {
+    const at = match.index ?? 0;
+    if (at > cursor) parts.push(text.slice(cursor, at));
+    const numbers = (match[0].match(EVIDENCE_ID_RE) || [])
+      .map(id => position.get(id))
+      .filter((n): n is number => typeof n === 'number');
+    if (numbers.length > 0) {
+      parts.push(
+        <sup key={`c${key++}`} className="ml-0.5">
+          {numbers.map((n, i) => (
+            <span key={n}>
+              {i > 0 && <span className="text-slate-400">,</span>}
+              <a
+                href={`#${idPrefix}-src-${n}`}
+                title="Jump to this source"
+                className="text-hp-navy no-underline hover:underline font-bold px-0.5"
+              >
+                {n}
+              </a>
+            </span>
+          ))}
+        </sup>
+      );
+    }
+    cursor = at + match[0].length;
+  }
+  if (cursor < text.length) parts.push(text.slice(cursor));
+
+  return <p className="text-xs leading-relaxed whitespace-pre-wrap">{parts}</p>;
 }
 
 // A widget that never generated stores the reason on its payload. Showing it
@@ -320,9 +391,26 @@ export default function UserDashboardPage() {
   const [expandedCalc, setExpandedCalc] = useState<Record<string, boolean>>({});
 
   // Strategy Chat State
-  const [chatAdvisorMode, setChatAdvisorMode] = useState<string>('Strategy Advisor');
+  //
+  // No mode state: the advisor is the only mode implemented, and the selector
+  // that used to hold one was never wired to the request. It comes back with
+  // the roleplay personas, which is the point at which there is a second mode
+  // to hold.
   const [chatInput, setChatInput] = useState<string>('');
-  const [chatMessages, setChatMessages] = useState<Array<{ id: string; sender: 'user' | 'assistant'; text: string; timestamp: string }>>([]);
+  const [chatMessages, setChatMessages] = useState<Array<{ id: string; sender: 'user' | 'assistant'; text: string; timestamp: string; citations?: any[]; available?: boolean }>>([]);
+  const [chatPending, setChatPending] = useState(false);
+  // Which stage of the answer is running. An answer takes around fifteen
+  // seconds and cannot be streamed - every fact is validated against the
+  // evidence before any of it is shown, so text that appeared as it was
+  // written could be retracted a paragraph later. What can be shown honestly
+  // is which step is running, which is what this drives.
+  const [chatStage, setChatStage] = useState<number>(0);
+  // The validated answer so far, while it is still being written. Every value
+  // this holds has already passed the same check the finished answer passes -
+  // the server releases text only as far as its last resolved citation - so
+  // rendering it does not show the seller anything unverified.
+  const [chatStreamingText, setChatStreamingText] = useState<string>('');
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
 
   // Message Evaluator State
   // Defaults are empty: the objective, format and persona vocabularies are
@@ -436,6 +524,15 @@ export default function UserDashboardPage() {
       fetchWidgetContracts(selectedAccountId, activeFeatureKey);
     }
   }, [selectedAccountId, activeFeatureKey, fetchWidgetContracts]);
+
+  // Changing account ends the conversation. ABX Feature 8: "Validate follow-up
+  // questions against conversation account scope; changing accounts must
+  // invalidate prior retrieved context." Carrying turns across would let a
+  // follow-up resolve "that" against the previous account's answer.
+  useEffect(() => {
+    setChatMessages([]);
+    setChatInput('');
+  }, [selectedAccountId]);
 
   const handleSelectAccount = (acc: CompanyAccount) => {
     setSelectedAccountId(acc.id);
@@ -6493,24 +6590,100 @@ export default function UserDashboardPage() {
                       ? groundingMeta.stakeholders_count
                       : null;
 
-                  const handleSendPrompt = (promptText: string) => {
-                    if (!promptText.trim()) return;
+                  const handleSendPrompt = async (promptText: string) => {
+                    if (!promptText.trim() || chatPending) return;
+                    const stamp = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
                     const userMsg = {
                       id: `user_${Date.now()}`,
                       sender: 'user' as const,
                       text: promptText,
-                      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                      timestamp: stamp(),
                     };
 
-                    const assistantMsg = {
-                      id: `asst_${Date.now() + 1}`,
-                      sender: 'assistant' as const,
-                      text: `Conversational RAG response for prompt "${promptText}" on ${companyName} is TBD for Step 8 (AI Generation Layer).`,
-                      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                    };
+                    // The whole conversation goes with every question. The chat
+                    // is stateless per account on the server, which is what lets
+                    // ABX's rule hold: switching account clears these messages,
+                    // and the old turns simply stop being sent.
+                    const history = [...chatMessages, userMsg].map(m => ({
+                      role: m.sender === 'user' ? 'user' : 'assistant',
+                      content: m.text,
+                    }));
 
-                    setChatMessages(prev => [...prev, userMsg, assistantMsg]);
+                    setChatMessages(prev => [...prev, userMsg]);
                     setChatInput('');
+                    setChatPending(true);
+
+                    // The server reports its own stages now, so nothing here is
+                    // on a timer. `delta` carries the whole validated answer so
+                    // far rather than an increment, which means a dropped or
+                    // late event costs nothing - the next one is still correct
+                    // on its own, and `done` carries the finished answer.
+                    setChatStage(0);
+                    setChatStreamingText('');
+                    const STAGES: Record<string, number> = {
+                      retrieving: 0, writing: 1, rewriting: 1, checking: 2,
+                    };
+
+                    let settled = false;
+                    const publish = (
+                      text: string, citations: any[], available: boolean,
+                    ) => {
+                      settled = true;
+                      setChatMessages(prev => [...prev, {
+                        id: `asst_${Date.now()}`,
+                        sender: 'assistant' as const,
+                        text, timestamp: stamp(), citations, available,
+                      }]);
+                    };
+
+                    try {
+                      await postStream(
+                        `/accounts/${selectedAccount.id}/widgets/strategy_chat/ask/stream`,
+                        { messages: history, mode: 'advisor' },
+                        (event) => {
+                          if (event.type === 'stage') {
+                            setChatStage(STAGES[event.stage ?? ''] ?? 0);
+                            // A rewrite is a second attempt over text the
+                            // seller is already reading. Clearing it is the
+                            // honest thing to do - the answer they were shown
+                            // was rejected, and the replacement is not written
+                            // yet.
+                            if (event.stage === 'rewriting') setChatStreamingText('');
+                          } else if (event.type === 'delta') {
+                            setChatStreamingText(event.text ?? '');
+                          } else if (event.type === 'done') {
+                            publish(
+                              (event.answer as string) || 'No answer was returned.',
+                              (event.citations as any[]) || [],
+                              event.available !== false,
+                            );
+                          } else if (event.type === 'error') {
+                            publish(
+                              event.detail
+                                || 'The strategy assistant could not be reached.',
+                              [], false,
+                            );
+                          }
+                        },
+                      );
+                      // A stream that ends without `done` - a dropped
+                      // connection - must not leave the question unanswered in
+                      // the thread.
+                      if (!settled) {
+                        publish('The strategy assistant could not complete that answer.',
+                                [], false);
+                      }
+                    } catch {
+                      if (!settled) {
+                        publish('The strategy assistant could not be reached.',
+                                [], false);
+                      }
+                    } finally {
+                      setChatStage(0);
+                      setChatStreamingText('');
+                      setChatPending(false);
+                    }
                   };
 
                   return (
@@ -6528,20 +6701,24 @@ export default function UserDashboardPage() {
 
                       {/* Grounding Bar */}
                       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
+                        {/* The mode the chat actually runs in.
+
+                            This was a four-option dropdown - Competitive
+                            Defender, Executive Pitcher, ABM Campaign Planner -
+                            but the selection was never sent: the request
+                            hardcodes `mode: 'advisor'`, so three of the four
+                            changed nothing when picked. Shown as a label rather
+                            than a one-item select, because a chevron invites a
+                            click that has nowhere to go.
+
+                            The roleplay personas of Feature 18 are the reason
+                            this stays a distinct element. `StrategyChatRequest`
+                            already carries `mode`, so restoring a real selector
+                            is a UI change and not a contract change. */}
                         <div className="flex items-center gap-2">
-                          <div className="relative">
-                            <select
-                              value={chatAdvisorMode}
-                              onChange={(e) => setChatAdvisorMode(e.target.value)}
-                              className="px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-extrabold text-slate-800 focus:outline-none focus:ring-2 focus:ring-hp-navy appearance-none pr-8 cursor-pointer shadow-xs"
-                            >
-                              <option value="Strategy Advisor">🤖 Strategy Advisor</option>
-                              <option value="Competitive Defender">🛡️ Competitive Defender</option>
-                              <option value="Executive Pitcher">🎯 Executive Pitcher</option>
-                              <option value="ABM Campaign Planner">📅 ABM Campaign Planner</option>
-                            </select>
-                            <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-3 pointer-events-none" />
-                          </div>
+                          <span className="px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-extrabold text-slate-800 shadow-xs">
+                            🤖 Strategy Advisor
+                          </span>
                         </div>
 
                         <div className="flex items-center gap-1.5 text-slate-500 font-medium">
@@ -6611,18 +6788,77 @@ export default function UserDashboardPage() {
                                         <Sparkles className="w-3.5 h-3.5 text-amber-500" />
                                         <span>ABM Strategy Assistant</span>
                                       </span>
-                                      <span className="text-[10px] font-mono font-extrabold text-amber-800 bg-amber-50 px-2.5 py-0.5 rounded-full border border-amber-200">
-                                        Inferred TBD
-                                      </span>
+                                      {msg.available === false && (
+                                        <span className="text-[10px] font-bold text-amber-800 bg-amber-50 px-2.5 py-0.5 rounded-full border border-amber-200">
+                                          Not in the evidence
+                                        </span>
+                                      )}
                                     </div>
 
-                                    <div className="bg-amber-50/70 border border-amber-200/80 rounded-xl p-3.5 text-xs text-amber-900 space-y-1.5">
-                                      <span className="font-extrabold text-xs block">
-                                        Strategy Assistant RAG Grounding — Inferred TBD
-                                      </span>
-                                      <p className="text-[11px] text-amber-800 leading-relaxed font-medium">
-                                        Conversational responses grounded in {companyName}&apos;s own account data are not built yet. Strategy Chat is the last feature to be implemented, because it reads the finished output of every other one.
-                                      </p>
+                                    {/* The answer is plain text with UPPERCASE
+                                        headers and numbered lists, so it is
+                                        rendered as written rather than parsed
+                                        as markdown - except for the evidence
+                                        tags, which become footnote markers. */}
+                                    <AnswerWithCitations
+                                      text={msg.text}
+                                      citations={msg.citations || []}
+                                      idPrefix={msg.id}
+                                    />
+
+                                    {(msg.citations?.length ?? 0) > 0 && (
+                                      <div className="pt-2 border-t border-slate-200/80 space-y-1.5">
+                                        <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 block">
+                                          Sources ({msg.citations!.length})
+                                        </span>
+                                        {msg.citations!.map((c: any, ci: number) => (
+                                          <div key={ci} id={`${msg.id}-src-${ci + 1}`}
+                                               className="text-[10px] text-slate-600 leading-relaxed scroll-mt-24">
+                                            <span className="font-bold text-slate-400 mr-1">{ci + 1}.</span>
+                                            {c.source_url ? (
+                                              <a href={c.source_url} target="_blank" rel="noopener noreferrer"
+                                                 className="text-hp-navy hover:underline inline-flex items-center gap-1">
+                                                <FileText className="w-3 h-3 flex-shrink-0" />
+                                                <span>{c.publisher || c.filing_label || c.dataset || 'Source'}</span>
+                                                <ExternalLink className="w-2.5 h-2.5" />
+                                              </a>
+                                            ) : (
+                                              <span className="font-bold text-slate-500">
+                                                {c.filing_label ? `${c.filing_label}${c.page ? ` p.${c.page}` : ''}` : (c.dataset || 'Account evidence')}
+                                              </span>
+                                            )}
+                                            {c.source_text && <span> — {c.source_text}</span>}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+
+                                    {/* Copy and Send as email, as the reference
+                                        offers. The email is a mailto: so it
+                                        opens the seller's own client with their
+                                        own signature - nothing is sent from
+                                        here, and no account data leaves the
+                                        browser on our account. */}
+                                    <div className="flex items-center gap-3 pt-1">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          navigator.clipboard?.writeText(msg.text);
+                                          setCopiedMessageId(msg.id);
+                                          setTimeout(() => setCopiedMessageId(null), 1500);
+                                        }}
+                                        className="text-[10px] font-bold text-slate-500 hover:text-hp-navy inline-flex items-center gap-1 transition"
+                                      >
+                                        <FileText className="w-3 h-3" />
+                                        {copiedMessageId === msg.id ? 'Copied' : 'Copy'}
+                                      </button>
+                                      <a
+                                        href={`mailto:?subject=${encodeURIComponent(`${companyName} — ABM strategy notes`)}&body=${encodeURIComponent(msg.text)}`}
+                                        className="text-[10px] font-bold text-slate-500 hover:text-hp-navy inline-flex items-center gap-1 transition"
+                                      >
+                                        <Mail className="w-3 h-3" />
+                                        Send as email
+                                      </a>
                                     </div>
 
                                     <span className="text-[9px] font-mono text-slate-400 block">{msg.timestamp}</span>
@@ -6630,6 +6866,73 @@ export default function UserDashboardPage() {
                                 )}
                               </div>
                             ))}
+
+                            {/* What is happening during the wait.
+
+                                The answer cannot be shown as it is written:
+                                every claim is checked against the retrieved
+                                evidence first, and an answer that fails is
+                                rewritten rather than published. Streaming the
+                                draft would put an unverified sentence in front
+                                of a seller and then take it back, which is the
+                                one thing this feature promises not to do.
+
+                                So the wait is narrated instead of filled. The
+                                steps are the real pipeline, named in the
+                                seller's terms, and the checking step is listed
+                                because it is the reason the wait exists. */}
+                            {chatPending && (
+                              <div className="flex justify-start">
+                                <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 max-w-2xl w-full space-y-3 shadow-xs animate-fade-in">
+                                  <div className="flex items-center gap-1.5 border-b border-slate-200/80 pb-2">
+                                    <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                                    <span className="text-xs font-black text-hp-navy">ABM Strategy Assistant</span>
+                                  </div>
+                                  {/* The answer as it is written. Only text the
+                                      server has already validated reaches here:
+                                      it releases up to the last resolved
+                                      citation and holds the sentence in flight
+                                      back, so a figure the checker has not seen
+                                      is never on screen. */}
+                                  {chatStreamingText && (
+                                    <div className="text-xs text-slate-800 leading-relaxed whitespace-pre-wrap border-b border-slate-200/80 pb-3">
+                                      {chatStreamingText}
+                                      <span className="inline-block w-1.5 h-3.5 ml-0.5 bg-hp-navy/60 align-text-bottom animate-pulse" />
+                                    </div>
+                                  )}
+
+                                  <div className="space-y-2">
+                                    {[
+                                      { label: `Searching ${companyName}'s account intelligence` },
+                                      { label: 'Writing your answer' },
+                                      { label: 'Checking every fact against the evidence' },
+                                    ].map((step, i) => {
+                                      const done = i < chatStage;
+                                      const active = i === chatStage;
+                                      return (
+                                        <div key={step.label} className="flex items-center gap-2.5">
+                                          {done ? (
+                                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
+                                          ) : active ? (
+                                            <Loader2 className="w-3.5 h-3.5 text-hp-navy animate-spin flex-shrink-0" />
+                                          ) : (
+                                            <div className="w-3.5 h-3.5 flex items-center justify-center flex-shrink-0">
+                                              <div className="w-1.5 h-1.5 rounded-full bg-slate-300" />
+                                            </div>
+                                          )}
+                                          <span className={`text-xs ${done ? 'text-slate-400' : active ? 'font-bold text-slate-800' : 'text-slate-400'}`}>
+                                            {step.label}
+                                          </span>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                  <p className="text-[10px] text-slate-400 leading-relaxed pt-1 border-t border-slate-200/80">
+                                    Answers are shown only once every fact has been matched to account evidence.
+                                  </p>
+                                </div>
+                              </div>
+                            )}
                           </div>
                         )}
 
@@ -6651,10 +6954,12 @@ export default function UserDashboardPage() {
                             />
                             <button
                               type="submit"
-                              disabled={!chatInput.trim()}
+                              disabled={!chatInput.trim() || chatPending}
                               className="p-3 bg-hp-navy hover:bg-blue-900 text-white rounded-2xl transition disabled:opacity-40 shadow-xs flex items-center justify-center flex-shrink-0"
                             >
-                              <Sparkles className="w-4 h-4 text-amber-300" />
+                              {chatPending
+                                ? <Loader2 className="w-4 h-4 animate-spin" />
+                                : <Sparkles className="w-4 h-4 text-amber-300" />}
                             </button>
                           </form>
                         </div>

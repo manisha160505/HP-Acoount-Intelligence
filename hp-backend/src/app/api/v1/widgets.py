@@ -1,8 +1,10 @@
+import json
 import logging
 from datetime import datetime
 
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse
 
 from app.database.mongodb import get_db
 from app.errors import APIError, ErrorCode
@@ -13,6 +15,10 @@ from app.schemas.widget import (
     ContentGenerateRequest,
     MessageEvaluateRequest,
     MessageRewriteRequest,
+    # Strategy Chat's request body. The only symbol this branch's import block
+    # carried that main's did not - every extractor it also listed is imported
+    # below, sorted, including `extract_strategy_chat`.
+    StrategyChatRequest,
     WidgetContract,
     WidgetResponse,
 )
@@ -49,6 +55,39 @@ from app.services.retrieval import (
 )
 
 router = APIRouter(tags=["Widget Contracts & Dashboard Shell"])
+
+
+def _queue_indexes_for(account_id: str, feature_key: str = "", widget_keys=None) -> list:
+    """Tell the retrieval layer that a feature's widgets were just republished.
+
+    Regenerating a feature used to leave every index built on it silently
+    behind: only a dataset file upload or delete queued anything, so a widget
+    refreshed through this API never reached Strategy Chat and the chat kept
+    answering from the previous version.
+
+    Feature-grained on purpose. The indexes decide per DOCUMENT what actually
+    changed - `update_index` re-ingests only documents whose fingerprint moved -
+    so queuing the index is cheap even when little changed, and working out
+    which documents a widget touches is both unnecessary and unreliable (several
+    documents mix widgets, and several unit keys are positional).
+
+    Never raises: the widgets are written and correct, and a queueing failure
+    must not turn a successful regenerate into a 500.
+    """
+    keys = list(widget_keys or [])
+    if feature_key and not keys:
+        keys = [c["widget_key"] for c in WIDGET_REGISTRY.get(feature_key, [])
+                if c.get("widget_key")]
+    if not keys:
+        return []
+    try:
+        from app.services.retrieval import ingest as retrieval_ingest_mod
+        return retrieval_ingest_mod.requeue_dependents(
+            account_id, keys, reason="%s regenerated" % (feature_key or "widget"))
+    except Exception:
+        logger.exception("could not queue retrieval updates after %s regenerated",
+                         feature_key or ", ".join(keys[:3]))
+        return []
 
 WIDGET_REGISTRY = {
     "executive_dashboard": [
@@ -612,6 +651,10 @@ def regenerate_account_feature_widgets(
             log_context={"feature": key_clean, "account_id": account_id},
         ) from exc
 
+    # Only after the extractor succeeded. Queuing before would index the
+    # previous widgets and record them as current.
+    _queue_indexes_for(account_id, feature_key=key_clean)
+
     return get_account_feature_widgets(account_id, key_clean, current_user)
 
 
@@ -629,6 +672,8 @@ def generate_opportunity_map_endpoint(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company account not found")
 
     ext_doc = generate_opportunity_map_plays_with_gpt4o(account_id)
+    _queue_indexes_for(account_id,
+                       widget_keys=["opportunity_narrative_plays"])
     updated_at_val = ext_doc.get("updated_at")
     updated_at_str = updated_at_val.isoformat() if isinstance(updated_at_val, datetime) else str(updated_at_val or "")
 
@@ -1088,6 +1133,9 @@ def generate_content_messaging(
         raise APIError(ErrorCode.NO_SOURCE_DATA, str(exc),
                        log_context={"account_id": account_id}) from exc
 
+    _queue_indexes_for(account_id,
+                       widget_keys=[messaging_pillars.WIDGET_KEY])
+
     contract = next(c for c in WIDGET_REGISTRY["content_messaging"]
                     if c["widget_key"] == messaging_pillars.WIDGET_KEY)
     updated = doc.get("updated_at")
@@ -1106,3 +1154,105 @@ def generate_content_messaging(
         "display_order": contract["display_order"],
         "updated_at": updated.isoformat() if isinstance(updated, datetime) else str(updated or ""),
     }
+
+
+@router.post("/accounts/{account_id}/widgets/strategy_chat/ask")
+def strategy_chat_ask(
+    account_id: str,
+    body: StrategyChatRequest,
+    current_user: dict = Depends(require_user_role)
+):
+    """Ask Strategy Chat one question about one account.
+
+    The account is taken from the path and never from the body, so a client
+    cannot ask about one account while carrying another's conversation - ABX
+    requires the conversation to be locked to the selected account.
+
+    A refusal is a 200 with `available: false`, not an error: "the platform does
+    not hold that" is a correct answer and the UI shows it in the thread. Only a
+    genuinely unusable state - no index built yet - is a 400.
+    """
+    if not ObjectId.is_valid(account_id):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Invalid account ID format")
+    db = get_db()
+    if not db["accounts"].find_one({"_id": ObjectId(account_id)}):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="Company account not found")
+
+    from app.services.strategy import chat as strategy_chat_service
+
+    try:
+        return strategy_chat_service.answer(
+            account_id=account_id,
+            messages=[m.model_dump() for m in body.messages],
+            mode=body.mode,
+        )
+    except strategy_chat_service.ChatUnavailable as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=str(exc)) from exc
+
+
+@router.post("/accounts/{account_id}/widgets/strategy_chat/ask/stream")
+def strategy_chat_ask_stream(
+    account_id: str,
+    body: StrategyChatRequest,
+    current_user: dict = Depends(require_user_role)
+):
+    """The same answer as `/ask`, sent as it is written.
+
+    Server-sent events, one JSON object per `data:` line:
+
+        {"type": "stage", "stage": "retrieving"|"writing"|"rewriting"|"checking"}
+        {"type": "delta", "text": "...the validated answer so far..."}
+        {"type": "done",  ...the payload `/ask` returns...}
+
+    `delta` carries the whole validated prefix rather than an increment, so a
+    reconnecting or slow client renders the latest one and is correct - there is
+    no accumulated state to lose. Every prefix has passed the same validation
+    the final answer passes; the transport shows nothing the checker has not
+    already accepted.
+
+    `/ask` is unchanged and remains the endpoint of record. This one exists so
+    a seller reads from about seven seconds instead of waiting fifteen for the
+    whole answer; both take the same time to finish.
+    """
+    if not ObjectId.is_valid(account_id):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Invalid account ID format")
+    db = get_db()
+    if not db["accounts"].find_one({"_id": ObjectId(account_id)}):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="Company account not found")
+
+    from app.services.strategy import chat as strategy_chat_service
+
+    messages = [m.model_dump() for m in body.messages]
+
+    def events():
+        # ChatUnavailable is raised inside the generator, after the response has
+        # begun, so it cannot become a 400 the way it does on `/ask`. It is sent
+        # as a terminal event instead and the client renders it as the refusal
+        # it is.
+        try:
+            for event in strategy_chat_service.answer_stream(
+                    account_id=account_id, messages=messages, mode=body.mode):
+                yield "data: %s\n\n" % json.dumps(event)
+        except strategy_chat_service.ChatUnavailable as exc:
+            yield "data: %s\n\n" % json.dumps(
+                {"type": "error", "detail": str(exc)})
+        except Exception:
+            logger.exception("strategy chat stream failed for account %s", account_id)
+            yield "data: %s\n\n" % json.dumps(
+                {"type": "error",
+                 "detail": "The strategy assistant could not complete that answer."})
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        # Proxies buffer text/event-stream by default, which would hold the
+        # whole answer and deliver it at once - the exact behaviour this
+        # endpoint exists to avoid.
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no",
+                 "Connection": "keep-alive"},
+    )

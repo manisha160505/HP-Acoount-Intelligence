@@ -50,3 +50,24 @@ class MessageEvaluateRequest(BaseModel):
 class MessageRewriteRequest(BaseModel):
     fingerprint: str
     selected_recommendations: list[str] = []
+
+
+class StrategyChatMessage(BaseModel):
+    role: str          # "user" or "assistant"; anything else is dropped
+    content: str
+
+
+class StrategyChatRequest(BaseModel):
+    """One turn of Strategy Chat.
+
+    The whole conversation is sent each time rather than held server-side: the
+    chat is stateless per account, and ABX requires prior context to be
+    invalidated the moment the selected account changes. A client that switches
+    account simply stops sending the old turns.
+
+    `mode` is carried from the start even though only the advisor is
+    implemented, so the roleplay personas of Feature 18 can be added later
+    without changing this contract.
+    """
+    messages: list[StrategyChatMessage]
+    mode: str = "advisor"

@@ -133,4 +133,76 @@ api.interceptors.response.use(
   }
 );
 
+/** One event from a server-sent-event endpoint. */
+export type StreamEvent = {
+  type: 'stage' | 'delta' | 'done' | 'error';
+  stage?: string;
+  text?: string;
+  detail?: string;
+  [key: string]: unknown;
+};
+
+/**
+ * POST to an SSE endpoint and call `onEvent` as each event arrives.
+ *
+ * axios buffers the whole body before resolving, so it cannot read a stream -
+ * this uses `fetch` for the response body reader while keeping the same base
+ * URL and the same bearer token as every other call.
+ *
+ * `signal` aborts the request; the caller passes one so that switching account
+ * or asking a second question stops the first stream rather than leaving it
+ * writing into a thread the seller has moved on from.
+ */
+export async function postStream(
+  path: string,
+  body: unknown,
+  onEvent: (event: StreamEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const token = typeof window !== 'undefined' ? localStorage.getItem('hp_token') : null;
+  const res = await fetch(`${API_URL}/api/v1${path}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(body),
+    signal,
+  });
+
+  if (!res.ok || !res.body) {
+    throw new Error(`stream request failed: ${res.status}`);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  // An event can be split across two network chunks, so the tail of a chunk is
+  // carried forward rather than parsed. Splitting on the blank line SSE uses as
+  // a record separator keeps a half-received event in the buffer until the rest
+  // of it arrives.
+  let buffer = '';
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    const records = buffer.split('\n\n');
+    buffer = records.pop() ?? '';
+
+    for (const record of records) {
+      const line = record.split('\n').find((l) => l.startsWith('data: '));
+      if (!line) continue;
+      try {
+        onEvent(JSON.parse(line.slice(6)) as StreamEvent);
+      } catch {
+        // A malformed event is skipped rather than aborting the stream: the
+        // answer still arrives on the `done` event, which is what the thread
+        // ultimately renders.
+        logger.warn('Discarded an unparseable stream event.');
+      }
+    }
+  }
+}
+
 export default api;
