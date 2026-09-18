@@ -108,6 +108,31 @@ def _is_retryable(exc) -> bool:
     return isinstance(code, int) and code in RETRYABLE_STATUS
 
 
+def _record_usage(response) -> None:
+    """Report what this call cost, to whatever step timer is in scope.
+
+    Token counts are the half of the story latency does not tell. A turn that
+    served 139,222 of its 142,116 input tokens from cache and one that cached
+    nothing take indistinguishable amounts of time and differ several-fold in
+    price, and nothing outside this function can see which happened - the SDK
+    hands usage back on the response and `generate` returns only the text.
+
+    Silent when nothing is measuring, and never raises: the usage block is
+    optional in the SDK's own typing, and a missing counter must not turn a good
+    answer into an error.
+    """
+    from app.observability import steps
+
+    usage = getattr(response, "usage_metadata", None)
+    if usage is None or steps.current() is None:
+        return
+    steps.count("input_tokens", getattr(usage, "prompt_token_count", 0) or 0)
+    steps.count("cached_tokens",
+                getattr(usage, "cached_content_token_count", 0) or 0)
+    steps.count("output_tokens", getattr(usage, "candidates_token_count", 0) or 0)
+    steps.count("thinking_tokens", getattr(usage, "thoughts_token_count", 0) or 0)
+
+
 def _finish_reason(response) -> str:
     for candidate in (getattr(response, "candidates", None) or []):
         reason = getattr(candidate, "finish_reason", None)
@@ -175,6 +200,8 @@ def generate(system_prompt: str, messages: list, *,
                                attempt + 1, MAX_ATTEMPTS, delay)
                 time.sleep(delay)
                 continue
+
+            _record_usage(response)
 
             reason = _finish_reason(response)
             if reason == "MAX_TOKENS":

@@ -22,7 +22,22 @@ class WidgetResponse(BaseModel):
     description: str
     widget_type: str
     data_classification: Literal['deterministic', 'derived', 'inferred']
-    status: Literal['available', 'empty', 'pending']
+    # `partial` is what the urgency score writes when it computed what it could
+    # but some inputs were missing (`urgency.py`: "available" if not
+    # missing_inputs else "partial"), and it was absent from this literal.
+    #
+    # The consequence was not a bad field, it was a blank feature. FastAPI
+    # validates the WHOLE response array, so one widget carrying an unlisted
+    # status made `GET /accounts/{id}/widgets/executive_dashboard` return 500 -
+    # and the frontend's fetch swallows a failure non-blockingly, so every panel
+    # rendered its "no data yet" placeholder while the data sat in Mongo intact.
+    # An account whose urgency score could not be computed lost its company
+    # profile, its metrics and its priorities too.
+    #
+    # Added rather than removed from the writer: "computed, but on incomplete
+    # inputs" is a real state and worth telling a seller apart from "not
+    # computed". Anything that ever writes a fourth status must come here too.
+    status: Literal['available', 'empty', 'pending', 'partial']
     data: dict[str, Any]
     source_datasets: list[str]
     source_fields: list[str]

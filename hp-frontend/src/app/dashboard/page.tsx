@@ -328,6 +328,14 @@ export default function UserDashboardPage() {
   const [activeFeatureKey, setActiveFeatureKey] = useState<string>('executive_dashboard');
   
   const [widgets, setWidgets] = useState<WidgetResponse[]>([]);
+  // Why a failed widget fetch needs its own state rather than an empty list:
+  // an empty list is indistinguishable from "this account has no data yet", and
+  // every panel renders that as its own polite placeholder. A 500 therefore
+  // looked exactly like a brand-new account - which is how a schema mismatch on
+  // ONE widget hid an entire generated Executive Dashboard, data intact in the
+  // database, behind "Upload firmographics.csv to view extracted company
+  // profile".
+  const [widgetsError, setWidgetsError] = useState<string>('');
   const [isLoadingAccounts, setIsLoadingAccounts] = useState(true);
   const [isLoadingWidgets, setIsLoadingLoadingWidgets] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -511,11 +519,20 @@ export default function UserDashboardPage() {
   const fetchWidgetContracts = useCallback(async (accId: string, featureKey: string) => {
     if (!accId) return;
     setIsLoadingLoadingWidgets(true);
+    setWidgetsError('');
     try {
       const response = await api.get<WidgetResponse[]>(`/accounts/${accId}/widgets/${featureKey}`);
       setWidgets(response.data);
     } catch (err: any) {
-      // Non-blocking
+      // Surfaced, not swallowed. The previous version caught this and did
+      // nothing - "Non-blocking" - which meant a server error and an empty
+      // account produced the identical screen, and the only way to tell them
+      // apart was to query Mongo by hand.
+      setWidgets([]);
+      setWidgetsError(
+        err?.response?.data?.detail
+        || err?.message
+        || 'This feature could not be loaded.');
     } finally {
       setIsLoadingLoadingWidgets(false);
     }
@@ -992,6 +1009,27 @@ export default function UserDashboardPage() {
                         </tbody>
                       </table>
                     </div>
+                  </div>
+                )}
+
+                {/* A feature that failed to load says so, once, above whatever
+                    it managed to render. Without this the panels below fall
+                    back to their own "no data yet" copy and a server error is
+                    indistinguishable from an account nobody has uploaded to -
+                    which is exactly how a generated dashboard stayed hidden
+                    behind "Upload firmographics.csv". */}
+                {widgetsError && (
+                  <div className="mb-6 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4">
+                    <p className="text-xs font-black text-amber-900">
+                      This feature could not be loaded
+                    </p>
+                    <p className="mt-1 text-xs text-amber-800 leading-relaxed">
+                      {widgetsError}
+                    </p>
+                    <p className="mt-1.5 text-[11px] text-amber-700">
+                      The panels below are showing empty states because nothing was
+                      returned - not because this account has no data.
+                    </p>
                   </div>
                 )}
 

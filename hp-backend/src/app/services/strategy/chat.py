@@ -43,6 +43,7 @@ from app.config.settings import settings
 from app.core import gemini
 from app.core.llm import generate_gpt4o_json_completion
 from app.database.mongodb import get_db
+from app.observability import steps
 from app.services.extractors import grounding
 from app.services.strategy import context as account_context, personas as strategy_personas
 
@@ -142,7 +143,7 @@ def _resolve_question(messages: list) -> tuple:
 
 ANSWER_SYSTEM = """You are an ABM strategy assistant for HP Inc., helping an HP seller plan their approach to {company}.
 
-You answer ONLY from the ACCOUNT DATA supplied with the question. That is the finished output of
+You answer ONLY from the ACCOUNT DATA given below these instructions. That is the finished output of
 every intelligence feature this platform runs on {company} - its filings and priorities, its people,
 its technology, its intent signals, recent events, opportunity plays, objections and messaging - and
 it is everything the platform knows about them. If something is not in there, the platform does not
@@ -201,7 +202,7 @@ You are a SIMULATION OF THIS ROLE at {company}. You are not a named person, you 
 anyone, and you never claim to be a specific individual. If the seller asks who you are, answer with
 the role.
 
-You answer ONLY from the ACCOUNT DATA supplied with the question. That is the finished output of
+You answer ONLY from the ACCOUNT DATA given below these instructions. That is the finished output of
 every intelligence feature this platform runs on {company} - its filings and priorities, its people,
 its technology, its intent signals, recent events, opportunity plays, objections and messaging - and
 it is everything the platform knows about them. If something is not in there, the platform does not
@@ -244,42 +245,67 @@ FORMAT: plain text, first person, as spoken. No stage directions, no narration, 
 asterisks, no hashes. Do not prefix your lines with a name or a role label."""
 
 
-def _system_prompt(company: str, persona: dict | None) -> str:
-    """Which voice this turn is answered in.
+def _system_prompt(company: str, persona: dict | None, context: str = "") -> str:
+    """The instructions AND the account, as one stable block.
 
     The single render point for both prompts. Both go through `str.format`, so
     a persona block containing a literal brace would raise here rather than
     quietly producing a broken prompt - `personas.prompt_block` builds from
     account text, which is why it is worth knowing that is the failure mode.
+
+    **The payload is concatenated, never formatted.** It is compact JSON and
+    therefore full of braces; passing it through `str.format` would raise
+    KeyError on the first object key. Template first, account second.
+
+    **Why the account lives here rather than in the question turn.** Gemini is
+    stateless - `system_instruction` travels on every request exactly as
+    `contents` does, so this saves nothing in transmission and is not meant to.
+    What it buys is a STABLE PREFIX, which is the precondition for caching.
+
+    The previous shape appended the account to the last user turn, so the wire
+    looked like:
+
+        system: 2.7 KB
+        contents: [ history, history, ..., LAST TURN(453 KB + question) ]
+
+    with growing history in front of the payload and the question glued to its
+    back. The one large, unchanging block sat in the middle and moved every
+    turn, so there was no reusable prefix and `cached_content_token_count` came
+    back 0 on every call - measured across three consecutive turns. Here the
+    instructions and the account are both fixed for the life of a conversation,
+    and only the question varies.
     """
-    if not persona:
-        return ANSWER_SYSTEM.format(company=company)
-    return ROLEPLAY_SYSTEM.format(
-        company=company, persona=strategy_personas.prompt_block(persona))
+    rendered = (ANSWER_SYSTEM.format(company=company) if not persona
+                else ROLEPLAY_SYSTEM.format(
+                    company=company,
+                    persona=strategy_personas.prompt_block(persona)))
+    if not context:
+        return rendered
+    return "\n\n".join([rendered, "ACCOUNT DATA:", context])
 
 
 def _answer_once(company: str, question: str, context: str, messages: list,
                  correction: str = "", persona: dict | None = None) -> str:
-    """One generation attempt."""
+    """One generation attempt.
+
+    The account is NOT in this turn. It moved into the system prompt, which is
+    fixed for the life of a conversation, so the only thing varying between
+    turns is the question - see `_system_prompt` for why that matters to
+    caching. The payload is still sent whole and still never truncated; it has
+    simply moved to the one position where a cache can find it twice.
+    """
     user = "\n".join([
-        # Not truncated. The payload is the whole account and it fits the
-        # window whole - that is the point of the model choice. A cap here
-        # would silently drop whichever feature sorted last, and the answer
-        # would be confidently wrong about it rather than visibly short.
-        "ACCOUNT DATA:",
-        context,
-        "",
         ("CORRECTION - your previous answer was rejected: %s Write it again "
          "using only the account data above." % correction) if correction else "",
         "QUESTION: %s" % question,
-    ])
+    ]).strip()
 
     turns = [m for m in (messages or [])[:-1]
              if isinstance(m, dict) and _text(m.get("role")) in ("user", "assistant")
              and _text(m.get("content"))][-MAX_HISTORY_TURNS:]
     turns.append({"role": "user", "content": user})
 
-    return gemini.generate(_system_prompt(company, persona), turns)
+    return gemini.generate(_system_prompt(company, persona, context), turns)
 
 
 # ---------------------------------------------------------------------------
@@ -658,15 +684,34 @@ def answer(account_id: str, messages: list, mode: str | None = None,
     turn is answered as the advisor rather than silently as someone else.
     """
     db = get_db()
-    persona = (strategy_personas.resolve(account_id, persona_id)
-               if persona_id else None)
+    timer = steps.StepTimer()
+    with steps.use(timer):
+        return _answer(db, timer, account_id, messages, mode, persona_id)
+
+
+def _answer(db, timer, account_id, messages, mode, persona_id) -> dict:
+    """The turn itself, with a timer in scope for everything it calls.
+
+    Split out so `steps.use` wraps the whole turn including the Gemini calls -
+    the client records its token usage against whatever timer is current, and
+    that is how cache hits become visible at all.
+    """
+    with timer.step("persona"):
+        persona = (strategy_personas.resolve(account_id, persona_id)
+                   if persona_id else None)
     resolved_mode = "roleplay" if persona else (_text(mode) or "advisor")
 
-    company = _text((db["account_widgets"].find_one(
-        {"account_id": account_id, "widget_key": "exec_summary_card"}) or {}
-    ).get("data", {}).get("company_name")) or "this account"
+    with timer.step("company_lookup"):
+        company = _text((db["account_widgets"].find_one(
+            {"account_id": account_id, "widget_key": "exec_summary_card"}) or {}
+        ).get("data", {}).get("company_name")) or "this account"
 
-    question, topic = _resolve_question(messages)
+    # A gpt-4o JSON call whenever there is history to resolve against, and free
+    # on the first turn - which is why it is timed separately rather than folded
+    # into generation. Measured at 3-9 seconds on a follow-up, for rewriting one
+    # sentence, so it is worth seeing on its own.
+    with timer.step("resolve_question", turns=len(messages or [])):
+        question, topic = _resolve_question(messages)
 
     if _is_small_talk(question):
         return _greeting(company, question, resolved_mode, persona)
@@ -682,18 +727,25 @@ def answer(account_id: str, messages: list, mode: str | None = None,
     # The resolved question is what gets asked. History shaped it and
     # contributes nothing else: what the assistant said earlier is not a source
     # for what it says now.
-    payload, sections = account_context.build(account_id)
+    # 25 widgets out of Mongo and rendered to one string. Small, and timed so
+    # that "the payload is slow" can be ruled out rather than assumed.
+    with timer.step("payload_build"):
+        payload, sections = account_context.build(account_id)
     widget_keys = [row["widget_key"] for row in sections]
     if not payload:
         return _unavailable(company, question, topic,
                             "no feature has published anything for this account yet",
                             mode=resolved_mode, persona=persona)
 
+    # Read once, not once per attempt: the roster cannot change between them.
+    banned = strategy_personas.banned_names(account_id) if persona else []
+
     attempts, correction, last_reason = [], "", "no attempt was made"
     for attempt in range(MAX_VALIDATION_ATTEMPTS):
         try:
-            raw = _answer_once(company, question, payload, messages, correction,
-                               persona=persona)
+            with timer.step("generation", attempt=attempt + 1):
+                raw = _answer_once(company, question, payload, messages,
+                                   correction, persona=persona)
         except gemini.GeminiTruncated as exc:
             # Named rather than left to the validator, which would have rejected
             # the cut-off answer for a missing citation and spent the remaining
@@ -704,14 +756,15 @@ def answer(account_id: str, messages: list, mode: str | None = None,
         except gemini.GeminiUnavailable as exc:
             return _unavailable(company, question, topic, str(exc), attempts,
                                 mode=resolved_mode, persona=persona)
-        if persona:
-            ok, reason, cited, cleaned = _validate_roleplay(
-                raw, payload, widget_keys,
-                strategy_personas.banned_names(account_id))
-        else:
-            ok, reason, cited, cleaned = _validate(raw, payload, widget_keys)
+        with timer.step("validation"):
+            if persona:
+                ok, reason, cited, cleaned = _validate_roleplay(
+                    raw, payload, widget_keys, banned)
+            else:
+                ok, reason, cited, cleaned = _validate(raw, payload, widget_keys)
         attempts.append({"attempt": attempt + 1, "accepted": ok, "reason": reason})
         if ok:
+            _log_timings(timer, question, accepted=True)
             return {
                 "answer": cleaned,
                 "question": question,
@@ -726,6 +779,11 @@ def answer(account_id: str, messages: list, mode: str | None = None,
                     "widgets_in_context": len(widget_keys),
                     "context_chars": len(payload),
                     "attempts": attempts,
+                    # Slowest step first, plus the token counters. Returned as
+                    # well as logged because the person asking "why did that
+                    # take so long" is looking at the screen, not the server.
+                    "timings": timer.as_dict(),
+                    "tokens": dict(timer.counters),
                 },
             }
         last_reason = reason
@@ -734,8 +792,28 @@ def answer(account_id: str, messages: list, mode: str | None = None,
 
     # Bounded retries, then stop. A third failure means the evidence does not
     # support the answer the model keeps wanting to give.
+    _log_timings(timer, question, accepted=False)
     return _unavailable(company, question, topic, last_reason, attempts,
-                        mode=resolved_mode, persona=persona)
+                        mode=resolved_mode, persona=persona, timer=timer)
+
+
+def _log_timings(timer, question: str, accepted: bool) -> None:
+    """One line per question, carrying the request id the middleware set.
+
+    A rejected answer is logged too, and is the more interesting case: three
+    failed attempts means three generations, and the line shows that as
+    `generation 41200ms/3` rather than leaving someone to wonder why a question
+    took a minute. The cache line is separate because it explains the bill
+    rather than the clock - a cached turn and an uncached one look identical on
+    the clock and differ several-fold in price.
+    """
+    logger.info("strategy chat timings: %s | %s | %s | %r",
+                timer.summary(), timer.cache_summary() or "cache n/a",
+                "accepted" if accepted else "rejected", _text(question)[:80],
+                extra={"timings": timer.as_dict(),
+                       "tokens": dict(timer.counters),
+                       "total_ms": timer.total_ms(),
+                       "accepted": accepted})
 
 
 def _text_block(value) -> str:
@@ -811,7 +889,8 @@ def _greeting(company: str, question: str, mode: str = "advisor",
 
 
 def _unavailable(company, question, topic, reason, attempts=None,
-                 mode: str = "advisor", persona: dict | None = None) -> dict:
+                 mode: str = "advisor", persona: dict | None = None,
+                 timer=None) -> dict:
     closest = ("You could look at the Stakeholder Map, Tech Landscape or Recent "
                "Signals for the nearest related evidence.")
     body = UNAVAILABLE.format(company=company, closest=closest)
@@ -839,7 +918,11 @@ def _unavailable(company, question, topic, reason, attempts=None,
         "citations": [],
         "available": False,
         "generation": {"prompt_version": PROMPT_VERSION, "reason": reason,
-                       "attempts": attempts or []},
+                       "attempts": attempts or [],
+                       # The timer rather than two derived dicts: a refusal
+                       # wants the same breakdown a published answer gets.
+                       "timings": timer.as_dict() if timer else {},
+                       "tokens": dict(timer.counters) if timer else {}},
     }
 
 

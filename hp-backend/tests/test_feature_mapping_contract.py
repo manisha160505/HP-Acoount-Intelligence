@@ -121,3 +121,64 @@ def test_hp_capability_is_marked_as_model_written():
     match = [f for _, f in _all_fields() if f.get("field_key") == "hp_capability"]
     assert match, "hp_capability was renamed or removed"
     assert match[0]["data_type"] == "INFERRED / SYNTHESIZED"
+
+
+# ---------------------------------------------------------------------------
+# Widget status: the writers and the schema must agree
+#
+# They did not, and the failure was disproportionate. `urgency.py` writes
+# "partial" when it computed a score on incomplete inputs; `WidgetResponse`
+# allowed only available/empty/pending. FastAPI validates the WHOLE response
+# array, so that one widget made `GET /accounts/{id}/widgets/executive_dashboard`
+# return 500 - and the frontend caught the failure non-blockingly, so every
+# panel fell back to its own "no data yet" placeholder.
+#
+# The account's dashboard was fully generated and sitting in Mongo. What the
+# screen said was "Upload firmographics.csv to view extracted company profile".
+# ---------------------------------------------------------------------------
+
+def test_every_status_a_widget_writer_emits_is_allowed_by_the_schema():
+    """Parsed, not grepped.
+
+    A regex for `"status":` also finds job leases, evidence rows and HTTP
+    envelopes. This walks the syntax tree instead and looks only at dict
+    literals that are widget records - the ones carrying a `widget_key` - so it
+    reports what actually reaches `WidgetResponse`.
+
+    A fourth status added to an extractor without touching the schema blanks a
+    whole feature, and the only symptom is a screen that looks like an account
+    nobody has uploaded to.
+    """
+    import ast
+    from pathlib import Path
+
+    from app.schemas.widget import WidgetResponse
+
+    allowed = set(WidgetResponse.model_fields["status"].annotation.__args__)
+    services = Path(__file__).resolve().parents[1] / "src" / "app" / "services"
+
+    found = {}
+    for path in services.rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Dict):
+                continue
+            keys = [k.value for k in node.keys
+                    if isinstance(k, ast.Constant) and isinstance(k.value, str)]
+            if "widget_key" not in keys or "status" not in keys:
+                continue
+            value = node.values[keys.index("status")]
+            # A literal, or the branches of a conditional - which is how the
+            # urgency score writes "available" or "partial".
+            for part in ([value.body, value.orelse]
+                         if isinstance(value, ast.IfExp) else [value]):
+                if isinstance(part, ast.Constant) and isinstance(part.value, str):
+                    found.setdefault(part.value, set()).add(path.name)
+
+    assert found, "no widget writers were found - has the layout moved?"
+    unknown = sorted(set(found) - allowed)
+    assert not unknown, (
+        "widget writers emit status(es) the schema rejects: %s (in %s) - a "
+        "response carrying one 500s the whole feature, and the frontend renders "
+        "that as an empty account"
+        % (unknown, sorted({f for s in unknown for f in found[s]})))
