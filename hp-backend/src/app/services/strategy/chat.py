@@ -38,8 +38,12 @@ account evidence, and on approved HP product facts where it names a product.
 """
 
 import logging
+import time
 
-from app.core.llm import generate_chat_completion, generate_gpt4o_json_completion
+from app.core.llm import (
+    generate_chat_completion, generate_gpt4o_json_completion,
+    stream_chat_completion,
+)
 from app.database.mongodb import get_db
 from app.services.extractors import grounding
 from app.services.retrieval import evidence as ev, index_state, query
@@ -374,8 +378,71 @@ UNAVAILABLE = (
     "{closest}")
 
 
-def answer(account_id: str, messages: list, mode: str | None = None) -> dict:
-    """Answer one question about one account. Returns the published payload."""
+def _answer_once_stream(company: str, question: str, context: str, messages: list,
+                        correction: str = ""):
+    """`_answer_once`, yielding deltas. The prompt is identical."""
+    user = "\n".join([
+        "RETRIEVED ACCOUNT EVIDENCE:",
+        context[:MAX_CONTEXT_CHARS],
+        "",
+        ("CORRECTION - your previous answer was rejected: %s Write it again "
+         "using only the evidence above." % correction) if correction else "",
+        "QUESTION: %s" % question,
+    ])
+
+    turns = [m for m in (messages or [])[:-1]
+             if isinstance(m, dict) and _text(m.get("role")) in ("user", "assistant")
+             and _text(m.get("content"))][-MAX_HISTORY_TURNS:]
+    turns.append({"role": "user", "content": user})
+
+    yield from stream_chat_completion(ANSWER_SYSTEM.format(company=company), turns)
+
+
+def _validated_prefix(account_id: str, buffer: str, passages: list) -> tuple:
+    """(text safe to publish, whether it validated). Never a partial sentence.
+
+    This is what makes streaming compatible with a guarantee that nothing
+    unverified is shown, and the rule is narrow on purpose.
+
+    An answer is released only as far as its last **closed citation bracket**.
+    A sentence mid-flight has no citation yet - not because it is wrong, but
+    because the model writes the claim before the tag - and releasing it would
+    publish a figure the validator has not seen. A fabricated number therefore
+    cannot escape: it sits after the last bracket until either a citation
+    follows it, at which point it is validated like anything else, or the answer
+    ends and the full check rejects it.
+
+    The prefix is validated by the same `_validate` the final answer goes
+    through. Nothing is relaxed for streaming - it is the identical function,
+    run earlier and more often, which it can afford to be at about 60ms.
+    """
+    end = buffer.rfind("]")
+    if end == -1:
+        return "", False
+    candidate = buffer[:end + 1]
+    ok, _reason, _cited, cleaned = _validate(account_id, candidate, passages)
+    return (cleaned, True) if ok else ("", False)
+
+
+def answer_stream(account_id: str, messages: list, mode: str | None = None):
+    """`answer`, yielding the answer as it is written.
+
+    Yields dicts the transport can serialise directly:
+
+        {"type": "stage",  "stage": "retrieving" | "writing" | "checking"}
+        {"type": "delta",  "text": "...validated text so far..."}
+        {"type": "done",   ...the same payload `answer` returns...}
+
+    The contract `answer` holds is unchanged: a seller never reads a sentence
+    that has not been checked against the evidence. What streaming changes is
+    *when* the checked sentences arrive - as each one completes, rather than all
+    at the end - so the wait is spent reading rather than watching a spinner.
+
+    A rejected answer is never partially published: the final `done` carries the
+    validated whole, and a caller that has been rendering deltas replaces what
+    it showed with that. Because deltas are only ever validated prefixes of the
+    same attempt, in practice the replacement is the same text plus its tail.
+    """
     db = get_db()
 
     state = index_state.get(account_id, INDEX)
@@ -391,6 +458,115 @@ def answer(account_id: str, messages: list, mode: str | None = None) -> dict:
     question, topic = _resolve_question(messages)
 
     if _is_small_talk(question):
+        yield {"type": "done", **_greeting(company, question)}
+        return
+
+    yield {"type": "stage", "stage": "retrieving"}
+    try:
+        result = query.ask(account_id, INDEX, question,
+                           top_k=TOP_K, only_context=True)
+    except query.IndexNotReady as exc:
+        raise ChatUnavailable(str(exc)) from exc
+    except Exception as exc:
+        logger.exception("strategy chat: retrieval failed for %r", question[:80])
+        yield {"type": "done",
+               **_unavailable(company, question, topic, "retrieval failed: %s" % exc)}
+        return
+
+    reasoning_context = _reasoning_context(result)
+    passages = [p for p in [result.context] if _text(p)]
+    if not passages:
+        yield {"type": "done",
+               **_unavailable(company, question, topic, "no evidence was retrieved")}
+        return
+
+    attempts, correction, last_reason = [], "", "no attempt was made"
+    for attempt in range(MAX_VALIDATION_ATTEMPTS):
+        # Only the first attempt streams. A retry exists because the previous
+        # answer was rejected, and the seller is already reading text from it -
+        # streaming a second one over the top would rewrite the thread under
+        # them. The retry is written silently and replaces what was shown.
+        streaming = attempt == 0
+        yield {"type": "stage", "stage": "writing" if streaming else "rewriting"}
+
+        if streaming:
+            # Validated only when a citation bracket *closes*, not on every
+            # token that happens to follow one. `_validate` resolves ids
+            # against Mongo at about 70ms, so re-running it per token spent
+            # more time checking the same prefix than the model spent writing
+            # the answer - 531 calls and 82% of the wall clock, measured.
+            # A new `]` is the only event that can extend the safe prefix.
+            buffer, published, last_end = "", "", -1
+            for chunk in _answer_once_stream(company, question, reasoning_context,
+                                             messages, correction):
+                buffer += chunk
+                end = buffer.rfind("]")
+                if end == last_end:
+                    continue
+                last_end = end
+                safe, ok = _validated_prefix(account_id, buffer, passages)
+                if ok and len(safe) > len(published):
+                    published = safe
+                    yield {"type": "delta", "text": published}
+            raw = buffer
+        else:
+            raw = _answer_once(company, question, reasoning_context, messages,
+                               correction)
+
+        yield {"type": "stage", "stage": "checking"}
+        ok, reason, cited, cleaned = _validate(account_id, raw, passages)
+        attempts.append({"attempt": attempt + 1, "accepted": ok, "reason": reason})
+        if ok:
+            yield {"type": "done", "answer": cleaned, "question": question,
+                   "topic": topic, "mode": _text(mode) or "advisor",
+                   "citations": [_citation(row) for row in cited],
+                   "available": True,
+                   "generation": {"prompt_version": PROMPT_VERSION,
+                                  "retrieval_mode": result.mode,
+                                  "index_workspace": result.workspace,
+                                  "index_stale": result.stale,
+                                  "attempts": attempts}}
+            return
+        last_reason = reason
+        correction = reason
+        logger.info("strategy chat: attempt %d rejected - %s", attempt + 1, reason)
+
+    yield {"type": "done",
+           **_unavailable(company, question, topic, last_reason, attempts)}
+
+
+def answer(account_id: str, messages: list, mode: str | None = None) -> dict:
+    """Answer one question about one account. Returns the published payload."""
+    # Where the time goes, per stage. A total is not diagnostic here: the same
+    # ten seconds can be one slow retrieval or three fast generations thrown
+    # away by validation, and those have opposite fixes. `timings` is reported
+    # in milliseconds on the payload's `generation` block, which already
+    # carries the per-attempt record the durations belong beside.
+    t_start = time.perf_counter()
+    timings = {}
+
+    def _since(mark):
+        return round((time.perf_counter() - mark) * 1000)
+
+    db = get_db()
+
+    state = index_state.get(account_id, INDEX)
+    if state.get("status") not in (index_state.READY, index_state.STALE):
+        raise ChatUnavailable(
+            "the Strategy index is %s - %s"
+            % (state.get("status"), state.get("last_error") or "build it first"))
+
+    company = _text((db["account_widgets"].find_one(
+        {"account_id": account_id, "widget_key": "exec_summary_card"}) or {}
+    ).get("data", {}).get("company_name")) or "this account"
+
+    # A follow-up pays for an LLM rewrite before retrieval even starts, and a
+    # first question does not. Timing them together hides that difference.
+    _t = time.perf_counter()
+    question, topic = _resolve_question(messages)
+    timings["resolve_question_ms"] = _since(_t)
+
+    if _is_small_talk(question):
         return _greeting(company, question)
 
     # Retrieval runs on the RESOLVED question. The history shaped that question
@@ -401,19 +577,25 @@ def answer(account_id: str, messages: list, mode: str | None = None) -> dict:
     # on every query by default, and we discard it - the answer a seller reads
     # is written afterwards, against validated evidence. Paying for prose we
     # throw away cost about 3 seconds of every question.
+    _t = time.perf_counter()
     try:
         result = query.ask(account_id, INDEX, question,
                            top_k=TOP_K, only_context=True)
+        timings["retrieval_ms"] = _since(_t)
     except query.IndexNotReady as exc:
         raise ChatUnavailable(str(exc)) from exc
     except Exception as exc:
+        # A retrieval that fails slowly is worth seeing, so the duration is
+        # recorded before the early return rather than lost with the exception.
+        timings["retrieval_ms"] = _since(_t)
         # Retrieval can refuse a question for its own reasons - a query it
         # considers too short, a transient backend error. None of those is a
         # server fault, and a 500 tells a seller nothing. Answer that we could
         # not look it up.
         logger.exception("strategy chat: retrieval failed for %r", question[:80])
+        timings["total_ms"] = _since(t_start)
         return _unavailable(company, question, topic,
-                            "retrieval failed: %s" % exc)
+                            "retrieval failed: %s" % exc, timings=timings)
 
     # Two different bodies of text, for two different jobs.
     #
@@ -432,14 +614,35 @@ def answer(account_id: str, messages: list, mode: str | None = None) -> dict:
     reasoning_context = _reasoning_context(result)
     passages = [p for p in [result.context] if _text(p)]
     if not passages:
-        return _unavailable(company, question, topic, "no evidence was retrieved")
+        timings["total_ms"] = _since(t_start)
+        return _unavailable(company, question, topic, "no evidence was retrieved",
+                            timings=timings)
 
     attempts, correction, last_reason = [], "", "no attempt was made"
     for attempt in range(MAX_VALIDATION_ATTEMPTS):
+        # Generation and validation are timed apart because only one of them is
+        # an LLM call. A rejected attempt is a whole generation paid for and
+        # discarded, so the per-attempt figures are what show whether latency
+        # is the model being slow or the loop running more than once.
+        _t = time.perf_counter()
         raw = _answer_once(company, question, reasoning_context, messages, correction)
+        generate_ms = _since(_t)
+
+        _t = time.perf_counter()
         ok, reason, cited, cleaned = _validate(account_id, raw, passages)
-        attempts.append({"attempt": attempt + 1, "accepted": ok, "reason": reason})
+        validate_ms = _since(_t)
+
+        attempts.append({"attempt": attempt + 1, "accepted": ok, "reason": reason,
+                         "generate_ms": generate_ms, "validate_ms": validate_ms})
         if ok:
+            timings["total_ms"] = _since(t_start)
+            logger.info(
+                "strategy chat timing: total=%dms resolve=%dms retrieval=%dms "
+                "attempts=%d generate=%dms validate=%dms",
+                timings["total_ms"], timings.get("resolve_question_ms", 0),
+                timings.get("retrieval_ms", 0), len(attempts),
+                sum(a.get("generate_ms", 0) for a in attempts),
+                sum(a.get("validate_ms", 0) for a in attempts))
             return {
                 "answer": cleaned,
                 "question": question,
@@ -453,6 +656,7 @@ def answer(account_id: str, messages: list, mode: str | None = None) -> dict:
                     "index_workspace": result.workspace,
                     "index_stale": result.stale,
                     "attempts": attempts,
+                    "timings": timings,
                 },
             }
         last_reason = reason
@@ -461,7 +665,15 @@ def answer(account_id: str, messages: list, mode: str | None = None) -> dict:
 
     # Bounded retries, then stop. A third failure means the evidence does not
     # support the answer the model keeps wanting to give.
-    return _unavailable(company, question, topic, last_reason, attempts)
+    timings["total_ms"] = _since(t_start)
+    logger.info(
+        "strategy chat timing (refused): total=%dms resolve=%dms retrieval=%dms "
+        "attempts=%d generate=%dms validate=%dms",
+        timings["total_ms"], timings.get("resolve_question_ms", 0),
+        timings.get("retrieval_ms", 0), len(attempts),
+        sum(a.get("generate_ms", 0) for a in attempts),
+        sum(a.get("validate_ms", 0) for a in attempts))
+    return _unavailable(company, question, topic, last_reason, attempts, timings)
 
 
 # LightRAG assembles its context in this order, and puts the only citable part
@@ -543,9 +755,17 @@ def _greeting(company: str, question: str) -> dict:
     }
 
 
-def _unavailable(company, question, topic, reason, attempts=None) -> dict:
+def _unavailable(company, question, topic, reason, attempts=None,
+                 timings=None) -> dict:
     closest = ("You could look at the Stakeholder Map, Tech Landscape or Recent "
                "Signals for the nearest related evidence.")
+    generation = {"prompt_version": PROMPT_VERSION, "reason": reason,
+                  "attempts": attempts or []}
+    # A refusal after three rejected attempts is the slowest path there is -
+    # the one worth measuring most, and the one that would otherwise report
+    # nothing.
+    if timings:
+        generation["timings"] = timings
     return {
         "answer": UNAVAILABLE.format(company=company, closest=closest),
         "question": question,
@@ -553,8 +773,7 @@ def _unavailable(company, question, topic, reason, attempts=None) -> dict:
         "mode": "advisor",
         "citations": [],
         "available": False,
-        "generation": {"prompt_version": PROMPT_VERSION, "reason": reason,
-                       "attempts": attempts or []},
+        "generation": generation,
     }
 
 

@@ -4,7 +4,7 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { ProtectedRoute } from '@/components/common/ProtectedRoute';
 import { useAuth } from '@/providers/AuthProvider';
-import api from '@/services/api';
+import api, { postStream } from '@/services/api';
 import { CompanyAccount } from '@/types/account';
 import { 
   WidgetResponse, 
@@ -389,6 +389,17 @@ export default function UserDashboardPage() {
   const [chatInput, setChatInput] = useState<string>('');
   const [chatMessages, setChatMessages] = useState<Array<{ id: string; sender: 'user' | 'assistant'; text: string; timestamp: string; citations?: any[]; available?: boolean }>>([]);
   const [chatPending, setChatPending] = useState(false);
+  // Which stage of the answer is running. An answer takes around fifteen
+  // seconds and cannot be streamed - every fact is validated against the
+  // evidence before any of it is shown, so text that appeared as it was
+  // written could be retracted a paragraph later. What can be shown honestly
+  // is which step is running, which is what this drives.
+  const [chatStage, setChatStage] = useState<number>(0);
+  // The validated answer so far, while it is still being written. Every value
+  // this holds has already passed the same check the finished answer passes -
+  // the server releases text only as far as its last resolved citation - so
+  // rendering it does not show the seller anything unverified.
+  const [chatStreamingText, setChatStreamingText] = useState<string>('');
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
 
   // Message Evaluator State
@@ -6233,30 +6244,74 @@ export default function UserDashboardPage() {
                     setChatInput('');
                     setChatPending(true);
 
+                    // The server reports its own stages now, so nothing here is
+                    // on a timer. `delta` carries the whole validated answer so
+                    // far rather than an increment, which means a dropped or
+                    // late event costs nothing - the next one is still correct
+                    // on its own, and `done` carries the finished answer.
+                    setChatStage(0);
+                    setChatStreamingText('');
+                    const STAGES: Record<string, number> = {
+                      retrieving: 0, writing: 1, rewriting: 1, checking: 2,
+                    };
+
+                    let settled = false;
+                    const publish = (
+                      text: string, citations: any[], available: boolean,
+                    ) => {
+                      settled = true;
+                      setChatMessages(prev => [...prev, {
+                        id: `asst_${Date.now()}`,
+                        sender: 'assistant' as const,
+                        text, timestamp: stamp(), citations, available,
+                      }]);
+                    };
+
                     try {
-                      const res = await api.post(
-                        `/accounts/${selectedAccount.id}/widgets/strategy_chat/ask`,
-                        { messages: history, mode: 'advisor' }
+                      await postStream(
+                        `/accounts/${selectedAccount.id}/widgets/strategy_chat/ask/stream`,
+                        { messages: history, mode: 'advisor' },
+                        (event) => {
+                          if (event.type === 'stage') {
+                            setChatStage(STAGES[event.stage ?? ''] ?? 0);
+                            // A rewrite is a second attempt over text the
+                            // seller is already reading. Clearing it is the
+                            // honest thing to do - the answer they were shown
+                            // was rejected, and the replacement is not written
+                            // yet.
+                            if (event.stage === 'rewriting') setChatStreamingText('');
+                          } else if (event.type === 'delta') {
+                            setChatStreamingText(event.text ?? '');
+                          } else if (event.type === 'done') {
+                            publish(
+                              (event.answer as string) || 'No answer was returned.',
+                              (event.citations as any[]) || [],
+                              event.available !== false,
+                            );
+                          } else if (event.type === 'error') {
+                            publish(
+                              event.detail
+                                || 'The strategy assistant could not be reached.',
+                              [], false,
+                            );
+                          }
+                        },
                       );
-                      setChatMessages(prev => [...prev, {
-                        id: `asst_${Date.now()}`,
-                        sender: 'assistant' as const,
-                        text: res.data?.answer || 'No answer was returned.',
-                        timestamp: stamp(),
-                        citations: res.data?.citations || [],
-                        available: res.data?.available !== false,
-                      }]);
-                    } catch (err: any) {
-                      setChatMessages(prev => [...prev, {
-                        id: `asst_${Date.now()}`,
-                        sender: 'assistant' as const,
-                        text: err?.response?.data?.detail
-                          || 'The strategy assistant could not be reached.',
-                        timestamp: stamp(),
-                        citations: [],
-                        available: false,
-                      }]);
+                      // A stream that ends without `done` - a dropped
+                      // connection - must not leave the question unanswered in
+                      // the thread.
+                      if (!settled) {
+                        publish('The strategy assistant could not complete that answer.',
+                                [], false);
+                      }
+                    } catch {
+                      if (!settled) {
+                        publish('The strategy assistant could not be reached.',
+                                [], false);
+                      }
                     } finally {
+                      setChatStage(0);
+                      setChatStreamingText('');
                       setChatPending(false);
                     }
                   };
@@ -6439,6 +6494,73 @@ export default function UserDashboardPage() {
                                 )}
                               </div>
                             ))}
+
+                            {/* What is happening during the wait.
+
+                                The answer cannot be shown as it is written:
+                                every claim is checked against the retrieved
+                                evidence first, and an answer that fails is
+                                rewritten rather than published. Streaming the
+                                draft would put an unverified sentence in front
+                                of a seller and then take it back, which is the
+                                one thing this feature promises not to do.
+
+                                So the wait is narrated instead of filled. The
+                                steps are the real pipeline, named in the
+                                seller's terms, and the checking step is listed
+                                because it is the reason the wait exists. */}
+                            {chatPending && (
+                              <div className="flex justify-start">
+                                <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 max-w-2xl w-full space-y-3 shadow-xs animate-fade-in">
+                                  <div className="flex items-center gap-1.5 border-b border-slate-200/80 pb-2">
+                                    <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                                    <span className="text-xs font-black text-hp-navy">ABM Strategy Assistant</span>
+                                  </div>
+                                  {/* The answer as it is written. Only text the
+                                      server has already validated reaches here:
+                                      it releases up to the last resolved
+                                      citation and holds the sentence in flight
+                                      back, so a figure the checker has not seen
+                                      is never on screen. */}
+                                  {chatStreamingText && (
+                                    <div className="text-xs text-slate-800 leading-relaxed whitespace-pre-wrap border-b border-slate-200/80 pb-3">
+                                      {chatStreamingText}
+                                      <span className="inline-block w-1.5 h-3.5 ml-0.5 bg-hp-navy/60 align-text-bottom animate-pulse" />
+                                    </div>
+                                  )}
+
+                                  <div className="space-y-2">
+                                    {[
+                                      { label: `Searching ${companyName}'s account intelligence` },
+                                      { label: 'Writing your answer' },
+                                      { label: 'Checking every fact against the evidence' },
+                                    ].map((step, i) => {
+                                      const done = i < chatStage;
+                                      const active = i === chatStage;
+                                      return (
+                                        <div key={step.label} className="flex items-center gap-2.5">
+                                          {done ? (
+                                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
+                                          ) : active ? (
+                                            <Loader2 className="w-3.5 h-3.5 text-hp-navy animate-spin flex-shrink-0" />
+                                          ) : (
+                                            <div className="w-3.5 h-3.5 flex items-center justify-center flex-shrink-0">
+                                              <div className="w-1.5 h-1.5 rounded-full bg-slate-300" />
+                                            </div>
+                                          )}
+                                          <span className={`text-xs ${done ? 'text-slate-400' : active ? 'font-bold text-slate-800' : 'text-slate-400'}`}>
+                                            {step.label}
+                                          </span>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                  <p className="text-[10px] text-slate-400 leading-relaxed pt-1 border-t border-slate-200/80">
+                                    Answers are shown only once every fact has been matched to account evidence.
+                                  </p>
+                                </div>
+                              </div>
+                            )}
                           </div>
                         )}
 

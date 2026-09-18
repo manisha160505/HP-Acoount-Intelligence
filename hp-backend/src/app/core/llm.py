@@ -63,6 +63,51 @@ def generate_chat_completion(system_prompt: str, messages: list,
         return None
 
 
+def stream_chat_completion(system_prompt: str, messages: list,
+                           temperature: float = 0.3):
+    """`generate_chat_completion`, yielding text as the model writes it.
+
+    Same request, same model, same validation downstream - the only difference
+    is that the caller sees the answer being written instead of waiting for the
+    whole of it. Generation is not faster; a seller waits about twelve seconds
+    either way. What changes is that the first words arrive in about three.
+
+    Yields str deltas. A failure yields nothing, which the caller reads as an
+    empty answer exactly as it reads a `None` from the non-streaming call.
+    """
+    client = get_openai_client()
+    if not client:
+        logger.warning("Cannot stream completion: OpenAI client is uninitialized.")
+        return
+
+    turns = [{"role": "system", "content": system_prompt}]
+    for message in (messages or []):
+        if not isinstance(message, dict):
+            continue
+        role = str(message.get("role") or "").strip().lower()
+        content = str(message.get("content") or "").strip()
+        if role in ("user", "assistant") and content:
+            turns.append({"role": role, "content": content})
+
+    if len(turns) == 1:
+        logger.warning("Cannot stream completion: no usable messages supplied.")
+        return
+
+    model_name = settings.OPENAI_MODEL_NAME or "gpt-4o"
+    try:
+        stream = client.chat.completions.create(
+            model=model_name, messages=turns, temperature=temperature,
+            stream=True)
+        for chunk in stream:
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta
+            if delta and delta.content:
+                yield delta.content
+    except Exception as exc:
+        logger.error("Error streaming chat completion: %s", exc)
+
+
 def generate_gpt4o_json_completion(system_prompt: str, user_prompt: str) -> dict | None:
     client = get_openai_client()
     if not client:

@@ -1,8 +1,10 @@
+import json
 import logging
 from datetime import datetime
 
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse
 
 from app.database.mongodb import get_db
 from app.errors import APIError, ErrorCode
@@ -1112,3 +1114,68 @@ def strategy_chat_ask(
     except strategy_chat_service.ChatUnavailable as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                             detail=str(exc)) from exc
+
+
+@router.post("/accounts/{account_id}/widgets/strategy_chat/ask/stream")
+def strategy_chat_ask_stream(
+    account_id: str,
+    body: StrategyChatRequest,
+    current_user: dict = Depends(require_user_role)
+):
+    """The same answer as `/ask`, sent as it is written.
+
+    Server-sent events, one JSON object per `data:` line:
+
+        {"type": "stage", "stage": "retrieving"|"writing"|"rewriting"|"checking"}
+        {"type": "delta", "text": "...the validated answer so far..."}
+        {"type": "done",  ...the payload `/ask` returns...}
+
+    `delta` carries the whole validated prefix rather than an increment, so a
+    reconnecting or slow client renders the latest one and is correct - there is
+    no accumulated state to lose. Every prefix has passed the same validation
+    the final answer passes; the transport shows nothing the checker has not
+    already accepted.
+
+    `/ask` is unchanged and remains the endpoint of record. This one exists so
+    a seller reads from about seven seconds instead of waiting fifteen for the
+    whole answer; both take the same time to finish.
+    """
+    if not ObjectId.is_valid(account_id):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Invalid account ID format")
+    db = get_db()
+    if not db["accounts"].find_one({"_id": ObjectId(account_id)}):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="Company account not found")
+
+    from app.services.strategy import chat as strategy_chat_service
+
+    messages = [m.model_dump() for m in body.messages]
+
+    def events():
+        # ChatUnavailable is raised inside the generator, after the response has
+        # begun, so it cannot become a 400 the way it does on `/ask`. It is sent
+        # as a terminal event instead and the client renders it as the refusal
+        # it is.
+        try:
+            for event in strategy_chat_service.answer_stream(
+                    account_id=account_id, messages=messages, mode=body.mode):
+                yield "data: %s\n\n" % json.dumps(event)
+        except strategy_chat_service.ChatUnavailable as exc:
+            yield "data: %s\n\n" % json.dumps(
+                {"type": "error", "detail": str(exc)})
+        except Exception:
+            logger.exception("strategy chat stream failed for account %s", account_id)
+            yield "data: %s\n\n" % json.dumps(
+                {"type": "error",
+                 "detail": "The strategy assistant could not complete that answer."})
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        # Proxies buffer text/event-stream by default, which would hold the
+        # whole answer and deliver it at once - the exact behaviour this
+        # endpoint exists to avoid.
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no",
+                 "Connection": "keep-alive"},
+    )
