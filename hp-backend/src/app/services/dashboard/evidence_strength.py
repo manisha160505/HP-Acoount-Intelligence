@@ -42,31 +42,31 @@ from datetime import date, timedelta
 
 _ONE_DAY = timedelta(days=1)
 
+from app.config import scoring as _scoring
+
 logger = logging.getLogger(__name__)
+
+# Points and bands come from config/scoring.yaml.
+_CFG = _scoring.section("evidence_strength")
 
 # --- Filing Evidence -------------------------------------------------------
 
-POINTS_PER_FILING = 5
-MAX_FILING_POINTS = 25
+POINTS_PER_FILING = _CFG["points_per_filing"]
+MAX_FILING_POINTS = _CFG["max_filing_points"]
 
 # --- Recency ---------------------------------------------------------------
 
 # (upper bound in months inclusive, points). Read in order, first match wins.
-RECENCY_BANDS = (
-    (12, 25),
-    (24, 20),
-    (36, 15),
-    (60, 10),
-)
-RECENCY_BEYOND_BANDS = 5      # older than 60 months
-RECENCY_NO_DATE = 0           # no usable date on any supporting source
+RECENCY_BANDS = _scoring.bands("evidence_strength", "recency_bands")
+RECENCY_BEYOND_BANDS = _CFG["recency_beyond_bands"]   # older than 60 months
+RECENCY_NO_DATE = _CFG["recency_no_date"]   # no usable date on any source
 
 FISCAL_YEAR_END = (12, 31)    # (month, day) - see module docstring
 
 # --- Source Diversity ------------------------------------------------------
 
-POINTS_PER_CATEGORY = 10
-MAX_DIVERSITY_POINTS = 50
+POINTS_PER_CATEGORY = _CFG["points_per_category"]
+MAX_DIVERSITY_POINTS = _CFG["max_diversity_points"]
 
 REGULATORY_FILINGS = "Regulatory Filings"
 OFFICIAL_COMPANY = "Official Company Sources"

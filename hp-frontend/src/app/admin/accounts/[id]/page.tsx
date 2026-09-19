@@ -595,7 +595,9 @@ export default function ManageAccountPage() {
                   </div>
                 )}
 
-                {/* Tab 2: 23 Client-Defined Data Categories Management */}
+                {/* Tab 2: Data Categories Management. The count is derived from the
+                    registry rather than written here - three different hardcoded
+                    numbers (23, 24, 25) had drifted apart across the codebase. */}
                 {activeTab === 'data' && (
                   <div className="space-y-8">
                     
@@ -607,7 +609,7 @@ export default function ManageAccountPage() {
                           <span>Raw Data Management — {account.name}</span>
                         </h2>
                         <p className="text-xs text-gray-300 mt-1">
-                          23 Client-Defined Datasets. Single-file datasets persist canonically. News datasets support multi-file coexistence.
+                          {DATASET_REGISTRY_LIST.length} client-defined datasets. Single-file datasets persist canonically. News and filing datasets support multi-file coexistence.
                         </p>
                       </div>
 
@@ -763,7 +765,7 @@ export default function ManageAccountPage() {
                       </form>
                     </div>
 
-                    {/* 23 Client-Defined Datasets Directory Grid */}
+                    {/* Dataset directory grid */}
                     <div className="space-y-6">
                       {Object.entries(groupedDatasets).map(([groupName, items]) => (
                         <div key={groupName} className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">

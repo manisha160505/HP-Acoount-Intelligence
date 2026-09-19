@@ -79,6 +79,19 @@ async def lifespan(app: FastAPI):
         logger.exception("Retrieval worker did not start. Indexes will not "
                          "rebuild until it does; widgets are unaffected.")
 
+    # A scoring weight can be retuned in config/scoring.yaml without touching
+    # code, and that file is read at import - so startup is the moment the
+    # change becomes live, and the moment to rebuild what it invalidated. The
+    # rebuilds are queued on worker threads, never awaited: a config edit must
+    # not make a deploy look hung.
+    try:
+        from app.services.dashboard.scoring_refresh import refresh_stale_scores
+        refresh_stale_scores()
+    except Exception:
+        logger.exception("Scoring refresh did not run. Widgets scored under an "
+                         "older config will keep their existing numbers until "
+                         "the feature is regenerated.")
+
     _log_readiness()
     yield
 

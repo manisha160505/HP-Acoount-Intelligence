@@ -117,11 +117,11 @@ SCORE_WEIGHTS = signal_scoring.WEIGHTS
 # computed and injected, so asking for them would invite a second opinion on a
 # question that already has an exact answer.
 MODEL_SCORED_DIMS = ("relevance_impact",)
-TIER_THRESHOLDS = [(8.0, "S"), (6.0, "A"), (4.0, "B"), (2.0, "C")]
-MIN_CONFIDENCE_TO_PUBLISH = 2.0
-MAX_SIGNALS = 20
+TIER_THRESHOLDS = [list(r) for r in signal_scoring.TIER_THRESHOLDS]
+MIN_CONFIDENCE_TO_PUBLISH = signal_scoring.MIN_CONFIDENCE_TO_PUBLISH
+MAX_SIGNALS = signal_scoring.MAX_SIGNALS
 GATE_MAX_AGE_DAYS = 365
-DEDUP_SIMILARITY = 0.85
+DEDUP_SIMILARITY = signal_scoring.DEDUP_SIMILARITY
 
 # Bump when the scoring prompt changes so cached output is regenerated.
 # 10 - three drivers per HP_Live_Signal_Scoring_Logic.docx. The model now
@@ -759,6 +759,7 @@ Output JSON:
                 "signals_fingerprint": fingerprint,
                 "scored_count": len(scored),
                 "score_weights": SCORE_WEIGHTS,
+                "scoring_config_version": signal_scoring.version_stamp(),
                 "scores": scored,
                 "grounding_report": report.as_dict(),
             },
@@ -779,6 +780,7 @@ Output JSON:
                 "signals_fingerprint": None,
                 "scored_count": 0,
                 "score_weights": SCORE_WEIGHTS,
+                "scoring_config_version": signal_scoring.version_stamp(),
                 "scores": {},
                 "notice": "Signal relevance scoring requires OPENAI_API_KEY. The signal feed below is shown unscored; no scores are invented.",
             },

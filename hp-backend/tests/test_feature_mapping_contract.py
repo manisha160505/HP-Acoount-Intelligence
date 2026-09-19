@@ -121,3 +121,62 @@ def test_hp_capability_is_marked_as_model_written():
     match = [f for _, f in _all_fields() if f.get("field_key") == "hp_capability"]
     assert match, "hp_capability was renamed or removed"
     assert match[0]["data_type"] == "INFERRED / SYNTHESIZED"
+
+
+# =============================================================================
+# A dataset nothing depends on is a dataset nothing rebuilds.
+# =============================================================================
+
+def test_every_dataset_a_feature_reads_is_declared_as_a_dependency():
+    """`dependent_datasets` is not documentation - it is the regeneration trigger.
+
+    `_features_for_dataset` in `api/v1/account_data.py` builds the list of
+    extractors to re-run purely by scanning `dependent_datasets` for the
+    uploaded key. A dataset absent from every feature therefore regenerates
+    nothing: the upload returns 201, the file lands on disk, and the dashboard
+    goes on showing figures derived from the previous one.
+
+    `compliance_filings` was in exactly that state. It is read by
+    `dashboard/priorities.py`, `dashboard/evidence_strength.py` and
+    `retrieval/corpus.py` in five places, and it is the only source of reported
+    financial figures - and it appeared in no feature's dependency list, so
+    copying filings into an account changed nothing at all.
+    """
+    from app.api.v1.feature_mapping import FEATURE_MAPPINGS
+
+    declared = {d for spec in FEATURE_MAPPINGS.values()
+                for d in (spec.get("dependent_datasets") or [])}
+    assert "compliance_filings" in declared, (
+        "compliance_filings is read by the code but depended on by no feature, "
+        "so uploading one regenerates nothing")
+
+
+def test_filings_rebuild_the_five_features_the_client_named():
+    """The client's file-usage mapping is explicit about which features
+    `filings 1.csv` feeds. Pinned so a future edit to one feature's dependency
+    list cannot quietly drop filings from another."""
+    from app.api.v1.feature_mapping import FEATURE_MAPPINGS
+
+    expected = {
+        "executive_dashboard",          # reported financial figures
+        "recent_news_signals",          # "Live Signals" in the client's naming
+        "solution_narrative_opportunity_map",   # "Opportunity Map"
+        "content_messaging",
+        "strategy_chat",
+    }
+    actual = {fk for fk, spec in FEATURE_MAPPINGS.items()
+              if "compliance_filings" in (spec.get("dependent_datasets") or [])}
+    assert actual == expected
+
+
+def test_every_declared_dependency_is_a_real_dataset_key():
+    """A typo in `dependent_datasets` fails silently - the key simply never
+    matches an upload, and the feature never rebuilds."""
+    from app.api.v1.feature_mapping import FEATURE_MAPPINGS
+    from app.schemas.account_data import DATASET_REGISTRY
+
+    for feature_key, spec in FEATURE_MAPPINGS.items():
+        for dataset in (spec.get("dependent_datasets") or []):
+            assert dataset in DATASET_REGISTRY, (
+                "%s depends on '%s', which is not a dataset key"
+                % (feature_key, dataset))

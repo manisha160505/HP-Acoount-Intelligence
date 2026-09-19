@@ -59,24 +59,29 @@ mentions has not been validated.
 
 import re
 
+from app.config import scoring as _scoring
 from app.services.hp import intent_topic_map as tm
+
+# Weights and bands come from config/scoring.yaml.
+_CFG = _scoring.section("tech_confidence")
+_WEIGHTS = _scoring.weights("tech_confidence")
 
 # ==============================================================================
 # The formula
 # ==============================================================================
 
-DRIVER_1_WEIGHT = 0.70
-DRIVER_2_WEIGHT = 0.30
-DRIVER_SCALE = 10          # both drivers are scored out of 10
+DRIVER_1_WEIGHT = _WEIGHTS["technology_evidence"]
+DRIVER_2_WEIGHT = _WEIGHTS["intent_support"]
+DRIVER_SCALE = _CFG["driver_scale"]   # both drivers are scored out of 10
 
 FORMULA = ("Tech Landscape Confidence % = [(Driver 1 x 0.70) + "
            "(Driver 2 x 0.30)] x 10")
 FORMULA_AUTHORITY = "HP_Tech_Landscape_Confidence_Scoring_Logic_FINAL.docx"
 
 # The three band values each driver may take. Anything else is a bug.
-DIRECT_FIT = 10
-RELATED_FIT = 5
-NO_FIT = 0
+DIRECT_FIT = _CFG["direct_fit"]
+RELATED_FIT = _CFG["related_fit"]
+NO_FIT = _CFG["no_fit"]
 
 BAND_VALUES = (NO_FIT, RELATED_FIT, DIRECT_FIT)
 
@@ -108,11 +113,8 @@ def is_publishable(driver_1: int) -> bool:
 
 # "Matching HP-category Intent Score | Driver 2 score", verbatim. Read as
 # (inclusive lower bound, points); first match wins, highest band first.
-INTENT_BANDS = (
-    (50, DIRECT_FIT),
-    (25, RELATED_FIT),
-)
-INTENT_BELOW_BANDS = NO_FIT      # "0-24 or missing"
+INTENT_BANDS = _scoring.bands("tech_confidence", "intent_bands")
+INTENT_BELOW_BANDS = _CFG["intent_below_bands"]   # "0-24 or missing"
 
 
 def driver_2_intent(score, category: str | None = None) -> tuple:
