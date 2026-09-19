@@ -1881,11 +1881,18 @@ def _strategy_technology_documents(db, account_id, index, company) -> list:
                 vendor_name = _text(vendor.get("vendor_name"))
                 detected = ", ".join(_text(x) for x in (vendor.get("detected_as") or []) if _text(x))
                 if vendor_name and detected:
+                    # `confidence` is now the Tech Landscape score, 0-100, and a
+                    # legitimate score of 0 is falsy - `or "not stated"` would
+                    # have reported a card scored zero as one that was never
+                    # scored, which is the opposite of what it means.
+                    score = vendor.get("confidence")
+                    confidence_text = ("not stated" if score is None
+                                       else "%s%%" % _text(score))
                     out.append("%s detected at %s as %s (confidence: %s)." % (
                         vendor_name, company,
                         b.line(detected, field="detected_as", record_id=i,
                                dataset="technographics"),
-                        _text(vendor.get("confidence")) or "not stated"))
+                        confidence_text))
                 play = vendor.get("hp_play") or {}
                 if _text(play.get("play_text")):
                     out.append("HP play against %s: %s" % (

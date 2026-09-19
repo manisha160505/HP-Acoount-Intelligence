@@ -4280,9 +4280,13 @@ export default function UserDashboardPage() {
                                             )}
                                           </div>
 
+                                          {/* A whitespace card is HP's absence from the
+                                              category, not a technology detection, so it
+                                              carries no Tech Landscape confidence. Its
+                                              detection status is the honest thing to show. */}
                                           <div className="text-[9px] font-mono uppercase tracking-wider text-slate-400 border-t border-emerald-200/60 pt-2 flex items-center justify-between">
                                             <span className="truncate pr-2">{vendor.provenance}</span>
-                                            <span className="font-bold text-slate-500">{vendor.confidence}</span>
+                                            <span className="font-bold text-slate-500">{vendor.detection_status}</span>
                                           </div>
                                         </div>
                                       );
@@ -4337,11 +4341,23 @@ export default function UserDashboardPage() {
 
                                         <div className="text-[9px] font-mono uppercase tracking-wider text-slate-400 border-t border-slate-100 pt-2 flex items-center justify-between">
                                           <span className="truncate pr-2">{vendor.provenance}</span>
+                                          {/* The client's Tech Landscape confidence, 0-100.
+                                              Compared against null explicitly: a card can
+                                              legitimately score 0, and a falsy check would
+                                              hide it. The tooltip carries both drivers so
+                                              the number can be traced to the rule and the
+                                              intent category that produced it. */}
                                           <span
                                             className="font-bold text-slate-500 whitespace-nowrap"
-                                            title={vendor.evidence_basis || ''}
+                                            title={[
+                                              vendor.confidence_drivers?.technology_evidence?.basis,
+                                              vendor.confidence_drivers?.intent_support?.basis,
+                                              vendor.evidence_basis,
+                                            ].filter(Boolean).join(' · ')}
                                           >
-                                            {vendor.confidence}
+                                            {vendor.confidence != null
+                                              ? `${vendor.confidence}% confidence`
+                                              : vendor.detection_status}
                                           </span>
                                         </div>
                                       </div>

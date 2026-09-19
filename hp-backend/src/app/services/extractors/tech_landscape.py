@@ -9,6 +9,7 @@ from app.services.extractors.datasets import (
     read_dataset_records,
     requires_local_datasets,
 )
+from app.services.hp import tech_confidence as tconf
 
 logger = logging.getLogger(__name__)
 
@@ -142,7 +143,17 @@ def _normalise_hp_fields(categories: list, techno_row: dict | None = None) -> No
 
         for vendor in category.get("vendors") or []:
             is_whitespace = bool(vendor.get("is_whitespace"))
-            vendor["confidence"] = STATUS_UNKNOWN if is_whitespace else STATUS_CONFIRMED
+            # What this value has always meant: whether the vendor string was
+            # actually in the export, or arrived via a keyword rule. It is a
+            # statement about DETECTION, and it used to be called `confidence`.
+            #
+            # `confidence` now carries the client's Tech Landscape score, which
+            # answers a different question - whether the detected technology
+            # supports the HP opportunity printed beside it. Both are worth
+            # having, so the detection flag keeps its meaning under its own
+            # name rather than being overwritten by a number.
+            vendor["detection_status"] = (
+                STATUS_UNKNOWN if is_whitespace else STATUS_CONFIRMED)
             # Cite the entries actually matched. A generic "named in the
             # technographics install-base export" was attached to cards whose
             # named product was not in the export at all - Microsoft Intune on
@@ -164,7 +175,7 @@ def _normalise_hp_fields(categories: list, techno_row: dict | None = None) -> No
                 # Detected by a rule that did not record what it matched.
                 # Without the matched entry the claim cannot be substantiated,
                 # so it is Likely rather than Confirmed.
-                vendor["confidence"] = "Likely"
+                vendor["detection_status"] = "Likely"
                 vendor["evidence_basis"] = (
                     "matched a technographics keyword rule; the specific source "
                     "entry was not recorded")
@@ -187,6 +198,141 @@ def _normalise_hp_fields(categories: list, techno_row: dict | None = None) -> No
             # Filled by the inferred layer with an HP line and a one-line play,
             # or left absent when no rule supports one.
             vendor["hp_play"] = None
+
+
+# The HP line a card's play names, to the rulebook route Driver 1 scores
+# against. Only the two service routes are derivable from an HP line: a card
+# selling Wolf Security is asking a Wolf question, a Poly card a Poly question.
+# The hardware lines do not name a service route, and a card with no play names
+# nothing at all - both pass route=None, which asks the looser question "does
+# any HP rule recognise this technology" and reports which rule answered.
+#
+# Guessing a route for the hardware lines would put a rule id on a card that the
+# rulebook never connected to it.
+HP_PLAY_TO_ROUTE = {
+    "hp wolf security": tconf.ROUTE_WOLF,
+    "poly collaboration": tconf.ROUTE_POLY,
+}
+
+
+def _hp_category_intent(account_id: str) -> dict:
+    """`{HP category: intent score}` for this account, or `{}`.
+
+    Driver 2 reads the intent score for the card's own HP business category, and
+    the document is emphatic that it must be that category's own score and no
+    other. This returns the whole map so the caller picks per card rather than
+    passing a category down and hoping.
+
+    The `status == "matched"` gate is load-bearing: `_parse_category_file` finds
+    the account's row by domain, and any other status means the scores in the
+    file belong to somebody else. Returning `{}` then scores every card's
+    Driver 2 as "missing", which is the bottom band - it weakens cards, and
+    never suppresses one.
+    """
+    from app.services.extractors.datasets import account_domain, read_dataset_rows
+    from app.services.extractors.intent_demand_signals import _parse_category_file
+
+    try:
+        parsed = _parse_category_file(
+            read_dataset_rows(account_id, "hp_category_intent"),
+            account_domain(account_id))
+    except Exception:
+        logger.exception("tech landscape: could not read hp_category_intent for %s",
+                         account_id)
+        return {}
+
+    if parsed.get("status") != "matched":
+        logger.info("tech landscape: hp_category_intent not matched for %s (%s) - "
+                    "every card scores Driver 2 as missing",
+                    account_id, parsed.get("status"))
+        return {}
+
+    return {name: entry.get("score")
+            for name, entry in (parsed.get("categories") or {}).items()}
+
+
+def _score_card_confidence(categories: list, intent_scores: dict) -> dict:
+    """Attach the client's Tech Landscape confidence to every vendor card.
+
+    Runs AFTER `generate_map_narrative`, because Driver 1 is scored against the
+    HP opportunity on the card and `hp_play` is not populated until the
+    narrative layer has run. Scoring earlier would ask the question with the
+    answer missing.
+
+    Returns a report: how many cards were scored, and which were suppressed by
+    the document's guardrail. The suppression count is published rather than
+    silent - a card vanishing from a seller's screen should be explicable.
+    """
+    report = {"scored": 0, "suppressed": [], "formula": tconf.FORMULA,
+              "formula_authority": tconf.FORMULA_AUTHORITY,
+              "intent_scores_available": bool(intent_scores)}
+
+    for category in categories or []:
+        hp_category = tconf.hp_category_for(category.get("category_key") or "")
+        intent = intent_scores.get(hp_category) if hp_category else None
+        d2, d2_basis = tconf.driver_2_intent(intent, hp_category)
+
+        kept = []
+        for vendor in category.get("vendors") or []:
+            # A whitespace row is HP's own ABSENCE from a category - "no vendor
+            # confirmed here". It makes no technology claim, so Driver 1 has
+            # nothing to evaluate and the document's guardrail does not reach
+            # it: the guardrail suppresses a card whose technology evidence does
+            # not support its opportunity, and this card's point is that there
+            # is no technology to support.
+            #
+            # Scoring it anyway gave every whitespace row 0 and deleted it,
+            # which removed exactly the cards a seller most wants - the open
+            # opportunities. It carries no confidence rather than a false one.
+            if vendor.get("is_whitespace"):
+                vendor["confidence"] = None
+                vendor["confidence_drivers"] = {
+                    "not_scored": "HP's absence from this category is not a "
+                                  "technology detection, so the Tech Landscape "
+                                  "confidence does not apply to it",
+                }
+                kept.append(vendor)
+                continue
+
+            play = vendor.get("hp_play") or {}
+            product = str(play.get("product") or "").strip()
+            route = HP_PLAY_TO_ROUTE.get(product.lower())
+
+            # The HP opportunity this card is actually making. The play names it
+            # when the narrative layer found one; otherwise the category's own
+            # HP business line does. A category with neither - one the platform
+            # itself badges "no direct HP line" - offers nothing for a
+            # technology to be related TO, which is the document's 0.
+            hp_opportunity = product or hp_category
+
+            detected = [d for d in (vendor.get("detected_as") or []) if d]
+            if not detected:
+                detected = [vendor.get("vendor_name") or ""]
+
+            d1, d1_basis, matched = tconf.driver_1_for_card(
+                detected, route, hp_opportunity)
+
+            vendor["confidence"] = tconf.confidence(d1, d2)
+            vendor["confidence_drivers"] = {
+                "technology_evidence": {"score": d1, "weight": tconf.DRIVER_1_WEIGHT,
+                                        "basis": d1_basis, "matched_rule": matched},
+                "intent_support": {"score": d2, "weight": tconf.DRIVER_2_WEIGHT,
+                                   "basis": d2_basis, "hp_category": hp_category},
+            }
+
+            if tconf.is_publishable(d1):
+                report["scored"] += 1
+                kept.append(vendor)
+            else:
+                report["suppressed"].append({
+                    "category": category.get("category_key"),
+                    "vendor": vendor.get("vendor_name"),
+                    "reason": d1_basis,
+                })
+
+        category["vendors"] = kept
+
+    return report
 
 
 @requires_local_datasets(
@@ -647,6 +793,16 @@ def extract_tech_landscape(account_id: str) -> list[dict]:  # noqa: PLR0912, PLR
         logger.exception("tech landscape: map narrative generation failed for %s",
                          account_id)
 
+    # The client's Tech Landscape confidence. Last, because Driver 1 scores the
+    # technology against the HP opportunity on the card, and `hp_play` only
+    # exists once the narrative layer above has run.
+    confidence_report = _score_card_confidence(hp_categories,
+                                               _hp_category_intent(account_id))
+    if confidence_report["suppressed"]:
+        logger.info("tech landscape: %d card(s) suppressed for %s - no HP "
+                    "rulebook rule supports the detected technology",
+                    len(confidence_report["suppressed"]), account_id)
+
     strategic_read_text = narrative_report.get("strategic_read")
 
     # No hardcoded fallback: an account with no technographics has zero detected
@@ -698,9 +854,16 @@ def extract_tech_landscape(account_id: str) -> list[dict]:  # noqa: PLR0912, PLR
             # everything else in this widget is computed. Recorded so the
             # classification stays honest even though both live here.
             "narrative_source": "inferred",
-            "narrative_report": narrative_report
+            "narrative_report": narrative_report,
+            "confidence_report": confidence_report
         },
-        "source_datasets": ["technographics", "technology_detections", "webstack"],
+        # hp_category_intent feeds Driver 2 of the card confidence. It is NOT in
+        # `requires_local_datasets` on purpose: the client's document puts a
+        # missing intent score in the bottom band rather than treating it as an
+        # error, so an account without the file still gets a Tech Landscape -
+        # every card simply scores Driver 2 = 0.
+        "source_datasets": ["technographics", "technology_detections", "webstack",
+                            "hp_category_intent"],
         "extracted_at": now,
         "updated_at": now
     }
