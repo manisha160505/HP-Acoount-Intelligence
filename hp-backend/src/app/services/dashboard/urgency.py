@@ -75,17 +75,18 @@ import logging
 import re
 from datetime import UTC, date, datetime
 
+from app.config import scoring as _scoring
 from app.services.hp import intent_topic_map
 
 logger = logging.getLogger(__name__)
 
+# Every weight, band and cap below is loaded from config/scoring.yaml rather
+# than written here, so the client's numbers can be retuned without editing
+# this module. The names are unchanged, so nothing downstream moves.
+_CFG = _scoring.section("urgency")
+
 # HP_Urgency_Score_Updated_Final.pdf, "Overall scoring model".
-WEIGHTS = {
-    "workplace_os": 0.20,
-    "ai_workstation": 0.25,
-    "growth_expansion": 0.30,
-    "hp_solution_intent": 0.25,
-}
+WEIGHTS = _scoring.weights("urgency")
 
 DRIVER_LABELS = {
     "workplace_os": "Workplace Technology and OS Opportunity",
@@ -115,22 +116,19 @@ SCOPE_NOTE = (
     "assume access to PC brands, printer brands, device age, Windows version, "
     "warranty data or other unavailable account fields.")
 
-DRIVER_MAX = 100
+DRIVER_MAX = _CFG["driver_max"]
 
 # Job records are eligible only inside this window (PDF: "only records dated
 # within the latest 12 months are eligible for scoring"). The same window
 # governs news events in sections 2C and 3C.
-WINDOW_DAYS = 365
+WINDOW_DAYS = _CFG["window_days"]
 
 # --- 1. Workplace Technology and OS Opportunity (20%) -----------------------
 
 # A. Account scale - 30 points. Source A, 1_Firmographics, Number Of Employees
 # Range. Ladder position scores; no number is parsed out of the band string.
-EMPLOYEE_BANDS = (
-    ("50000+", 30), ("10001-49999", 25), ("5001-10000", 20),
-    ("1001-5000", 15), ("251-1000", 10), ("below250", 5),
-)
-ACCOUNT_SCALE_MAX = 30
+EMPLOYEE_BANDS = _scoring.bands("urgency", "employee_bands")
+ACCOUNT_SCALE_MAX = _CFG["account_scale_max"]
 
 # Aliases for how vendors actually spell these bands. Each maps to a band above.
 EMPLOYEE_BAND_ALIASES = {
@@ -143,7 +141,7 @@ EMPLOYEE_BAND_ALIASES = {
 }
 
 # B. OS environment - 40 points. Highest applicable rule wins.
-OS_ENVIRONMENT_MAX = 40
+OS_ENVIRONMENT_MAX = _CFG["os_environment_max"]
 OS_COMBINATION_POINTS = (
     (("linux", "windows"), 40),
     (("linux", "apple"), 35),
@@ -171,8 +169,8 @@ OS_FAMILIES = {
 # C. Workplace technology footprint - 30 points, banded on the COUNT of distinct
 # qualifying technologies. Capped: "an account with 12 qualifying technologies
 # still receives 30/30, not 12 x 5 = 60."
-WORKPLACE_FOOTPRINT_BANDS = ((5, 30), (3, 20), (1, 10))
-WORKPLACE_FOOTPRINT_MAX = 30
+WORKPLACE_FOOTPRINT_BANDS = _scoring.bands("urgency", "workplace_footprint_bands")
+WORKPLACE_FOOTPRINT_MAX = _CFG["workplace_footprint_max"]
 
 # The PDF's qualifying examples, encoded literally. A technology qualifies only
 # where the PDF names it or names its category; anything else does not count.
@@ -207,8 +205,12 @@ WORKPLACE_TECHNOLOGIES = {
 # --- 2. AI and Workstation Opportunity (25%) --------------------------------
 
 # A. Breadth - 35 points, on how many of the four core families are present.
-AI_BREADTH_POINTS = {4: 35, 3: 28, 2: 21, 1: 14, 0: 0}
-AI_BREADTH_MAX = 35
+# Keyed by how many core families were found, so the YAML's string keys are
+# converted back to ints here - a lookup by `len(families)` would otherwise
+# silently miss every time and score zero.
+AI_BREADTH_POINTS = {int(k): v for k, v in
+                     (_CFG.get("ai_breadth_points") or {}).items()}
+AI_BREADTH_MAX = _CFG["ai_breadth_max"]
 
 # "Similar terms are grouped into the same family and counted once."
 AI_CORE_FAMILIES = {
@@ -224,8 +226,8 @@ AI_FAMILY_ACRONYMS = {"ai", "ml", "llm", "vllm", "genai"}
 
 # A. Depth - 35 points, banded on the COUNT of distinct detailed evidence items
 # (detailed AI/ML intent signals + qualifying AI/ML technologies).
-AI_DEPTH_BANDS = ((20, 35), (15, 28), (10, 21), (5, 14), (1, 7))
-AI_DEPTH_MAX = 35
+AI_DEPTH_BANDS = _scoring.bands("urgency", "ai_depth_bands")
+AI_DEPTH_MAX = _CFG["ai_depth_max"]
 
 # "Qualifying technology examples include PyTorch, TensorFlow, Keras,
 # scikit-learn, Apache Spark MLlib and other technologies clearly identified as
@@ -251,12 +253,12 @@ AI_DEPTH_TERMS = (
 
 # B. Workstation intent - 15 points, linear on the score. hp_intent_results,
 # Workstations Intent Score: points = score / 100 x 15.
-WORKSTATION_INTENT_MAX = 15
+WORKSTATION_INTENT_MAX = _CFG["workstation_intent_max"]
 
 # C. Recent AI initiatives - 5 points per unique verified AI event in the last
 # 12 months, capped at 15.
-POINTS_PER_AI_EVENT = 5
-AI_EVENT_MAX = 15
+POINTS_PER_AI_EVENT = _CFG["points_per_ai_event"]
+AI_EVENT_MAX = _CFG["ai_event_max"]
 
 # "Qualifying events must explicitly concern AI, machine learning, generative
 # AI, large language models, an AI centre of excellence, AI infrastructure, or
@@ -274,16 +276,16 @@ AI_EVENT_TERMS = (
 # A. Workforce growth proxy - 25 points. Source B, extended_company,
 # social_stats, dated associated_members values. A LinkedIn proxy, not verified
 # headcount.
-GROWTH_BANDS = ((20.0, 25), (10.0, 20), (5.0, 15), (1.0, 7.5))
+GROWTH_BANDS = _scoring.bands("urgency", "growth_bands")
 GROWTH_MAX = 25
 
 # B. Recent hiring volume - 50 points, banded on eligible job records.
-HIRING_VOLUME_BANDS = ((200, 50), (100, 40), (50, 30), (20, 20), (5, 10))
-HIRING_VOLUME_MAX = 50
+HIRING_VOLUME_BANDS = _scoring.bands("urgency", "hiring_volume_bands")
+HIRING_VOLUME_MAX = _CFG["hiring_volume_max"]
 
 # C. Verified growth and expansion events - 10 points each, capped at 25.
-POINTS_PER_GROWTH_EVENT = 10
-GROWTH_EVENT_MAX = 25
+POINTS_PER_GROWTH_EVENT = _CFG["points_per_growth_event"]
+GROWTH_EVENT_MAX = _CFG["growth_event_max"]
 
 GROWTH_EVENT_TERMS = (
     "new office", "headquarters", "facility", "plant", "factory",
@@ -307,16 +309,13 @@ GROWTH_EVENT_EXCLUSIONS = (
 
 # Source: hp_intent_results. "Use the fields belonging to the highest-scoring HP
 # category."
-HP_CATEGORY_INTENT_MAX = 60      # A: score / 100 x 60
-INTENT_TREND_POINTS = {"increasing": 10, "stable": 5, "decreasing": 0}
-INTENT_TREND_MAX = 10            # B
-BUYING_STAGE_POINTS = {
-    "decision": 15, "purchase": 15, "decision or purchase": 15,
-    "consideration": 10, "awareness": 5, "no signal": 0,
-}
-BUYING_STAGE_MAX = 15            # C
-RESEARCH_VOLUME_POINTS = {"high": 15, "medium": 10, "low": 5}
-RESEARCH_VOLUME_MAX = 15         # D
+HP_CATEGORY_INTENT_MAX = _CFG["hp_category_intent_max"]      # A: score / 100 x 60
+INTENT_TREND_POINTS = _CFG["intent_trend_points"]
+INTENT_TREND_MAX = _CFG["intent_trend_max"]            # B
+BUYING_STAGE_POINTS = _CFG["buying_stage_points"]
+BUYING_STAGE_MAX = _CFG["buying_stage_max"]            # C
+RESEARCH_VOLUME_POINTS = _CFG["research_volume_points"]
+RESEARCH_VOLUME_MAX = _CFG["research_volume_max"]         # D
 
 # Terms that make a category's score untrustworthy as a *primary* signal: "SLA"
 # in a job posting is a service-level agreement, not stereolithography. A
@@ -993,6 +992,11 @@ def score(drivers: list, scored_on: date | None = None) -> dict:
         "missing_input_rule": MISSING_INPUT_RULE,
         "scope_note": SCOPE_NOTE,
         "client_agreed": True,
+        # The scoring config that produced this score. A startup sweep compares
+        # it against the current config and regenerates the widgets whose stamp
+        # no longer matches, so retuning a weight reaches the dashboard instead
+        # of leaving a score computed by rules that no longer exist.
+        "scoring_config_version": _scoring.version("urgency"),
     }
 
 

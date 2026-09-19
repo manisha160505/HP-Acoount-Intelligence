@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 
 from bson import ObjectId
 
+from app.config import scoring as _scoring
 from app.database.mongodb import get_db
 from app.services.extractors.datasets import (
     read_dataset_records,
@@ -265,7 +266,10 @@ def _score_card_confidence(categories: list, intent_scores: dict) -> dict:
     """
     report = {"scored": 0, "suppressed": [], "formula": tconf.FORMULA,
               "formula_authority": tconf.FORMULA_AUTHORITY,
-              "intent_scores_available": bool(intent_scores)}
+              "intent_scores_available": bool(intent_scores),
+              # See the note in urgency.py - this is what lets a weight change
+              # in config/scoring.yaml reach the cards.
+              "scoring_config_version": _scoring.version("tech_confidence")}
 
     for category in categories or []:
         hp_category = tconf.hp_category_for(category.get("category_key") or "")

@@ -1,0 +1,188 @@
+# Scoring weights and bands.
+#
+# Every number a client document fixes lives here rather than in the Python that
+# uses it, so it can be retuned without editing code. Loaded and validated at
+# startup by `app/config/scoring.py`.
+#
+# Three things to know before editing:
+#
+#   1. A `weights` block MUST sum to 1.0. The loader refuses to start otherwise -
+#      weights summing to 0.9 would put every score in that feature about 10%
+#      low, on every account, with nothing to show for it on screen.
+#
+#   2. A `*_bands` table is read FIRST MATCH WINS and must stay in descending
+#      order. Out of order it does not fail; it just returns the wrong row for
+#      every input, and the scores stay inside their normal range.
+#
+#   3. Changing a value here changes published scores. Each section is hashed,
+#      every scored widget records the hash that produced it, and the widgets
+#      whose stamp no longer matches are regenerated. So an edit takes effect -
+#      but only on restart, which is when this file is read.
+#
+# `authority` names the document a section's numbers came from. It is published
+# in the widget payload so a reader who doubts a score can find the page it was
+# decided on. Editing a value without updating its authority makes that citation
+# a lie.
+
+
+# ============================================================================
+# Four weighted drivers, each scored out of 100, combined into one 0-100 score.
+# Astra's worked example in the source document resolves to 64.43 before
+# rounding; `tests/test_urgency.py` pins that arithmetic and the individual
+# driver values, so an edit here shows up as a test diff rather than a silent
+# change on the dashboard.
+# ============================================================================
+urgency:
+  authority: "HP_Urgency_Score_Updated_Final.docx, 'HP Account Urgency Score Final Logic', supplied by the client."
+  weights:
+    workplace_os: 0.2
+    ai_workstation: 0.25
+    growth_expansion: 0.3
+    hp_solution_intent: 0.25
+  driver_max: 100
+  window_days: 365
+  employee_bands:
+    - ["50000+", 30]
+    - ["10001-49999", 25]
+    - ["5001-10000", 20]
+    - ["1001-5000", 15]
+    - ["251-1000", 10]
+    - ["below250", 5]
+  account_scale_max: 30
+  os_environment_max: 40
+  workplace_footprint_bands:
+    - [5, 30]
+    - [3, 20]
+    - [1, 10]
+  workplace_footprint_max: 30
+  ai_breadth_points:
+    4: 35
+    3: 28
+    2: 21
+    1: 14
+    0: 0
+  ai_breadth_max: 35
+  ai_depth_bands:
+    - [20, 35]
+    - [15, 28]
+    - [10, 21]
+    - [5, 14]
+    - [1, 7]
+  ai_depth_max: 35
+  workstation_intent_max: 15
+  points_per_ai_event: 5
+  ai_event_max: 15
+  growth_bands:
+    - [20.0, 25]
+    - [10.0, 20]
+    - [5.0, 15]
+    - [1.0, 7.5]
+  hiring_volume_bands:
+    - [200, 50]
+    - [100, 40]
+    - [50, 30]
+    - [20, 20]
+    - [5, 10]
+  hiring_volume_max: 50
+  points_per_growth_event: 10
+  growth_event_max: 25
+  hp_category_intent_max: 60
+  intent_trend_points:
+    increasing: 10
+    stable: 5
+    decreasing: 0
+  intent_trend_max: 10
+  buying_stage_points:
+    decision: 15
+    purchase: 15
+    decision or purchase: 15
+    consideration: 10
+    awareness: 5
+    no signal: 0
+  buying_stage_max: 15
+  research_volume_points:
+    high: 15
+    medium: 10
+    low: 5
+  research_volume_max: 15
+
+# ============================================================================
+# Three drivers for news and event signals. Recency and source reliability are
+# computed in Python from these bands; only relevance is judged by the model.
+#
+# `tier_thresholds`, `min_confidence_to_publish`, `max_signals` and
+# `dedup_similarity` are NOT in the client document - it defines no tier and no
+# publish floor. They are delivery decisions, kept because the tier renders as a
+# badge on every signal card and the floor is what keeps undated signals with
+# untraceable sources off the dashboard. Removing them is a product decision.
+# ============================================================================
+live_signal:
+  authority: "HP_Live_Signal_Scoring_Logic.docx, supplied by the client."
+  weights:
+    recency: 0.3
+    relevance_impact: 0.5
+    source_reliability: 0.2
+  driver_max: 10
+  recency_bands:
+    - [7, 10]
+    - [30, 8]
+    - [90, 6]
+    - [180, 4]
+    - [365, 2]
+  recency_over_max: 0
+  recency_no_date: 0
+  source_first_party: 10
+  source_established: 8
+  source_structured: 6
+  source_weak: 3
+  source_unverifiable: 0
+  tier_thresholds:
+    - [8.0, "S"]
+    - [6.0, "A"]
+    - [4.0, "B"]
+    - [2.0, "C"]
+  min_confidence_to_publish: 2.0
+  max_signals: 20
+  dedup_similarity: 0.85
+
+# ============================================================================
+# Two drivers for each Technographic Map card, each scored 0, 5 or 10.
+#
+# Note `no_fit: 0` is not merely a low score - a card whose technology driver is
+# 0 is not created at all, per the document's mandatory guardrail. Changing
+# `related_fit` or `direct_fit` changes what appears on screen, not just the
+# number printed on it.
+# ============================================================================
+tech_confidence:
+  authority: "HP_Tech_Landscape_Confidence_Scoring_Logic_FINAL.docx, supplied by the client."
+  weights:
+    technology_evidence: 0.7
+    intent_support: 0.3
+  driver_scale: 10
+  direct_fit: 10
+  related_fit: 5
+  no_fit: 0
+  intent_bands:
+    - [50, 10]
+    - [25, 5]
+  intent_below_bands: 0
+
+# ============================================================================
+# Three additive terms behind the catalyst confidence on the Executive
+# Dashboard. Unlike the other sections these are delivery-authored: the ABX
+# source weights four counts with no stated normalisation, so this formula was
+# written to be computable. `evidence_strength.py` documents that reasoning.
+# ============================================================================
+evidence_strength:
+  authority: "ABX Feature 1 evidence-strength terms, as implemented in evidence_strength.py."
+  points_per_filing: 5
+  max_filing_points: 25
+  recency_bands:
+    - [12, 25]
+    - [24, 20]
+    - [36, 15]
+    - [60, 10]
+  recency_beyond_bands: 5
+  recency_no_date: 0
+  points_per_category: 10
+  max_diversity_points: 50

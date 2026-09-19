@@ -32,7 +32,8 @@ export type DatasetKey =
   | 'connections'
   | 'subpages'
   | 'similar_companies'
-  | 'google_news';
+  | 'google_news'
+  | 'compliance_filings';
 
 export interface AccountDataFile {
   id: string;
@@ -95,7 +96,15 @@ export const DATASET_REGISTRY_LIST: DatasetRegistryItem[] = [
   // 6. News & Live Signals (Multi-File)
   { key: 'news_events', display_name: 'News & Events', type: 'multi_file', group: 'News & Live Signals', description: 'Primary news articles, PR releases, leadership changes, and expansion announcements (Multi-file CSV)', allowed_extensions: ['.csv'] },
   { key: 'news_events_additional', display_name: 'News & Events (Additional)', type: 'multi_file', group: 'News & Live Signals', description: 'Supplemental news feeds, market updates, and additional press coverage (Multi-file CSV)', allowed_extensions: ['.csv'] },
-  { key: 'google_news', display_name: 'Google News', type: 'multi_file', group: 'News & Live Signals', description: 'Google News RSS feeds and search results (Multi-file Excel .xlsx / .csv)', allowed_extensions: ['.xlsx', '.xls', '.csv'] }
+  { key: 'google_news', display_name: 'Google News', type: 'multi_file', group: 'News & Live Signals', description: 'Google News RSS feeds and search results (Multi-file Excel .xlsx / .csv)', allowed_extensions: ['.xlsx', '.xls', '.csv'] },
+
+  // 7. Filed Documents
+  // The only PDF dataset, and the only source of reported financial figures -
+  // every other dataset carries a band or a category, this one carries the
+  // number the company published. It was declared on the backend and read in
+  // five places, but had no slot here, so the dashboard told sellers to upload
+  // filings with no way to do it.
+  { key: 'compliance_filings', display_name: 'Compliance Filings', type: 'multi_file', group: 'Filed Documents', description: "The account's filed documents - annual reports, exchange filings, market reports. The source of reported financial figures, quoted with their period, unit and page (Multi-file PDF)", allowed_extensions: ['.pdf'] }
 ];
 
 export interface AccountInstructions {

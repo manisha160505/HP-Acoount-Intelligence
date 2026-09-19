@@ -53,17 +53,19 @@ import re
 from datetime import UTC, datetime
 from urllib.parse import parse_qs, unquote, urlparse
 
+from app.config import scoring as _scoring
+
+# Weights and bands come from config/scoring.yaml so the client's numbers can
+# be retuned without editing this module.
+_CFG = _scoring.section("live_signal")
+
 # ==============================================================================
 # Driver weights. Python owns the composite - the model is never asked for it.
 # ==============================================================================
 
-WEIGHTS = {
-    "recency": 0.30,
-    "relevance_impact": 0.50,
-    "source_reliability": 0.20,
-}
+WEIGHTS = _scoring.weights("live_signal")
 
-DRIVER_MAX = 10
+DRIVER_MAX = _CFG["driver_max"]
 
 # The specification's authority string, published so a reader can trace a score
 # back to the document that defines it.
@@ -78,17 +80,11 @@ FORMULA_AUTHORITY = "HP_Live_Signal_Scoring_Logic.docx"
 # "Age of individual Live Signal | Recency score", verbatim from the
 # specification. Read as (maximum age in days, points); the first row whose
 # bound the age satisfies wins.
-RECENCY_BANDS = (
-    (7, 10),
-    (30, 8),
-    (90, 6),
-    (180, 4),
-    (365, 2),
-)
-RECENCY_OVER_365 = 0
+RECENCY_BANDS = _scoring.bands("live_signal", "recency_bands")
+RECENCY_OVER_365 = _CFG["recency_over_max"]
 
 # "No usable date | 0/10". Scored, not suppressed, and not treated as recent.
-RECENCY_NO_DATE = 0
+RECENCY_NO_DATE = _CFG["recency_no_date"]
 
 
 def recency_points(event_dt: datetime | None, now: datetime | None = None) -> tuple[int, str]:
@@ -122,11 +118,11 @@ def recency_points(event_dt: datetime | None, now: datetime | None = None) -> tu
 # Driver 3 - Source Reliability (20%)
 # ==============================================================================
 
-FIRST_PARTY = 10
-ESTABLISHED_REPORTING = 8
-STRUCTURED_THIRD_PARTY = 6
-WEAK_SECONDARY = 3
-UNVERIFIABLE = 0
+FIRST_PARTY = _CFG["source_first_party"]
+ESTABLISHED_REPORTING = _CFG["source_established"]
+STRUCTURED_THIRD_PARTY = _CFG["source_structured"]
+WEAK_SECONDARY = _CFG["source_weak"]
+UNVERIFIABLE = _CFG["source_unverifiable"]
 
 # A domain nobody has classified. Distinct from UNVERIFIABLE, which means there
 # is no source at all - an unrecognised publisher is a gap in this table, not
@@ -503,6 +499,25 @@ def source_reliability_points(
 # The composite. Python owns it; the model is never asked for a total.
 # ==============================================================================
 
+# ==============================================================================
+# Publishing rules. NOT from the specification - it defines neither a tier nor a
+# floor - so these are delivery decisions, kept deliberately:
+#
+#   the tier renders as a badge on every signal card, and
+#   the floor is what keeps a signal with no date and no traceable source off
+#   the dashboard, which the specification would otherwise allow at 5.0/10.
+#
+# They live in the same config section as the weights so they are retunable
+# together, and they are declared here rather than in `recent_news_signals.py`
+# so the whole scoring contract is in one module.
+# ==============================================================================
+
+TIER_THRESHOLDS = _scoring.bands("live_signal", "tier_thresholds")
+MIN_CONFIDENCE_TO_PUBLISH = _CFG["min_confidence_to_publish"]
+MAX_SIGNALS = _CFG["max_signals"]
+DEDUP_SIMILARITY = _CFG["dedup_similarity"]
+
+
 def composite(recency: float, relevance_impact: float, source_reliability: float) -> float:
     """The weighted total, out of 10, rounded once for display.
 
@@ -514,3 +529,14 @@ def composite(recency: float, relevance_impact: float, source_reliability: float
              + float(relevance_impact) * WEIGHTS["relevance_impact"]
              + float(source_reliability) * WEIGHTS["source_reliability"])
     return round(total, 2)
+
+
+def version_stamp() -> str:
+    """The scoring config this module is currently running.
+
+    Recorded on every widget it scores. A startup sweep compares the stamp
+    against the live config and regenerates what no longer matches - the
+    mechanism that makes an edit to `config/scoring.yaml` actually reach the
+    dashboard.
+    """
+    return _scoring.version("live_signal")

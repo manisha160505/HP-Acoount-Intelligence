@@ -14,7 +14,13 @@ FEATURE_MAPPINGS = {
         "feature_key": "executive_dashboard",
         "display_name": "Executive Dashboard",
         "purpose": "Executive summary of target company identity, size, financial health, corporate hierarchy, and hiring velocity",
-        "dependent_datasets": ["firmographics", "company_hierarchy", "job_openings"],
+        # compliance_filings drives regeneration for this feature. It was read
+        # by the code but declared by no feature, and `_features_for_dataset`
+        # builds the regeneration list from exactly this key - so uploading a
+        # filing rebuilt nothing. The client's file-usage mapping names this
+        # feature as one of the five it feeds.
+        "dependent_datasets": ["firmographics", "company_hierarchy", "job_openings",
+                               "compliance_filings"],
         "mapped_fields": [
             {
                 "field_key": "company_name",
@@ -103,7 +109,12 @@ FEATURE_MAPPINGS = {
         "feature_key": "recent_news_signals",
         "display_name": "Recent News Signals",
         "purpose": "Live event signals, leadership changes, M&A, financing, and recent expansion events",
-        "dependent_datasets": ["google_news", "news_events"],
+        # compliance_filings drives regeneration for this feature. It was read
+        # by the code but declared by no feature, and `_features_for_dataset`
+        # builds the regeneration list from exactly this key - so uploading a
+        # filing rebuilt nothing. The client's file-usage mapping names this
+        # feature as one of the five it feeds.
+        "dependent_datasets": ["google_news", "news_events", "compliance_filings"],
         "mapped_fields": [
             {
                 "field_key": "event_headline",
@@ -375,7 +386,13 @@ FEATURE_MAPPINGS = {
         "feature_key": "solution_narrative_opportunity_map",
         "display_name": "Solution Narrative / Opportunity Map",
         "purpose": "Maps customer triggers and tech environment to HP business outcomes and product opportunities",
-        "dependent_datasets": ["firmographics", "technographics", "intent_score", "google_news", "news_events", "prospect_contacts"],
+        # compliance_filings drives regeneration for this feature. It was read
+        # by the code but declared by no feature, and `_features_for_dataset`
+        # builds the regeneration list from exactly this key - so uploading a
+        # filing rebuilt nothing. The client's file-usage mapping names this
+        # feature as one of the five it feeds.
+        "dependent_datasets": ["firmographics", "technographics", "intent_score", "google_news", "news_events", "prospect_contacts",
+                               "compliance_filings"],
         "mapped_fields": [
             {
                 "field_key": "account_evidence",
@@ -632,7 +649,13 @@ FEATURE_MAPPINGS = {
         "feature_key": "strategy_chat",
         "display_name": "Strategy Chat",
         "purpose": "Interactive account strategy Q&A grounded in full cached account snapshot",
-        "dependent_datasets": ["firmographics", "company_hierarchy", "technographics", "webstack", "job_openings", "google_news", "news_events", "intent_score", "technology_detections"],
+        # compliance_filings drives regeneration for this feature. It was read
+        # by the code but declared by no feature, and `_features_for_dataset`
+        # builds the regeneration list from exactly this key - so uploading a
+        # filing rebuilt nothing. The client's file-usage mapping names this
+        # feature as one of the five it feeds.
+        "dependent_datasets": ["firmographics", "company_hierarchy", "technographics", "webstack", "job_openings", "google_news", "news_events", "intent_score", "technology_detections",
+                               "compliance_filings"],
         "mapped_fields": [
             {
                 "field_key": "firmographics_context",
@@ -756,7 +779,13 @@ FEATURE_MAPPINGS = {
         "feature_key": "content_messaging",
         "display_name": "Content Messaging",
         "purpose": "Constructs core messaging pillars (challenge, benefit, proof points) tailored to the account",
-        "dependent_datasets": ["firmographics", "technographics", "intent_score", "google_news", "news_events"],
+        # compliance_filings drives regeneration for this feature. It was read
+        # by the code but declared by no feature, and `_features_for_dataset`
+        # builds the regeneration list from exactly this key - so uploading a
+        # filing rebuilt nothing. The client's file-usage mapping names this
+        # feature as one of the five it feeds.
+        "dependent_datasets": ["firmographics", "technographics", "intent_score", "google_news", "news_events",
+                               "compliance_filings"],
         "mapped_fields": [
             {
                 "field_key": "business_description",
