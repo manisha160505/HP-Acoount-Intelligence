@@ -1775,11 +1775,18 @@ def _strategy_opportunity_documents(db, account_id, index, company) -> list:
                     source_url=_text(play.get("hp_resource_url")),
                     dataset="hp_product_knowledge"))
 
+            # A published HP case study, not a deck fact. It used to be filed
+            # under `hp_product_knowledge`, which is the CONFIDENTIAL deck
+            # collection - so a seller asking the chat where a claim came from
+            # was told it came from a deck they could not share. It lives in
+            # `hp_case_studies`, and the public hp.com page is cited with it.
             proof = _text(play.get("hp_proof_point"))
             if proof:
+                detail = play.get("hp_proof_point_detail") or {}
                 out.append("HP proof point: %s" % b.line(
                     proof, field="hp_proof_point", record_id=play.get("play_key"),
-                    dataset="hp_product_knowledge"))
+                    source_url=_text(detail.get("source_url")),
+                    dataset="hp_case_studies"))
 
             # `statement` is the sentence and `quote` the cell it was read from.
             # An earlier version looked for a "text" key, which does not exist,
@@ -1825,12 +1832,22 @@ def _strategy_opportunity_documents(db, account_id, index, company) -> list:
             for field, label in (("reframe", "How to reframe it"),
                                  ("counter_question", "Counter question"),
                                  ("why_expected", "Why this objection is expected"),
-                                 ("recommended_next_step", "Recommended next step"),
-                                 ("hp_proof_point", "HP proof point")):
+                                 ("recommended_next_step", "Recommended next step")):
                 value = _text(card.get(field))
                 if value:
                     out.append("%s: %s" % (label, b.line(
                         value, field=field, record_id=card.get("card_id"))))
+
+            # Cited to its own public page and its own collection, for the same
+            # reason as the opportunity play above: it is a fact about another
+            # HP customer, not about this account and not from a deck.
+            proof = _text(card.get("hp_proof_point"))
+            if proof:
+                detail = card.get("hp_proof_point_detail") or {}
+                out.append("HP proof point: %s" % b.line(
+                    proof, field="hp_proof_point", record_id=card.get("card_id"),
+                    source_url=_text(detail.get("source_url")),
+                    dataset="hp_case_studies"))
             if area:
                 raiser = _text(area.get("likely_raiser"))
                 # `_resolve_likely_raiser` falls back to the area's own name

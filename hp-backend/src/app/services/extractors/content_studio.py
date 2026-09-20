@@ -34,6 +34,7 @@ from app.services.extractors.stakeholder_map import (
     score_hp_relevance,
     seniority_band,
 )
+from app.services.hp import case_studies as cs
 
 logger = logging.getLogger(__name__)
 
@@ -319,7 +320,12 @@ def _read_dataset_records(account_id: str, dataset_key: str) -> list[dict]:
 # takes seller input; the other four key on the account's data alone.
 
 # Bump when the prompt changes so cached assets are regenerated.
-CONTENT_PROMPT_VERSION = "2026-09-16.9"
+CONTENT_PROMPT_VERSION = "2026-09-17.1"    # HP case studies fill the Proof Points section
+
+# The one mandated section an HP case study belongs in. Named rather than
+# repeated, because the contract, the fallback template and the attach all have
+# to agree on the exact string or the section is silently never found.
+PROOF_POINTS_HEADING = "Proof Points"
 ASSET_HISTORY_MAX = 20
 RETRY_ROUNDS = 2
 TOPIC_MAX_CHARS = 200
@@ -386,7 +392,8 @@ CONTENT_TYPE_CONTRACTS = {
         # The order is mandated, so the headings are fixed rather than left to
         # the model, and `required_headings` re-checks what came back.
         "sections": (4, 4),
-        "required_headings": ["Account Challenge", "How HP Helps", "Proof Points", "Next Step"],
+        "required_headings": ["Account Challenge", "How HP Helps",
+                              PROOF_POINTS_HEADING, "Next Step"],
         "shape": ("A one-page solution overview for the account. headline; opening summary paragraph; "
                   "EXACTLY 4 body_sections, each WITH a heading, and the headings must be exactly "
                   "these four in this order: 'Account Challenge' (the situation the evidence shows); "
@@ -622,7 +629,8 @@ def _persona_rule(kind: str, company_name: str, contract: dict) -> str:
 
 def _request_fingerprint(evidence_cells: list[str], persona: dict, content_type: str,
                          topic: str, additional_context: str,
-                         instructions_text: str, guardrails_text: str) -> str:
+                         instructions_text: str, guardrails_text: str,
+                         case_studies_version: str = "") -> str:
     # The account team's instructions and guardrails are part of the key, so an
     # edit to them regenerates on the next request instead of serving the cache.
     payload = {
@@ -634,6 +642,9 @@ def _request_fingerprint(evidence_cells: list[str], persona: dict, content_type:
         "context": additional_context.strip().lower(),
         "instructions": instructions_text.strip(),
         "guardrails": guardrails_text.strip(),
+        # A one-pager stores the case study in its Proof Points section, so
+        # reloading the corpus has to rebuild the assets that quote it.
+        "case_studies_version": case_studies_version,
     }
     return hashlib.sha256(
         json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
@@ -1025,15 +1036,62 @@ def _safe_fallback_asset(contract: dict, persona: dict, company_name: str, topic
         # A headed format needs its mandated sections; the template fills the
         # ones it can stand behind and says nothing it cannot.
         req = contract.get("required_headings") or ["Account Challenge", "How HP Helps",
-                                                    "Proof Points", "Next Step"]
+                                                    PROOF_POINTS_HEADING, "Next Step"]
         texts = {
             "Account Challenge": trigger,
             "How HP Helps": body,
-            "Proof Points": "No HP proof point is attached to this account yet.",
+            PROOF_POINTS_HEADING: "No HP proof point is attached to this account yet.",
             "Next Step": cta,
         }
         asset["body_sections"] = [{"heading": h, "text": texts.get(h, body)} for h in req]
     return asset
+
+
+def _attach_proof_point(asset: dict, proof: dict, contract: dict) -> None:
+    """Put an HP case study on a written asset, in place.
+
+    The model does not choose this and is never shown one. It cannot be: rule 4
+    makes the HP line something the model has to EARN from the persona's remit
+    and the account evidence, so the line is not known until after it has
+    written. Handing it a case study up front would be handing it the product to
+    work backwards from, which is the failure that rule exists to prevent.
+
+    So the study is chosen afterwards, from the line the model settled on, and
+    attached by Python. Its sentence was verified against its own source when
+    the corpus was loaded, so nothing here needs re-checking against this
+    account's data - and must not be, since a case study is about a different
+    company entirely.
+
+    Where the format mandates a "Proof Points" section, that section's text is
+    replaced. The contract tells the model to write account evidence there "if
+    no HP proof point is available"; one now is, so the placeholder gives way.
+    The swap is skipped if it would push the copy past the format's word limit,
+    because that limit is a spec rule rather than a preference.
+    """
+    asset["hp_proof_point"] = proof["text"]
+    asset["hp_proof_point_detail"] = proof
+
+    headings = contract.get("required_headings") or []
+    if PROOF_POINTS_HEADING not in headings:
+        return
+
+    sections = asset.get("body_sections") or []
+    target = next((s for s in sections
+                   if str(s.get("heading") or "").strip() == PROOF_POINTS_HEADING), None)
+    if not target:
+        return
+
+    _wmin, wmax = contract.get("words") or (None, None)
+    if wmax:
+        counted = [asset.get("headline") or "", asset.get("opening") or "",
+                   asset.get("cta") or ""]
+        counted += [proof["text"] if sec is target else (sec.get("text") or "")
+                    for sec in sections]
+        counted += [sec.get("heading") or "" for sec in sections]
+        if len(" ".join(t for t in counted if t).split()) > wmax:
+            return
+
+    target["text"] = proof["text"]
 
 
 def _compose_greeting(persona: dict, contract: dict) -> str:
@@ -1157,7 +1215,8 @@ def _build_generation_context(db, account_id: str, persona_id: str, content_type
             banned_names.append(n)
 
     fingerprint = _request_fingerprint(list(labels.values()), persona, content_type, topic, additional_context,
-                                       instructions_text, guardrails_text)
+                                       instructions_text, guardrails_text,
+                                       cs.knowledge_version(db))
 
     return {
         "contract": contract, "persona": persona, "company_name": company_name,
@@ -1167,6 +1226,10 @@ def _build_generation_context(db, account_id: str, persona_id: str, content_type
         "instructions_text": instructions_text, "guardrails_text": guardrails_text,
         "topic": topic, "additional_context": additional_context,
         "content_type": content_type,
+        # Only used to rank case studies. It is never a justification in the
+        # copy - rule 2b forbids that - so it is carried separately from the
+        # evidence block the model reads.
+        "industry": _firmo_industry(firmo_records[0]) if firmo_records else "",
     }
 
 
@@ -1456,6 +1519,23 @@ def generate_content_asset(account_id: str, persona_id: str, content_type: str,
         variants = []
     else:
         is_fallback = False
+
+    # An HP case study for the line the model earned. Attached to the primary
+    # asset and to every variant, so a seller comparing LinkedIn drafts sees the
+    # same reference on each rather than one arbitrary draft carrying it.
+    #
+    # Skipped for the deterministic fallback: that template exists because
+    # generation failed its checks, and it names no HP line to match against.
+    if not is_fallback:
+        proof_lines: list[str] = []
+        for product in asset.get("hp_products") or []:
+            proof_lines.extend(line for line in cs.lines_for_hp_line(product)
+                               if line not in proof_lines)
+        proof = cs.proof_point_for(
+            db, proof_lines, industry=cs.normalise_industry(ctx.get("industry") or ""))
+        if proof:
+            for written in [asset, *[v["asset"] for v in variants]]:
+                _attach_proof_point(written, proof, contract)
 
     record = {
         "asset_id": fingerprint[:16],

@@ -34,6 +34,7 @@ import {
   Package,
   MessageSquare,
   HelpCircle,
+  Award,
   CheckSquare,
   Megaphone,
   TrendingUp,
@@ -3038,11 +3039,15 @@ export default function UserDashboardPage() {
                               {discoveryAreas.length} additional discovery {discoveryAreas.length === 1 ? 'area' : 'areas'} identified &mdash; listed separately below, not presented as HP opportunities.
                             </p>
                           )}
-                          {/* Stated once here rather than repeated on every card. */}
+                          {/* Stated once here rather than repeated on every card.
+                              The first sentence used to say no proof-point source was
+                              connected; HP's published case studies now are. The second
+                              is unchanged and still matters. */}
                           <p className="text-[11px] text-slate-400 mt-1 max-w-3xl leading-relaxed">
-                            HP proof points and case studies are not shown: no HP proof-point source is
-                            connected to this system. The HP links on each play are product reference
-                            pages, not evidence about this account.
+                            Proof points are published HP case studies about other customers, shown
+                            only where one supports an HP product this play already names. The HP
+                            links on each play are product reference pages, not evidence about this
+                            account, and a play without a proof point simply has none in the corpus.
                           </p>
                         </div>
 
@@ -3168,17 +3173,49 @@ export default function UserDashboardPage() {
                                               <Globe className="w-3 h-3 text-emerald-600" />
                                               <span>HP &#8599;</span>
                                             </a>
-                                            {/* An HP proof point, when one can ever be sourced. No HP
-                                                proof corpus is connected, so this stays empty and the
-                                                reason is stated once in the section header instead of
-                                                repeated on every card. */}
-                                            {play.hp_proof_point && (
-                                              <span className="text-[11px] text-slate-600">{play.hp_proof_point}</span>
-                                            )}
                                           </div>
                                         </div>
                                       )}
                                     </div>
+
+                                    {/* HP PROOF POINT. A published HP case study about another
+                                        customer, chosen in Python from the HP products this play
+                                        already names - never written by the model, and never
+                                        evidence about this account. The customer and the link are
+                                        the point: this is the one place a seller can cite a public
+                                        HP source to a customer. Most plays carry none, which is the
+                                        correct answer rather than a gap. */}
+                                    {play.hp_proof_point && (
+                                      <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                                        <div className="flex items-center gap-2 mb-2">
+                                          <Award className="w-4 h-4 text-amber-600" />
+                                          <p className="text-xs font-semibold text-amber-700 uppercase tracking-wider">
+                                            HP Proof Point
+                                          </p>
+                                        </div>
+                                        <p className="text-sm text-amber-900 leading-relaxed">{play.hp_proof_point}</p>
+                                        {play.hp_proof_point_detail && (
+                                          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-amber-700">
+                                            <span className="font-semibold">{play.hp_proof_point_detail.customer}</span>
+                                            {play.hp_proof_point_detail.industry && (
+                                              <span>{play.hp_proof_point_detail.industry}</span>
+                                            )}
+                                            {/* `hp_product` is deliberately NOT shown - see the
+                                                objection card for why the tag contradicts the text. */}
+                                            {play.hp_proof_point_detail.source_url && (
+                                              <a
+                                                href={play.hp_proof_point_detail.source_url}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="underline hover:text-amber-900"
+                                              >
+                                                View the HP case study
+                                              </a>
+                                            )}
+                                          </div>
+                                        )}
+                                      </div>
+                                    )}
 
                                     <div className="border-t border-slate-100"></div>
 
@@ -5455,6 +5492,50 @@ export default function UserDashboardPage() {
                                       <p className="text-sm text-purple-900 italic">&ldquo;{card.counter_question}&rdquo;</p>
                                     </div>
 
+                                    {/* An HP customer who already did this. Rendered only when the
+                                        case-study corpus actually holds one for this area - the
+                                        corpus has no Poly or collaboration study, so those cards
+                                        correctly show nothing rather than a placeholder. The named
+                                        customer and the link are the point: this is the one place a
+                                        seller can cite a public HP source to a customer. */}
+                                    {card.hp_proof_point && (
+                                      <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                                        <div className="flex items-center gap-2 mb-2">
+                                          <Award className="w-4 h-4 text-amber-600" />
+                                          <p className="text-xs font-semibold text-amber-700 uppercase tracking-wider">
+                                            HP Proof Point
+                                          </p>
+                                        </div>
+                                        <p className="text-sm text-amber-900 leading-relaxed">{card.hp_proof_point}</p>
+                                        {card.hp_proof_point_detail && (
+                                          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-amber-700">
+                                            <span className="font-semibold">{card.hp_proof_point_detail.customer}</span>
+                                            {card.hp_proof_point_detail.industry && (
+                                              <span>{card.hp_proof_point_detail.industry}</span>
+                                            )}
+                                            {/* `hp_product` is deliberately NOT shown. It is the
+                                                tag HP filed the study under and it is how we found
+                                                it, but it often disagrees with what the study is
+                                                about - the Universidad Andrés Bello story is
+                                                tagged "HP EliteBook" and is entirely about HP
+                                                Managed Device Services. The headline above already
+                                                names the offering, from the study's own text, so
+                                                printing the tag beside it only contradicts it. */}
+                                            {card.hp_proof_point_detail.source_url && (
+                                              <a
+                                                href={card.hp_proof_point_detail.source_url}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="underline hover:text-amber-900"
+                                              >
+                                                View the HP case study
+                                              </a>
+                                            )}
+                                          </div>
+                                        )}
+                                      </div>
+                                    )}
+
                                     <div className="bg-slate-100 border border-slate-200 rounded-lg p-3 flex items-start gap-2">
                                       <User className="w-4 h-4 text-slate-500 flex-shrink-0 mt-0.5" />
                                       <p className="text-xs text-slate-600 leading-relaxed">
@@ -5805,6 +5886,40 @@ export default function UserDashboardPage() {
                                             </ul>
                                           )}
                                         </div>
+
+                                        {/* An HP customer story for the lines this pillar
+                                            names. Separate from the proof points above, which
+                                            are facts about THIS account resolved by evidence
+                                            id - this one is about a different company, and
+                                            says so by naming them. */}
+                                        {p.hp_proof_point && (
+                                          <div className="border-t border-slate-200 mt-4 pt-4">
+                                            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-amber-700 mb-2 flex items-center gap-1.5">
+                                              <Award className="w-3.5 h-3.5" />
+                                              HP customer proof point
+                                            </p>
+                                            <p className="text-[13px] text-slate-700 leading-[1.7]">{p.hp_proof_point}</p>
+                                            {p.hp_proof_point_detail && (
+                                              <p className="mt-1.5 text-[11px] text-slate-500">
+                                                {p.hp_proof_point_detail.customer}
+                                                {p.hp_proof_point_detail.industry && ` · ${p.hp_proof_point_detail.industry}`}
+                                                {p.hp_proof_point_detail.source_url && (
+                                                  <>
+                                                    {' · '}
+                                                    <a
+                                                      href={p.hp_proof_point_detail.source_url}
+                                                      target="_blank"
+                                                      rel="noopener noreferrer"
+                                                      className="underline hover:text-hp-navy"
+                                                    >
+                                                      View the HP case study
+                                                    </a>
+                                                  </>
+                                                )}
+                                              </p>
+                                            )}
+                                          </div>
+                                        )}
 
                                         {(p.target_role || p.next_step) && (
                                           <div className="border-t border-slate-200 mt-4 pt-3 text-[12px] text-slate-600 space-y-0.5">
@@ -6540,6 +6655,29 @@ export default function UserDashboardPage() {
                                   </div>
                                   {generatedAsset.persona?.kind === 'role_proxy' && (
                                     <div className="text-amber-800">Role-type proxy from open hiring — no individual is known to hold this role.</div>
+                                  )}
+                                  {/* Where the Proof Points section came from. The sentence
+                                      itself is already in the copy above; what a seller needs
+                                      here is the customer and the public HP page behind it,
+                                      so the claim can be checked before it is sent. */}
+                                  {g.hp_proof_point_detail && (
+                                    <div className="text-slate-600">
+                                      Proof point:{' '}
+                                      <span className="font-semibold text-slate-800">{g.hp_proof_point_detail.customer}</span>
+                                      {g.hp_proof_point_detail.source_url && (
+                                        <>
+                                          {' · '}
+                                          <a
+                                            href={g.hp_proof_point_detail.source_url}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="underline hover:text-hp-navy"
+                                          >
+                                            HP case study
+                                          </a>
+                                        </>
+                                      )}
+                                    </div>
                                   )}
                                   {Array.isArray(generatedAsset.style_warnings) && generatedAsset.style_warnings.length > 0 && (
                                     <div className="text-amber-800">
