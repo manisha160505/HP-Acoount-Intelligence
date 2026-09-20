@@ -14,6 +14,7 @@ from app.services.extractors.grounding import (
     build_corpus,
     check_text,
 )
+from app.services.hp import case_studies as cs
 
 logger = logging.getLogger(__name__)
 from app.services.extractors.datasets import (
@@ -136,8 +137,17 @@ MAX_OBJECTIONS = 10
 # No HP proof-point corpus is supplied to this system, so this is what shows.
 NO_PROOF_POINT = "No supporting HP proof point available"
 
+# How deep to look for a study a card can still use. Five areas share three
+# lines between them, so the first choice is often already on another card.
+PROOF_POINT_CANDIDATES = 5
+
 # Bump when the objection prompt changes so cached output is regenerated.
-OBJECTION_PROMPT_VERSION = 5
+# 6 - cards now carry an HP case study as their proof point, so a cached card
+#     from before the corpus existed must be rebuilt rather than reused.
+# 7 - the case study a card reaches is now chosen by computed offering rather
+#     than HP's product tag, which reaches studies the tag hid entirely.
+# 8 - no customer is cited on two cards in the same playbook.
+OBJECTION_PROMPT_VERSION = 8
 
 # The dataset key used everywhere in evidence, prompts and UI. Never the Source A
 # sheet name - the application speaks in dataset keys.
@@ -293,7 +303,8 @@ def _resolve_likely_raiser(area: str, contacts: list[dict]) -> tuple[str, str]:
     return area, "hp_contest_area"
 
 
-def _evidence_fingerprint(areas: list[dict], business_description: str) -> str:
+def _evidence_fingerprint(areas: list[dict], business_description: str,
+                          case_studies_version: str = "") -> str:
     basis = sorted(
         [{"a": a["area"], "e": a["evidence"], "r": a.get("likely_raiser", "")} for a in areas],
         key=lambda x: x["a"],
@@ -302,6 +313,10 @@ def _evidence_fingerprint(areas: list[dict], business_description: str) -> str:
         "prompt_version": OBJECTION_PROMPT_VERSION,
         "areas": basis,
         "business_description": business_description,
+        # A card stores its proof point, so reloading the case-study corpus has
+        # to rebuild the cards that cite it. The account's own evidence does not
+        # change when HP's corpus is corrected.
+        "case_studies_version": case_studies_version,
     }
     return hashlib.sha256(
         json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
@@ -309,13 +324,15 @@ def _evidence_fingerprint(areas: list[dict], business_description: str) -> str:
 
 
 def generate_objection_cards(account_id: str, areas: list[dict],
-                             company_name: str, business_description: str) -> dict | None:
+                             company_name: str, business_description: str,
+                             industry: str = "") -> dict | None:
     """One cached GPT-4o call. The model writes only the objection, the reframe
     and the counter question. The evidence, the vendor list, the area and the
     likely raiser are owned by Python and are never sent back for rewriting."""
     db = get_db()
     now = datetime.now(UTC)
-    fingerprint = _evidence_fingerprint(areas, business_description)
+    fingerprint = _evidence_fingerprint(areas, business_description,
+                                        cs.knowledge_version(db))
 
     existing = db["account_widgets"].find_one({
         "account_id": account_id,
@@ -331,6 +348,40 @@ def generate_objection_cards(account_id: str, areas: list[dict],
         ("technographics", "firmographics", "prospect_contacts")
     })
     report = GroundingReport(ground, ["objection", "reframe", "counter_question"])
+
+    # One HP case study per area, chosen by Python before the model is called.
+    #
+    # The model never writes this and is never told it exists: rule 1 of the
+    # prompt below forbids naming a customer that is not in the area's own
+    # evidence, which is correct for prose it invents and would rule out every
+    # case study. So the proof point is attached afterwards, the way
+    # `likely_raiser` and the evidence already are.
+    #
+    # It is also kept out of `check_text` further down. That gate verifies
+    # against the ACCOUNT's technographics and drops the whole card on a miss -
+    # a case study's customer name and figures are not in this account's data,
+    # so routing them through it would delete the card they exist to support.
+    # They were verified at load time against their own source instead.
+    # No customer appears on two cards. Client Devices and Device Management
+    # both reach the device-services line, so without this the same university
+    # was cited twice in one playbook - which reads as a bug to a seller and
+    # spends two slots on one story. Areas are served in the order they arrive,
+    # which is the fixed order of `AREA_CATEGORY_COLUMNS`; a later card takes
+    # its next-best unused study, or none, rather than repeating an earlier one.
+    corpus_industry = cs.normalise_industry(industry)
+    proof_by_area, spoken_for = {}, set()
+    for area in areas:
+        proof_by_area[area["area"]] = None
+        for study in cs.match(db, cs.lines_for_area(area["area"]),
+                              industry=corpus_industry,
+                              limit=PROOF_POINT_CANDIDATES):
+            if str(study.get("_id")) in spoken_for:
+                continue
+            point = cs.as_proof_point(study)
+            if point:
+                proof_by_area[area["area"]] = point
+                spoken_for.add(str(study.get("_id")))
+                break
 
     roster = []
     for a in areas:
@@ -452,8 +503,10 @@ def generate_objection_cards(account_id: str, areas: list[dict],
                 "recommended_next_step": str(entry.get("recommended_next_step") or "").strip() or None,
                 # No HP proof-point corpus is supplied to this system, so the
                 # spec's empty state is shown rather than an unrelated case study.
-                "hp_proof_point": None,
-                "hp_proof_point_note": NO_PROOF_POINT,
+                "hp_proof_point": (proof_by_area.get(area) or {}).get("text"),
+                "hp_proof_point_note": (None if proof_by_area.get(area)
+                                        else NO_PROOF_POINT),
+                "hp_proof_point_detail": proof_by_area.get(area),
                 # technographics carries no link, date or confidence column, so
                 # these are recorded as absent rather than invented.
                 "evidence_source_link": None,
@@ -510,8 +563,10 @@ def generate_objection_cards(account_id: str, areas: list[dict],
                     "counter_question": counter,
                     "why_expected": str(entry.get("why_expected") or "").strip() or None,
                     "recommended_next_step": str(entry.get("recommended_next_step") or "").strip() or None,
-                    "hp_proof_point": None,
-                    "hp_proof_point_note": NO_PROOF_POINT,
+                    "hp_proof_point": (proof_by_area.get(area) or {}).get("text"),
+                    "hp_proof_point_note": (None if proof_by_area.get(area)
+                                            else NO_PROOF_POINT),
+                    "hp_proof_point_detail": proof_by_area.get(area),
                     "evidence_source_link": None,
                     "evidence_date": None,
                     "evidence_confidence": None,
@@ -693,6 +748,7 @@ def extract_objection_playbook(account_id: str) -> list[dict]:
             area_evidence,
             company_name,
             str(business_context.get("business_description") or "").strip(),
+            str(business_context.get("industry_classification") or "").strip(),
         )
 
     if reframe_payload is None:

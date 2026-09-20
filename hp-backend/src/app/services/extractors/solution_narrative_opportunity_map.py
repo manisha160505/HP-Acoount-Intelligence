@@ -29,7 +29,7 @@ from app.services.extractors.intent_demand_signals import (
     _parse_category_file,
 )
 from app.services.extractors.recent_news_signals import extract_recent_news_signals
-from app.services.hp import intent_topic_map as tm
+from app.services.hp import case_studies as cs, intent_topic_map as tm
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +56,14 @@ def _read_dataset_records(account_id: str, dataset_key: str) -> list[dict]:
 
 NL = chr(10)
 
-OPPORTUNITY_PROMPT_VERSION = 18
+# 19 - each play now carries an HP case study as its proof point, chosen from
+#      the HP lines the play itself names. A card cached before the corpus
+#      existed has an empty slot and must be rebuilt rather than reused.
+OPPORTUNITY_PROMPT_VERSION = 19
+
+# How deep to look for a case study a play can still use. Plays share HP lines,
+# so the best study for one is often already cited on another.
+PROOF_POINT_CANDIDATES = 5
 MAX_PLAYS = 5
 
 # HP_ABX_v3_final defines NO numeric opportunity score for this feature. Plays
@@ -435,11 +442,16 @@ def _match_play_contacts(play_key: str, contacts: list[dict]) -> list[dict]:
     return out
 
 
-def _opportunity_fingerprint(corpus_items: list[str], contact_ids: list[str]) -> str:
+def _opportunity_fingerprint(corpus_items: list[str], contact_ids: list[str],
+                             case_studies_version: str = "") -> str:
     payload = {
         "prompt_version": OPPORTUNITY_PROMPT_VERSION,
         "evidence": sorted(corpus_items),
         "contacts": sorted(contact_ids),
+        # A play stores its proof point, so reloading the case-study corpus has
+        # to rebuild the plays that cite it. The account's own evidence does not
+        # change when HP's corpus is corrected.
+        "case_studies_version": case_studies_version,
     }
     return hashlib.sha256(
         json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
@@ -610,7 +622,8 @@ def generate_opportunity_map_plays_with_gpt4o(account_id: str) -> dict:  # noqa:
     roster = ((grid or {}).get("data") or {}).get("contacts") or []
 
     fingerprint = _opportunity_fingerprint(
-        [c["text"] for c in corpus], [str(c.get("contact_id")) for c in roster])
+        [c["text"] for c in corpus], [str(c.get("contact_id")) for c in roster],
+        cs.knowledge_version(db))
 
     existing = db["account_widgets"].find_one({
         "account_id": account_id, "widget_key": "opportunity_narrative_plays"})
@@ -1078,6 +1091,7 @@ Output JSON:
                 "trigger_recency": recency,
                 "hp_proof_point": None,
                 "hp_proof_point_note": NO_PROOF_POINT,
+                "hp_proof_point_detail": None,
                 "account_evidence": [{k: v for k, v in item.items() if k != "dt"}
                                      for item in verified],
                 "hp_capability": capability,
@@ -1189,9 +1203,13 @@ Output JSON:
         entry = dict(play)
         entry["title"] = (PLAY_DISPLAY_NAMES.get(play["play_key"], play["play_key"].upper())
                           + " - no supporting evidence in this account's data")
+        # `hp_proof_point` is listed even though proof points are attached after
+        # this split: a discovery area has no HP narrative for a case study to
+        # support, and the day the order changes this is what keeps that true.
         for field in ("inference", "hp_capability", "hp_resource_url",
                       "owner_angle", "quantified_impact", "quantified_impact_source",
-                      "proof_point", "source_url"):
+                      "proof_point", "source_url", "hp_proof_point",
+                      "hp_proof_point_note", "hp_proof_point_detail"):
             entry[field] = None
         entry["quantified_impact_state"] = "none"
         entry["hp_products"] = []
@@ -1202,6 +1220,44 @@ Output JSON:
         dropped.append(f'{play["play_key"]}: fails the HP-fit check - moved to '
                        f'discovery areas, sales narrative removed')
     cleaned_plays = opportunities
+
+    # One HP case study per play, attached in Python after the split so that a
+    # play demoted to a discovery area never spends one.
+    #
+    # The study is chosen from the play's own `hp_products` - the HP lines it
+    # already argues for, validated against the enum above - so a proof point
+    # can only ever support the offering the play names. The model neither
+    # writes nor sees it: it is forbidden from naming a customer outside this
+    # account's evidence, which is right for prose it invents and would rule
+    # out every case study.
+    #
+    # It is deliberately NOT passed through `check_text`. That gate verifies
+    # against THIS account's uploads and drops a number it cannot find; a case
+    # study's figures belong to another company entirely and were verified at
+    # load time against their own source.
+    corpus_industry = cs.normalise_industry(industry_val)
+    spoken_for = set()
+    for play in cleaned_plays:
+        lines = []
+        for product in play.get("hp_products") or []:
+            lines.extend(line for line in cs.lines_for_hp_line(product)
+                         if line not in lines)
+        for study in cs.match(db, lines, industry=corpus_industry,
+                              limit=PROOF_POINT_CANDIDATES):
+            # No customer is cited on two plays: several HP lines share a
+            # corpus line, so the same story would otherwise fill two cards.
+            if str(study.get("_id")) in spoken_for:
+                continue
+            point = cs.as_proof_point(study)
+            if point:
+                # Same shape as the Objection Playbook stores: the sentence to
+                # read, and the record behind it for the customer, industry and
+                # link. One shape means one way to render a proof point.
+                play["hp_proof_point"] = point["text"]
+                play["hp_proof_point_note"] = None
+                play["hp_proof_point_detail"] = point
+                spoken_for.add(str(study.get("_id")))
+                break
 
     if cleaned_plays or discovery_areas:
         plays_payload = {

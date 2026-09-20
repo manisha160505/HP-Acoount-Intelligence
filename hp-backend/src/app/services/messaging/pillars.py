@@ -39,6 +39,7 @@ from app.services.extractors.grounding import (
     filter_enum_list,
     normalize_hp_product,
 )
+from app.services.hp import case_studies as cs
 from app.services.hp.guardrails import (
     COMPETITOR_BLOCK_COUNTRIES,
     SUPERLATIVE_BLOCK_COUNTRIES,
@@ -51,6 +52,10 @@ logger = logging.getLogger(__name__)
 INDEX = "content_messaging"
 WIDGET_KEY = "messaging_pillars_output"
 PROMPT_VERSION = 2
+
+# How deep to look for a case study a pillar can still use. Pillars share HP
+# lines, so the best study for one is often already cited on another.
+PROOF_POINT_CANDIDATES = 5
 
 MIN_PILLARS = 3
 MAX_PILLARS = 5
@@ -87,6 +92,11 @@ class PillarError(Exception):
 # seller reads - no chip ever shows a bare identifier as its only label.
 DATASET_LABELS = {
     "hp_products": "HP product deck",
+    # A published hp.com case study, distinct from the deck above: one is HP
+    # Confidential, the other is a page a seller may forward to a customer. A
+    # chip that called both "HP product deck" would hide that difference at the
+    # exact moment it matters.
+    "hp_case_studies": "HP case study",
     "content_messaging": "Account evidence",
     "firmographics": "Firmographics",
     "technographics": "Technographics",
@@ -853,9 +863,12 @@ def generate_messaging_pillars(account_id: str, mode: str | None = None) -> dict
             "the Content Messaging index is %s - %s"
             % (state.get("status"), state.get("last_error") or "build it first"))
 
-    company = _text((db["account_widgets"].find_one(
+    context_card = (db["account_widgets"].find_one(
         {"account_id": account_id, "widget_key": "messaging_context_card"}) or {}
-    ).get("data", {}).get("company_name"))
+    ).get("data", {})
+    business_context = context_card.get("business_context") or {}
+    company = _text(context_card.get("company_name")
+                    or business_context.get("company_name"))
 
     candidates, retrieval = asyncio.run(_candidate_challenges(account_id, mode))
     challenges, dropped, invalid_count = _resolve_challenges(account_id, candidates)
@@ -896,11 +909,47 @@ def generate_messaging_pillars(account_id: str, mode: str | None = None) -> dict
          "widget_key": "opportunity_narrative_plays"}) or {}).get("data")
         or {}).get("opportunity_plays") or []
 
+    # An HP case study for each pillar, chosen in Python from the HP lines the
+    # pillar already names.
+    #
+    # `_hp_resource` above explains why an HP DECK fact is never given a
+    # citation: it lives on a slide in a confidential deck, and pointing that at
+    # a marketing page would tell a seller the claim came from somewhere it did
+    # not. A case study is the opposite - it IS a public hp.com page, with a URL
+    # a seller may forward - so the objection does not apply to it.
+    #
+    # It is kept out of `proof_points`, which are facts about THIS account
+    # resolved against the evidence index by id. A case study is a fact about a
+    # different company; filing it there would let the account's own evidence
+    # registry answer for someone else's story. It is also deliberately absent
+    # from the pillar blob `_validate_derived` checks against, so the umbrella
+    # can never restate another customer's figure as if it were this account's.
+    corpus_industry = cs.normalise_industry(
+        _text(business_context.get("industry_classification")))
+    spoken_for: set[str] = set()
+
     for pillar in pillars:
         pillar["sourced"] = _sourced_count(pillar)
         resource = _hp_resource(pillar, plays)
         if resource:
             pillar["hp_resource"] = resource
+
+        lines: list[str] = []
+        for product in pillar.get("hp_solutions") or []:
+            lines.extend(line for line in cs.lines_for_hp_line(product)
+                         if line not in lines)
+        for study in cs.match(db, lines, industry=corpus_industry,
+                              limit=PROOF_POINT_CANDIDATES):
+            # No customer appears on two pillars: the message house is read as
+            # one document, so the same story twice reads as having only one.
+            if str(study.get("_id")) in spoken_for:
+                continue
+            point = cs.as_proof_point(study)
+            if point:
+                pillar["hp_proof_point"] = point["text"]
+                pillar["hp_proof_point_detail"] = point
+                spoken_for.add(str(study.get("_id")))
+                break
 
     umbrella, umbrella_faults = _umbrella(pillars, company, restrictions)
     framing = _framing(pillars, company, restrictions)
