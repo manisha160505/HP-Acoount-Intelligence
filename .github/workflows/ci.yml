@@ -10,6 +10,39 @@ on:
     branches: [main]
 
 jobs:
+  up-to-date-with-main:
+    name: Up to date with main
+    # A branch push has no base to compare against; only a PR does.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The PR head, not the default checkout. On a pull_request event
+          # GitHub checks out a synthetic merge of the PR into main, which
+          # contains main by construction - this check would always pass.
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      # This check only sees main as it was when the job ran. If main moves
+      # afterwards, the green result stays green - branch protection's
+      # "Require branches to be up to date" is what catches that; see
+      # docs/branch-protection.md.
+      - name: Check the branch contains every commit on main
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          git fetch --no-tags origin "$BASE_REF"
+          if git merge-base --is-ancestor FETCH_HEAD HEAD; then
+            echo "Branch contains every commit on $BASE_REF."
+            exit 0
+          fi
+          behind=$(git rev-list --count HEAD..FETCH_HEAD)
+          echo "::error::This branch is $behind commit(s) behind $BASE_REF. Update it before merging: git fetch origin && git merge origin/$BASE_REF (or git rebase origin/$BASE_REF), then push."
+          echo "Commits on $BASE_REF missing from this branch:"
+          git log --oneline HEAD..FETCH_HEAD
+          exit 1
+
   backend-lint:
     name: Backend lint
     runs-on: ubuntu-latest
