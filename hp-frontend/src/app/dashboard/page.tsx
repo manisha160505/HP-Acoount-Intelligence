@@ -35,6 +35,7 @@ import {
   MessageSquare,
   HelpCircle,
   Award,
+  BookOpen,
   CheckSquare,
   Megaphone,
   TrendingUp,
@@ -234,7 +235,7 @@ function PendingNotice({ widget, title }: { widget: any; title: string }) {
 // One HP recommendation, rendered to match the vendor cards it sits beneath.
 // The product, the confidence and the approved facts are all decided in Python;
 // this only lays them out.
-function HpRecommendationCard({ rec }: { rec: any }) {
+function HpRecommendationCard({ rec, xray }: { rec: any; xray?: boolean }) {
   const withheld: Record<string, number> = rec.withheld_summary || {};
   const withheldEntries = Object.entries(withheld);
   const conf = String(rec.confidence || '');
@@ -250,15 +251,34 @@ function HpRecommendationCard({ rec }: { rec: any }) {
           <span className="text-[10px] font-mono font-extrabold uppercase tracking-widest text-indigo-600">
             HP Recommendation
           </span>
-          <span className="text-xs font-black text-slate-900">HP {rec.hp_family}</span>
+          {/* A Part B rule names its own HP line ("HP Wolf Security"); a Part A
+              rule names a family that reads as "HP Elite". Prefixing the line
+              would print "HP HP Wolf Security". */}
+          <span className="text-xs font-black text-slate-900">
+            {rec.hp_line || `HP ${rec.hp_family}`}
+          </span>
+          {rec.offering && rec.offering !== rec.hp_line && (
+            <span className="text-[11px] font-semibold text-slate-600">{rec.offering}</span>
+          )}
           {rec.device_type && (
             <span className="text-[10px] uppercase tracking-wider bg-white text-slate-600 px-1.5 py-0.5 rounded border border-slate-200">
               {rec.device_type}
             </span>
           )}
-          <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border ${confClass}`}>
-            {conf}
-          </span>
+          {/* Part A only. Its bands are computed from whether the DEVICE's
+              category is confirmed in the estate, and a service rule has no
+              device to check - an invented band would look like the same
+              measurement. */}
+          {conf && (
+            <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border ${confClass}`}>
+              {conf}
+            </span>
+          )}
+          {rec.quoted_verbatim && (
+            <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border bg-white text-slate-500 border-slate-200">
+              quoted from the rulebook
+            </span>
+          )}
         </div>
         <span className="text-[10px] font-mono text-slate-400 whitespace-nowrap">
           Rule {rec.rule_id}
@@ -272,23 +292,48 @@ function HpRecommendationCard({ rec }: { rec: any }) {
         <p className="text-xs text-slate-600 leading-relaxed">{rec.why_this_product}</p>
       )}
 
-      {(rec.approved_facts || []).length > 0 && (
-        <div className="bg-white border border-slate-100 rounded-xl p-3 space-y-1.5">
-          <span className="text-[10px] font-mono font-extrabold uppercase tracking-widest text-slate-500 block">
-            HP facts approved for this account
-          </span>
-          {(rec.approved_facts || []).slice(0, 6).map((f: any, i: number) => (
-            <div key={i} className="text-xs text-slate-700">
-              <span>&bull; {f.text}</span>
-              {(f.conditions || []).length > 0 && (
-                <span className="block text-[10px] text-slate-500 ml-3 mt-0.5 leading-snug">
-                  {f.conditions[0]}
-                </span>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
+      {(rec.approved_facts || []).length > 0 && (() => {
+        /* A deck fact carries its OWN footnote, so printing it under each one
+           is right. A rulebook fact carries the RULE's conditions, which are
+           the same for every fact of that rule - printed per fact they
+           repeated the same sentence six times under one recommendation.
+           Shared conditions are lifted out and shown once; anything specific
+           to a single fact still sits under it. */
+        /* All of them, not the first six. The cap upstream is eight
+           (MAX_FACTS_PER_RECOMMENDATION), and truncating here meant the prose
+           cited "up to 128GB DDR5" and "up to 11 native USB ports" - both
+           approved, both facts 7 and 8 - while the reader could not see them. */
+        const facts = rec.approved_facts || [];
+        const conditionLists = facts.map((f: any) => (f.conditions || []));
+        const shared = (conditionLists[0] || []).filter((c: string) =>
+          conditionLists.length > 1 && conditionLists.every((list: string[]) => list.includes(c)));
+        return (
+          <div className="bg-white border border-slate-100 rounded-xl p-3 space-y-1.5">
+            <span className="text-[10px] font-mono font-extrabold uppercase tracking-widest text-slate-500 block">
+              HP facts approved for this account
+            </span>
+            {facts.map((f: any, i: number) => {
+              const own = (f.conditions || []).filter((c: string) => !shared.includes(c));
+              return (
+                <div key={i} className="text-xs text-slate-700">
+                  <span>&bull; {f.text}</span>
+                  {own.length > 0 && (
+                    <span className="block text-[10px] text-slate-500 ml-3 mt-0.5 leading-snug">
+                      {own[0]}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+            {shared.length > 0 && (
+              <p className="text-[10px] text-slate-500 leading-snug pt-1.5 border-t border-slate-100">
+                <span className="font-semibold">Applies to all of the above: </span>
+                {shared.join(' ')}
+              </p>
+            )}
+          </div>
+        );
+      })()}
 
       {withheldEntries.length > 0 && (
         <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded px-3 py-2">
@@ -301,6 +346,48 @@ function HpRecommendationCard({ rec }: { rec: any }) {
         <p className="text-xs text-slate-600 italic border-l-2 border-indigo-200 pl-3">
           {rec.discovery_question}
         </p>
+      )}
+
+      {/* Which of the account's files earned this card.
+          A recommendation in PC/Laptop Brands can be fired by a job ad - HP's
+          own signal for rule 1 is "Enterprise AI / local AI ... AI hiring" -
+          and a category header reading "0 detected signals" would otherwise
+          make that card look unexplained, or worse, look like a detection.
+
+          One line by default. The first version printed the raw cells, which
+          on this account meant 300 characters of an Indonesian job posting
+          under every card - true, and unreadable. The cells themselves are
+          worth having when someone is checking the work, so they moved behind
+          X-Ray with the rest of the provenance view. */}
+      {(rec.fired_by_datasets || []).length > 0 && (
+        <div className="border-t border-indigo-100 pt-2 space-y-1">
+          <p className="text-[11px] text-slate-600 leading-snug">
+            <span className="font-semibold">Earned by </span>
+            {(rec.matched_tokens || []).join(', ') || 'this account’s evidence'}
+            <span className="text-slate-400">
+              {' '}&mdash; from {(rec.fired_by_datasets || []).join(', ')}
+            </span>
+          </p>
+
+          {!rec.confidence && rec.confidence_basis?.no_band_because && (
+            <p className="text-[10px] text-slate-500 italic">
+              No confidence band: {rec.confidence_basis.no_band_because}.
+            </p>
+          )}
+
+          {xray && (rec.account_evidence || []).length > 0 && (
+            <div className="space-y-1 pt-1">
+              {rec.account_evidence.map((e: any, i: number) => (
+                <p key={i} className="text-[10px] text-slate-500 leading-snug">
+                  <span className="font-mono text-slate-400">
+                    {e.dataset}{e.field ? ` → ${e.field}` : ''}
+                  </span>
+                  <span className="block pl-1 line-clamp-2">{e.text}</span>
+                </p>
+              ))}
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
@@ -3018,6 +3105,8 @@ export default function UserDashboardPage() {
                   // Plays failing the HP-fit check are not opportunities; they are
                   // retained separately as discovery gaps, with no sales narrative.
                   const discoveryAreas: any[] = playsData.discovery_areas || [];
+                  const servicePlays: any[] = playsData.service_plays || [];
+                  const serviceNotes: string[] = playsData.service_notes || [];
                   const isAvailable = playsWidget?.status === 'available' && generatedPlays.length > 0;
 
                   return (
@@ -3415,6 +3504,173 @@ export default function UserDashboardPage() {
                           </div>
                         )}
                       </div>
+
+                      {/* HP services the account's evidence earns, from the HP 220
+                          Account Rulebook. A different kind of thing from the plays
+                          above: those are a model's reading of the account, these are
+                          a rule the account matched, and every sentence in them is
+                          HP's own approved wording rather than generated copy. */}
+                      {(servicePlays.length > 0 || serviceNotes.length > 0) && (
+                        <div className="space-y-3 pt-2">
+                          <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-600 flex items-center gap-2">
+                            <BookOpen className="w-3.5 h-3.5 text-hp-navy" />
+                            <span>HP services matched by rulebook</span>
+                            {servicePlays.length > 0 && (
+                              <span className="text-slate-400">({servicePlays.length})</span>
+                            )}
+                          </h3>
+                          <p className="text-[11px] text-slate-400 max-w-3xl leading-relaxed">
+                            Matched from the account&apos;s own evidence to the HP 220 Account
+                            Rulebook. The wording is HP&apos;s, quoted as written &mdash; nothing
+                            here is generated. One main recommendation is shown; a second
+                            appears only where separate evidence supports it.
+                          </p>
+
+                          {servicePlays.map((play: any, i: number) => (
+                            <div key={i} className="bg-white border border-slate-200 rounded-2xl p-5 space-y-3">
+                              <div className="flex flex-wrap items-start justify-between gap-2">
+                                <div>
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="text-[10px] font-mono font-bold text-hp-navy bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded">
+                                      {play.rule_label}
+                                    </span>
+                                    <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                                      {play.opportunity_type}
+                                    </span>
+                                    {play.selection === 'secondary' && (
+                                      <span className="text-[10px] font-semibold text-slate-500">
+                                        second play &middot; separate evidence
+                                      </span>
+                                    )}
+                                  </div>
+                                  <h4 className="text-sm font-extrabold text-slate-900 mt-1">{play.title}</h4>
+                                </div>
+                              </div>
+
+                              {/* The rule's System action, verbatim. This is the point of
+                                  the whole feature: the plays above label their capability
+                                  line "general HP capability" because a model wrote it. */}
+                              {play.hp_capability && (
+                                <div className="space-y-1">
+                                  <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">
+                                    What HP says
+                                    <span className="normal-case font-normal text-slate-400"> &middot; quoted from the rulebook</span>
+                                  </span>
+                                  <p className="text-sm text-slate-700 leading-relaxed">{play.hp_capability}</p>
+                                </div>
+                              )}
+
+                              {(play.prohibitions || []).length > 0 && (
+                                /* Slate rather than red. This is HP telling a seller
+                                   how to phrase something, not an error or a risk
+                                   about the account - an alarm colour on a wording
+                                   note reads as though something is wrong. */
+                                <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-1">
+                                  <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider block">
+                                    How HP requires it to be put
+                                  </span>
+                                  {play.prohibitions.map((rule: string, j: number) => (
+                                    <p key={j} className="text-[12px] text-slate-700 leading-relaxed">{rule}</p>
+                                  ))}
+                                </div>
+                              )}
+
+                              {/* C 07: "leave out the recommendation or label the missing
+                                  condition clearly." This is the labelling branch. */}
+                              {(play.unverified_conditions || []).length > 0 && (
+                                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-1">
+                                  <span className="text-[10px] font-semibold text-amber-700 uppercase tracking-wider block">
+                                    Confirm before using
+                                  </span>
+                                  {play.unverified_conditions.map((c: string, j: number) => (
+                                    <p key={j} className="text-[12px] text-amber-900 leading-relaxed">{c}</p>
+                                  ))}
+                                </div>
+                              )}
+
+                              {/* The narrowing the rule itself asks for. WXP 07 ends
+                                  "Mention only the integration that matches the account
+                                  evidence", so listing all six routes when the account
+                                  runs two of them leaves the seller doing HP's work. */}
+                              {(play.named_in_rule || []).length > 0 && (
+                                <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
+                                  <span className="text-[10px] font-semibold text-emerald-700 uppercase tracking-wider block mb-1">
+                                    Named by the rule, and this account runs it
+                                  </span>
+                                  <p className="text-[13px] text-emerald-900 font-semibold leading-relaxed">
+                                    {play.named_in_rule.join(', ')}
+                                  </p>
+                                </div>
+                              )}
+
+                              {(play.account_evidence || []).length > 0 && (
+                                <div className="space-y-1">
+                                  <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">
+                                    Why it matched &middot; this account&apos;s own data
+                                  </span>
+                                  {play.account_evidence.slice(0, 3).map((e: any, j: number) => (
+                                    <p key={j} className="text-[11px] text-slate-600 leading-relaxed">
+                                      <span className="font-mono text-slate-400">{e.dataset}</span>{' '}
+                                      {String(e.text || '').slice(0, 160)}
+                                    </p>
+                                  ))}
+                                  {/* Kept distinct from the box above: these put the
+                                      account in the right territory without the rule
+                                      naming them, which is a weaker claim. */}
+                                  {(play.indicative_only || []).length > 0 && (
+                                    <p className="text-[11px] text-slate-400">
+                                      indicative only &mdash; the rule does not name{' '}
+                                      {play.indicative_only.join(', ')}
+                                    </p>
+                                  )}
+                                </div>
+                              )}
+
+                              {/* The same entry path the product plays carry, so this
+                                  is something to act on rather than a rulebook readout.
+                                  The contacts are this account's own roster; the next
+                                  step is composed in Python and asks about what the
+                                  account already runs rather than pitching. */}
+                              {play.entry_path && (
+                                <div className="border-t border-slate-100 pt-3 grid grid-cols-1 md:grid-cols-3 gap-3">
+                                  <div>
+                                    <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">Timeline</span>
+                                    <p className="text-[12px] text-slate-700">{play.entry_path.timeline}</p>
+                                  </div>
+                                  <div>
+                                    <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">Target buyers</span>
+                                    {(play.entry_path.target_contacts || []).length > 0 ? (
+                                      play.entry_path.target_contacts.map((c: any, j: number) => (
+                                        <p key={j} className="text-[12px] text-slate-700 leading-snug">
+                                          <span className="font-semibold">{c.name}</span>
+                                          {c.title && <span className="text-slate-500"> &mdash; {c.title}</span>}
+                                        </p>
+                                      ))
+                                    ) : (
+                                      <p className="text-[12px] text-slate-400">{play.entry_path.no_contact_note}</p>
+                                    )}
+                                  </div>
+                                  <div>
+                                    <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">Next step</span>
+                                    <p className="text-[12px] text-slate-700 leading-snug">{play.entry_path.recommended_cta}</p>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          ))}
+
+                          {/* Why a family is absent. An offering blocked in this market,
+                              or a rule withheld because the same evidence already carries
+                              another, is more useful said than silently missing. */}
+                          {serviceNotes.length > 0 && (
+                            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-1">
+                              {serviceNotes.map((note: string, i: number) => (
+                                <p key={i} className="text-[11px] text-slate-500 leading-relaxed">{note}</p>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
 
                       {/* Discovery / evidence gaps - areas the data raises but does not
                           support as an HP opportunity. Deliberately reduced: no HP
@@ -4365,13 +4621,38 @@ export default function UserDashboardPage() {
 
                                           {vendor.hp_play && (
                                             <div className="mt-3 bg-blue-50/80 border border-blue-200/80 rounded-xl p-2.5 text-xs text-hp-navy font-semibold space-y-0.5">
-                                              <span className="font-extrabold text-hp-navy flex items-center gap-1">
+                                              <span className="font-extrabold text-hp-navy flex items-center gap-1 flex-wrap">
                                                 <span>&rarr;</span>
                                                 <span>{vendor.hp_play.product}</span>
+                                                {/* What stands behind this line. A rulebook match
+                                                    is an authorised answer; the alternative is the
+                                                    model positioning a broad line against a
+                                                    detected vendor - reasonable, but not a rule,
+                                                    and a seller should be able to tell. */}
+                                                {vendor.hp_play.product_source === 'positioning' && (
+                                                  <span className="text-[9px] font-medium text-slate-400 normal-case">
+                                                    general positioning &middot; no rulebook rule
+                                                  </span>
+                                                )}
                                               </span>
                                               <p className="text-[11px] text-slate-600 font-normal italic pl-4">
                                                 {vendor.hp_play.play_text}
                                               </p>
+                                              {/* The rule used to be quoted in full here. It is
+                                                  now a proper recommendation card in this
+                                                  category, which carries the same wording plus
+                                                  the approved facts and what was withheld - so
+                                                  this stays as the pointer that ties THIS vendor
+                                                  to that card, and the rule is stated once. */}
+                                              {vendor.rulebook_offering && (
+                                                <p className="mt-2 pt-2 border-t border-blue-200/70 text-[10px] font-mono text-hp-navy">
+                                                  {vendor.rulebook_offering.rule_label} &middot;{' '}
+                                                  {vendor.rulebook_offering.offering}
+                                                  <span className="text-slate-400 normal-case font-sans">
+                                                    {' '}&mdash; see the HP recommendation below
+                                                  </span>
+                                                </p>
+                                              )}
                                             </div>
                                           )}
                                         </div>
@@ -4409,7 +4690,26 @@ export default function UserDashboardPage() {
                                 {hpRecs
                                   .filter((rec: any) => rec.category_key === cat.category_key)
                                   .map((rec: any) => (
-                                    <HpRecommendationCard key={rec.rule_id} rec={rec} />
+                                    <HpRecommendationCard key={rec.rule_id} rec={rec} xray={isXRayOn} />
+                                  ))}
+
+                                {/* Rules that WOULD have produced a card in this
+                                    category and were refused. Shown here rather
+                                    than only at the foot of the page: a category
+                                    reading "no HP client hardware detected" with
+                                    nothing under it is exactly where a seller
+                                    asks why, and the answer was three screens
+                                    away under a heading about something else. */}
+                                {isXRayOn && (hpRecData.rules_blocked || [])
+                                  .filter((b: any) => b.category_key === cat.category_key)
+                                  .map((b: any) => (
+                                    <div key={`blocked-${b.rule_id}`}
+                                         className="text-[11px] text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 mt-2">
+                                      <span className="font-semibold">
+                                        Rule {b.rule_id} was evaluated and not used.
+                                      </span>{' '}
+                                      {b.blocked}
+                                    </div>
                                   ))}
 
                                </div>
@@ -4419,13 +4719,17 @@ export default function UserDashboardPage() {
                           rules that were evaluated and not used - surfaced so a
                           recommendation is never dropped without explanation. */}
                       {hpRecs.filter((r: any) => !r.category_key).map((rec: any) => (
-                        <HpRecommendationCard key={rec.rule_id} rec={rec} />
+                        <HpRecommendationCard key={rec.rule_id} rec={rec} xray={isXRayOn} />
                       ))}
 
-                      {(hpRecData.rules_blocked || []).length > 0 && (
+                      {/* Only the refusals with no category of their own; the
+                          rest are shown beside the category they belong to. */}
+                      {isXRayOn && (hpRecData.rules_blocked || [])
+                        .filter((b: any) => !b.category_key).length > 0 && (
                         <div className="text-[11px] text-slate-500 bg-slate-50 border border-slate-200 rounded px-3 py-2">
                           <span className="font-semibold text-slate-600">Rules evaluated but not used: </span>
                           {(hpRecData.rules_blocked || [])
+                            .filter((b: any) => !b.category_key)
                             .map((b: any) => `rule ${b.rule_id} (${b.blocked})`).join('; ')}
                         </div>
                       )}

@@ -83,6 +83,18 @@ REQUIRED_QUALIFIER_TRIGGERS = [
 ]
 
 # --- Guardrail 5: comparison claims need their benchmark ---------------------
+# Wording that makes a claim a superlative, for guardrail 2. The deck path
+# reads this from each slide's parsed restriction block; a rulebook fact has no
+# such block, so the claim text itself is what is tested.
+SUPERLATIVE_RE = re.compile(
+    r"\b(world'?s|industry'?s|market'?s)\b|\b(most|best|first|only|fastest|"
+    r"strongest|safest|leading)\b", re.I)
+
+# Competitor names, for guardrails 3 and 4 on a rulebook fact.
+COMPETITOR_RE = re.compile(
+    r"\b(lenovo|thinkpad|dell|latitude|apple|macbook|asus|acer|huawei|"
+    r"samsung|microsoft surface)\b", re.I)
+
 COMPARISON_RE = re.compile(r"\b\d{1,3}\s*%|\bhigher\b|\bbetter\b|\bfaster\b|\bless\b", re.I)
 BENCHMARK_RE = re.compile(r"cinebench|procyon|mobilemark|internal testing|"
                           r"benchmark|tested|spec sheet|data sheet", re.I)
@@ -151,6 +163,141 @@ class FactDecision:
             out["guardrail"] = self.guardrail
             out["reason"] = self.reason
         return out
+
+
+# Model and generation tokens, for guardrail 16. Deliberately narrow: an
+# earlier attempt also matched form-factor words like "desktop", and calling a
+# tower a desktop is ordinary English rather than a mixed record.
+_GENERATION_RE = re.compile(r"\bG[12][iaq]?8?\b")
+
+
+def prose_guardrail_faults(text: str, facts: list) -> list:
+    """Guardrails 15 and 16 on one generated sentence about a product.
+
+    `facts` are that recommendation's own approved facts. Returns the reasons
+    the sentence must not be published, or an empty list.
+    """
+    faults = []
+    said = " ".join(str(text or "").split())
+    if not said:
+        return faults
+
+    sourced = " ".join(str(f.get("text") or "") + " "
+                       + " ".join(f.get("conditions") or []) for f in (facts or []))
+
+    # G 15 - the classes are fixed by the document and a figure decides them.
+    for match in re.finditer(r"next\s*gen\s*ai\s*pc", said, re.I):
+        window = said[max(0, match.start() - 140):match.start() + 140]
+        figures = [int(n) for n in _TOPS_RE.findall(window)]
+        if figures and not any(NEXT_GEN_AI_PC_MIN_TOPS <= n <= NEXT_GEN_AI_PC_MAX_TOPS
+                               for n in figures):
+            faults.append(
+                "G15 AI-PC class: calls a %s TOPS product a Next Gen AI PC, "
+                "which the rulebook defines as %d-%d TOPS"
+                % (figures, NEXT_GEN_AI_PC_MIN_TOPS, NEXT_GEN_AI_PC_MAX_TOPS))
+            break
+
+    # G 16 - a generation the approved facts never state.
+    for generation in sorted(set(_GENERATION_RE.findall(said))):
+        if generation.lower() not in sourced.lower():
+            faults.append(
+                "G16 mixed generations: names %s, which this recommendation's "
+                "approved facts never state" % generation)
+            break
+
+    return faults
+
+
+def approve_rulebook_facts(rule, account_country, now=None):
+    """The same filter, applied to a rule of the HP 220 Account Rulebook.
+
+    Returns (approved, rejected) as `FactDecision` lists, exactly as
+    `approve_facts` does, so every consumer of a recommendation keeps working
+    unchanged - `recommendations.py`, `retrieval/corpus.py`,
+    `evaluator/sources.py`, `dashboard/priorities.py` and
+    `scripts/audit_grounding.py` all read
+    `approved_facts[].{text, qualifiers, conditions, kept}` and none of them
+    needs to know which corpus a fact came from.
+
+    Three of the deck guardrails do not apply and are not pretended to:
+
+      G8 (a claim citing a footnote the deck never defines) has no analogue -
+      a rulebook fact carries its conditions in the rule's own `conditions`
+      list, so there is no dangling reference to be missing.
+
+      G10 (embargo) has none either. The rulebook states no embargo dates; the
+      decks do, and that is one of the things the rulebook was written to
+      settle.
+
+      The slide-level competitor block still applies, but it is keyed on the
+      rule rather than on a slide's parsed restrictions, because a rulebook
+      rule names its competitor explicitly (Part A rule 8) instead of carrying
+      a scanned restriction block.
+
+    What does apply is everything about how a claim may be worded: the
+    country-restricted superlatives, the competitor markets, benchmark context
+    for a comparison, and the configuration qualifiers of G6/G7.
+    """
+    country = normalize_country(account_country)
+    approved, rejected = [], []
+    rule_id = str(rule.get("rule_label") or rule.get("_id") or "rulebook")
+    conditions = [c.get("text") for c in (rule.get("conditions") or [])
+                  if isinstance(c, dict) and c.get("text")]
+    names_competitor = bool(rule.get("requires_exact_competitor")) or \
+        bool(COMPETITOR_RE.search(" ".join(rule.get("allowed_facts") or [])))
+
+    for text in (rule.get("allowed_facts") or []):
+        claim = {"text": text, "qualifiers": [], "footnotes": {}}
+
+        # Guardrail 2 - restricted superlative claims, by country.
+        if country in SUPERLATIVE_BLOCK_COUNTRIES and SUPERLATIVE_RE.search(text):
+            rejected.append(FactDecision(
+                claim, rule_id, False,
+                "restricted superlative claim in %s" % country,
+                "G2 superlative by country"))
+            continue
+
+        # Guardrails 3 and 4 - competitor comparison claims, by market.
+        if names_competitor and country in COMPETITOR_BLOCK_COUNTRIES:
+            rejected.append(FactDecision(
+                claim, rule_id, False,
+                "competitor comparison claim in %s" % country,
+                "G3/G4 competitor market"))
+            continue
+
+        # Guardrail 5 - a comparison needs its benchmark context. The rule's
+        # own conditions count as context, the way a deck's footnotes do.
+        if COMPARISON_RE.search(text) and names_competitor:
+            context = text + " " + " ".join(conditions)
+            if not BENCHMARK_RE.search(context):
+                rejected.append(FactDecision(
+                    claim, rule_id, False,
+                    "comparison claim without benchmark context",
+                    "G5 benchmark context"))
+                continue
+
+        # Guardrails 6 and 7 - configuration and availability qualifiers.
+        fault = None
+        for trigger, qualifier, note in REQUIRED_QUALIFIER_TRIGGERS:
+            if trigger.search(text):
+                haystack = text + " " + " ".join(conditions)
+                if not qualifier.search(haystack):
+                    fault = note
+                    break
+        if fault:
+            rejected.append(FactDecision(claim, rule_id, False, fault,
+                                         "G6/G7 missing qualifier"))
+            continue
+
+        # Kept. The rule's conditions travel with every fact of that rule,
+        # which is C 04 - "Keep every country, device, operating-system,
+        # configuration, benchmark, licence, term, seat-count, warranty,
+        # registration, and availability condition written in the applicable
+        # rule."
+        claim["footnotes"] = {str(i): c for i, c in enumerate(conditions, 1)}
+        approved.append(FactDecision(claim, rule_id, True))
+
+    return approved, rejected
 
 
 def approve_facts(slides, rule, account_country, now=None):

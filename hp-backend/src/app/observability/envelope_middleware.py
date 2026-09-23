@@ -41,6 +41,19 @@ class ResponseEnvelopeMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next) -> Response:
         response = await call_next(request)
 
+        # No JSON response from this API may be cached by a browser.
+        #
+        # Nothing here sets a Cache-Control header, and with none set a browser
+        # applies HEURISTIC caching: it may reuse a response for a while without
+        # asking again. Every payload here is per-account, authenticated, and
+        # changes the moment a widget is regenerated - so a seller who reloads
+        # after a rebuild can be served the version they already had, with
+        # nothing on screen to say so. That happened: a regenerated
+        # Technographic Map kept showing its previous recommendations after a
+        # reload, and the data behind it was correct the whole time.
+        if request.url.path.startswith("/api/"):
+            response.headers["Cache-Control"] = "no-store, must-revalidate"
+
         if request.url.path in _UNWRAPPED_PATHS:
             return response
 

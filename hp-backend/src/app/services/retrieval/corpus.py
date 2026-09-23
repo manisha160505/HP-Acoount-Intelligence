@@ -134,6 +134,42 @@ def _build(account_id, index, feature, unit_key, title, source_payload, fill):
 # Content Messaging corpus
 # ---------------------------------------------------------------------------
 
+def _fill_service_plays(b, plays) -> list:
+        out = []
+        for i, play in enumerate(plays.get("service_plays") or []):
+            title = _text(play.get("title"))
+            if not title:
+                continue
+            key = play.get("play_key") or i
+            out.append("HP service play (%s): %s"
+                       % (_text(play.get("opportunity_type")) or "service",
+                          b.line(title, field="title", record_id=key)))
+            for j, fact in enumerate(play.get("allowed_facts") or []):
+                text = _text(fact)
+                if text:
+                    out.append("  HP approved fact: %s"
+                               % b.line(text, field="allowed_facts",
+                                        record_id="%s:%d" % (key, j)))
+            # What HP forbids saying about this offering travels with it.
+            # A pillar that is shown the offering and not its prohibition
+            # can write the one sentence the rulebook rules out.
+            for j, ban in enumerate(play.get("prohibitions") or []):
+                text = _text(ban)
+                if text:
+                    out.append("  HP prohibition: %s"
+                               % b.line(text, field="prohibitions",
+                                        record_id="%s:%d" % (key, j)))
+            for j, evidence in enumerate(play.get("account_evidence") or []):
+                statement = _text(evidence.get("text") or evidence.get("statement"))
+                if statement:
+                    out.append("  Account evidence: %s"
+                               % b.line(statement,
+                                        field=_text(evidence.get("field")) or "account_evidence",
+                                        record_id="%s:e%d" % (key, j),
+                                        dataset=_text(evidence.get("dataset"))))
+        return out
+
+
 def content_messaging_documents(account_id: str, index: str = "content_messaging") -> list:
     """The documents that feed Content Messaging.
 
@@ -276,6 +312,25 @@ def content_messaging_documents(account_id: str, index: str = "content_messaging
             return out
         docs.append(_build(account_id, index, "content_messaging", "opportunity_plays",
                            "HP opportunity plays for %s" % company, plays, fill_plays))
+
+        # The service half of the rulebook. `opportunity_plays` above are the
+        # five hardware plays; `service_plays` are what the rulebook's Part B
+        # rules earned - 144 of the 162 rules, including every print, scan and
+        # ink rule the client added in the FINAL revision. None of it reached
+        # this index, so Content Messaging, Strategy Chat and the Message
+        # Evaluator could only ever speak about HP hardware.
+        #
+        # A service play's `allowed_facts` are HP's own approved sentences, so
+        # they are indexed as facts a pillar may cite rather than summarised.
+        # Its `account_evidence` entries carry their own dataset and field, the
+        # same as an opportunity play's, so a citation names the technographics
+        # cell rather than the play the cell was assembled into.
+        if plays.get("service_plays"):
+            docs.append(_build(
+                account_id, index, "content_messaging", "service_plays",
+                "HP service plays for %s" % company,
+                {"service_plays": plays.get("service_plays")},
+                lambda b, p=plays: _fill_service_plays(b, p)))
 
     signals = _widget(db, account_id, "news_signals_feed")
     if signals:
@@ -1743,14 +1798,27 @@ def _strategy_opportunity_documents(db, account_id, index, company) -> list:
             raisers[_text(area["area"]).lower()] = area
     docs = []
 
-    for play in (plays.get("opportunity_plays") or []):
+    # Service plays are indexed here for the same reason they are indexed into
+    # Content Messaging: they are 144 of the rulebook's 162 rules, and without
+    # them a seller asking Strategy Chat about print, care, deployment or
+    # lifecycle is answered from hardware plays alone.
+    #
+    # They join the same loop rather than getting a loop of their own - a play
+    # is a play to this index, and `fill_play` already renders every field
+    # either kind carries, skipping the ones a service play does not have.
+    for play in list(plays.get("opportunity_plays") or []) + list(
+            plays.get("service_plays") or []):
         title = _text(play.get("title"))
         if not title:
             continue
 
         def fill_play(b, play=play, title=title):
-            out = ["HP opportunity play for %s: %s (%s)." % (
-                company, title, _text(play.get("category_label")))]
+            # A service play has no `category_label`; its opportunity type is
+            # the equivalent, and rendering neither left a bare "()".
+            label = (_text(play.get("category_label"))
+                     or _text(play.get("opportunity_type")))
+            out = ["HP opportunity play for %s: %s%s." % (
+                company, title, " (%s)" % label if label else "")]
 
             # An opportunity play carries the whole argument - what the account
             # has, what HP does about it, who would weigh it, and at what scale.

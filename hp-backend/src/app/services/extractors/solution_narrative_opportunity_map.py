@@ -29,7 +29,11 @@ from app.services.extractors.intent_demand_signals import (
     _parse_category_file,
 )
 from app.services.extractors.recent_news_signals import extract_recent_news_signals
-from app.services.hp import case_studies as cs, intent_topic_map as tm
+from app.services.hp import (
+    case_studies as cs,
+    intent_topic_map as tm,
+    rulebook as rb,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -59,11 +63,26 @@ NL = chr(10)
 # 19 - each play now carries an HP case study as its proof point, chosen from
 #      the HP lines the play itself names. A card cached before the corpus
 #      existed has an empty slot and must be rebuilt rather than reused.
-OPPORTUNITY_PROMPT_VERSION = 19
-
-# How deep to look for a case study a play can still use. Plays share HP lines,
-# so the best study for one is often already cited on another.
-PROOF_POINT_CANDIDATES = 5
+# 20 - a customer cited by a higher-priority surface is not repeated here where
+#      the corpus offers an equally good alternative.
+# 21 - the Rulebook's service plays are published alongside the hardware ones.
+# 22 - instructions aimed at whoever writes the copy no longer appear on a
+#      service play as a caveat for the seller to confirm.
+# 23 - service plays carry an entry path: the roster contacts who own that
+#      opportunity type, and a next step composed from the rule's own offering
+#      and the evidence that matched it, quoted in the account's own spelling.
+# 25 - a prohibition appears once, under the warning, instead of also
+#      inside the quoted text above it.
+# 26 - a rule whose own text says the rulebook holds no detail about the
+#      offering qualifies a recommendation rather than being one.
+# 27 - routing is a path rather than a gate, so a rule fires on its own
+#      evidence; Part B only; one play per opportunity type; and a
+#      market-blocked family is never offered.
+#
+# Service plays are built by `services/hp/rulebook.py` rather than by the
+# prompt, so a change to that module does not move any other input to the
+# fingerprint. Bumping this is what makes a matcher change rebuild them.
+OPPORTUNITY_PROMPT_VERSION = 28
 MAX_PLAYS = 5
 
 # HP_ABX_v3_final defines NO numeric opportunity score for this feature. Plays
@@ -122,6 +141,49 @@ PLAY_OWNER_DEPARTMENTS = {
     "print": ["Operations", "Information Technology", "Finance"],
     "daas": ["Information Technology", "Engineering & Technical"],
 }
+
+# Who owns each of the rulebook's eight opportunity types, in the same
+# vocabulary `_match_play_contacts` already uses for the five product plays.
+#
+# Authored here rather than derived: the rulebook says which HP offering fits a
+# signal and says nothing about who at an account would own it. Keyed on the
+# opportunity type rather than the rule, because all twenty Care Pack rules
+# reach the same people and a per-rule table would be twenty ways of saying
+# "IT service owners".
+#
+# Matching still only ever returns people already on this account's roster -
+# `_match_play_contacts` scores real contacts and invents nobody.
+OPPORTUNITY_OWNER_TITLE_TOKENS = {
+    "workforce experience": ["end user", "service", "workplace", "employee",
+                             "information technology", "operations", "support"],
+    "security": ["security", "risk", "compliance", "governance",
+                 "information technology", "infrastructure"],
+    "support and care pack": ["service", "support", "operations", "procurement",
+                              "information technology", "maintenance"],
+    "lifecycle and sustainability": ["sustainability", "procurement", "asset",
+                                     "general affairs", "operations", "finance"],
+    "deployment and configuration": ["infrastructure", "information technology",
+                                     "operations", "procurement", "end user",
+                                     "deployment"],
+    "poly support": ["collaboration", "communications", "end user", "workplace",
+                     "operations"],
+    "print and scan": ["procurement", "facilities", "administration",
+                       "general affairs", "operations"],
+    "enterprise ai": ["data", "analytics", "business intelligence",
+                      "technology development", "architect", "innovation"],
+}
+OPPORTUNITY_OWNER_DEPARTMENTS = {
+    "workforce experience": ["Information Technology", "Operations"],
+    "security": ["Information Technology", "Operations"],
+    "support and care pack": ["Information Technology", "Operations"],
+    "lifecycle and sustainability": ["Operations", "Finance",
+                                     "Information Technology"],
+    "deployment and configuration": ["Information Technology", "Operations"],
+    "poly support": ["Information Technology", "Operations"],
+    "print and scan": ["Operations", "Information Technology", "Finance"],
+    "enterprise ai": ["Information Technology", "Engineering & Technical"],
+}
+
 
 # Signal vocabulary per play family. At least one cited evidence quote must
 # contain one of these, or the trigger -> implication -> solution chain does not
@@ -411,11 +473,9 @@ def _build_scale_statement(play_key: str, verified: list[dict], corpus: list[dic
     }
 
 
-def _match_play_contacts(play_key: str, contacts: list[dict]) -> list[dict]:
-    """Real contacts from this account's own roster who plausibly own the play.
+def _match_contacts(tokens: list, depts: list, contacts: list[dict]) -> list[dict]:
+    """Real contacts from this account's own roster who plausibly own a topic.
     Never invents a persona."""
-    tokens = PLAY_OWNER_TITLE_TOKENS.get(play_key, [])
-    depts = PLAY_OWNER_DEPARTMENTS.get(play_key, [])
     scored = []
     for c in contacts:
         title = str(c.get("title") or "")
@@ -442,8 +502,205 @@ def _match_play_contacts(play_key: str, contacts: list[dict]) -> list[dict]:
     return out
 
 
+def _match_play_contacts(play_key: str, contacts: list[dict]) -> list[dict]:
+    """Owners of one of the five product plays."""
+    return _match_contacts(PLAY_OWNER_TITLE_TOKENS.get(play_key, []),
+                           PLAY_OWNER_DEPARTMENTS.get(play_key, []), contacts)
+
+
+def _match_opportunity_contacts(opportunity_type: str, contacts: list[dict]) -> list[dict]:
+    """Owners of one of the rulebook's eight opportunity types."""
+    key = _norm_text(opportunity_type)
+    return _match_contacts(OPPORTUNITY_OWNER_TITLE_TOKENS.get(key, []),
+                           OPPORTUNITY_OWNER_DEPARTMENTS.get(key, []), contacts)
+
+
+def _service_plays(db, corpus: list, country: str, roster: list) -> tuple:
+    """The HP services this account's own evidence earns, from the Rulebook.
+
+    Kept entirely separate from the five hardware plays above, and deliberately
+    so on three counts:
+
+    1. **Nothing can regress.** The rulebook's 95 service rules have no
+       representation in this feature today, so service plays either appear
+       beside the existing ones or nothing changes. Threading them through the
+       existing prompt would put the working five at risk for no gain.
+
+    2. **The text is approved, not generated.** A rule's `System action` is
+       what HP permits a seller to say about that offering; C 03 is "Use exact
+       facts" and C 05 is "optional means optional". Passing it through the
+       model to be reworded is the one thing that could turn an approved
+       sentence into an unapproved one, so it is carried verbatim and no model
+       is involved in building these at all.
+
+    3. **C 02 forbids the alternative.** "The engine must not reopen the
+       original HP files": the facts come from the matched rule and nowhere
+       else.
+
+    Returns `(plays, notes)` - notes being the rules that fired but were
+    withheld, and any family blocked in this market, both published so a
+    partly-empty section is explicable rather than looking broken.
+    """
+    book = rb.load(db)
+    if not book.get("rules"):
+        return [], []
+
+    def _display_name(term: str, indices: list) -> str:
+        """The account's own spelling of a matched term.
+
+        The stored terms are normalised for matching, so "power bi" is what
+        fires the rule and "Microsoft Power BI" is what the account's file
+        actually says. Quoting the file back is both better English and a
+        smaller claim - it is their wording, not ours. Long cells are a vendor
+        list rather than a name, so those fall back to the term.
+        """
+        for i in indices:
+            text = " ".join(str(corpus[i].get("text") or "").split())
+            if len(text) <= 40 and _token_present(term, _norm_text(text)):
+                return text
+        return term
+
+    def _and_list(items: list) -> str:
+        items = [i for i in items if i]
+        if len(items) <= 1:
+            return items[0] if items else ""
+        return "%s and %s" % (", ".join(items[:-1]), items[-1])
+
+    def _service_cta(match: dict, owners: list) -> str:
+        who = owners[0]["title"] if owners else None
+        names = [_display_name(t, match["evidence_indices"])
+                 for t in match["matched_terms"][:3]]
+        found = _and_list(names)
+        ask = "Ask the %s" % who if who else "Ask the owning team"
+        if not found:
+            return ("%s whether %s would fit what they run today."
+                    % (ask, match["offering"]))
+        verb = "is" if len(names) == 1 else "are"
+        return ("%s how %s %s used today, and whether %s would fit alongside."
+                % (ask, found, verb, match["offering"]))
+
+    routes = rb.route(book, corpus)
+    # Part B only. Part A chooses a hardware product, which is what the four
+    # product plays above already do from this same corpus - offering both
+    # would put two recommendations about the same laptop on one page. Part A
+    # belongs in the Technographic Map's recommendation chain, where the
+    # deck-backed hardware logic already lives.
+    matches = [m for m in rb.candidates(book, corpus, routes, country)
+               if m["rule"].get("part") == "B"]
+    chosen = rb.select(matches)
+    # Family -> the opportunity type it belongs to. Built from the whole
+    # routing table, not only the rows that fired: the mapping is static in the
+    # document, and deriving it from fired rows alone left every family that
+    # reached us through its own rules labelled with its raw code ("WOLF"
+    # rather than "Security") and, worse, with no target buyers, because the
+    # owner lookup is keyed on the opportunity type.
+    route_of = {}
+    for row in book.get("routing") or []:
+        for family in row.get("families") or []:
+            route_of.setdefault(family, row["opportunity_type"])
+
+    def build(match: dict, rank: str) -> dict:
+        facts = rb.facts_for(match)
+
+        # The strongest thing a service play can say, and the rule itself asks
+        # for it: WXP 07 ends "Mention only the integration that matches the
+        # account evidence." Listing all six integration routes when the
+        # account runs two of them makes the seller do the narrowing that HP
+        # already told us to do.
+        #
+        # A term the rule NAMES and the account HAS is a direct hit. A term
+        # that only came from the observable-terms list is indicative - it says
+        # the account is in the right territory, not that HP named it - and the
+        # two are labelled differently rather than blended, because the first
+        # is far stronger and a seller should be able to tell them apart.
+        rule_text = _norm_text(" ".join(
+            [match["rule"].get("signal_text") or ""] + (facts["allowed_facts"] or [])))
+        named, indicative = [], []
+        for term in match["matched_terms"]:
+            (named if _token_present(term, rule_text) else indicative).append(term)
+
+        opportunity = route_of.get(match["family"], match["family"])
+        owners = _match_opportunity_contacts(opportunity, roster)
+
+        return {
+            "play_key": _norm_text(match["rule_label"]).replace(" ", "-"),
+            "rule_label": match["rule_label"],
+            "source": "rulebook",
+            "selection": rank,
+            "opportunity_type": route_of.get(match["family"], match["family"]),
+            "family": match["family"],
+            "title": match["offering"],
+            "hp_products": [match["offering"]] if match["offering"] else [],
+            # What the seller may say, as the rule's own sentences with the
+            # prohibitions lifted out. The card shows this rather than the raw
+            # System action, which contains both and made every negative clause
+            # appear twice - once in the quote and once in the warning below it.
+            #
+            # Still verbatim, and still the reason this feature is worth wiring
+            # at all: the product plays label their capability line "general HP
+            # capability" because a model wrote it. These are HP's sentences.
+            "hp_capability": " ".join(facts["allowed_facts"]),
+            # The whole action, unpartitioned, for audit. Not rendered.
+            "system_action": facts["system_action"],
+            "allowed_facts": facts["allowed_facts"],
+            "prohibitions": facts["prohibitions"],
+            # C 07's second branch, on the card rather than in a log.
+            "unverified_conditions": facts["unverified_conditions"],
+            "account_evidence": [
+                {k: v for k, v in corpus[i].items() if k != "dt"}
+                for i in match["evidence_indices"][:6]],
+            "evidence_count": len(match["evidence_indices"]),
+            "matched_terms": match["matched_terms"],
+            # What this account runs that the rule itself names.
+            "named_in_rule": named,
+            # What put the account in the right territory without the rule
+            # naming it.
+            "indicative_only": indicative,
+            "provenance": facts["provenance"],
+            # The same entry path the product plays carry, so a service play is
+            # something a seller can act on rather than a rulebook readout.
+            #
+            # The next step is composed in Python from the rule's own offering
+            # and the evidence that matched it. It is deliberately a question
+            # about what the account already runs, not a pitch: the rule that
+            # produced it says in its own words "Existing use shows possible
+            # fit, not buying intent", and C 01 says HP material cannot
+            # establish a need.
+            "entry_path": {
+                "timeline": "0-90 days",
+                "target_contacts": owners,
+                "target_buyers_source": "prospect_contacts" if owners else "no_match",
+                "no_contact_note": None if owners else NO_CONTACT_NOTE,
+                "recommended_cta": _service_cta(match, owners),
+            },
+        }
+
+    plays = []
+    if chosen["primary"]:
+        plays.append(build(chosen["primary"], "primary"))
+    plays.extend(build(m, "secondary") for m in chosen["secondary"])
+
+    notes = [
+        "%s withheld: %s" % (m["rule_label"], m["withheld_because"])
+        for m in chosen.get("withheld") or []]
+    if chosen["primary"] is None and chosen.get("reason"):
+        notes.append("no service play: %s" % chosen["reason"])
+
+    # A family the market blocks is named rather than left silently absent. HP
+    # IQ is the live case: Version 1.0 is a United States, English-only launch,
+    # so for a non-US account its twelve rules can never fire and a seller
+    # should be told why instead of wondering where HP IQ went.
+    iq = rb.iq_availability(book, country)
+    if iq["available"] is False:
+        notes.append("HP IQ not offered: %s" % iq["reason"])
+
+    return plays, notes
+
+
 def _opportunity_fingerprint(corpus_items: list[str], contact_ids: list[str],
-                             case_studies_version: str = "") -> str:
+                             case_studies_version: str = "",
+                             cited_above: set | None = None,
+                             rulebook_version: str = "") -> str:
     payload = {
         "prompt_version": OPPORTUNITY_PROMPT_VERSION,
         "evidence": sorted(corpus_items),
@@ -452,6 +709,13 @@ def _opportunity_fingerprint(corpus_items: list[str], contact_ids: list[str],
         # to rebuild the plays that cite it. The account's own evidence does not
         # change when HP's corpus is corrected.
         "case_studies_version": case_studies_version,
+        # Which studies the Objection Playbook has claimed. A play avoids those
+        # where it can, so a playbook that re-allocates leaves these plays
+        # citing a customer that is now taken - this rebuilds them instead.
+        "cited_above": sorted(cited_above or ()),
+        # Service plays are stored on this widget, so reloading the rulebook
+        # has to rebuild them.
+        "rulebook_version": rulebook_version,
     }
     return hashlib.sha256(
         json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
@@ -623,7 +887,9 @@ def generate_opportunity_map_plays_with_gpt4o(account_id: str) -> dict:  # noqa:
 
     fingerprint = _opportunity_fingerprint(
         [c["text"] for c in corpus], [str(c.get("contact_id")) for c in roster],
-        cs.knowledge_version(db))
+        cs.knowledge_version(db),
+        cs.cited_above(db, account_id, cs.SURFACE_OPPORTUNITIES),
+        rb.knowledge_version(db))
 
     existing = db["account_widgets"].find_one({
         "account_id": account_id, "widget_key": "opportunity_narrative_plays"})
@@ -1235,31 +1501,45 @@ Output JSON:
     # against THIS account's uploads and drops a number it cannot find; a case
     # study's figures belong to another company entirely and were verified at
     # load time against their own source.
+    # No customer is cited on two plays, nor on a play the Objection Playbook
+    # already cites: several HP lines share one corpus line, so the same story
+    # would otherwise fill several cards across the account.
     corpus_industry = cs.normalise_industry(industry_val)
-    spoken_for = set()
+    elsewhere = cs.cited_above(db, account_id, cs.SURFACE_OPPORTUNITIES)
+    here: set = set()
     for play in cleaned_plays:
         lines = []
         for product in play.get("hp_products") or []:
             lines.extend(line for line in cs.lines_for_hp_line(product)
                          if line not in lines)
-        for study in cs.match(db, lines, industry=corpus_industry,
-                              limit=PROOF_POINT_CANDIDATES):
-            # No customer is cited on two plays: several HP lines share a
-            # corpus line, so the same story would otherwise fill two cards.
-            if str(study.get("_id")) in spoken_for:
-                continue
-            point = cs.as_proof_point(study)
-            if point:
-                # Same shape as the Objection Playbook stores: the sentence to
-                # read, and the record behind it for the customer, industry and
-                # link. One shape means one way to render a proof point.
-                play["hp_proof_point"] = point["text"]
-                play["hp_proof_point_note"] = None
-                play["hp_proof_point_detail"] = point
-                spoken_for.add(str(study.get("_id")))
-                break
+        point = cs.allocate(db, lines, industry=corpus_industry,
+                            taken=elsewhere, used_here=here)
+        if point:
+            # Same shape as the Objection Playbook stores: the sentence to read,
+            # and the record behind it for the customer, industry and link. One
+            # shape means one way to render a proof point.
+            play["hp_proof_point"] = point["text"]
+            play["hp_proof_point_note"] = None
+            play["hp_proof_point_detail"] = point
+            if point.get("study_id"):
+                here.add(point["study_id"])
 
-    if cleaned_plays or discovery_areas:
+    # The Rulebook's service plays. Built from the same corpus the hardware
+    # plays reason over, so a seller can see both came from the same evidence.
+    account_country = ""
+    if firmo_records:
+        account_country = str(firmo_records[0].get("Country Name")
+                              or firmo_records[0].get("Country") or "").strip()
+    try:
+        service_plays, service_notes = _service_plays(
+            db, corpus, account_country, roster)
+    except Exception:
+        # A rulebook that is missing or half-loaded must not take the feature
+        # down with it; the hardware plays are older and stand alone.
+        logger.exception("opportunity map: service plays failed")
+        service_plays, service_notes = [], []
+
+    if cleaned_plays or discovery_areas or service_plays:
         plays_payload = {
             "account_id": account_id,
             "feature_key": "solution_narrative_opportunity_map",
@@ -1273,6 +1553,15 @@ Output JSON:
                 "discovery_count": len(discovery_areas),
                 "discovery_areas": discovery_areas,
                 "dropped": dropped,
+                # Rulebook-backed HP services, chosen in Python and carrying
+                # HP's own approved wording. Separate from `opportunity_plays`
+                # because they are a different kind of thing: those are a
+                # model's reading of the account, these are a rule the account
+                # matched.
+                "service_plays": service_plays,
+                "service_play_count": len(service_plays),
+                "service_notes": service_notes,
+                "rulebook_version": rb.knowledge_version(db),
                 "grounding_report": report.as_dict(),
                 # Why each play was or was not allowed to claim a buying moment.
                 # Published rather than logged: a play that reads as exploratory

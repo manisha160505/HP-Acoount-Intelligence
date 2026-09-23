@@ -32,7 +32,13 @@ from app.services.extractors.grounding import (
     check_text,
     corpus_from_texts,
 )
-from app.services.hp.guardrails import approve_facts, summarise
+from app.services.hp import rulebook as rb
+from app.services.hp.guardrails import (
+    approve_facts,
+    approve_rulebook_facts,
+    prose_guardrail_faults,
+    summarise,
+)
 from app.services.hp.product_rules import RULES_BY_ID, match_rules
 
 logger = logging.getLogger(__name__)
@@ -41,7 +47,37 @@ logger = logging.getLogger(__name__)
 #     "Contextual - no direct HP line" categories to Confirmed.
 # 3 - recommendations carry category_key/category_name so they render inside
 #     the technographic category they concern.
-RECOMMENDATION_PROMPT_VERSION = 3
+# 4 - Part A of the HP 220 Account Rulebook replaces the hand-typed rules and
+#     the deck-extracted facts (C 02).
+# 5 - the stored payload now reports the rulebook's version and counts the
+#     rules the rulebook evaluated, which read as 0 on a card that existed.
+# 6 - rules refused under C 06 are now reported in `rules_blocked` instead of
+#     being discarded, so a single card can be explained rather than doubted.
+# 7 - rules refused before selection are reported too, not only those C 06
+#     withheld. A card missing because its only term was "microsoft azure"
+#     should say so rather than simply not appear.
+# 8 - a refused rule now carries the category it would have appeared in, so
+#     the reason sits beside the empty category rather than at the page foot.
+# 9 - Part B rules now produce a card in the category they speak to. Part A is
+#     HP's client-hardware chapter, so four of the six categories could never
+#     carry one while 144 service rules sat unused behind them.
+# 10 - Part A now matches the account's whole research corpus, not four
+#      widgets. HP's own signal for rule 1 names "AI hiring" and the hiring
+#      data was unreachable. A card says which dataset earned it, and drops the
+#      confidence band where no estate evidence fired it.
+# 11 - the per-family cap no longer spends a slot on a modifier, which had
+#      been cutting rule 1 before selection saw it; and a withheld rule is
+#      reported once rather than twice.
+# 12 - provenance drops the widget-derived restatement of a dataset it already
+#      names, so a card does not cite "Autodesk" twice from two places.
+RECOMMENDATION_PROMPT_VERSION = 12
+
+# Whether hardware facts come from the rulebook (C 02) or from the decks.
+#
+# The rulebook is the client's authority and says plainly that the engine must
+# not reopen the original HP files. Set False to fall back to the deck corpus,
+# which is richer but is exactly what C 02 forbids at runtime.
+RULEBOOK_PART_A = True
 MAX_RECOMMENDATIONS = 5
 MAX_FACTS_PER_RECOMMENDATION = 8
 
@@ -84,11 +120,35 @@ def _account_evidence(db, account_id: str) -> dict:
     matrix = widget("tech_stack_matrix")
     techno = widget("technographic_map")
 
+    # The account's whole research corpus, not just the four widgets this
+    # feature used to read.
+    #
+    # Part A rules are evaluated HERE and nowhere else - the Opportunity Map
+    # deliberately excludes them - so a signal this corpus cannot hold is a
+    # signal the product can never match. Four of the twelve placeable Part A
+    # rules name evidence the widgets do not carry: rule 1 is "Enterprise AI /
+    # local AI ... AI HIRING ... AI-PC refresh", and the account's Data
+    # Engineer job ad fires it. On the old 377-cell corpus it fired nothing,
+    # so HP wrote a signal that had no way of being matched.
+    research = rb.account_evidence(account_id)
+
     intent = [str(t.get("topic_name") or "")
               for t in (widget("intent_topics_table").get("topics") or [])]
     triggers = [str(t.get("headline") or t.get("text") or "")
                 for t in (widget("opportunity_trigger_signals").get("triggers") or [])]
     stack = [str(s) for s in (matrix.get("full_tech_stack") or [])]
+
+    # Widget-derived cells stay in the corpus beside the raw research. They are
+    # the same facts in a tidier form, and keeping both means nothing that
+    # matched before this widened can stop matching now.
+    seen: set = set()
+    texts = []
+    for text in ([exec_card.get("business_description") or "", *intent,
+                  *triggers, *stack] + [r["text"] for r in research]):
+        text = str(text or "").strip()
+        if text and text not in seen:
+            seen.add(text)
+            texts.append(text)
 
     return {
         "company_name": exec_card.get("company_name") or "",
@@ -98,7 +158,11 @@ def _account_evidence(db, account_id: str) -> dict:
         "triggers": triggers,
         "tech_stack": stack,
         "categories": techno.get("categories") or [],
-        "texts": [exec_card.get("business_description") or "", *intent, *triggers, *stack],
+        "texts": texts,
+        # The same cells with their dataset and field, so a card can say which
+        # of the account's files fired the rule instead of implying it came
+        # from the technology export.
+        "research": research,
     }
 
 
@@ -149,11 +213,272 @@ def _category_status_for_rule(categories: list, rule: dict) -> str:
     return str((categories[0] or {}).get("status_badge") or "") if categories else ""
 
 
+# One Part B card per category, for the same reason `select` allows one play
+# per opportunity type: a category carrying four Care Pack rules is a catalogue,
+# not a recommendation.
+MAX_PART_B_PER_CATEGORY = 1
+
+# The datasets that describe the technology estate itself. A confidence band is
+# a statement about the estate, so it is only published where the estate is
+# what fired the rule.
+ESTATE_DATASETS = frozenset((
+    "technographics", "technology_detections", "webstack", "technographic_map",
+))
+
+
+def _category_families(category: dict) -> frozenset:
+    """The rulebook families whose rules speak to this category.
+
+    Derived from the category's own cards rather than a seventh hand-typed
+    table: each vendor card already names the HP line it maps to, and
+    `rulebook.HP_LINE_TO_RULEBOOK_FAMILIES` already says which families speak
+    for a line. A whitespace category names its line too - Print Fleet's
+    placeholder card says "HP Enterprise Print / MPS" - so an empty category
+    can still reach the rules that would fill it.
+    """
+    families: set = set()
+    for vendor in category.get("vendors") or []:
+        if not isinstance(vendor, dict):
+            continue
+        line = str(((vendor.get("hp_play") or {}).get("product")) or "").strip().lower()
+        families.update(rb.HP_LINE_TO_RULEBOOK_FAMILIES.get(line, ()))
+    return frozenset(families)
+
+
+def _part_b_cards(book, matches: list, categories: list, country: str,
+                  now) -> list:
+    """Part B recommendations, placed in the category they speak to.
+
+    Part A is HP's client-hardware chapter: 12 of its 18 rules are notebooks and
+    desktops, so only two of the six categories could ever carry a card and the
+    other four - security, collaboration, print, client OS - had none, while 144
+    Part B rules sat unused behind them.
+
+    Nothing here is generated. A Part B card carries the rule's approved facts
+    as HP wrote them, the way the Opportunity Map's service plays do: C 03 is
+    "use exact facts", and passing an approved sentence through a model to be
+    reworded is the one step that could turn it into an unapproved one.
+    """
+    cards, used = [], set()
+    for category in categories or []:
+        if not isinstance(category, dict):
+            continue
+        families = _category_families(category)
+        if not families:
+            continue
+        for match in matches:
+            if match["family"] not in families or match["rule_label"] in used:
+                continue
+            approved, rejected = approve_rulebook_facts(
+                match["rule"], country, now)
+            if not approved:
+                continue
+            used.add(match["rule_label"])
+            cards.append({
+                "rule_id": match["rule_label"],
+                "part": "B",
+                "hp_line": rb.RULEBOOK_FAMILY_TO_HP_LINE.get(match["family"]),
+                "offering": match.get("offering"),
+                "hp_family": match["family"],
+                "device_type": None,
+                "category_key": category.get("category_key"),
+                "category_name": category.get("category_name"),
+                "rule_condition": match["rule"].get("signal_text"),
+                "matched_tokens": (match.get("qualifying_terms")
+                                   or match.get("matched_terms")),
+                "indicative_tokens": match.get("indicative_terms") or [],
+                "approved_facts": [d.as_dict()
+                                   for d in approved[:MAX_FACTS_PER_RECOMMENDATION]],
+                "withheld_summary": summarise(rejected),
+                "prohibitions": list(match["rule"].get("prohibitions") or []),
+                # No confidence band: the Part A bands are computed from the
+                # category status of a DEVICE, and a service rule has no device
+                # to check the estate for. An invented band would look like the
+                # same measurement.
+                "confidence": None,
+                "deck": match["rule"].get("evidence_source"),
+                "quoted_verbatim": True,
+            })
+            if len([c for c in cards
+                    if c["category_key"] == category.get("category_key")
+                    ]) >= MAX_PART_B_PER_CATEGORY:
+                break
+    return cards
+
+
+def _blocked_placement(rule_label: str) -> dict:
+    """Which category a refused rule would have appeared in, had it been used.
+
+    A refusal listed at the foot of the page answers a question nobody asked
+    there. The question is asked in the category that LOOKS empty - "no HP
+    client hardware detected" with no recommendation under it - so the answer
+    belongs beside it. Rule 2 is a notebook rule, and PC/Laptop Brands is the
+    category a seller is staring at when they wonder why nothing was suggested.
+
+    A rule with no device type in the bridge has no category to sit in and
+    stays with the general list.
+    """
+    bridge = RULES_BY_ID.get(int(rule_label)) if rule_label.isdigit() else None
+    key, name = DEVICE_TYPE_TO_CATEGORY.get(
+        (bridge or {}).get("device_type") or "", (None, None))
+    return {"category_key": key, "category_name": name,
+            "deck": (bridge or {}).get("deck")}
+
+
+def _rulebook_candidates(db, evidence: dict, now):
+    """Part A rules this account's evidence earns, as recommendation candidates.
+
+    The same shape the deck path produces, so everything downstream - the
+    prompt, the two-corpus grounding, Strategy Chat, the evaluator, the
+    dashboard and `audit_grounding.py` - is unchanged.
+
+    Metadata the rulebook does not carry (the deck this rule maps to, the
+    device type, the HP family, the exact-competitor requirement) is read from
+    `product_rules.RULES_BY_ID`, which was transcribed from an earlier HP
+    document and has been in production since. The rulebook decides WHICH rule
+    and WHAT may be said; the bridge supplies what the document is silent on.
+    """
+    book = rb.load(db)
+    if not book.get("rules"):
+        return [], [], ""
+
+    # Provenanced, so a matched rule knows which file fired it. Widget-derived
+    # cells carry no dataset of their own and are labelled as such rather than
+    # borrowed from one.
+    items = list(evidence.get("research") or [])
+    known = {i["text"] for i in items}
+    items += [{"text": t, "dataset": "technographic_map", "field": "derived"}
+              for t in evidence["texts"] if t not in known]
+    refused: list = []
+    every = rb.candidates(book, items, None, evidence["hq_location"],
+                          drops=refused)
+    # Part B cards for the four categories Part A can never reach. Built from
+    # the same match pass, so both halves answer from one reading of the
+    # evidence rather than two.
+    part_b = _part_b_cards(book, [m for m in every if m["rule"].get("part") != "A"],
+                           evidence.get("categories") or [],
+                           evidence["hq_location"], now)
+    matches = [m for m in every if m["rule"].get("part") == "A"]
+    chosen = rb.select(matches)
+    if not chosen["primary"]:
+        # Part A found nothing, which says nothing about Part B.
+        return part_b, [], rb.knowledge_version(db)
+
+    candidates, blocked = [], []
+
+    # C 06 refusals, reported rather than dropped. `select` already records why
+    # it refused each one; this used to discard that, so a page showing one card
+    # gave no way to tell whether one rule fired or five - and the honest answer
+    # (four more fired, on the same sentence as the first) is the useful one.
+    # C 07 asks for exactly this: "leave out the recommendation or label the
+    # missing condition clearly."
+    # Rules that never became candidates: a condition failed, or every term
+    # they matched on was one that points at a rule without earning it.
+    for dropped in refused:
+        label = str(dropped.get("rule_label", ""))
+        if not label.isdigit():
+            continue                      # Part B belongs to the Opportunity Map
+        blocked.append({"rule_id": dropped["rule_label"],
+                        "blocked": "; ".join(dropped.get("unmet") or [])
+                                   or "no qualifying evidence",
+                        **_blocked_placement(label)})
+
+    for match in chosen.get("withheld") or []:
+        blocked.append({
+            "rule_id": match["rule_label"],
+            "offering": match.get("offering"),
+            "blocked": match.get("withheld_because")
+                       or "C 06: no separate verified evidence supports it",
+            "matched_tokens": match.get("qualifying_terms")
+                              or match.get("matched_terms"),
+            **_blocked_placement(str(match["rule_label"])),
+        })
+
+    for match in [chosen["primary"], *chosen["secondary"]]:
+        rule = match["rule"]
+        label = rule["rule_label"]
+        bridge = RULES_BY_ID.get(int(label)) if str(label).isdigit() else None
+
+        approved, rejected = approve_rulebook_facts(
+            {**rule,
+             "requires_exact_competitor": bool((bridge or {}).get(
+                 "requires_exact_competitor"))},
+            evidence["hq_location"], now)
+        if not approved:
+            blocked.append({"rule_id": label,
+                            "blocked": "every fact was withheld by a guardrail"})
+            continue
+
+        shim = {"device_type": (bridge or {}).get("device_type")}
+        fired_rows = [items[i] for i in sorted(match["evidence_indices"])
+                      if i < len(items)]
+        # A widget-derived cell is a restatement of a dataset this list already
+        # names - "Autodesk" beside the technographics row it was lifted from -
+        # so it is dropped from the provenance rather than shown as a second
+        # source. It stays in the match corpus; it is just not evidence of
+        # anything the raw row does not already show.
+        real = [r for r in fired_rows
+                if r.get("dataset") and r["dataset"] != "technographic_map"]
+        fired_rows = real or fired_rows
+        fired_in = sorted({str(r.get("dataset") or "") for r in fired_rows})
+        status = _category_status_for_rule(evidence["categories"], shim)
+        band, basis = _confidence_for(status, bool(evidence["triggers"]),
+                                      summarise(rejected))
+        basis["fired_by_datasets"] = fired_in
+
+        # The band measures whether this DEVICE's category is confirmed in the
+        # estate. Where nothing in the estate fired the rule - the account is
+        # hiring data engineers, say - the band would be reporting a
+        # measurement of something other than the reason the card exists. C 07
+        # would rather label the gap than dress it up, so the band is dropped
+        # and the reason recorded in its place.
+        if not (set(fired_in) & ESTATE_DATASETS):
+            band = None
+            basis["no_band_because"] = (
+                "no technology-estate evidence fired this rule; it was earned "
+                "by %s" % (", ".join(d for d in fired_in if d) or "other research"))
+
+        category_key, category_name = DEVICE_TYPE_TO_CATEGORY.get(
+            shim["device_type"] or "", (None, None))
+        candidates.append({
+            "rule_id": label,
+            "rule_condition": rule.get("signal_text"),
+            "matched_tokens": match["matched_terms"],
+            "hp_family": (bridge or {}).get("family"),
+            "device_type": shim["device_type"],
+            "category_key": category_key,
+            "category_name": category_name,
+            # Provenance only. C 02: "Source names are provenance only; the
+            # engine must not reopen the original HP files."
+            "deck": rule.get("material") or (bridge or {}).get("deck"),
+            "approved_facts": [d.as_dict()
+                               for d in approved[:MAX_FACTS_PER_RECOMMENDATION]],
+            "withheld_summary": summarise(rejected),
+            "confidence": band,
+            "confidence_basis": basis,
+            # Named, not implied. A card in PC/Laptop Brands earned by a job ad
+            # must not carry a "technographics ->" line it did not come from.
+            "fired_by_datasets": fired_in,
+            "account_evidence": [
+                {"text": str(r.get("text") or "")[:300],
+                 "dataset": r.get("dataset"),
+                 "field": r.get("field")}
+                for r in fired_rows[:4]],
+            "unverified_conditions": match["unverified_conditions"],
+            "fact_source": "rulebook",
+        })
+
+    return candidates + part_b, blocked, rb.knowledge_version(db)
+
+
 def _fingerprint(evidence: dict, rule_ids: list, kversion: str) -> str:
     payload = {
         "prompt_version": RECOMMENDATION_PROMPT_VERSION,
         "knowledge_version": kversion,
-        "rules": sorted(rule_ids),
+        # Rule ids are strings under the rulebook and were ints under the
+        # hand-typed table. `sorted` raises TypeError on a mixed list, so they
+        # are normalised before sorting rather than after a crash.
+        "rules": sorted(str(r) for r in rule_ids),
         "evidence": sorted(t for t in evidence["texts"] if t),
         "hq": evidence["hq_location"],
     }
@@ -200,19 +525,37 @@ def generate_hp_recommendations(account_id: str) -> dict | None:
     if not evidence["texts"]:
         return None
 
-    matched = match_rules(evidence["texts"], competitor_models=evidence["tech_stack"])
-    live = [m for m in matched if not m["blocked"]]
-    blocked = [m for m in matched if m["blocked"]]
+    rulebook_candidates, rulebook_blocked, rversion = [], [], ""
+    if RULEBOOK_PART_A:
+        rulebook_candidates, rulebook_blocked, rversion = _rulebook_candidates(
+            db, evidence, now)
+
+    matched, live, blocked = [], [], []
+    if not RULEBOOK_PART_A:
+        matched = match_rules(evidence["texts"],
+                              competitor_models=evidence["tech_stack"])
+        live = [m for m in matched if not m["blocked"]]
+        blocked = [m for m in matched if m["blocked"]]
 
     existing = db["account_widgets"].find_one({
         "account_id": account_id, "widget_key": "technographic_hp_recommendations"})
-    fingerprint = _fingerprint(evidence, [m["rule_id"] for m in live], kversion)
+    rule_ids = ([c["rule_id"] for c in rulebook_candidates] if RULEBOOK_PART_A
+                else [m["rule_id"] for m in live])
+    # The rulebook's own version joins the fingerprint, so reloading it
+    # rebuilds these the way reloading the decks already did.
+    fingerprint = _fingerprint(evidence, rule_ids, kversion + "|" + rversion)
     if (existing and existing.get("status") == "available"
             and (existing.get("data") or {}).get("fingerprint") == fingerprint):
         return existing
 
     # ---- assemble candidates: Python decides everything here ----------------
-    candidates = []
+    if RULEBOOK_PART_A:
+        candidates = rulebook_candidates
+        blocked = rulebook_blocked
+    else:
+        candidates = []
+
+    # `live` is empty under the rulebook, so this loop is the deck path only.
     for match in live:
         rule = RULES_BY_ID[match["rule_id"]]
         if rule.get("modifier_only") or rule.get("routing_only"):
@@ -252,11 +595,24 @@ def generate_hp_recommendations(account_id: str) -> dict | None:
                                  if any(tok in t.lower() for tok in match["matched_tokens"])][:4],
         })
 
+    # Part B never reaches the model. Its text is HP's approved wording carried
+    # verbatim, the way the Opportunity Map's service plays are: C 03 is "use
+    # exact facts", and passing an approved sentence through a model to be
+    # reworded is the one step that could make it unapproved. So the two halves
+    # separate here - Part A goes on to the prompt, Part B goes straight out.
+    part_b_cards = [c for c in candidates if c.get("part") == "B"]
+    candidates = [c for c in candidates if c.get("part") != "B"]
+
     candidates.sort(key=lambda c: (c["confidence"] != CONFIDENCE_CONFIRMED,
                                    -len(c["approved_facts"])))
-    candidates = candidates[:MAX_RECOMMENDATIONS]
+    # C 06 - "Give one main recommendation. Add another product or service only
+    # when separate verified evidence supports it" - is enforced by
+    # `rulebook.select` before we get here, so the rulebook path arrives
+    # already limited and the cap below only applies to the deck path.
+    if not RULEBOOK_PART_A:
+        candidates = candidates[:MAX_RECOMMENDATIONS]
 
-    if not candidates:
+    if not candidates and not part_b_cards:
         if existing and existing.get("status") == "available":
             return existing
         return _pending(account_id, now, kversion,
@@ -278,12 +634,18 @@ def generate_hp_recommendations(account_id: str) -> dict | None:
         } for c in candidates],
     }, ensure_ascii=False)
 
-    result = generate_gpt4o_json_completion(SYSTEM_PROMPT, user_prompt)
+    # Only Part A needs the model, and an account can now have Part B cards and
+    # no Part A rule at all - a security-only or print-only match. Calling with
+    # an empty list would spend a request to be told nothing.
+    result = (generate_gpt4o_json_completion(SYSTEM_PROMPT, user_prompt)
+              if candidates else None)
     prose = {}
     if result and isinstance(result.get("recommendations"), list):
         for entry in result["recommendations"]:
             if isinstance(entry, dict) and entry.get("rule_id") is not None:
-                prose[int(entry["rule_id"])] = entry
+                # Keyed as a string: Part B ids read "WXP 01" and int() on one
+                # raises. Part A's are numeric but arrive as strings too.
+                prose[str(entry["rule_id"])] = entry
 
     # ---- verify what it wrote, against two separate corpora -----------------
     account_corpus = build_corpus({"account": [{"t": t} for t in evidence["texts"]]})
@@ -294,11 +656,12 @@ def generate_hp_recommendations(account_id: str) -> dict | None:
 
     out = []
     for candidate in candidates:
-        entry = prose.get(candidate["rule_id"]) or {}
+        entry = prose.get(str(candidate["rule_id"])) or {}
         rationale = str(entry.get("rationale") or "").strip()
         why = str(entry.get("why_this_product") or "").strip()
         question = str(entry.get("discovery_question") or "").strip()
-        label = "rule-%d" % candidate["rule_id"]
+        # %s, not %d: a rulebook rule id is a string.
+        label = "rule-%s" % candidate["rule_id"]
 
         # Account-facing prose is checked against the account's own uploads.
         bad_numbers, bad_urls = check_text(account_corpus, report, label, rationale, question)
@@ -321,10 +684,25 @@ def generate_hp_recommendations(account_id: str) -> dict | None:
                            "figures absent from its approved facts", label)
             why = ""
 
+        # Product guardrails 15 and 16. A figure can be correctly sourced and
+        # still be used to make a claim the document forbids - "13 TOPS" is a
+        # real fact, and calling that product a Next Gen AI PC is false by the
+        # rulebook's own definition.
+        if why:
+            faults = prose_guardrail_faults(why, candidate["approved_facts"])
+            if faults:
+                report.hp_facts_rejected.append("%s: %s" % (label, "; ".join(faults)))
+                logger.warning("hp recommendations: %s dropped product prose - %s",
+                               label, faults)
+                why = ""
+
         candidate.update({"rationale": rationale or None,
                           "why_this_product": why or None,
                           "discovery_question": question or None})
         out.append(candidate)
+
+    # Part B after Part A, so a category that has both reads hardware first.
+    out.extend(part_b_cards)
 
     grounding = report.as_dict()
     grounding["hp_facts_checked"] = report.hp_facts_checked
@@ -343,8 +721,16 @@ def generate_hp_recommendations(account_id: str) -> dict | None:
             "account_country": evidence["hq_location"],
             "recommendations": out,
             "recommendations_count": len(out),
-            "rules_evaluated": len(matched),
+            # Both paths. Under RULEBOOK_PART_A the deck matcher evaluates
+            # nothing, so counting only `matched` reported "0 rules evaluated"
+            # on a widget showing a recommendation - which reads as a bug to
+            # anyone checking why a card appeared.
+            "rules_evaluated": len(matched) + len(rulebook_candidates),
             "rules_blocked": blocked,
+            # The deck corpus version is kept above as `knowledge_version`
+            # because the older path keys on it. The rulebook has its own, and
+            # it is the one that decides these cards today.
+            "rulebook_version": rversion,
             "grounding_report": grounding,
         },
         "source_datasets": ["technographics", "technology_detections", "webstack",

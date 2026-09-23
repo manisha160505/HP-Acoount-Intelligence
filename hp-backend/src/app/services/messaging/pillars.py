@@ -53,10 +53,6 @@ INDEX = "content_messaging"
 WIDGET_KEY = "messaging_pillars_output"
 PROMPT_VERSION = 2
 
-# How deep to look for a case study a pillar can still use. Pillars share HP
-# lines, so the best study for one is often already cited on another.
-PROOF_POINT_CANDIDATES = 5
-
 MIN_PILLARS = 3
 MAX_PILLARS = 5
 MIN_EVIDENCE_PER_PILLAR = 1
@@ -926,7 +922,8 @@ def generate_messaging_pillars(account_id: str, mode: str | None = None) -> dict
     # can never restate another customer's figure as if it were this account's.
     corpus_industry = cs.normalise_industry(
         _text(business_context.get("industry_classification")))
-    spoken_for: set[str] = set()
+    elsewhere = cs.cited_above(db, account_id, cs.SURFACE_MESSAGING)
+    here: set = set()
 
     for pillar in pillars:
         pillar["sourced"] = _sourced_count(pillar)
@@ -934,22 +931,20 @@ def generate_messaging_pillars(account_id: str, mode: str | None = None) -> dict
         if resource:
             pillar["hp_resource"] = resource
 
+        # No customer appears on two pillars - the message house is read as one
+        # document, so the same story twice reads as having only one - nor on a
+        # pillar that the playbook or the map already cites.
         lines: list[str] = []
         for product in pillar.get("hp_solutions") or []:
             lines.extend(line for line in cs.lines_for_hp_line(product)
                          if line not in lines)
-        for study in cs.match(db, lines, industry=corpus_industry,
-                              limit=PROOF_POINT_CANDIDATES):
-            # No customer appears on two pillars: the message house is read as
-            # one document, so the same story twice reads as having only one.
-            if str(study.get("_id")) in spoken_for:
-                continue
-            point = cs.as_proof_point(study)
-            if point:
-                pillar["hp_proof_point"] = point["text"]
-                pillar["hp_proof_point_detail"] = point
-                spoken_for.add(str(study.get("_id")))
-                break
+        point = cs.allocate(db, lines, industry=corpus_industry,
+                            taken=elsewhere, used_here=here)
+        if point:
+            pillar["hp_proof_point"] = point["text"]
+            pillar["hp_proof_point_detail"] = point
+            if point.get("study_id"):
+                here.add(point["study_id"])
 
     umbrella, umbrella_faults = _umbrella(pillars, company, restrictions)
     framing = _framing(pillars, company, restrictions)

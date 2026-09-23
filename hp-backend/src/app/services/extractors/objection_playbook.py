@@ -14,7 +14,14 @@ from app.services.extractors.grounding import (
     build_corpus,
     check_text,
 )
-from app.services.hp import case_studies as cs
+from app.services.hp import case_studies as cs, rulebook as rb
+from app.services.hp.guardrails import (
+    SUPERLATIVE_BLOCK_COUNTRIES,
+    SUPERLATIVE_RE,
+    approve_rulebook_facts,
+    prose_guardrail_faults,
+    summarise,
+)
 
 logger = logging.getLogger(__name__)
 from app.services.extractors.datasets import (
@@ -137,9 +144,6 @@ MAX_OBJECTIONS = 10
 # No HP proof-point corpus is supplied to this system, so this is what shows.
 NO_PROOF_POINT = "No supporting HP proof point available"
 
-# How deep to look for a study a card can still use. Five areas share three
-# lines between them, so the first choice is often already on another card.
-PROOF_POINT_CANDIDATES = 5
 
 # Bump when the objection prompt changes so cached output is regenerated.
 # 6 - cards now carry an HP case study as their proof point, so a cached card
@@ -147,7 +151,24 @@ PROOF_POINT_CANDIDATES = 5
 # 7 - the case study a card reaches is now chosen by computed offering rather
 #     than HP's product tag, which reaches studies the tag hid entirely.
 # 8 - no customer is cited on two cards in the same playbook.
-OBJECTION_PROMPT_VERSION = 8
+# 9 - nor on a card another feature already cites, where the corpus has an
+#     equally good alternative.
+# 10 - the reframe's HP claim now comes from the HP 220 Account Rulebook
+#      instead of the model's own knowledge of HP, so every cached card was
+#      written under the looser rule and must be rebuilt.
+# 11 - contact records no longer feed the rulebook match, and an integration
+#      claim must name an integration the approved facts state. Both changed
+#      what the prompt is given, so version 10 cards were written under
+#      different constraints.
+# 12 - the rulebook is matched against the account's whole research corpus
+#      (`rb.EVIDENCE_DATASETS`) rather than this feature's three grounding
+#      datasets, which held 39 cells and found almost nothing.
+# 13 - a reframe may no longer name this system's own research ("visible in
+#      your technographics data" was reaching the seller's mouth).
+# 14 - the integration check reads the whole sentence. Parsing the verb's
+#      object let "integrate seamlessly with" and "integrating with it" carry
+#      an HP claim nothing approved, the second attributing it to HP material.
+OBJECTION_PROMPT_VERSION = 14
 
 # The dataset key used everywhere in evidence, prompts and UI. Never the Source A
 # sheet name - the application speaks in dataset keys.
@@ -303,8 +324,262 @@ def _resolve_likely_raiser(area: str, contacts: list[dict]) -> tuple[str, str]:
     return area, "hp_contest_area"
 
 
+# How many rules one area may draw approved claims from. The model is being
+# given text to choose between, not a catalogue to summarise, and five rules of
+# eight facts each would bury the objection it is meant to answer.
+MAX_RULES_PER_AREA = 3
+
+# And how many facts from any one rule. CARE 01 alone carries eight.
+MAX_FACTS_PER_RULE = 4
+
+
+def _area_families(area: str) -> frozenset:
+    """The rulebook families whose rules may answer an objection in this area.
+
+    Derived, not typed out again. Two maps already exist and both are
+    maintained: `rulebook.RULEBOOK_FAMILY_TO_HP_LINE` says which HP line a
+    family speaks for, and `case_studies.HP_LINE_TO_LINES` and `AREA_TO_LINES`
+    resolve an HP line and an area to the same canonical vocabulary. Chaining
+    them means a family added to the rulebook reaches the right areas without a
+    seventh hand-typed copy of the taxonomy drifting out of step with the other
+    six.
+    """
+    wanted = set(cs.lines_for_area(area))
+    if not wanted:
+        return frozenset()
+    return frozenset(
+        family for family, hp_line in rb.RULEBOOK_FAMILY_TO_HP_LINE.items()
+        if set(cs.lines_for_hp_line(hp_line) or ()) & wanted)
+
+
+def _rulebook_claims(db, corpus: list, areas: list[dict],
+                     country: str, now=None) -> dict:
+    """The HP claims each area's reframe is allowed to make, per the rulebook.
+
+    Until this existed the reframe was the one place in this feature where HP
+    was described from the model's own knowledge: the prompt handed it six HP
+    line names and asked for "the concrete angle", and whatever it then said
+    about HP was unverified. The account side has always been grounded - rule 1
+    of the prompt, `check_text`, `_sector_terms_used` - so the HP side was the
+    remaining gap.
+
+    This closes it the way `recommendations.py` and the Opportunity Map already
+    do. The rules are matched against the ACCOUNT's evidence (C 01 - HP material
+    cannot prove the account has a problem), then filtered to the families that
+    speak for this area's HP line, and only their `allowed_facts` may be stated.
+
+    An area with no matched rule returns nothing, and the prompt then forbids a
+    capability claim there rather than inventing one. That is C 07: "leave out
+    the recommendation ... Do not force a match."
+    """
+    book = rb.load(db)
+    if not book.get("rules"):
+        return {}
+
+    matches = rb.candidates(book, corpus, rb.route(book, corpus), country)
+    claims = {}
+    for area in areas:
+        families = _area_families(area["area"])
+        if not families:
+            continue
+        hits = [m for m in matches if m["family"] in families][:MAX_RULES_PER_AREA]
+        if not hits:
+            continue
+        rules = []
+        for match in hits:
+            # The same guardrail pipeline every other rulebook consumer uses,
+            # rather than the rule's raw facts: it is what applies C 14 market
+            # availability, C 16 confidentiality and the competitor block, and
+            # a fact those withhold must not reach a prompt.
+            approved, rejected = approve_rulebook_facts(
+                match["rule"], country, now)
+            facts = [d.as_dict() for d in approved][:MAX_FACTS_PER_RULE]
+            if not facts:
+                continue
+            rules.append({
+                "rule_label": match["rule_label"],
+                "offering": match["offering"],
+                "hp_line": rb.RULEBOOK_FAMILY_TO_HP_LINE.get(match["family"]),
+                "approved_facts": facts,
+                "withheld": summarise(rejected),
+                "prohibitions": [str(x) for x in
+                                 (match["rule"].get("prohibitions") or [])],
+                "matched_terms": (match.get("qualifying_terms")
+                                  or match["matched_terms"]),
+            })
+        if rules:
+            claims[area["area"]] = rules
+    return claims
+
+
+# Our words for our own research. A reframe is the sentence a seller says out
+# loud, and "we cannot see a print vendor in your technographics" tells a buyer
+# what our data does not contain - which is our gap to close, not their problem
+# to hear about.
+_INTERNAL_VOCABULARY = (
+    "technographic", "firmographic", "the dataset", "our dataset",
+    "our records", "our data", "the evidence shows", "evidence block",
+)
+
+
+# A claim that HP connects to something, anywhere in a sentence.
+#
+# Parsing the target out of the verb was tried and is not enough. "WXP
+# integrates with ManageEngine" was caught; "Poly integrate SEAMLESSLY with
+# Microsoft Teams" slipped past an adverb, and "WXP can complement your existing
+# ManageEngine setup by integrating with IT, as noted in the supplied HP
+# material" slipped past a pronoun - and that one also attributed the invented
+# claim to HP. So the test is applied to the whole sentence: if it claims a
+# connection and names a product HP's approved facts never name, the connection
+# is to something HP did not say it connects to.
+_INTEGRATION_VERB_RE = re.compile(
+    r"\b(integrat\w*|interoperat\w*|work[s]?\s+with|connect[s]?\s+(to|into)|"
+    r"plug[s]?\s+into|native\s+support\s+for|compatible\s+with)\b", re.I)
+
+# A product name: capitalised, or ALLCAPS, and more than one letter.
+_PROPER_NOUN_RE = re.compile(r"\b([A-Z][A-Za-z0-9]+(?:\s+[A-Z][A-Za-z0-9]+)*)\b")
+
+# Never treated as a product HP must have named: HP's own name, and the words
+# that begin a sentence or label a platform generically.
+_NOT_A_PRODUCT = frozenset((
+    "hp", "it", "this", "these", "the", "our", "your", "their", "we", "us",
+    "windows", "pc", "pcs", "ai", "os", "and", "but", "however", "exploring",
+    "understanding", "its",
+    # HP's own brands and sub-brands. The question this check asks is what HP
+    # claims to connect TO; HP naming its own product is not that claim, and
+    # flagging "HP WXP integrates with Microsoft Intune" for saying "WXP" would
+    # refuse the approved sentence along with the invented one.
+    "poly", "wolf", "wxp", "anyware", "daas", "elitebook", "probook", "zbook",
+    "elitedesk", "prodesk", "elite", "pro", "workpath", "sure", "admin",
+    "tamper", "lock", "troy", "micr", "mps", "iq", "care", "pack",
+))
+
+
+def _named_products(text: str, company_name: str = "",
+                    own_names: str = "") -> set:
+    """Products a sentence names, excluding HP, the account and sentence-starts."""
+    skip = set(_NOT_A_PRODUCT)
+    for source in (company_name, own_names):
+        for word in str(source or "").replace("/", " ").split():
+            skip.add(word.strip(",.()").lower())
+    found = set()
+    for phrase in _PROPER_NOUN_RE.findall(text):
+        for word in phrase.split():
+            if word.lower() not in skip and len(word) > 1:
+                found.add(word)
+    return found
+
+
+def _claim_provenance(rules: list) -> dict:
+    """What a card says about where its HP claim came from.
+
+    Shown rather than kept internal: a seller repeating a claim to a customer
+    should be able to see which rule of HP's own rulebook stands behind it, and
+    an area with no rule should say so instead of leaving the reader to assume
+    one exists.
+    """
+    if not rules:
+        return {
+            "hp_claim_source": None,
+            "hp_claim_rules": [],
+            "hp_claim_note": ("No HP rulebook offering matches this area's "
+                              "evidence, so the reframe makes no HP capability "
+                              "claim."),
+        }
+    return {
+        "hp_claim_source": "rulebook",
+        "hp_claim_rules": [{"rule_label": r["rule_label"],
+                            "offering": r["offering"],
+                            "hp_line": r["hp_line"],
+                            "matched_terms": r["matched_terms"],
+                            "approved_facts": r["approved_facts"],
+                            "withheld": r["withheld"]}
+                           for r in rules],
+        "hp_claim_note": None,
+    }
+
+
+def _claim_faults(reframe: str, rules: list, country: str,
+                 company_name: str = "") -> list:
+    """Why this reframe may not be published as written.
+
+    Two checks, both reusing machinery the rulebook path already owns rather
+    than inventing a policy for this feature.
+
+    `prose_guardrail_faults` is G 15 and G 16 - the AI-PC class definition and a
+    product generation the approved facts never state. It is the same gate
+    `recommendations.py` runs on generated product prose.
+
+    The superlative check extends guardrail 2 from the facts to the sentence.
+    `approve_rulebook_facts` already withholds a restricted superlative FACT in
+    the countries that restrict them; without this, the model could withhold
+    nothing and simply write its own superlative instead, which is the same
+    claim arriving by a different route.
+    """
+    facts = [f for rule in rules for f in rule["approved_facts"]]
+    faults = list(prose_guardrail_faults(reframe, facts))
+
+    leaked = sorted({w for w in _INTERNAL_VOCABULARY if w in reframe.lower()})
+    if leaked:
+        faults.append(
+            "internal vocabulary: says %s, which names this system's own data "
+            "rather than anything the buyer would recognise"
+            % ", ".join(repr(w) for w in leaked))
+
+    own_names = " ".join(str(r.get("offering") or "") + " "
+                         + str(r.get("hp_line") or "") for r in rules)
+    sourced_text = " ".join(str(f.get("text") or "") + " "
+                            + " ".join(f.get("conditions") or [])
+                            for f in facts)
+    for sentence in re.split(r"(?<=[.;])\s+", reframe):
+        if not _INTEGRATION_VERB_RE.search(sentence):
+            continue
+        unnamed = sorted(p for p in _named_products(sentence, company_name,
+                                                    own_names)
+                         if p.lower() not in sourced_text.lower())
+        if unnamed:
+            faults.append(
+                "C 03 integration: claims HP connects to %s, which no approved "
+                "fact names" % ", ".join(unnamed))
+            break
+
+    if country in SUPERLATIVE_BLOCK_COUNTRIES:
+        sourced = " ".join(str(f.get("text") or "") for f in facts)
+        for hit in {m.group(0) for m in SUPERLATIVE_RE.finditer(reframe)}:
+            if hit.lower() not in sourced.lower():
+                faults.append(
+                    "G2 restricted superlative: says %r, which no approved fact "
+                    "states and which %s restricts" % (hit, country))
+                break
+    return faults
+
+
+def _claims_block(rules: list) -> str:
+    """One area's approved claims, as the prompt sees them."""
+    lines = []
+    for rule in rules:
+        lines.append("    * " + (rule["hp_line"] or "HP") + " - "
+                     + (rule["offering"] or "") + " [" + rule["rule_label"] + "]")
+        for fact in rule["approved_facts"]:
+            text = str(fact.get("text") or "").strip()
+            if not text:
+                continue
+            # A qualified fact travels with its qualifier. C 03 is "use exact
+            # facts", and a figure separated from the condition it holds under
+            # is no longer the fact the rulebook approved.
+            for extra in (fact.get("qualifiers") or []) + (fact.get("conditions") or []):
+                extra = str(extra or "").strip()
+                if extra and extra.lower() not in text.lower():
+                    text += " (" + extra + ")"
+            lines.append("        may say: " + text)
+        for ban in rule["prohibitions"]:
+            lines.append("        MUST NOT say: " + ban)
+    return NL.join(lines)
+
+
 def _evidence_fingerprint(areas: list[dict], business_description: str,
-                          case_studies_version: str = "") -> str:
+                          case_studies_version: str = "",
+                          rulebook_version: str = "") -> str:
     basis = sorted(
         [{"a": a["area"], "e": a["evidence"], "r": a.get("likely_raiser", "")} for a in areas],
         key=lambda x: x["a"],
@@ -317,6 +592,9 @@ def _evidence_fingerprint(areas: list[dict], business_description: str,
         # to rebuild the cards that cite it. The account's own evidence does not
         # change when HP's corpus is corrected.
         "case_studies_version": case_studies_version,
+        # A card stores the rulebook claims its reframe was written from, so a
+        # reloaded rulebook has to rebuild the cards that lean on it.
+        "rulebook_version": rulebook_version,
     }
     return hashlib.sha256(
         json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
@@ -332,7 +610,8 @@ def generate_objection_cards(account_id: str, areas: list[dict],
     db = get_db()
     now = datetime.now(UTC)
     fingerprint = _evidence_fingerprint(areas, business_description,
-                                        cs.knowledge_version(db))
+                                        cs.knowledge_version(db),
+                                        rb.knowledge_version(db))
 
     existing = db["account_widgets"].find_one({
         "account_id": account_id,
@@ -343,10 +622,33 @@ def generate_objection_cards(account_id: str, areas: list[dict],
         return existing
 
     # Grounding corpus: the datasets this feature reasons over.
-    ground = build_corpus({
-        k: _read_dataset_records(account_id, k) for k in
-        ("technographics", "firmographics", "prospect_contacts")
-    })
+    records = {k: _read_dataset_records(account_id, k) for k in
+               ("technographics", "firmographics", "prospect_contacts")}
+    ground = build_corpus(records)
+
+    # The same cells again, as the rulebook matcher wants them. Built from the
+    # records already read rather than through a second read, so the claims an
+    # area may make and the evidence its card is checked against cannot come
+    # from different snapshots of the account.
+    # The rulebook is matched against the account's whole research corpus, not
+    # just the three datasets this feature grounds its prose against. Those
+    # three hold 39 cells for this account and the full corpus holds thousands;
+    # matching on the narrow set meant four of five areas found no HP offering
+    # that the same evidence plainly supports elsewhere in the product.
+    #
+    # `rb.EVIDENCE_DATASETS` is the shared definition, so the Opportunity Map,
+    # the Technographic Map and this feature all answer from the same evidence.
+    rb_corpus = rb.account_evidence(account_id)
+    country = rb.account_country(account_id)
+
+    try:
+        claims_by_area = _rulebook_claims(db, rb_corpus, areas, country, now)
+    except Exception:
+        # A rulebook that is missing or half-loaded must not take the playbook
+        # down with it. The cards then carry no approved claim, and the prompt
+        # below forbids a capability claim rather than inventing one.
+        logger.exception("objection playbook: rulebook claims unavailable")
+        claims_by_area = {}
     report = GroundingReport(ground, ["objection", "reframe", "counter_question"])
 
     # One HP case study per area, chosen by Python before the model is called.
@@ -368,39 +670,57 @@ def generate_objection_cards(account_id: str, areas: list[dict],
     # spends two slots on one story. Areas are served in the order they arrive,
     # which is the fixed order of `AREA_CATEGORY_COLUMNS`; a later card takes
     # its next-best unused study, or none, rather than repeating an earlier one.
+    # No customer appears twice - not on two cards here, and not on a card that
+    # another feature already cites. Client Devices and Device Management both
+    # reach the device-services line, and the Opportunity Map reaches it too, so
+    # without this one university was cited three times across the account.
+    #
+    # The Objection Playbook chooses FIRST (see `cs.SURFACE_ORDER`): its five
+    # areas are fixed and land on the thinnest lines in the corpus, so it has
+    # the least room to move. `cited_above` is therefore empty for it today -
+    # it is passed anyway, so that adding a surface above it needs no change
+    # here.
     corpus_industry = cs.normalise_industry(industry)
-    proof_by_area, spoken_for = {}, set()
+    elsewhere = cs.cited_above(db, account_id, cs.SURFACE_OBJECTIONS)
+    here: set = set()
+    proof_by_area = {}
     for area in areas:
-        proof_by_area[area["area"]] = None
-        for study in cs.match(db, cs.lines_for_area(area["area"]),
-                              industry=corpus_industry,
-                              limit=PROOF_POINT_CANDIDATES):
-            if str(study.get("_id")) in spoken_for:
-                continue
-            point = cs.as_proof_point(study)
-            if point:
-                proof_by_area[area["area"]] = point
-                spoken_for.add(str(study.get("_id")))
-                break
+        point = cs.allocate(db, cs.lines_for_area(area["area"]),
+                            industry=corpus_industry,
+                            taken=elsewhere, used_here=here)
+        proof_by_area[area["area"]] = point
+        if point and point.get("study_id"):
+            here.add(point["study_id"])
 
     roster = []
     for a in areas:
         state = ("NO VENDOR DETECTED IN THE TECHNOGRAPHICS EVIDENCE"
                  if a["not_in_technographics"]
                  else "vendors detected: " + ", ".join(a["detected_vendors"]))
+        rules = claims_by_area.get(a["area"]) or []
+        approved = (NL + "    APPROVED HP CLAIMS for this area - the only "
+                         "things you may assert about HP here:" + NL
+                    + _claims_block(rules)) if rules else (
+            NL + "    APPROVED HP CLAIMS for this area: NONE. The rulebook "
+                 "connects no HP offering to the evidence in this area, so you "
+                 "may name an HP line but MUST NOT state any capability, "
+                 "benefit, saving or figure for it.")
         roster.append(
             "- area=" + a["area"] + " | " + state + NL
             + "    evidence (verbatim, do not rewrite): " + a["evidence"] + NL
             + "    topic owner at this account: " + a["likely_raiser"]
+            + approved
         )
 
     system_prompt = (
 "You are an HP enterprise sales strategist preparing a seller to meet " + company_name + "." + NL + NL
 + "ABOUT THE ACCOUNT (from its firmographics record):" + NL
 + (business_description or "No business description supplied.") + NL + NL
-+ "HP competes in these areas: client devices (HP Elite/Pro PCs, Z by HP Workstations), "
-  "collaboration hardware (Poly), print and managed print services, endpoint security "
-  "(HP Wolf Security), and device management (HP Anyware / DaaS)." + NL + NL
++ "HP competes in these areas: client devices, collaboration hardware (Poly), print and "
+  "managed print services, endpoint security (HP Wolf Security), device management, and the "
+  "device services that attach to them. Which HP offering applies to an area is not for you "
+  "to decide - each area block below carries the offerings HP's rulebook connects to that "
+  "area's evidence, and those are the ones to use." + NL + NL
 + "EVIDENCE - one block per area, drawn from this account's technographics dataset:" + NL
 + NL.join(roster) + NL + NL
 + "WRITE, FOR EACH AREA, one objection card." + NL + NL
@@ -421,6 +741,14 @@ def generate_objection_cards(account_id: str, areas: list[dict],
   "claim about the account. Frame it as a visibility gap - the evidence does not show one, and a vendor may "
   "well exist undetected - and make the counter question one that FINDS OUT who owns that decision today." + NL
 + "4. Never rewrite, paraphrase or tidy the evidence string. You are reading it, not editing it." + NL
++ "6. HP CLAIMS. Everything you assert about what HP does, provides, includes or improves "
+  "must come from that area's APPROVED HP CLAIMS block. Those sentences are HP's own approved "
+  "wording; you may compress or rephrase one to fit the reframe, but you may not add a "
+  "capability, a benefit, a comparison, a saving or a figure that is not in them. Where the "
+  "block says NONE, name the HP line and stop there - answer the objection from the account's "
+  "own evidence and let the counter question do the work. Anything marked MUST NOT say is a "
+  "hard ban. Inventing an HP capability is the one failure that reaches a customer as HP's "
+  "own word, so it is worse than a thin card." + NL
 + "5. The account description above lists the sectors this business operates in. Do NOT use a sector name as justification for a device, security, collaboration or print need - nothing in the evidence links a sector to a technology requirement. Write \"across the account's diverse business units\" instead of naming mining, financial services, heavy equipment or any other sector as a reason." + NL + NL
 + "FIELDS:" + NL
 + '- "objection": the anticipated push-back, in a buyer\'s own words, in quotes. One sentence. '
@@ -431,10 +759,10 @@ def generate_objection_cards(account_id: str, areas: list[dict],
   "buyer DEPRIORITISING the topic - 'there is no RFP open for that', 'that is handled', 'why "
   "are we even discussing this' - not the buyer admitting they do not know." + NL
 + '- "reframe": the seller\'s answer. Two sentences at most, and it must do BOTH of these: '
-  "name the specific HP line that applies (HP Elite/Pro PCs, Z by HP Workstations, Poly, HP "
-  "Enterprise Print/MPS, HP Wolf Security, HP Anyware/DaaS) AND give the concrete angle for "
-  "this account, tied to a vendor or fact in that area's evidence. A reframe that names no HP "
-  "line is a FAILED answer." + NL
+  "name the HP line that applies AND give the concrete angle for this account, tied to a "
+  "vendor or fact in that area's evidence. A reframe that names no HP line is a FAILED "
+  "answer. Take the HP line, and everything you assert about it, from that area's APPROVED "
+  "HP CLAIMS block - see the rule on HP claims below." + NL
 + '- "counter_question": one question the seller can ask next that advances the conversation.' + NL
 + '- "why_expected": one sentence on why THIS account would raise this, tied to its own evidence above. Not a general statement about buyers.' + NL
 + '- "recommended_next_step": the concrete next action for the seller after the counter question - a meeting, a discovery item, a thing to confirm. One short sentence.' + NL + NL
@@ -447,7 +775,12 @@ def generate_objection_cards(account_id: str, areas: list[dict],
 + "- Do NOT write filler abstractions: 'as threats evolve', 'optimise performance', 'uncover "
   "opportunities', 'drive efficiencies', 'streamline', 'best possible experience'. Say the "
   "specific thing about THIS account instead." + NL
-+ "- Write as one seasoned seller briefing another, not as marketing copy." + NL + NL
++ "- Write as one seasoned seller briefing another, not as marketing copy." + NL
++ "- NEVER name this system's own data in the prose. Words like \"technographics\", "
+  "\"firmographics\", \"the dataset\", \"the evidence\" and \"our records\" are how WE "
+  "describe our research; a seller saying them to a buyer is telling the buyer what we "
+  "do and do not know about them. Say \"what we can see of your estate\" or simply "
+  "write the sentence without the reference." + NL + NL
 + "Return one entry per supplied area, using the area name exactly as given." + NL + NL
 + "Output JSON:" + NL
 + '{ "cards": [ { "area": "<area name exactly as supplied>", "objection": "...", '
@@ -461,6 +794,7 @@ def generate_objection_cards(account_id: str, areas: list[dict],
     )
 
     rejected_sectors: list[str] = []
+    rejected_claims: list[str] = []
 
     llm_res = generate_gpt4o_json_completion(system_prompt, user_prompt)
 
@@ -493,6 +827,15 @@ def generate_objection_cards(account_id: str, areas: list[dict],
                 # A figure or link the technographics never carried has no place
                 # in a card that is meant to be evidence-led.
                 continue
+
+            faults = _claim_faults(reframe, claims_by_area.get(area) or [],
+                                   country, company_name)
+            if faults:
+                # An HP claim the rulebook does not support reaches a customer
+                # as HP's own word. Retried rather than dropped, so the area
+                # keeps a card.
+                rejected_claims.append("%s: %s" % (area, "; ".join(faults)))
+                continue
             cards.append({
                 "card_id": hashlib.sha1(area.encode("utf-8")).hexdigest()[:12],
                 "area": area,
@@ -507,6 +850,7 @@ def generate_objection_cards(account_id: str, areas: list[dict],
                 "hp_proof_point_note": (None if proof_by_area.get(area)
                                         else NO_PROOF_POINT),
                 "hp_proof_point_detail": proof_by_area.get(area),
+                **_claim_provenance(claims_by_area.get(area) or []),
                 # technographics carries no link, date or confidence column, so
                 # these are recorded as absent rather than invented.
                 "evidence_source_link": None,
@@ -522,19 +866,32 @@ def generate_objection_cards(account_id: str, areas: list[dict],
                 "likely_raiser_source": src_area["likely_raiser_source"],
             })
 
-    if rejected_sectors:
-        logger.warning("objection playbook: %d card(s) leaned on a sector as "
-                       "justification, retrying: %s", len(rejected_sectors), rejected_sectors)
+    if rejected_sectors or rejected_claims:
+        logger.warning("objection playbook: retrying %d sector rejection(s) and "
+                       "%d HP-claim rejection(s): %s", len(rejected_sectors),
+                       len(rejected_claims), rejected_sectors + rejected_claims)
+        why = []
+        if rejected_sectors:
+            why.append(
+                "These cards used a business sector as justification for a technology "
+                "need: " + "; ".join(rejected_sectors) + "." + NL
+                + "A sector is not evidence of a technology requirement. Rewrite those "
+                  "cards without naming any sector - say \"across the account's diverse "
+                  "business units\".")
+        if rejected_claims:
+            why.append(
+                "These cards made an HP claim the rulebook does not support: "
+                + "; ".join(rejected_claims) + "." + NL
+                + "Rewrite the reframe using ONLY that area's APPROVED HP CLAIMS, or "
+                  "name the HP line and make no capability claim at all.")
         retry_system = system_prompt + (
-            NL + NL + "RETRY - REJECTED." + NL
-            + "These cards used a business sector as justification for a technology "
-              "need: " + "; ".join(rejected_sectors) + "." + NL
-            + "A sector is not evidence of a technology requirement. Rewrite those "
-              "cards without naming any sector - say \"across the account's diverse "
-              "business units\" - and return the COMPLETE card object for each."
+            NL + NL + "RETRY - REJECTED." + NL + NL.join(why) + NL
+            + "Return the COMPLETE card object for each."
         )
+        retry_areas = sorted({s.split(":")[0]
+                              for s in rejected_sectors + rejected_claims})
         retry_user = ("Return JSON containing only these areas: "
-                      + ", ".join(sorted({s.split(':')[0] for s in rejected_sectors})) + ".")
+                      + ", ".join(retry_areas) + ".")
         rejected_sectors = []
         retry_res = generate_gpt4o_json_completion(retry_system, retry_user)
         if retry_res and isinstance(retry_res, dict) and isinstance(retry_res.get("cards"), list):
@@ -555,6 +912,10 @@ def generate_objection_cards(account_id: str, areas: list[dict],
                     continue
                 if any(check_text(ground, report, area, objection, reframe, counter)):
                     continue
+                if _claim_faults(reframe, claims_by_area.get(area) or [], country, company_name):
+                    # Twice is enough. The area keeps no card rather than one
+                    # carrying an HP claim nothing approved.
+                    continue
                 cards.append({
                     "card_id": hashlib.sha1(area.encode("utf-8")).hexdigest()[:12],
                     "area": area,
@@ -567,6 +928,7 @@ def generate_objection_cards(account_id: str, areas: list[dict],
                     "hp_proof_point_note": (None if proof_by_area.get(area)
                                             else NO_PROOF_POINT),
                     "hp_proof_point_detail": proof_by_area.get(area),
+                    **_claim_provenance(claims_by_area.get(area) or []),
                     "evidence_source_link": None,
                     "evidence_date": None,
                     "evidence_confidence": None,

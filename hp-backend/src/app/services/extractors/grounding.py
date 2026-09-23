@@ -38,6 +38,18 @@ HP_PRODUCT_LINES = [
     "HP Anyware / DaaS",
     "HP Anyware",
     "HP DaaS",
+    # The rulebook's service families. Added so a rule that matches an
+    # account's technology can actually name the card it belongs to - without
+    # these, WXP 08 matched Google Workspace and had nowhere to put the answer.
+    "HP Workforce Experience Platform",
+    "HP Care Pack Services",
+    "HP Lifecycle & Sustainability Services",
+    "HP Deployment & Configuration Services",
+    "HP IQ for Enterprise",
+    # The revision's tenth family. Named as HP names it in the document's own
+    # section heading, "Original HP Ink portfolio rules", so the line a card
+    # shows is the client's wording rather than ours.
+    "Original HP Ink",
 ]
 
 
@@ -155,6 +167,30 @@ def build_corpus(records_by_dataset: dict[str, list[dict]]) -> Corpus:
 # a real HP line, whatever SKU wording the model used ("HP Z Workstations",
 # "Poly Voyager Headsets"); anything naming no HP line at all is rejected.
 HP_LINE_TOKENS = [
+    # The rulebook's service families first: they are the most specific, and a
+    # bare "print" or "poly" further down would otherwise claim a scan or a
+    # collaboration-monitoring offering before these are reached.
+    (("workforce experience", "wxp", "dex roi"), "HP Workforce Experience Platform"),
+    (("care pack", "next business day", "accidental damage protection",
+      "advanced exchange", "defective media retention", "travel support"),
+     "HP Care Pack Services"),
+    # "lifecycle & sustainability" rather than a bare "lifecycle": rule 2's own
+    # fact reads "SIPP / long lifecycle / global SKU positioning", and a loose
+    # token would route an EliteBook claim to the services corpus.
+    (("lifecycle & sustainability", "device life extension",
+      "carbon emissions sync", "preventive maintenance"),
+     "HP Lifecycle & Sustainability Services"),
+    (("deployment & configuration", "imaging service",
+      "device registration service", "bios settings service",
+      "application and package installation",
+      "operating system version control"),
+     "HP Deployment & Configuration Services"),
+    (("hp iq", "ask iq", "iq for enterprise"), "HP IQ for Enterprise"),
+    # Never a bare "ink": the print rules are full of "ink" as an ordinary
+    # noun, and a loose token would pull a managed-print claim into the
+    # supplies line.
+    (("original hp ink", "instant ink", "ink portfolio", "ink cartridge"),
+     "Original HP Ink"),
     (("z by hp", "hp z", "workstation"), "Z by HP Workstations"),
     # "hp elite" and "hp pro" match the way the line is actually written. The
     # list previously held only the SKU-shaped spellings ("elitebook", "elite

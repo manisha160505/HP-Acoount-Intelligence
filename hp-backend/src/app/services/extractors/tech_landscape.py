@@ -10,7 +10,7 @@ from app.services.extractors.datasets import (
     read_dataset_records,
     requires_local_datasets,
 )
-from app.services.hp import tech_confidence as tconf
+from app.services.hp import rulebook as rb, tech_confidence as tconf
 
 logger = logging.getLogger(__name__)
 
@@ -210,6 +210,84 @@ def _normalise_hp_fields(categories: list, techno_row: dict | None = None) -> No
 #
 # Guessing a route for the hardware lines would put a rule id on a card that the
 # rulebook never connected to it.
+# The Part B families each HP line may draw an offering from.
+#
+# Without this the Google Workspace card - whose HP line is Poly Collaboration
+# - was given "WXP and WXP Collaboration" because WXP 08's terms include
+# Google Workspace. Two different HP products on one card is the forced match
+# C 07 forbids: "Where there is no clear relationship ... we should not force a
+# match."
+#
+# An HP line absent from this map draws no offering, which is the safe
+# direction: a card keeps the broad line it already had.
+# The HP line each Part B family speaks for.
+#
+# All nine now, where before only four could: WXP, CARE, LIFE, DEPLOY and IQ
+# named offerings the twelve-string list had no word for, so three rules that
+# matched the Google Workspace card were discarded for want of somewhere to put
+# the answer. Each name is the routing table's own opportunity type.
+# Defined in `services/hp/rulebook.py`, which is where rulebook taxonomy
+# belongs: the Objection Playbook needs the same mapping and should not have to
+# import an unrelated extractor to get it. Re-exported here under its original
+# name so every existing reference keeps working.
+RULEBOOK_FAMILY_TO_HP_LINE = rb.RULEBOOK_FAMILY_TO_HP_LINE
+
+HP_LINE_TO_RULEBOOK_FAMILIES = rb.HP_LINE_TO_RULEBOOK_FAMILIES
+
+
+def _rulebook_offering(book: dict, vendor: dict, hp_line: str) -> dict | None:
+    """The rulebook rule that speaks to this vendor's detected technology.
+
+    Matched on the technology the account actually runs - "Kaspersky",
+    "Symantec Endpoint Protection" - against the rules' own terms, so the
+    offering named is the one HP wrote for that situation rather than the
+    broad line a model picked from a list of six.
+
+    Returns None whenever nothing matches, which is most cards: a network
+    appliance or an OS has no HP offering, and C 07 says not to force one.
+    """
+    if not book.get("rules"):
+        return None
+
+    detected = [d for d in (vendor.get("detected_as") or []) if d]
+    if not detected:
+        detected = [vendor.get("vendor_name") or ""]
+    evidence = [{"text": d} for d in detected if d]
+    if not evidence:
+        return None
+
+    # Part B only. Part A chooses a hardware product, and that recommendation
+    # is already made once per account by `recommendations.py`; repeating it on
+    # every vendor card would say the same thing eight times.
+    # Every Part B family is considered. Which line the card should carry is
+    # then the rulebook's answer, not a filter on the model's.
+    matches = [m for m in rb.candidates(book, evidence)
+               if m["rule"].get("part") == "B"
+               and m["family"] in RULEBOOK_FAMILY_TO_HP_LINE
+               and not (m["modifier_only"] or m["routing_only"]
+                        or m["catalogue_only"])]
+    if not matches:
+        return None
+
+    match = matches[0]
+    line = RULEBOOK_FAMILY_TO_HP_LINE[match["family"]]
+    facts = rb.facts_for(match)
+    return {
+        "rule_label": match["rule_label"],
+        "offering": match["offering"],
+        # The line the rulebook says this card belongs to, and the one the
+        # model had picked. They usually agree; where they do not, the
+        # rulebook's is used and this records what changed.
+        "hp_line": line,
+        "model_line": hp_line or None,
+        "line_changed": bool(hp_line and hp_line != line),
+        "matched_terms": match["matched_terms"],
+        # The rule's own sentences, with its prohibitions kept separate.
+        "may_say": facts["allowed_facts"][:2],
+        "must_not_say": facts["prohibitions"][:1],
+    }
+
+
 HP_PLAY_TO_ROUTE = {
     "hp wolf security": tconf.ROUTE_WOLF,
     "poly collaboration": tconf.ROUTE_POLY,
@@ -264,6 +342,14 @@ def _score_card_confidence(categories: list, intent_scores: dict) -> dict:
     the document's guardrail. The suppression count is published rather than
     silent - a card vanishing from a seller's screen should be explicable.
     """
+    # Read once for the whole pass. The rulebook is 166 documents, and a card
+    # asking for it per vendor would re-read it eight times for one account.
+    try:
+        book = rb.load(get_db())
+    except Exception:
+        logger.exception("tech landscape: rulebook unavailable for card offerings")
+        book = {"rules": []}
+
     report = {"scored": 0, "suppressed": [], "formula": tconf.FORMULA,
               "formula_authority": tconf.FORMULA_AUTHORITY,
               "intent_scores_available": bool(intent_scores),
@@ -300,6 +386,26 @@ def _score_card_confidence(categories: list, intent_scores: dict) -> dict:
 
             play = vendor.get("hp_play") or {}
             product = str(play.get("product") or "").strip()
+
+            # The rulebook decides the line where it has a rule for what was
+            # detected here; the model's pick stands where it does not. The
+            # line is settled BEFORE the route is read, so a correction reaches
+            # the score - the formula is untouched, its input is better.
+            offering = _rulebook_offering(book, vendor, product)
+            if offering:
+                vendor["rulebook_offering"] = offering
+                product = offering["hp_line"]
+                play["product"] = product
+
+            # What stands behind the line on this card. A rulebook match is an
+            # authorised answer; anything else is the model positioning a broad
+            # line against a detected vendor, which is reasonable but is not a
+            # rule. A seller deciding what to say to a customer should be able
+            # to tell the two apart without opening the code.
+            play["product_source"] = "rulebook" if offering else "positioning"
+            if product:
+                vendor["hp_play"] = play
+
             route = HP_PLAY_TO_ROUTE.get(product.lower())
 
             # The HP opportunity this card is actually making. The play names it
