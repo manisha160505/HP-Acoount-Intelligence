@@ -101,8 +101,11 @@ def test_the_previously_broken_fields_are_now_deterministic():
     # The six that were "DERIVED". Each is computed in Python from named source
     # columns and never reaches an LLM prompt - pinned by name so a future edit
     # that flips one back to a model-written type has to justify itself here.
+    # "severity" became "priority" when the client replaced the "N of 3 checks"
+    # tag with Critical/High/Medium/Low (Sep 2026). Same field, same guarantee:
+    # computed in Python, never model-written.
     computed_in_python = {
-        "source_publisher", "influence_type", "severity",
+        "source_publisher", "influence_type", "priority",
         "scale_statement", "target_contacts", "likely_raiser",
     }
     seen = {

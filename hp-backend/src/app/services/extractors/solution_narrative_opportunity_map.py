@@ -90,6 +90,46 @@ MAX_PLAYS = 5
 # the tie-break. Any weighted score here would be invented, so there is none.
 SPEC_CHECKS = ("verified_evidence", "timing_trigger", "hp_fit")
 
+# Priority, per the client's table (Sep 2026). The SEA Limited reference
+# application shows only these four tags, so the three per-check tags are no
+# longer published - the checks themselves still run and still order the plays,
+# they are just not surfaced as tags of their own.
+#
+# The table turns on two questions the checks already answer:
+#
+#   Is a specific initiative directly evidenced?   -> verified_evidence
+#   Does an independent second signal support it?  -> timing_trigger
+#
+#   Critical  a specific initiative AND an independent supporting signal
+#   High      a specific initiative, but no second independent signal
+#   Medium    no specific initiative, but relevant signals indicate potential
+#   Low       contextual or indirect evidence only
+#
+# Medium and Low are separated by whether any account signal actually attaches
+# to this play: a play with signals but no confirmed initiative is Medium, and
+# one resting on context alone is Low.
+PRIORITY_CRITICAL = "Critical"
+PRIORITY_HIGH = "High"
+PRIORITY_MEDIUM = "Medium"
+PRIORITY_LOW = "Low"
+
+# Highest first - the display order, and the sort key's ranking.
+PRIORITY_ORDER = (PRIORITY_CRITICAL, PRIORITY_HIGH, PRIORITY_MEDIUM, PRIORITY_LOW)
+
+
+def _priority_for(has_initiative: bool, has_supporting_signal: bool,
+                  has_any_signal: bool) -> str:
+    """The play's priority tag, by the client's table.
+
+    `has_initiative` is a directly evidenced account initiative or activity.
+    `has_supporting_signal` is a second, independent signal for the same
+    opportunity. `has_any_signal` is whether anything at all attaches to this
+    play, which is what separates Medium from Low.
+    """
+    if has_initiative:
+        return PRIORITY_CRITICAL if has_supporting_signal else PRIORITY_HIGH
+    return PRIORITY_MEDIUM if has_any_signal else PRIORITY_LOW
+
 # The spec's exact wording when no official HP proof point can be sourced.
 NO_PROOF_POINT = "No supporting HP proof point available"
 
@@ -1258,8 +1298,16 @@ Output JSON:
                 "hp_fit": bool(hp_fit) if signal_tokens else True,
             }
             checks_met = sum(1 for v in checks.values() if v)
-            missing_checks = [k for k, v in checks.items() if not v]
             recency = _recency_score(newest, now)
+
+            # The client's priority table. `verified` is this play's directly
+            # evidenced account activity; a timing trigger is the independent
+            # second signal that raises High to Critical.
+            priority = _priority_for(
+                has_initiative=bool(verified),
+                has_supporting_signal=bool(has_trigger),
+                has_any_signal=bool(verified or has_trigger or signal_tokens),
+            )
 
             entry_p = p.get("entry_path") or {}
 
@@ -1351,10 +1399,13 @@ Output JSON:
                 "play_key": play_key,
                 "category_label": play_key.upper(),
                 "title": title,
-                "severity": f"{checks_met} of 3 checks",
+                "priority": priority,
+                # checks/checks_met still drive ordering and remain in the
+                # payload as the audit trail behind the tag. They are no longer
+                # published as tags of their own: the SEA Limited reference
+                # application shows priority alone.
                 "checks": checks,
                 "checks_met": checks_met,
-                "missing_checks": missing_checks,
                 "trigger_recency": recency,
                 "hp_proof_point": None,
                 "hp_proof_point_note": NO_PROOF_POINT,
@@ -1455,7 +1506,12 @@ Output JSON:
         logger.warning("opportunity map: %d play(s) withheld entirely: %s",
                        len(withheld), withheld)
 
-    cleaned_plays.sort(key=lambda x: (-x["checks_met"], -x.get("trigger_recency", 0.0)))
+    # Priority first, since that is now what the card shows; checks_met still
+    # separates plays inside a band, and trigger recency breaks the remaining
+    # ties as before.
+    cleaned_plays.sort(key=lambda x: (PRIORITY_ORDER.index(x["priority"]),
+                                      -x["checks_met"],
+                                      -x.get("trigger_recency", 0.0)))
     cleaned_plays = cleaned_plays[:MAX_PLAYS]
 
     # A play that fails the HP-fit check is not an HP opportunity. It is retained
