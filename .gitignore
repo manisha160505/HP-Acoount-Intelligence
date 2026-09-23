@@ -97,3 +97,12 @@ hp-project-flow.html
 *.bak
 *.bak[0-9]
 *.bak[0-9][0-9]
+
+# Standalone static lineage site + clickable replica, deployed separately to
+# Vercel. Kept out of this repository: it carries a 649KB read-only capture of
+# real account data (replica/assets/live.js) and is not part of the app build.
+vercel app/
+
+# Raw 220-account source data (exa, predictleads, google news, intent results,
+# explorium). ~140MB of real client account data, internal only, never committed.
+220 account data /

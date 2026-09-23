@@ -42,15 +42,12 @@ table gives as 50.4, and its closing line prints 61 against a table summing to
 64.43). The screen's own numbers are the authority.
 
 **Intent trend is scored from the file's own words.** Section 4B scores
-Increasing=10 / Stable=5 / Decreasing=0. The input contract had deliberately
-refused to promote that column to a trend - *"the file states a direction but
-supplies no prior score or window to check it against"* - and keeps it as
-`trend_label`. The PDF overrides that for scoring purposes, so the label is
-scored as written - but nothing here may read as though the trend were computed
-here, because it was not. Both the term's label ("Intent trend
-(provider-reported)") and its basis carry the attribution and name the missing
-verification, so it travels with the number onto the screen rather than sitting
-only in the driver's caveats.
+Increasing=10 / Stable=5 / Decreasing=0. The client has ruled the HP category
+intent file the source of truth - its scores and fields are vendor-verified and
+are used as supplied - so the label is scored as written and presented without
+qualification. The same ruling emptied the keyword-noise gate
+(`NOISY_CATEGORY_TERMS`), so the primary category is simply the highest-scoring
+one, exactly as the PDF states.
 
 **The workforce growth proxy needs `extended_company`.** Section 3A reads dated
 `associated_members` values out of `social_stats`. That dataset is registered but
@@ -317,17 +314,17 @@ BUYING_STAGE_MAX = _CFG["buying_stage_max"]            # C
 RESEARCH_VOLUME_POINTS = _CFG["research_volume_points"]
 RESEARCH_VOLUME_MAX = _CFG["research_volume_max"]         # D
 
-# Terms that make a category's score untrustworthy as a *primary* signal: "SLA"
-# in a job posting is a service-level agreement, not stereolithography. A
-# flagged category keeps its score on screen but cannot be the account's
-# primary. The PDF says "the highest-scoring HP category" without addressing
-# keyword noise; this gate is retained from the previous implementation because
-# removing it would let Astra's 3D Printers score - carried by "SLA" - drive
-# 60 of this driver's 100 points.
+# Keyword-noise gate, now empty by client instruction (Sep 2026).
 #
-# Read from Intent & Demand Signals' own dictionary rather than copied, so one
-# account cannot have a category barred on this dashboard and primary on the
-# Intent feature.
+# This used to bar a category whose score rested on an ambiguous keyword from
+# becoming the account's primary. The client has ruled that the category file
+# is the source of truth - its scores are vendor-verified and used as supplied
+# - so the dictionary is empty and this driver now does exactly what the PDF
+# says: "use the fields belonging to the highest-scoring HP category", with no
+# eligibility test in front of it.
+#
+# The tuple is still read from Intent & Demand Signals' own dictionary rather
+# than copied, so if terms are ever put back both features gate identically.
 NOISY_KEYWORDS = tuple(intent_topic_map.NOISY_CATEGORY_TERMS)
 
 
@@ -802,8 +799,9 @@ def hp_solution_intent(categories: list) -> dict:
     `categories` are dicts from the hp_intent_results / hp_category_intent file:
     {name, score, trend_label, stage, research_volume, keywords}. All four
     components read the fields belonging to the **highest-scoring** category, as
-    the PDF directs - except that a category whose score rests on a flagged
-    keyword cannot be chosen as primary.
+    the PDF directs. The keyword-eligibility gate that used to sit in front of
+    that choice is disabled (`NOISY_CATEGORY_TERMS` is empty by client
+    instruction), so the highest-scoring category is always the primary.
     """
     entries = [c for c in (categories or [])
                if isinstance(c, dict) and _text(c.get("name"))]
@@ -813,7 +811,7 @@ def hp_solution_intent(categories: list) -> dict:
             [
                 _term("HP-category intent strength", 0, HP_CATEGORY_INTENT_MAX,
                       "no HP category intent scores on file", missing=True),
-                _term("Intent trend (provider-reported)", 0, INTENT_TREND_MAX,
+                _term("Intent trend", 0, INTENT_TREND_MAX,
                       "no category on file", missing=True),
                 _term("Buying stage", 0, BUYING_STAGE_MAX,
                       "no category on file", missing=True),
@@ -850,20 +848,16 @@ def hp_solution_intent(categories: list) -> dict:
 
     # B. Intent trend - 10 points.
     #
-    # The wording here is deliberate and load-bearing. The provider states a
-    # direction; we have no prior window to check it against, so we did not
-    # compute a trend and must not read as though we did. The basis says
-    # "provider-reported" and names the absent verification, so the attribution
-    # travels with the number onto the screen rather than living only in the
-    # driver's caveats where a reader may never open it.
+    # The category file's Intent Trend is taken as supplied. The client has
+    # ruled the file the source of truth, so the basis states the direction
+    # and its source without qualifying it.
     trend_label = _lower(primary.get("trend_label") or primary.get("trend"))
     trend_points = INTENT_TREND_POINTS.get(trend_label, 0)
     trend_basis = (
-        "%s intent trend reported by the provider as %r - not independently "
-        "verified, as no prior scoring window is on file to compare against"
+        "%s intent trend is %s per the category file"
         % (name, _text(primary.get("trend_label")))
         if trend_label else
-        "%s has no provider-reported intent trend on file" % name)
+        "%s has no intent trend on file" % name)
 
     # C. Buying stage - 15 points.
     stage = _lower(primary.get("stage"))
@@ -890,7 +884,7 @@ def hp_solution_intent(categories: list) -> dict:
                   HP_CATEGORY_INTENT_MAX,
                   "highest category %s scores %s/100" % (name, score_value),
                   missing=not score_value),
-            _term("Intent trend (provider-reported)", trend_points,
+            _term("Intent trend", trend_points,
                   INTENT_TREND_MAX, trend_basis, missing=not trend_label),
             _term("Buying stage", stage_points, BUYING_STAGE_MAX, stage_basis,
                   missing=not stage),
@@ -898,14 +892,7 @@ def hp_solution_intent(categories: list) -> dict:
                   volume_basis, missing=not volume),
         ],
         ["hp_category_intent:%s" % _lower(name)],
-        notes=notes or None,
-        caveats=[
-            "The trend component scores the file's own Intent Trend words. The "
-            "file supplies no prior score or window to verify a direction "
-            "against, so this is the provider's claim, not a trend computed "
-            "here - which is why the Intent & Demand Signals feature still "
-            "declines to draw it as one.",
-        ])
+        notes=notes or None)
 
 
 # ---------------------------------------------------------------------------

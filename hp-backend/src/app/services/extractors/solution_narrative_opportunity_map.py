@@ -240,10 +240,11 @@ PLAY_PRIMARY_CATEGORY = {
 def _intent_timing_gate(category_file: dict, account_match_ok: bool) -> tuple[dict, dict]:
     """Which HP categories may let a Bombora topic act as a timing trigger.
 
-    Returns (allowed_by_category, report). A category is allowed only when the
-    category file gives it a buying stage and no noisy keyword - the intent
-    widget's own test, imported rather than restated so the two can never drift
-    apart.
+    Returns (allowed_by_category, report). A category is allowed when the
+    category file gives it a buying stage - the intent widget's own test,
+    imported rather than restated so the two can never drift apart. That test
+    also consults the keyword gate, which is empty by client instruction, so in
+    practice the buying stage alone decides.
 
     Two deliberate exemptions, both because silence is not the same as a denial:
 
@@ -283,7 +284,7 @@ def _intent_timing_gate(category_file: dict, account_match_ok: bool) -> tuple[di
 
     report["reason"] = (
         "Bombora topics may carry timing only for categories the HP Category Intent file "
-        "gives a buying stage and no noisy keyword: "
+        "gives a buying stage: "
         + ("; ".join(report["allowed"]) if report["allowed"] else "none qualify")
         + (". Blocked: " + "; ".join(report["blocked"]) if report["blocked"] else "."))
     return allowed, report

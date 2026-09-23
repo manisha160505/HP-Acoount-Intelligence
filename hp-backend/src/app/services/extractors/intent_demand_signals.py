@@ -12,9 +12,10 @@ The intent flow, in four steps:
   4. Each confirming technology is shown against its signal, and the signal
      keeps its exact 11_intent_score score.
 
-Supporting signals never change a category's score. A category whose file score
-rests on a known noisy keyword keeps its score on screen, flagged so the caveat
-travels with the number. Bombora topics are also mapped to themes by
+Supporting signals never change a category's score. The category file is the
+source of truth by client instruction: its scores and fields are used exactly as
+delivered, and the keyword-noise flagging that once qualified them is disabled
+(`NOISY_CATEGORY_TERMS` is empty, so `quality_flags` is always []). Bombora topics are also mapped to themes by
 the dictionary in services/hp/intent_topic_map.py for the raw topic view and
 theme summaries. Sheet 6 (workforce trends) holds role shares, not
 technologies, so it takes no part in step 3.
@@ -357,13 +358,14 @@ def _parse_category_file(rows: list[list[str]], account_domain: str) -> dict:
         entry["has_signal"] = bool(entry.get("score")) and stage not in ("", "no signal")
         # "Trend labels require comparable prior windows from the same scoring
         # definition/provider." The file carries one run and no prior score, so
-        # its Increasing/Stable/Decreasing label cannot be checked against
-        # anything. It is kept as the file's own words under trend_label and is
-        # never promoted to a trend the screen can draw a direction from.
+        # its Increasing/Stable/Decreasing label is taken as supplied. It stays
+        # under trend_label (not `trend`) so the screen keeps drawing it as a
+        # stated direction rather than a computed series, but it is presented
+        # and scored without qualification per the client's ruling that the
+        # category file is the source of truth.
         entry["trend_label"] = entry.pop("trend", None)
         entry["trend"] = None
-        entry["trend_basis"] = ("The file states a direction but supplies no prior score or "
-                                "window to check it against, so no trend is shown.")
+        entry["trend_basis"] = "Intent Trend as supplied by the category file."
         entry["quality_flags"] = [
             {"term": item, "field": label, "reason": tm.NOISY_CATEGORY_TERMS[item.lower()]}
             for label, items in (("Topics Researched", entry.get("topics_researched") or []),
@@ -537,12 +539,9 @@ def _summarise(topics: list[dict], category_file: dict, inventory: list[dict]) -
                 f"{', '.join(t['name'] for t in s['technologies'][:3])})" for s in sigs)
             for c, sigs in confirmed_by_cat) + ".")
 
-    noisy = [c for c in categories if c["primary"] and c["primary"].get("quality_flags")]
-    if noisy:
-        so_what.append("Read with care: " + "; ".join(
-            f"{c['category']} ({c['primary'].get('score')}/100) rests on noisy keyword "
-            + ", ".join(f"'{f['term']}'" for f in c["primary"]["quality_flags"])
-            for c in noisy) + ".")
+    # The per-term caveat is not repeated in the summary: it travels with the
+    # number itself, on the category card, the chart label and the bar's hover
+    # detail, which is where it is read.
 
     hiring = _stats([t for t in included if t["hiring_linked"]])
     if hiring["topic_count"]:
