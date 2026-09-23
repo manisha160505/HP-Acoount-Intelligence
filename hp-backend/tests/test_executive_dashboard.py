@@ -80,6 +80,61 @@ def test_does_not_promote_stated_parent():
 
 
 # ---------------------------------------------------------------------------
+# Parent Company Name - the client's ruling, which outranks the checks below
+# ---------------------------------------------------------------------------
+
+def test_populated_parent_name_is_used_as_supplied():
+    """A populated Parent Company Name settles it, per the client (Sep 2026)."""
+    row = {
+        "Business Id": "child-id",
+        "Parent Company Id": "parent-id",
+        "Parent Company Name": "Jardine Cycle & Carriage Limited",
+        "Ultimate Parent Id": "ultimate-id",
+        "Ultimate Parent Name": "Some Other Holdings Ltd",
+    }
+    parent, flag = _resolve_ultimate_parent(row, ASTRA_DESCRIPTION)
+    assert parent == "Jardine Cycle & Carriage Limited"
+    assert flag is None
+
+
+def test_parent_name_wins_over_a_self_referential_row():
+    """The self-reference check guards an unestablished parent.
+
+    A populated Parent Company Name establishes one, so the check does not
+    apply even though Ultimate Parent Id still equals Business Id.
+    """
+    row = dict(ASTRA_HIERARCHY, **{"Parent Company Name": "Jardine Cycle & Carriage Limited"})
+    parent, flag = _resolve_ultimate_parent(row, ASTRA_DESCRIPTION)
+    assert parent == "Jardine Cycle & Carriage Limited"
+    assert flag is None
+
+
+def test_parent_name_is_not_second_guessed_against_the_description():
+    """Taken as supplied - a description disagreeing with it does not flag it."""
+    row = {
+        "Business Id": "child-id",
+        "Parent Company Name": "Completely Unrelated Holdings Ltd",
+        "Ultimate Parent Id": "ultimate-id",
+        "Ultimate Parent Name": "Some Other Holdings Ltd",
+    }
+    parent, flag = _resolve_ultimate_parent(row, ASTRA_DESCRIPTION)
+    assert parent == "Completely Unrelated Holdings Ltd"
+    assert flag is None
+
+
+def test_blank_parent_name_falls_through_to_the_existing_rules():
+    """Blank is "ignore the parent relationship", not "look harder".
+
+    Astra ships a blank Parent Company Name, so it still lands on the
+    self-referential suppression path rather than displaying its own name.
+    """
+    parent, flag = _resolve_ultimate_parent(ASTRA_HIERARCHY, ASTRA_DESCRIPTION)
+    assert parent == ""
+    assert flag is not None
+    assert "self-referential" in flag["reason"]
+
+
+# ---------------------------------------------------------------------------
 # The two independent triggers
 # ---------------------------------------------------------------------------
 

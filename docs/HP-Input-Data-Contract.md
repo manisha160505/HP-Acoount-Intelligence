@@ -139,8 +139,8 @@ Company Name,Company Domain,Company ID,Business Id,Name,Business Description,Web
 
 | Column | Req | Notes |
 | --- | --- | --- |
-| `Parent Company Name` | **[R]** | Alias: `parent_company_name`. Empty = company is its own parent |
-| `Ultimate Parent Name` | **[R]** | |
+| `Parent Company Name` | **[R]** | Alias: `parent_company_name`. When populated this **is** the parent, used as supplied. Empty = parent relationship ignored for now (client instruction, Sep 2026) |
+| `Ultimate Parent Name` | **[R]** | Used only when `Parent Company Name` is blank, and then only when the row establishes a parent — a self-referential row (`Ultimate Parent Id` = `Business Id`) shows nothing rather than the company's own name |
 | `Business Id`, `Parent Company Id`, `Ultimate Parent Id` | [O] | |
 
 #### 3.3 `technographics` — `technographics.csv` — sheet `4_Technographics`

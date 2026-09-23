@@ -413,9 +413,9 @@ FEATURE_MAPPINGS = {
                 "data_type": "INFERRED / SYNTHESIZED"
             },
             {
-                "field_key": "severity",
+                "field_key": "priority",
                 "display_name": "Play Priority",
-                "purpose": "How many of HP_ABX_v3_final's three checks the play meets - (1) verified account evidence exists, (2) a current timing trigger exists, (3) the HP product/play directly fits the need - shown as '3 of 3 checks'. The spec defines NO numeric opportunity score for this feature, so none is computed: plays meeting all three are ordered first, those missing one follow, tie-broken by trigger recency. A play missing check 2 or 3 is retained and its gap marked in missing_checks rather than dropped; only a play with no traceable evidence chain is withheld. The model never supplies any of this",
+                "purpose": "Critical / High / Medium / Low, by the client's priority table (Sep 2026). Critical is a directly evidenced account initiative plus an independent supporting signal; High is the initiative without that second signal; Medium is relevant signals indicating potential but no confirmed initiative; Low is contextual or indirect evidence only. The per-check tags (verified evidence, timing trigger, HP fit) are no longer published - the SEA Limited reference application shows priority alone - but the checks still run, still order the plays and remain in the payload as the audit trail. No numeric opportunity score is computed: HP_ABX_v3_final defines none. The model never supplies any of this",
                 "dataset_key": None,
                 "source_sheet": None,
                 "source_column": None,

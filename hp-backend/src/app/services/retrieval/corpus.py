@@ -1829,7 +1829,7 @@ def _strategy_opportunity_documents(db, account_id, index, company) -> list:
                                  ("owner_angle", "Who would weigh this"),
                                  ("scale_statement", "Scale of the estate"),
                                  ("timing_note", "Timing"),
-                                 ("severity", "Checks met")):
+                                 ("priority", "Priority")):
                 value = _text(play.get(field))
                 if value:
                     out.append("%s: %s" % (label, b.line(

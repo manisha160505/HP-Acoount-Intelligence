@@ -3274,8 +3274,9 @@ export default function UserDashboardPage() {
 
                                   {/* Card Body - laid out to match the Northstar reference card */}
                                   <div className={`bg-white rounded-xl border border-slate-200 border-l-4 shadow-xs p-5 space-y-3.5 ${
-                                    play.checks_met === 3 ? 'border-l-emerald-500'
-                                      : play.checks_met === 2 ? 'border-l-amber-400'
+                                    play.priority === 'Critical' ? 'border-l-rose-500'
+                                      : play.priority === 'High' ? 'border-l-amber-500'
+                                      : play.priority === 'Medium' ? 'border-l-sky-400'
                                       : 'border-l-slate-300'
                                   }`}>
 
@@ -3288,16 +3289,14 @@ export default function UserDashboardPage() {
                                       </div>
 
                                       <div className="flex flex-col items-start sm:items-end gap-0.5 flex-shrink-0">
-                                        <span className={`text-[11px] font-semibold px-2 py-0.5 rounded border ${
-                                          play.checks_met === 3 ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
-                                            : play.checks_met === 2 ? 'text-amber-700 bg-amber-50 border-amber-200'
-                                            : 'text-slate-600 bg-slate-100 border-slate-200'
-                                        }`}>
-                                          {play.severity || `${play.checks_met ?? 0} of 3 checks`}
-                                        </span>
-                                        {play.missing_checks?.length > 0 && (
-                                          <span className="text-[10px] text-amber-700">
-                                            missing: {play.missing_checks.map((m: string) => m.replace(/_/g, ' ')).join(', ')}
+                                        {play.priority && (
+                                          <span className={`text-[11px] font-semibold px-2 py-0.5 rounded border ${
+                                            play.priority === 'Critical' ? 'text-rose-700 bg-rose-50 border-rose-200'
+                                              : play.priority === 'High' ? 'text-amber-700 bg-amber-50 border-amber-200'
+                                              : play.priority === 'Medium' ? 'text-sky-700 bg-sky-50 border-sky-200'
+                                              : 'text-slate-600 bg-slate-100 border-slate-200'
+                                          }`}>
+                                            {play.priority}
                                           </span>
                                         )}
                                       </div>
@@ -3782,16 +3781,12 @@ export default function UserDashboardPage() {
                             <div key={area.play_key || i} className="bg-slate-50 rounded-xl border border-dashed border-slate-300 p-4 space-y-2.5">
                               <div className="flex flex-wrap items-start justify-between gap-2">
                                 <p className="text-sm font-semibold text-slate-700">{area.title}</p>
-                                <span className="text-[11px] font-semibold text-slate-600 bg-white border border-slate-200 px-2 py-0.5 rounded flex-shrink-0">
-                                  {area.severity}
-                                </span>
+                                {area.priority && (
+                                  <span className="text-[11px] font-semibold text-slate-600 bg-white border border-slate-200 px-2 py-0.5 rounded flex-shrink-0">
+                                    {area.priority}
+                                  </span>
+                                )}
                               </div>
-
-                              {area.missing_checks?.length > 0 && (
-                                <p className="text-[11px] text-amber-700">
-                                  Failed checks: {area.missing_checks.map((m: string) => m.replace(/_/g, ' ')).join(', ')}
-                                </p>
-                              )}
 
                               {area.scale_statement && (
                                 <div>
