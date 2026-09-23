@@ -507,7 +507,7 @@ THEME_PRECEDENCE = (THEME_3D, THEME_PRINT, THEME_DEVICES, THEME_COLLAB, THEME_AI
 
 def _resolve_themes(themes: list[str]) -> str | None:
     """The single winning theme, or None when two rank equally."""
-    ranked = sorted(themes, key=lambda t: THEME_PRECEDENCE.index(t))
+    ranked = sorted(themes, key=THEME_PRECEDENCE.index)
     if len(ranked) > 1 and (THEME_PRECEDENCE.index(ranked[0])
                             == THEME_PRECEDENCE.index(ranked[1])):
         return None
