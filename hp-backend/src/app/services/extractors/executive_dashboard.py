@@ -25,124 +25,19 @@ def _read_dataset_csv(account_id: str, dataset_key: str) -> list[dict]:
     """
     return read_dataset_records(account_id, dataset_key, strict=False)
 
-def _resolve_ultimate_parent(hier_row: dict | None, business_description: str = "") -> tuple[str, dict | None]:
-    """The ultimate parent to display, and a review flag when it cannot be trusted.
+def _resolve_parent(hier_row: dict | None) -> str:
+    """The parent to display: the Company Hierarchy sheet's Parent Company Name.
 
-    Returns ("", flag) rather than a name whenever the hierarchy row fails to
-    establish one. The field is suppressed instead of guessed: the frontend
-    hides it on an empty value, and a blank is honest where a wrong parent is
-    not.
-
-    Client ruling (Sep 2026), which takes precedence over the checks below:
-    the Company Hierarchy sheet's Parent Company Name is the parent when it is
-    populated. A populated Parent Company Name is used as supplied, without
-    being second-guessed against the description. When it is blank the parent
-    relationship is ignored for now - blank means "not established", never a
-    reason to go looking for one elsewhere.
-
-    Below that rule, an Ultimate Parent Name is still only displayed when the
-    row actually establishes one. Two things make it untrustworthy:
-
-    1. It is self-referential - Ultimate Parent Id equals Business Id. A company
-       is not its own ultimate parent; this is how the vendor encodes "no
-       hierarchy known", and taking the name at face value asserts independence
-       the file never claimed. Astra ships exactly this: both ids are
-       8fe936f4..., Parent Company Name is empty, and Ultimate Parent Name is
-       the company itself.
-
-    2. It contradicts the description - the same vendor's Business Description
-       ends "operates as a subsidiary of Jardine Cycle & Carriage Limited", and
-       news_events independently says "controlled by Jardine Cycle & Carriage
-       Limited". Two datasets against one.
-
-    The contradicting name is deliberately NOT written into the field. It is
-    reported on the flag for a human to confirm, because promoting prose parsed
-    out of a description to ground truth is the silent swap this codebase avoids
-    - the description is unstructured text, and "subsidiary of" there may mean a
-    minority stake rather than an ultimate parent.
+    Client ruling (Sep 2026): a populated Parent Company Name is the parent and
+    is used as supplied. A blank one means the parent relationship is ignored
+    for now - nothing is shown and nothing is flagged, and no parent is looked
+    for anywhere else (Ultimate Parent Name, or a "subsidiary of" clause in the
+    Business Description).
     """
     if not hier_row:
-        return "", None
-
-    def field(*names):
-        for n in names:
-            v = (hier_row.get(n) or "").strip()
-            if v:
-                return v
         return ""
-
-    # Client ruling: a populated Parent Company Name settles the relationship.
-    # It is taken as supplied - no self-reference or description check runs,
-    # because those exist to stop an unestablished parent being displayed, and
-    # this one is established by the sheet itself.
-    parent_company_name = field("Parent Company Name", "parent_company_name")
-    if parent_company_name:
-        return parent_company_name, None
-
-    ultimate_parent = field("Ultimate Parent Name", "ultimate_parent_name")
-    if not ultimate_parent:
-        return "", None
-
-    business_id = field("Business Id", "business_id")
-    ultimate_parent_id = field("Ultimate Parent Id", "ultimate_parent_id")
-
-    self_referential = bool(business_id) and business_id == ultimate_parent_id
-    stated = _subsidiary_of(business_description)
-    contradicted = bool(stated) and _norm_company(stated) != _norm_company(ultimate_parent)
-
-    if not (self_referential or contradicted):
-        return ultimate_parent, None
-
-    reasons = []
-    if self_referential:
-        reasons.append(
-            "company_hierarchy is self-referential (Ultimate Parent Id equals "
-            "Business Id), so it establishes no parent"
-        )
-    if contradicted:
-        reasons.append(
-            f"firmographics Business Description states the company is a "
-            f"subsidiary of {stated!r}, which contradicts {ultimate_parent!r}"
-        )
-
-    return "", {
-        "field": "ultimate_parent",
-        "status": "needs_review",
-        "suppressed_value": ultimate_parent,
-        "stated_parent": stated or None,
-        "reason": "; ".join(reasons),
-    }
-
-
-def _norm_company(name: str) -> str:
-    """Company name reduced for comparison only - never for display."""
-    out = (name or "").lower()
-    for token in (" limited", " ltd", " tbk", " plc", " inc", " corporation",
-                  " corp", " company", " co", "pt ", ".", ","):
-        out = out.replace(token, " ")
-    return " ".join(out.split())
-
-
-def _subsidiary_of(description: str) -> str:
-    """The parent named by a "subsidiary of X" clause, or "".
-
-    Deliberately narrow: it matches the one phrasing this vendor uses to close a
-    description and stops at the sentence end. It feeds a review flag, not a
-    displayed value, so a miss costs a flag rather than a wrong parent on screen.
-    """
-    if not description:
-        return ""
-    lowered = description.lower()
-    marker = "subsidiary of "
-    idx = lowered.rfind(marker)
-    if idx == -1:
-        return ""
-    tail = description[idx + len(marker):].strip()
-    for stop in (".", ";", "\n"):
-        cut = tail.find(stop)
-        if cut != -1:
-            tail = tail[:cut]
-    return tail.strip()
+    return (hier_row.get("Parent Company Name")
+            or hier_row.get("parent_company_name") or "").strip()
 
 
 def _cross_feature_counts(db, account_id: str) -> dict:
@@ -208,16 +103,8 @@ def extract_executive_dashboard(account_id: str) -> list[dict]:
 
         business_description = (row.get("Business Description") or "").strip()
 
-        # Hierarchy fields
-        parent_company = ""
-        h_row = hier_rows[0] if hier_rows else None
-        if h_row:
-            parent_company = (h_row.get("Parent Company Name") or h_row.get("parent_company_name") or "").strip()
-
-        # Suppressed rather than guessed when the hierarchy row cannot establish
-        # a parent - see _resolve_ultimate_parent.
-        ultimate_parent, parent_review_flag = _resolve_ultimate_parent(
-            h_row, business_description)
+        # Blank unless the hierarchy sheet names a parent - see _resolve_parent.
+        parent_company = _resolve_parent(hier_rows[0] if hier_rows else None)
 
         summary_data = {
             "company_name": (row.get("Company Name") or row.get("Name") or "").strip(),
@@ -226,7 +113,6 @@ def extract_executive_dashboard(account_id: str) -> list[dict]:
             "industry_classification": industry_classification,
             "hq_location": hq_location,
             "parent_company": parent_company,
-            "ultimate_parent": ultimate_parent,
             "stakeholders_mapped_count": len(contact_rows),
             # Counts the dashboard's Quick Stats shows that belong to other
             # features. They are resolved here, server-side, because the
@@ -243,11 +129,6 @@ def extract_executive_dashboard(account_id: str) -> list[dict]:
             # dash rather than a number.
             **_cross_feature_counts(db, account_id),
         }
-
-        # Present only when something was actually suppressed, so a clean
-        # account's payload keeps the shape it had before this existed.
-        if parent_review_flag:
-            summary_data["review_flags"] = [parent_review_flag]
 
         summary_payload = {
             "account_id": account_id,

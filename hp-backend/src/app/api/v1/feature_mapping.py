@@ -88,10 +88,10 @@ FEATURE_MAPPINGS = {
             {
                 "field_key": "company_hierarchy",
                 "display_name": "Company Hierarchy",
-                "purpose": "Parent and ultimate parent corporate structure",
+                "purpose": "Parent company, shown only when the hierarchy sheet names one. A blank Parent Company Name means the parent relationship is ignored for now (client instruction, Sep 2026): nothing is shown and nothing is flagged",
                 "dataset_key": "company_hierarchy",
                 "source_sheet": "2_Company_Hierarchy",
-                "source_column": "Parent Company Name, Ultimate Parent Name",
+                "source_column": "Parent Company Name",
                 "data_type": "DETERMINISTIC"
             },
             {

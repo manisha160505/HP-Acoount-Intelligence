@@ -1161,15 +1161,10 @@ export default function UserDashboardPage() {
                   const domainVal = summaryData?.domain || null;
                   const locationVal = summaryData?.hq_location || null;
                   const industryVal = summaryData?.industry_classification || null;
-                  const parentVal = summaryData?.ultimate_parent || null;
-
-                  // Set when the backend suppressed a field rather than
-                  // displaying a value it could not stand behind. Shown as an
-                  // explicit "needs review" chip: a field that silently
-                  // vanishes looks like missing data, when in fact a
-                  // contradiction was detected and deliberately not resolved.
-                  const parentFlag = ((summaryData?.review_flags || []) as any[])
-                    .find((f: any) => f?.field === 'ultimate_parent') || null;
+                  // The hierarchy sheet's Parent Company Name. Blank means the
+                  // client asked for the relationship to be ignored, so the
+                  // line is hidden rather than shown as missing.
+                  const parentVal = summaryData?.parent_company || null;
 
                   return (
                     <div className="space-y-6">
@@ -1224,23 +1219,7 @@ export default function UserDashboardPage() {
                               {parentVal && (
                                 <div className="flex items-center space-x-1.5 text-slate-700">
                                   <User className="w-4 h-4 text-hp-navy" />
-                                  <span>Ultimate Parent: <strong className="font-bold text-slate-900">{parentVal}</strong></span>
-                                </div>
-                              )}
-
-                              {!parentVal && parentFlag && (
-                                <div
-                                  className="flex items-center space-x-1.5 text-amber-800"
-                                  title={parentFlag.reason || undefined}
-                                >
-                                  <User className="w-4 h-4 text-amber-600" />
-                                  <span>
-                                    Ultimate Parent:{' '}
-                                    <strong className="font-bold text-amber-900">Unavailable</strong>
-                                    <span className="ml-1.5 text-[10px] font-bold bg-amber-100 text-amber-900 px-1.5 py-0.5 rounded border border-amber-200 uppercase">
-                                      Needs Review
-                                    </span>
-                                  </span>
+                                  <span>Parent Company: <strong className="font-bold text-slate-900">{parentVal}</strong></span>
                                 </div>
                               )}
                             </div>
