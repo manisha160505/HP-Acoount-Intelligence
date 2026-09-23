@@ -52,9 +52,14 @@ Enable:
 - **Require a pull request before merging** — the setting that closes direct pushes
   - Require approvals: 1 (or more)
   - Dismiss stale approvals when new commits are pushed
-- **Require status checks to pass before merging** — once CI exists, add the backend
-  lint and test jobs here, so the gate is server-side rather than only in the hook
-- **Require branches to be up to date before merging**
+- **Require status checks to pass before merging** — add `Up to date with main`,
+  `Backend lint`, `Backend tests` and `Frontend typecheck and build` (the job
+  names in `.github/workflows/ci.yml`)
+- **Require branches to be up to date before merging** — this is the setting
+  that blocks a PR whose branch is missing commits from `main`. The CI job
+  `Up to date with main` checks the same thing and prints which commits are
+  missing, but its result goes stale when `main` moves after it ran; this
+  setting does not
 - **Do not allow bypassing the above settings** — otherwise admins silently keep the
   ability to push straight to `main`, which is usually not what people expect
 
@@ -72,7 +77,15 @@ gh api -X PUT repos/OWNER/REPO/branches/main/protection \
     "required_approving_review_count": 1,
     "dismiss_stale_reviews": true
   },
-  "required_status_checks": null,
+  "required_status_checks": {
+    "strict": true,
+    "contexts": [
+      "Up to date with main",
+      "Backend lint",
+      "Backend tests",
+      "Frontend typecheck and build"
+    ]
+  },
   "enforce_admins": true,
   "restrictions": null,
   "allow_force_pushes": false,
@@ -81,6 +94,7 @@ gh api -X PUT repos/OWNER/REPO/branches/main/protection \
 JSON
 ```
 
+`"strict": true` is "Require branches to be up to date before merging".
 `enforce_admins: true` is what makes the rule apply to the owner too.
 
 Verify it took:
@@ -89,6 +103,8 @@ Verify it took:
 gh api repos/OWNER/REPO/branches/main/protection --jq '{
   pr_required: (.required_pull_request_reviews != null),
   approvals: .required_pull_request_reviews.required_approving_review_count,
+  up_to_date_required: .required_status_checks.strict,
+  checks: .required_status_checks.contexts,
   admins_included: .enforce_admins.enabled,
   force_push: .allow_force_pushes.enabled
 }'

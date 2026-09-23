@@ -106,3 +106,18 @@ vercel app/
 # Raw 220-account source data (exa, predictleads, google news, intent results,
 # explorium). ~140MB of real client account data, internal only, never committed.
 220 account data /
+
+# Per-account CSVs produced from the above by scripts/split_account_data.py.
+# Same client data in a different shape (~233MB), and regenerable from the
+# source folder in about a minute, so it is derived output rather than input.
+220 account split csv/
+
+# Client documents (rulebooks, decks, spreadsheets, filings) shared for the
+# 220-account work. Real client material, internal only, never committed.
+NewDocs/
+
+# Local tooling for splitting and validating the 220-account data above.
+# Kept out of the repo alongside the data it reads.
+scripts/split_account_data.py
+scripts/split_baseline.json
+scripts/validate_split_data.py
