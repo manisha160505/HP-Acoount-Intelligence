@@ -9,6 +9,7 @@ from bson import ObjectId
 
 from app.core.llm import generate_gpt4o_json_completion
 from app.database.mongodb import get_db
+from app.services.extractors import grounding
 from app.services.extractors.datasets import (
     find_file_path,
     read_dataset_records,
@@ -78,7 +79,7 @@ SENIORITY_BAND_MAP = {
 # A c_suite tag is only honoured when the title corroborates it. HP_ABX_v3_final
 # Feature 3 rule 4: "If the mapped seniority does not fit the original title,
 # keep the original title and send only the mapped field for review."
-# `office` separates a department name ("CIO Office") from a person
+# `\boffice\b` separates a department name ("CIO Office") from a person
 # ("Chief Operating Officer" - "Officer" is a different word).
 OFFICE_NAME_RE = re.compile(r"\boffice\b", re.I)
 EXECUTIVE_TITLE_RE = re.compile(
@@ -173,9 +174,32 @@ DECISION_POWER_ECHOES = [
 ]
 
 
+# Remits that do not reach IT hardware buying at all. `NON_IT_TITLE_TERMS`
+# already caps HP relevance for these; this reuses it as a hard block on naming
+# any HP product to them.
+#
+# Added when qualified opportunities were first handed to the prompt: with a
+# proven account need in front of it the model paired one with every contact on
+# the roster, and a tax division head, an HR lead and a branch manager were all
+# opened on an HP product. The account half of the chain being true does not
+# make the remit half true, and the prompt saying so was not enough.
+NO_HARDWARE_REMIT_TERMS = (
+    *NON_IT_TITLE_TERMS, "branch manager", "product owner", "business owner",
+)
+
+
+def remit_reaches_hardware(title: str | None) -> bool:
+    """Whether this title's remit plausibly reaches an IT hardware decision."""
+    t = " ".join(str(title or "").split()).lower()
+    return not any(term in t for term in NO_HARDWARE_REMIT_TERMS)
+
+
 def blocked_plays_for(title: str | None) -> list[str]:
     """HP lines that do not plausibly follow from this contact's remit."""
     t = (title or "").lower()
+    if not remit_reaches_hardware(t):
+        # Every line, not a subset: the remit reaches none of them.
+        return list(grounding.HP_PRODUCT_LINES)
     return [play for play, terms in PLAY_BLOCKED_BY_TITLE.items()
             if any(term in t for term in terms)]
 
@@ -237,7 +261,18 @@ PRIORITY_CONTACT_MIN_COMPOSITE = 60
 
 # Bump when the talking-points prompt changes, so cached output is regenerated
 # rather than served stale against an older set of instructions.
-TALKING_POINTS_PROMPT_VERSION = 8
+# 9 - qualified Opportunity Map findings are handed to the prompt, and a remit
+#     that does not reach IT hardware is blocked from every HP line in Python
+#     rather than by instruction.
+# 10 - "how_to_open" is written to the tuning logic's word band. Asked for
+#      "1-2 sentences" it ran about 26 words against a 40-100 brief.
+TALKING_POINTS_PROMPT_VERSION = 10
+
+# Recommendation Tuning Logic, Stakeholder Map: "How to Open + HP Play Focus.
+# Minimum 40 words; maximum 100 words." The play focus is a short label, so
+# nearly all of the band belongs to the opener.
+OPENER_MIN_WORDS = 40
+OPENER_MAX_WORDS = 90
 
 
 def normalize_department(raw: str | None) -> str:
@@ -494,6 +529,48 @@ def _contacts_fingerprint(contacts: list[dict], account_context: str = "") -> st
     ).hexdigest()
 
 
+def _qualified_opportunities(account_id: str) -> list[str]:
+    """The HP opportunities this account's evidence has already earned.
+
+    The Recommendation Tuning Logic lists "qualified Opportunity Map findings"
+    among this feature's inputs, and the reason is visible in the output
+    without them: the prompt asks for a chain - remit + persona + a real
+    account signal -> a product - and makes the model build that chain from raw
+    evidence for every contact. Seventeen of twenty-three then landed on
+    "Account engagement / discovery", which is the honest answer to "I could
+    not build a chain" but a poor one when the Opportunity Map has already
+    built five and proved them.
+
+    Discovery areas are deliberately excluded. They are the plays that FAILED
+    their checks, and offering them here would be the forced match the same
+    prompt spends three rules forbidding.
+    """
+    plays = (get_db()["account_widgets"].find_one(
+        {"account_id": account_id,
+         "widget_key": "opportunity_narrative_plays"}) or {}).get("data") or {}
+
+    lines = []
+    for play in (plays.get("opportunity_plays") or []):
+        title = str(play.get("title") or "").strip()
+        if not title:
+            continue
+        products = ", ".join(str(p) for p in (play.get("hp_products") or []) if p)
+        earned = ", ".join(
+            str(e.get("quote") or e.get("text") or "")[:60]
+            for e in (play.get("account_evidence") or [])[:2])
+        lines.append("- %s | HP: %s | earned on: %s"
+                     % (title, products or "not named", earned or "account evidence"))
+
+    for play in (plays.get("service_plays") or []):
+        title = str(play.get("title") or "").strip()
+        if not title:
+            continue
+        terms = ", ".join(str(t) for t in (play.get("matched_terms") or [])[:3])
+        lines.append("- %s | HP service | earned on: %s"
+                     % (title, terms or "account evidence"))
+    return lines
+
+
 def _build_account_context(account_id: str) -> tuple[str, set[str]]:
     """Account-level inference context only - firmographics, technographics,
     intent_score, google_news, news_events. None of this becomes a contact fact.
@@ -563,6 +640,17 @@ def _build_account_context(account_id: str) -> tuple[str, set[str]]:
     if triggers:
         lines.append("Recent news and trigger events:\n"
                      + "\n".join(line for _dt, line in triggers[:10]))
+
+    # Last, so the raw evidence above is read first and the opportunities are
+    # seen as conclusions drawn FROM it rather than as more evidence. They land
+    # in the fingerprint with everything else here, so a regenerated Opportunity
+    # Map rebuilds these openers instead of leaving them citing a play that no
+    # longer holds.
+    qualified = _qualified_opportunities(account_id)
+    if qualified:
+        lines.append("QUALIFIED HP OPPORTUNITIES for this account - already "
+                     "earned by the evidence above, with the chain for each "
+                     "shown:\n" + "\n".join(qualified))
 
     context = "\n".join(lines) if lines else "No account-level context available."
     return context, labels
@@ -638,12 +726,13 @@ CRITICAL RULES:
 3a. AN HP PLAY MUST BE EARNED, NOT ASSIGNED. Before naming a product, the whole chain has to hold:
       this contact's role and department + their buying-committee persona + a relevant account trigger or installed technology -> a plausible HP product.
     Do NOT start from a product and work backwards to justify it. Do NOT give someone a product merely because every other contact has one.
+    A QUALIFIED HP OPPORTUNITY listed in the account evidence satisfies the ACCOUNT half of that chain, and only that half. It says the account has the need; it says nothing about whether THIS person has anything to do with it. The remit half is unchanged and is still the harder half: a tax, HR, legal, audit, branch-management, product-ownership or general-business remit does not reach IT hardware buying, and pairing one with a qualified opportunity is a forced match, not a chain. Where the remit does not reach it, "Account engagement / discovery" remains the right answer. Expect that for a meaningful share of any roster.
     IF THE CHAIN DOES NOT HOLD: set "hp_play_focus" to "Account engagement / discovery", name NO product anywhere in "how_to_open", and open on this contact's own remit and what you want to learn from them. That is a correct answer, not a failure. A forced product match IS a failure.
     BAD (the product does not follow from the role): a CIO Office or Cloud Operations contact opened on HP Enterprise Printing & MPS.
 3b. ABSOLUTE: where a contact's roster line carries DO_NOT_PROPOSE, those HP lines are forbidden for that contact. Do not name them in "hp_play_focus" and do not mention them anywhere in "how_to_open". If that leaves no product with an honest chain, use "Account engagement / discovery".
     GOOD (the chain is visible): a technology-development and business-intelligence remit + an analytics/AI account signal -> Z by HP Workstations.
     GOOD (the chain is visible): a data-governance remit + a security/tokenisation account signal -> HP Wolf Security.
-4. "how_to_open" is written in the first person, as the seller. Go from a specific account trigger or the contact's own remit to a specific HP product line. 1-2 sentences.
+4. "how_to_open" is written in the first person, as the seller. Go from a specific account trigger or the contact's own remit to a specific HP product line, and say what you want to learn from them. BETWEEN 40 AND 90 WORDS - the brief for this field is a word count, not a sentence count, and the room is for this contact's own remit and the account's own evidence, never for padding.
 4a. EVERY CONTACT GETS A DIFFERENT ANGLE. Before writing, count the distinct triggers and technology items in the ACCOUNT EVIDENCE and spread them across the roster. Do not use the same account trigger for more than two contacts, and never pair the same trigger with the same product twice across the roster. Where the evidence runs out, open on the contact's own remit rather than reusing a trigger a third time. Procurement, CIO office, technical evaluator, operations, data governance and engineering must read differently in SUBSTANCE - what the seller is there to do and learn - not merely in the closing clause. If you find yourself writing the same sentence with a different job title, stop and open on that role's own remit instead.
 5. "hp_play_focus" is a short category label, e.g. "PC - fleet standardisation" or "Workstation / strategic sourcing", or "Account engagement / discovery" where no product chain holds. No sentence.
 6. "decision_power" explains what this ROLE can do in a purchase. Base it on the remit the title implies, never on the individual, and NEVER claim more than this contact's supplied influence type allows:
@@ -735,7 +824,25 @@ CRITICAL RULES:
                 # Enforce the per-contact block list rather than trusting the
                 # prompt: v6 still opened a Cloud Operations lead on Print/MPS.
                 contact = by_id.get(cid)
-                for play in blocked_plays_for(contact.get("title") if contact else None):
+                title = contact.get("title") if contact else None
+
+                # A remit that reaches no hardware may not be shown a product
+                # under any name. Checked with the token map rather than by
+                # substring, because the prose writes "HP Elite PCs" where the
+                # line is "HP Elite / Pro PCs" and a substring test misses it.
+                if not remit_reaches_hardware(title):
+                    said = (record["how_to_open"] + " "
+                            + (record["hp_play_focus"] or "")).lower()
+                    named = next((canon for toks, canon in grounding.HP_LINE_TOKENS
+                                  if any(tok in said for tok in toks)), None)
+                    if named:
+                        rejected.append(
+                            "%s named to a remit that does not reach hardware (%s)"
+                            % (named, title))
+                        record["hp_play_focus"] = "Account engagement / discovery"
+                        record["play_blocked"] = named
+
+                for play in blocked_plays_for(title):
                     needle = play.lower()
                     if (needle in record["how_to_open"].lower()
                             or needle in (record["hp_play_focus"] or "").lower()):

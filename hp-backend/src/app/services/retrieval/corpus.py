@@ -1184,6 +1184,16 @@ def executive_dashboard_documents(account_id: str,
     intent = _widget(db, account_id, "intent_topics_table")
     topics = [t for t in (intent.get("topics") or [])
               if _text(t.get("topic_name"))][:MAX_INTENT_TOPICS]
+    # The Bombora export's own Date Stamp, which `intent_demand_signals` already
+    # reads and publishes as `observation.as_of`.
+    #
+    # Registered as the row's `period` because the Evidence Strength recency
+    # term reads that field and nothing else. Without it every intent-backed
+    # catalyst scored "no supporting source carries a usable date" - 0 of 25 -
+    # while the date sat on the widget one hop away. A catalyst evidenced only
+    # by intent then published as 0/100, which reads as "no evidence" rather
+    # than "evidence of a kind this formula does not count".
+    observed = _text((intent.get("observation") or {}).get("as_of"))
     if topics:
         def fill_intent(b):
             out = ["Research topics showing intent at %s, strongest first."
@@ -1196,6 +1206,7 @@ def executive_dashboard_documents(account_id: str,
                     name, score, ", %s intent" % level if level else "")
                 out.append(b.line(sentence, field="topic_name", record_id=i,
                                   dataset="intent_score",
+                                  period=observed or None,
                                   quote=name, value=score))
             return out
 

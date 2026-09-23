@@ -91,6 +91,8 @@ NEWS_EVENTS_CATEGORY_MAP = {
 
 DEFAULT_CATEGORY = "Strategic"
 
+NL = chr(10)
+
 # ==============================================================================
 # SCORING - `HP_Live_Signal_Scoring_Logic.docx` is the sole scoring authority.
 #
@@ -127,7 +129,29 @@ DEDUP_SIMILARITY = signal_scoring.DEDUP_SIMILARITY
 # 10 - three drivers per HP_Live_Signal_Scoring_Logic.docx. The model now
 #      scores only Relevance and Impact, on the document's 0/3/6/8/10 scale;
 #      recency and source reliability are computed in `signal_scoring`.
-SIGNAL_SCORING_PROMPT_VERSION = 10
+# 11 - the Implication for HP is published on the signal instead of being left
+#      in the score document; the angle now reads the account's earned
+#      opportunities, intent and technology; and it is written to the tuning
+#      logic's 70-100 word band.
+# 12 - the word band is retried rather than fatal. Enforcing it as a hard
+#      reject dropped every angle the model wrote and published cards with no
+#      implication at all, which is worse than a short one.
+# 13 - the JSON schema still asked for "two to three sentences", which is what
+#      the model was answering; rule 2 asking for 70-100 words lost the argument.
+# 14 - the angle rewrite is one call per signal. Batched, the model answered
+#      eight at about fifty words each whatever the brief said.
+# 15 - the length retry is given the account context the first pass had, so
+#      "connect this event to what is established about the account" is a brief
+#      the model can actually meet.
+# 16 - and a shape to write it in: three named parts rather than a word count,
+#      which is what the first pass already had and the retry did not.
+SIGNAL_SCORING_PROMPT_VERSION = 16
+
+# Recommendation Tuning Logic, Live Signals: "Minimum 70 words; maximum 100
+# words." Enforced through the existing angle guard and its one retry, so a
+# short angle is rewritten rather than dropped.
+ANGLE_MIN_WORDS = 70
+ANGLE_MAX_WORDS = 100
 
 # Whether the event has actually happened. A plant that "will be built" and one
 # that "has opened" are different sales conversations, so the card must not read
@@ -352,13 +376,63 @@ def _dedupe(signals: list[dict]) -> list[dict]:
     return groups
 
 
-def _signals_fingerprint(signals: list[dict]) -> str:
+def _account_context(account_id: str) -> str:
+    """What else is known about this account, for the Implication for HP.
+
+    The Recommendation Tuning Logic is explicit that Live Signals must "start
+    with the specific news event and connect it with relevant Intent,
+    Technographics, Hiring, Filings and existing Opportunity Map findings", and
+    that where those are absent the event is surfaced as context rather than an
+    opportunity.
+
+    Without them the model saw one headline and nothing else, so every angle it
+    could honestly write was a variation on "this does not indicate a
+    technology need" - true, and useless. Read from the widgets rather than the
+    raw datasets, so the context is what the platform has already verified and
+    published elsewhere.
+    """
+    db = get_db()
+
+    def widget(key):
+        return (db["account_widgets"].find_one(
+            {"account_id": account_id, "widget_key": key}) or {}).get("data") or {}
+
+    lines = []
+
+    plays = widget("opportunity_narrative_plays")
+    earned = [str(p.get("title") or "").strip()
+              for p in (plays.get("opportunity_plays") or [])
+              + (plays.get("service_plays") or [])
+              if str(p.get("title") or "").strip()]
+    if earned:
+        lines.append("HP opportunities this account's evidence has already "
+                     "earned: " + "; ".join(earned[:8]))
+
+    topics = [str(t.get("topic_name") or "") for t in
+              (widget("intent_topics_table").get("topics") or [])[:12]
+              if t.get("topic_name")]
+    if topics:
+        lines.append("Research intent topics: " + ", ".join(topics))
+
+    stack = [str(x) for x in
+             (widget("tech_stack_matrix").get("full_tech_stack") or [])[:25] if x]
+    if stack:
+        lines.append("Detected technologies: " + ", ".join(stack))
+
+    return NL.join(lines)
+
+
+def _signals_fingerprint(signals: list[dict], context: str = "") -> str:
     basis = sorted(
         [{"id": s["signal_id"], "h": s["headline"], "d": s["event_date"], "c": s["category"]}
          for s in signals],
         key=lambda x: x["id"],
     )
-    payload = {"prompt_version": SIGNAL_SCORING_PROMPT_VERSION, "signals": basis}
+    payload = {"prompt_version": SIGNAL_SCORING_PROMPT_VERSION,
+               "signals": basis,
+               # The angle now reads the account's opportunities, intent and
+               # technology, so a change in any of them has to rebuild it.
+               "account_context": context}
     return hashlib.sha256(
         json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
     ).hexdigest()
@@ -451,6 +525,22 @@ def _angle_fault(angle: str, seen_stems: set) -> str | None:
     return None
 
 
+def _angle_length_fault(angle: str) -> str | None:
+    """Why this angle misses the brief's word band, or None.
+
+    Kept apart from `_angle_fault` because the two failures deserve different
+    treatment. A banned phrase or a duplicated opening makes an angle unusable
+    and it is dropped. Being short does not: the first version of this check
+    rejected every angle the model wrote - they ran 36 to 60 words against a
+    70-100 brief - and the cards published with no implication at all, which is
+    worse than a short one. Length is retried, and the best answer is kept.
+    """
+    words = len(str(angle or "").split())
+    if words and not (ANGLE_MIN_WORDS <= words <= ANGLE_MAX_WORDS):
+        return f"is {words} words; the brief is {ANGLE_MIN_WORDS}-{ANGLE_MAX_WORDS}"
+    return None
+
+
 def _grounded_rationales(ground, report, sid: str,
                          rationales: dict) -> tuple[dict, dict]:
     """The rationales that are sourced, and the ones withheld.
@@ -488,7 +578,8 @@ def score_news_signals(account_id: str, signals: list[dict], company_name: str) 
     for the composite, the tier, the category, the dates or any source field."""
     db = get_db()
     now = datetime.now(UTC)
-    fingerprint = _signals_fingerprint(signals)
+    account_context = _account_context(account_id)
+    fingerprint = _signals_fingerprint(signals, account_context)
 
     existing = db["account_widgets"].find_one({
         "account_id": account_id,
@@ -520,6 +611,11 @@ def score_news_signals(account_id: str, signals: list[dict], company_name: str) 
     system_prompt = f"""You are a signal intelligence analyst for Account-Based Marketing. Score each signal for {company_name} using the framework below.
 
 CONTEXT: HP Inc. is targeting {company_name} to sell client devices (Z by HP Workstations, HP Elite/Pro PCs), HP Wolf Security, Poly collaboration devices, HP Enterprise Print/MPS, and HP Anyware/DaaS. Today's date is {now.strftime('%d %B %Y')}.
+
+WHAT ELSE IS KNOWN ABOUT THIS ACCOUNT - use it to connect the event to something already established, never as a new fact about the event:
+{account_context or "(nothing else is established for this account yet)"}
+
+CONNECT THE EVENT. An event on its own rarely establishes a technology requirement, and saying so is not an answer. Where one of the opportunities, intent topics or detected technologies above relates to this event, say how the event affects THAT - whether it makes it more timely, larger, or better funded - and open the conversation there. Where nothing above relates, surface the event as seller context and say what to watch for. Never invent a connection that the list above does not support.
 
 GATE VALIDATION (a second opinion - hard filtering has already been applied):
 Set "gate_pass" to false only if the signal does not reference a verifiable event, or does not concern {company_name} or a direct subsidiary. Otherwise true.
@@ -560,7 +656,7 @@ CRITICAL RULES:
 1. Score honestly. A generic business update with no device, security or workforce relevance scores 3-4, not 6-7.
 2a. NAME THE EVENT TYPE. Open by saying what kind of event this is - a leadership change, a financial result, a partnership, an investment, a product or market move - and say what it does and does NOT establish. A leadership appointment is a relationship and timing signal: new leadership resets priorities and reopens budgets, which is a reason to make contact. It is NOT evidence of a technology requirement. NEVER write "ideal time", "perfect time" or "the right time to position HP".
 2b. RECOMMENDING MONITORING IS FINE - A STOCK PHRASE IS NOT. Where an event warrants nothing more than watching, say so, but name what specifically to watch for on THIS event. Every angle in this set must be a different sentence from the others: do not open or close two of them the same way. These are banned as written: "Monitor for follow-on announcements", "Monitor for future announcements", "does not indicate any IT or workforce transformation needs".
-2. "sales_angle" is a 2-3 sentence brief for an HP seller. It must be an IMPLICATION, not a new fact - never introduce a number, product, customer or event that is not present in that signal's headline or evidence above.
+2. "sales_angle" is the Implication for HP: what this event changes for HP and what the seller should do because of it. Between 70 and 100 words. It must be an IMPLICATION, not a new fact - never introduce a number, product, customer or event that is not present in that signal's headline or evidence above.
 
    It MUST END WITH A USE - something the seller can actually do with this signal. One of: an outreach trigger; an opening line for a call; a specific person or function to approach; a timing window; or an explicit "monitor for X". A brief that ends by declaring the signal irrelevant is a FAILED answer and will be rejected.
 
@@ -596,7 +692,7 @@ Output JSON:
         "relevance_impact": {{"score": 6, "rationale": "Name the level and say what the signal explicitly states - and what it does not."}}
       }},
       "matched_categories": ["major business change: new facility", "workforce growth"],
-      "sales_angle": "Two to three sentences: what this evidences, what it does not, and whether it warrants an HP conversation.",
+      "sales_angle": "70-100 words: what this event establishes and what it does not, how it affects something already known about this account, and what the seller should do next.",
       "hp_play": null,
       "event_status": "announced"
     }}
@@ -695,8 +791,13 @@ Output JSON:
                 if fault:
                     angle_faults[sid] = fault
                 else:
+                    # Stored even when short, so a failed rewrite leaves the
+                    # card with an implication rather than none.
                     scored[sid]["sales_angle"] = _pending_angle
                     angle_stems.update(x for x in _angle_stems(_pending_angle) if x)
+                    length_fault = _angle_length_fault(_pending_angle)
+                    if length_fault:
+                        angle_faults[sid] = length_fault
 
     # Prose-only retry. The five dimension scores, rationales and gate validation
     # already stored are never re-requested - only the sales angle is rewritten.
@@ -728,13 +829,64 @@ Output JSON:
             "priorities and reopens budgets, which is a real reason to make contact "
             "early - say that, and say plainly that the appointment itself does not "
             "establish a technology requirement. Do not water it down to 'monitor for "
-            "developments'."
+            "developments'. "
+            # A word count alone does not lengthen the answer - every rewrite
+            # came back near fifty however many times the band was repeated.
+            # What the first pass has and this did not is a SHAPE: three named
+            # parts, each owing its own sentences. Asked for the parts the model
+            # writes them; asked for a number it writes to its own default.
+            "Write it in three parts, run together as continuous prose with no "
+            "headings, labels or bullets:" + chr(10)
+            + "(1) TWO SENTENCES on what this event is and what it establishes "
+            "for HP - and say plainly what it does NOT establish." + chr(10)
+            + "(2) TWO SENTENCES connecting it to what is already established "
+            "about this account, naming the specific intent topic, detected "
+            "technology, hiring pattern or earned HP opportunity from the list "
+            "below that it bears on." + chr(10)
+            + "(3) ONE SENTENCE on what the seller should do next and what "
+            "specifically to watch for on this event." + chr(10)
+            + "The five sentences together must total %d to %d words. Anything "
+            "shorter than %d is rejected again, and the room is for part (2), "
+            "not for padding parts (1) and (3)."
+            % (ANGLE_MIN_WORDS, ANGLE_MAX_WORDS, ANGLE_MIN_WORDS)
+            # The retry asks for exactly that connection, so it has to be given
+            # the same account context the first pass had. Without it the model
+            # was told to connect the event to what is established about the
+            # account and handed nothing to connect it to, which is why the
+            # rewrites kept coming back at the length that earned the rejection.
+            # Nothing new is introduced by this: it is the platform's own
+            # published findings, already grounded where they were written.
+            + (chr(10) + chr(10) + "WHAT IS ALREADY ESTABLISHED ABOUT THIS "
+               "ACCOUNT (connect the event to this; introduce nothing beyond "
+               "it and the signal's own headline):" + chr(10) + account_context
+               if account_context else "")
             + chr(10) + chr(10)
             + 'Output JSON: {"signals": [{"signal_id": "<id>", "sales_angle": "..."}]}'
         )
-        retry_res = generate_gpt4o_json_completion(
-            retry_system,
-            f"Rewrite the sales angle for these {len(lines)} signals. Return JSON.")
+        # One call per signal, not one call for all of them.
+        #
+        # The batched rewrite was asked for the 70-100 word band three separate
+        # ways - the rule, the JSON schema and this retry - and kept returning
+        # about fifty. Asked for eight angles in one response the model spends
+        # its budget across them; asked for one it writes to the brief. The cost
+        # is bounded by MAX_SIGNALS, and only the angles that actually missed
+        # are retried.
+        rewritten = []
+        for sid, fault in sorted(angle_faults.items()):
+            sig = by_sid.get(sid)
+            if not sig:
+                continue
+            one = generate_gpt4o_json_completion(
+                retry_system,
+                "Rewrite the sales angle for this one signal and return JSON "
+                "containing only it." + NL
+                + f'- id={sid} | {fault} | headline={sig["headline"][:150]}'
+                + NL + f'  evidence={(sig.get("evidence_sentence") or sig["headline"])[:300]}')
+            for entry in ((one or {}).get("signals") or []):
+                if isinstance(entry, dict):
+                    rewritten.append(entry)
+
+        retry_res = {"signals": rewritten}
         if retry_res and isinstance(retry_res, dict) and isinstance(retry_res.get("signals"), list):
             for entry in retry_res["signals"]:
                 if not isinstance(entry, dict):
@@ -744,6 +896,18 @@ Output JSON:
                     continue
                 angle = _grounded_angle(ground, report, sid, entry)
                 if not angle or _angle_fault(angle, angle_stems):
+                    continue
+                # Keep whichever answer is closer to the brief. A rewrite asked
+                # for length can come back shorter than what it replaced, and
+                # overwriting unconditionally would publish the worse of two
+                # valid angles.
+                def _miss(text):
+                    n = len(str(text or "").split())
+                    if not n:
+                        return 10 ** 6
+                    return max(ANGLE_MIN_WORDS - n, n - ANGLE_MAX_WORDS, 0)
+
+                if _miss(angle) > _miss(scored[sid].get("sales_angle")):
                     continue
                 scored[sid]["sales_angle"] = angle
                 angle_stems.update(x for x in _angle_stems(angle) if x)
@@ -832,6 +996,17 @@ def extract_recent_news_signals(account_id: str) -> list[dict]:
         # Unscored signals carry the honest default, so the card always has a
         # value to read and never renders a stale or missing status.
         s["event_status"] = (sc or {}).get("event_status") or DEFAULT_EVENT_STATUS
+        # The Implication for HP, which the Recommendation Tuning Logic makes
+        # this feature's mandatory seller-facing output.
+        #
+        # It has been generated, grounded, quality-guarded and retried all
+        # along - and then left in the score document, because only confidence,
+        # tier and status were copied across. Every card on screen carried a
+        # headline, a date and a score, and nothing saying what the event means
+        # for HP or what to do about it.
+        s["sales_angle"] = (sc or {}).get("sales_angle")
+        s["hp_play"] = (sc or {}).get("hp_play")
+        s["rationales"] = (sc or {}).get("rationales")
         s.pop("_canon", None)
         s.pop("_event_dt", None)
 

@@ -280,10 +280,35 @@ function HpRecommendationCard({ rec, xray }: { rec: any; xray?: boolean }) {
               quoted from the rulebook
             </span>
           )}
+          {/* How strongly this may be put. Not a score - the confidence band
+              beside it is the score. This says what the prose is allowed to
+              claim, and it is keyed on how many independent data pipelines saw
+              the evidence, not on how many rows did. */}
+          {rec.confidence_tier && (
+            <span
+              className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border ${
+                rec.confidence_tier === 'Opportunity'
+                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                  : rec.confidence_tier === 'Conversation Starter'
+                  ? 'bg-sky-50 text-sky-700 border-sky-200'
+                  : 'bg-slate-100 text-slate-600 border-slate-200'
+              }`}
+              title={[rec.evidence_tier?.basis, rec.evidence_tier?.permitted_language]
+                .filter(Boolean).join(' — ')}
+            >
+              {rec.confidence_tier}
+            </span>
+          )}
         </div>
-        <span className="text-[10px] font-mono text-slate-400 whitespace-nowrap">
-          Rule {rec.rule_id}
-        </span>
+        {/* Section 3: "Do not expose internal rule IDs ... Seller-facing
+            output should contain the conclusion, not the backend logic." The
+            id is how an engineer traces the card back to the rulebook, so it
+            stays - behind X-Ray, with the rest of the machinery. */}
+        {xray && (
+          <span className="text-[10px] font-mono text-slate-400 whitespace-nowrap">
+            Rule {rec.rule_id}
+          </span>
+        )}
       </div>
 
       {rec.rationale && (
@@ -942,6 +967,28 @@ export default function UserDashboardPage() {
                 );
               })()}
             </div>
+
+            {/* When the ACCOUNT DATA was loaded - not when this page was opened,
+                and not when the widget was last generated. Recommendation
+                Tuning Logic section E: a dashboard opened months after
+                ingestion must still name the snapshot it is reasoning from. */}
+            {(() => {
+              const asOf = widgets.find(w => w.data_as_of_date)?.data_as_of_date;
+              if (!asOf) return null;
+              const spread = widgets.find(w => w.data_as_of)?.data_as_of?.by_dataset || {};
+              const days = Array.from(new Set(Object.values(spread)));
+              return (
+                <span
+                  className="text-[10px] font-mono text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 whitespace-nowrap"
+                  title={days.length > 1
+                    ? `Pipelines were loaded on different days: ${days.sort().join(', ')}. The date shown is the most recent.`
+                    : 'The date this account’s data was loaded into the engine.'}
+                >
+                  Data as of {asOf}
+                  {days.length > 1 && <span className="text-slate-400"> &middot; mixed</span>}
+                </span>
+              );
+            })()}
 
             {/* X-Ray Mode Toggle Button */}
             <div className="flex items-center space-x-3">
@@ -1714,6 +1761,44 @@ export default function UserDashboardPage() {
                                             <p className="text-[11px] text-slate-500 leading-relaxed">
                                               <span className="font-bold text-slate-600">Why now: </span>{p.why_now}
                                             </p>
+                                          )}
+
+                                          {/* A published HP case study supporting the HP
+                                              offering this catalyst names. Attached in Python
+                                              AFTER the paragraph is written, to whichever HP
+                                              line the paragraph actually mentions - the
+                                              tuning logic is explicit that proof "must not
+                                              create the account need", so it can only follow
+                                              a recommendation the evidence already earned.
+                                              A catalyst naming no HP line carries none. */}
+                                          {p.hp_proof_point && (
+                                            <div className="bg-amber-50/60 border border-amber-200 rounded-xl px-3 py-2 space-y-1">
+                                              <span className="text-[9px] font-mono font-extrabold uppercase tracking-widest text-amber-800 block">
+                                                HP proof point
+                                              </span>
+                                              <p className="text-[11px] text-amber-900 leading-relaxed">{p.hp_proof_point}</p>
+                                              {p.hp_proof_point_detail && (
+                                                <p className="text-[10px] text-amber-800">
+                                                  <span className="font-semibold">{p.hp_proof_point_detail.customer}</span>
+                                                  {p.hp_proof_point_detail.industry && (
+                                                    <span className="text-amber-700"> &middot; {p.hp_proof_point_detail.industry}</span>
+                                                  )}
+                                                  {p.hp_proof_point_detail.source_url && (
+                                                    <>
+                                                      {' · '}
+                                                      <a
+                                                        href={p.hp_proof_point_detail.source_url}
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                        className="underline hover:text-amber-950"
+                                                      >
+                                                        View the HP case study
+                                                      </a>
+                                                    </>
+                                                  )}
+                                                </p>
+                                              )}
+                                            </div>
                                           )}
 
                                           <p className="text-[10px] text-slate-500">
@@ -3621,9 +3706,15 @@ export default function UserDashboardPage() {
                               <div className="flex flex-wrap items-start justify-between gap-2">
                                 <div>
                                   <div className="flex items-center gap-2 flex-wrap">
-                                    <span className="text-[10px] font-mono font-bold text-hp-navy bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded">
-                                      {play.rule_label}
-                                    </span>
+                                    {/* Section 3: the rule id is backend logic.
+                                        The opportunity type beside it is the
+                                        capability, which is what the doc asks
+                                        a seller to be shown instead. */}
+                                    {isXRayOn && (
+                                      <span className="text-[10px] font-mono font-bold text-hp-navy bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded">
+                                        {play.rule_label}
+                                      </span>
+                                    )}
                                     <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
                                       {play.opportunity_type}
                                     </span>
@@ -4736,7 +4827,13 @@ export default function UserDashboardPage() {
                                                   to that card, and the rule is stated once. */}
                                               {vendor.rulebook_offering && (
                                                 <p className="mt-2 pt-2 border-t border-blue-200/70 text-[10px] font-mono text-hp-navy">
-                                                  {vendor.rulebook_offering.rule_label} &middot;{' '}
+                                                  {/* Section 3: the offering is
+                                                      the supported capability and
+                                                      stays; the rule id that
+                                                      selected it is backend logic. */}
+                                                  {isXRayOn && (
+                                                    <>{vendor.rulebook_offering.rule_label} &middot;{' '}</>
+                                                  )}
                                                   {vendor.rulebook_offering.offering}
                                                   <span className="text-slate-400 normal-case font-sans">
                                                     {' '}&mdash; see the HP recommendation below
