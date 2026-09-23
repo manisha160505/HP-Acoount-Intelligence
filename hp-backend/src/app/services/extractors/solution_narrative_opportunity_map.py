@@ -82,7 +82,11 @@ NL = chr(10)
 # Service plays are built by `services/hp/rulebook.py` rather than by the
 # prompt, so a change to that module does not move any other input to the
 # fingerprint. Bumping this is what makes a matcher change rebuild them.
-OPPORTUNITY_PROMPT_VERSION = 28
+# 29 - the client's Critical/High/Medium/Low priority table. The logic landed
+#      without this bump, so every account kept serving the cached pre-table
+#      plays: the version is part of the cache fingerprint, so unchanged version
+#      means unchanged fingerprint means the new code never runs.
+OPPORTUNITY_PROMPT_VERSION = 29
 MAX_PLAYS = 5
 
 # HP_ABX_v3_final defines NO numeric opportunity score for this feature. Plays
