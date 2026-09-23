@@ -33,7 +33,15 @@ def _resolve_ultimate_parent(hier_row: dict | None, business_description: str = 
     hides it on an empty value, and a blank is honest where a wrong parent is
     not.
 
-    Two things make a hierarchy row untrustworthy:
+    Client ruling (Sep 2026), which takes precedence over the checks below:
+    the Company Hierarchy sheet's Parent Company Name is the parent when it is
+    populated. A populated Parent Company Name is used as supplied, without
+    being second-guessed against the description. When it is blank the parent
+    relationship is ignored for now - blank means "not established", never a
+    reason to go looking for one elsewhere.
+
+    Below that rule, an Ultimate Parent Name is still only displayed when the
+    row actually establishes one. Two things make it untrustworthy:
 
     1. It is self-referential - Ultimate Parent Id equals Business Id. A company
        is not its own ultimate parent; this is how the vendor encodes "no
@@ -62,6 +70,14 @@ def _resolve_ultimate_parent(hier_row: dict | None, business_description: str = 
             if v:
                 return v
         return ""
+
+    # Client ruling: a populated Parent Company Name settles the relationship.
+    # It is taken as supplied - no self-reference or description check runs,
+    # because those exist to stop an unestablished parent being displayed, and
+    # this one is established by the sheet itself.
+    parent_company_name = field("Parent Company Name", "parent_company_name")
+    if parent_company_name:
+        return parent_company_name, None
 
     ultimate_parent = field("Ultimate Parent Name", "ultimate_parent_name")
     if not ultimate_parent:
