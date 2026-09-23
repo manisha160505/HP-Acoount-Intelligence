@@ -370,7 +370,7 @@ class TestTheFamilyCapCountsRecommendationsNotQualifiers:
         rules.insert(1, rule("H MOD", "HARDWARE", terms=["autodesk"],
                              order=99, modifier_only=True))
         last = rule("H LAST", "HARDWARE", terms=["autodesk"], order=100)
-        b = book(rules=rules + [last],
+        b = book(rules=[*rules, last],
                  routes=[routing("Hardware", ["HARDWARE"])])
         got = [m["rule_label"] for m in rb.candidates(b, evidence("autodesk"))]
         # Every standalone rule up to the cap, plus the modifier alongside -
