@@ -27,19 +27,13 @@ Usage:
     python scripts/regenerate_features.py ... --include-llm
 
 Credentials come from the environment, never from arguments (an argument would
-land in your shell history). Either:
-    HP_TOKEN                    a bearer token copied from a browser session
-    HP_EMAIL + HP_PASSWORD      a dashboard login, exchanged for a token here
-
-HP_TOKEN wins when both are set. A token expires (typically 24h), so a failure
-with HTTP 401 usually means it needs copying again rather than anything broken.
+land in your shell history):
+    HP_EMAIL, HP_PASSWORD
 """
 import argparse
-import base64
 import json
 import os
 import sys
-import time
 import urllib.error
 import urllib.request
 
@@ -63,22 +57,6 @@ def _call(url, token=None, payload=None, timeout=300):
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         body = resp.read().decode()
         return resp.status, (json.loads(body) if body else None)
-
-
-def token_expiry(token):
-    """Seconds left on a JWT, or None when the token carries no readable exp.
-
-    Read locally, without the signing secret: the claims are base64, and only
-    the signature needs the secret. This is purely so an expired token is
-    reported as expired rather than as a confusing 401 mid-run.
-    """
-    try:
-        payload = token.split(".")[1]
-        payload += "=" * (-len(payload) % 4)
-        exp = json.loads(base64.urlsafe_b64decode(payload)).get("exp")
-        return None if exp is None else exp - time.time()
-    except (IndexError, ValueError, TypeError):
-        return None
 
 
 def login(base_url, email, password):
@@ -118,24 +96,12 @@ def main():
         print("\nDry run - nothing was changed.")
         return 0
 
-    token = os.getenv("HP_TOKEN")
-    if token:
-        token = token.strip()
-        remaining = token_expiry(token)
-        if remaining is not None and remaining <= 0:
-            raise SystemExit("HP_TOKEN has expired - log in again and re-copy it")
-        if remaining is not None:
-            print(f"\nUsing HP_TOKEN ({remaining / 3600:.1f}h before it expires).")
-        else:
-            print("\nUsing HP_TOKEN.")
-    else:
-        email, password = os.getenv("HP_EMAIL"), os.getenv("HP_PASSWORD")
-        if not email or not password:
-            raise SystemExit(
-                "set HP_TOKEN, or HP_EMAIL and HP_PASSWORD, in the environment")
-        token = login(base_url, email, password)
-        print("\nAuthenticated.")
-    print()
+    email, password = os.getenv("HP_EMAIL"), os.getenv("HP_PASSWORD")
+    if not email or not password:
+        raise SystemExit("set HP_EMAIL and HP_PASSWORD in the environment")
+
+    token = login(base_url, email, password)
+    print("\nAuthenticated.\n")
 
     failures = []
     for account_id in args.accounts:
