@@ -4,9 +4,15 @@ Maps a provider's raw intent topic to a broad theme and, only where the mapping
 is direct, to an HP category. It labels topics; it never touches the
 provider's score.
 
-The terms are the feature spec's own list plus their plurals - nothing else.
-An equivalent that turns up on real data is added here with a version bump,
-so every mapping on screen can be traced to the dictionary that produced it.
+v1 carried the feature spec's list only, which left most of a Bombora export
+in the residual bucket. v2 widens the vocabulary and adds four context themes
+(Cloud & Infrastructure, Security, Financial Services & Fintech, E-commerce &
+Logistics) so the export is described rather than discarded. Every term still
+lives here, so any mapping on screen traces to the dictionary that produced it,
+and a new equivalent is added with a version bump.
+
+The context themes carry no HP category: they say what the account researches,
+not which HP line to sell. Only the HP category intent file drives an HP play.
 
 Kept deliberately conservative. A topic that could be read two ways is left
 unmapped and flagged for review rather than placed wherever it tells the
@@ -14,7 +20,8 @@ better sales story:
 
   * a longer term beats a shorter one inside it, so "3d printing" is 3D,
     not Print
-  * a topic still matching two themes is ambiguous -> Other / Unmapped
+  * two themes of different rank resolve by THEME_PRECEDENCE; two of equal
+    rank stay ambiguous -> Other / Low Relevance
   * a topic naming two HP categories (PC and Workstation) keeps its theme
     but gets no HP category
   * a hardware-category term next to a non-hardware word ("ais software
@@ -26,16 +33,31 @@ Account-agnostic: nothing below is derived from any particular account.
 
 from app.services.hp.product_rules import token_present
 
-DICTIONARY_VERSION = "intent-map-v1"
+DICTIONARY_VERSION = "intent-map-v2"
 
 THEME_AI = "AI & Compute"
 THEME_DEVICES = "Devices & Endpoints"
 THEME_COLLAB = "Collaboration & Workplace"
+THEME_CLOUD = "Cloud & Infrastructure"
+THEME_SECURITY = "Security"
+THEME_FINANCE = "Financial Services & Fintech"
+THEME_COMMERCE = "E-commerce & Logistics"
 THEME_PRINT = "Print"
 THEME_3D = "3D"
-THEME_OTHER = "Other / Unmapped"
+# Renamed from "Other / Unmapped" in v2. The bucket never was a destination -
+# it is the topics the dictionary does not place - and the old wording read as
+# a mapping claim, which is what the client queried on the tooltip.
+THEME_OTHER = "Other / Low Relevance"
 
-THEMES = (THEME_AI, THEME_DEVICES, THEME_COLLAB, THEME_PRINT, THEME_3D, THEME_OTHER)
+# Display order on the Intent screen: HP-owned themes first, then the context
+# themes that describe the account's wider research, then the residue.
+THEMES = (THEME_COLLAB, THEME_AI, THEME_CLOUD, THEME_DEVICES, THEME_FINANCE,
+          THEME_SECURITY, THEME_COMMERCE, THEME_PRINT, THEME_3D, THEME_OTHER)
+
+# Themes added in v2 to describe the account's wider research. They carry no
+# HP category by design: they say what the account is looking at, not which HP
+# line to sell, and only the category file may drive an HP play.
+CONTEXT_THEMES = (THEME_CLOUD, THEME_SECURITY, THEME_FINANCE, THEME_COMMERCE)
 
 CAT_PC = "PC"
 CAT_WORKSTATION = "Workstation"
@@ -46,38 +68,254 @@ CAT_3D = "3D"
 # term -> (theme, HP category or None). None means the term places the topic in
 # a theme but does not say which HP line it concerns.
 TERMS = {
+    # --- AI & Compute -------------------------------------------------
     "generative ai": (THEME_AI, None),
     "chatgpt": (THEME_AI, None),
+    "openai": (THEME_AI, None),
     "machine learning": (THEME_AI, None),
+    "artificial intelligence": (THEME_AI, None),
+    "deep learning": (THEME_AI, None),
+    "neural network": (THEME_AI, None),
+    "neural networks": (THEME_AI, None),
+    "large language model": (THEME_AI, None),
+    "large language models": (THEME_AI, None),
+    "llm": (THEME_AI, None),
+    "llms": (THEME_AI, None),
+    "ai strategy": (THEME_AI, None),
+    "ai agents": (THEME_AI, None),
+    "ai chips": (THEME_AI, None),
     "gpu": (THEME_AI, None),
     "gpus": (THEME_AI, None),
     "graphics processing unit": (THEME_AI, None),
     "graphics processing units": (THEME_AI, None),
     "ai compute": (THEME_AI, None),
+    "supervised learning": (THEME_AI, None),
+    "self-supervised learning": (THEME_AI, None),
 
+    # --- Devices & Endpoints ------------------------------------------
     "pc": (THEME_DEVICES, CAT_PC),
     "pcs": (THEME_DEVICES, CAT_PC),
     "laptop": (THEME_DEVICES, CAT_PC),
     "laptops": (THEME_DEVICES, CAT_PC),
+    "notebook": (THEME_DEVICES, CAT_PC),
+    "notebooks": (THEME_DEVICES, CAT_PC),
+    "desktop": (THEME_DEVICES, CAT_PC),
+    "desktops": (THEME_DEVICES, CAT_PC),
     "endpoint": (THEME_DEVICES, None),
     "endpoints": (THEME_DEVICES, None),
+    "endpoint management": (THEME_DEVICES, None),
+    "device management": (THEME_DEVICES, None),
     "workstation": (THEME_DEVICES, CAT_WORKSTATION),
     "workstations": (THEME_DEVICES, CAT_WORKSTATION),
+    # Peripherals and mobile hardware: Devices, but no HP category - the topic
+    # text alone does not say the account wants an HP PC.
+    "monitor": (THEME_DEVICES, None),
+    "monitors": (THEME_DEVICES, None),
+    "display": (THEME_DEVICES, None),
+    "displays": (THEME_DEVICES, None),
+    "oled display": (THEME_DEVICES, None),
+    "projector": (THEME_DEVICES, None),
+    "projectors": (THEME_DEVICES, None),
+    "tablet": (THEME_DEVICES, None),
+    "tablets": (THEME_DEVICES, None),
+    "ipad": (THEME_DEVICES, None),
+    "android": (THEME_DEVICES, None),
+    "ios": (THEME_DEVICES, None),
+    "raspberry pi": (THEME_DEVICES, None),
+    "mobile device": (THEME_DEVICES, None),
+    "mobile devices": (THEME_DEVICES, None),
 
+    # --- Collaboration & Workplace ------------------------------------
     "meeting room": (THEME_COLLAB, CAT_POLY),
     "meeting rooms": (THEME_COLLAB, CAT_POLY),
+    "huddle room": (THEME_COLLAB, CAT_POLY),
+    "huddle rooms": (THEME_COLLAB, CAT_POLY),
     "video collaboration": (THEME_COLLAB, CAT_POLY),
+    "video conferencing": (THEME_COLLAB, CAT_POLY),
     "unified communications": (THEME_COLLAB, CAT_POLY),
-    "hybrid work": (THEME_COLLAB, CAT_POLY),
+    "conferencing": (THEME_COLLAB, CAT_POLY),
+    "headset": (THEME_COLLAB, CAT_POLY),
+    "headsets": (THEME_COLLAB, CAT_POLY),
+    "phone system": (THEME_COLLAB, CAT_POLY),
+    "phone systems": (THEME_COLLAB, CAT_POLY),
+    "voip": (THEME_COLLAB, CAT_POLY),
+    "microsoft teams": (THEME_COLLAB, CAT_POLY),
+    "zoom": (THEME_COLLAB, CAT_POLY),
+    "webex": (THEME_COLLAB, CAT_POLY),
+    # Workplace / people topics: the Collaboration & Workplace theme, but no
+    # Poly category - an HR topic is not a hardware signal.
+    "hybrid work": (THEME_COLLAB, None),
+    "remote work": (THEME_COLLAB, None),
+    "flexible working": (THEME_COLLAB, None),
+    "future of work": (THEME_COLLAB, None),
+    "return to office": (THEME_COLLAB, None),
+    "workplace": (THEME_COLLAB, None),
+    "collaboration": (THEME_COLLAB, None),
+    "chat tool": (THEME_COLLAB, None),
+    "google drive": (THEME_COLLAB, None),
+    "staffing": (THEME_COLLAB, None),
+    "recruitment": (THEME_COLLAB, None),
+    "recruiting": (THEME_COLLAB, None),
+    "onboarding": (THEME_COLLAB, None),
+    "talent management": (THEME_COLLAB, None),
+    "talent acquisition": (THEME_COLLAB, None),
+    "employee experience": (THEME_COLLAB, None),
+    "employee engagement": (THEME_COLLAB, None),
+    "termination": (THEME_COLLAB, None),
+    "layoff": (THEME_COLLAB, None),
+    "layoffs": (THEME_COLLAB, None),
+    "workforce": (THEME_COLLAB, None),
+    "leadership": (THEME_COLLAB, None),
+    "leadership training": (THEME_COLLAB, None),
+    "management development": (THEME_COLLAB, None),
+    "executive compensation": (THEME_COLLAB, None),
+    "tuition assistance": (THEME_COLLAB, None),
+    "vision care": (THEME_COLLAB, None),
+    "c-suite": (THEME_COLLAB, None),
+    "company relocation": (THEME_COLLAB, None),
+    "process mapping": (THEME_COLLAB, None),
+    "email management": (THEME_COLLAB, None),
+    "automated reporting": (THEME_COLLAB, None),
+    "job satisfaction": (THEME_COLLAB, None),
+    "succession planning": (THEME_COLLAB, None),
+    "successfactors": (THEME_COLLAB, None),
+    "executive development": (THEME_COLLAB, None),
+    "professional development": (THEME_COLLAB, None),
+    "performance management": (THEME_COLLAB, None),
+    "employee retention": (THEME_COLLAB, None),
+    "employee services": (THEME_COLLAB, None),
+    "hr": (THEME_COLLAB, None),
+    "human resources": (THEME_COLLAB, None),
+    "talent supply": (THEME_COLLAB, None),
+    "generation z recruiting": (THEME_COLLAB, None),
+    "gen z workforce": (THEME_COLLAB, None),
 
+    # --- Cloud & Infrastructure ---------------------------------------
+    "cloud": (THEME_CLOUD, None),
+    "cloud computing": (THEME_CLOUD, None),
+    "hybrid cloud": (THEME_CLOUD, None),
+    "multicloud": (THEME_CLOUD, None),
+    "public cloud": (THEME_CLOUD, None),
+    "private cloud": (THEME_CLOUD, None),
+    "data center": (THEME_CLOUD, None),
+    "data centre": (THEME_CLOUD, None),
+    "data centers": (THEME_CLOUD, None),
+    "data centres": (THEME_CLOUD, None),
+    "server": (THEME_CLOUD, None),
+    "servers": (THEME_CLOUD, None),
+    "linux servers": (THEME_CLOUD, None),
+    "virtualization": (THEME_CLOUD, None),
+    "virtualisation": (THEME_CLOUD, None),
+    "kubernetes": (THEME_CLOUD, None),
+    "containers": (THEME_CLOUD, None),
+    "microsoft azure": (THEME_CLOUD, None),
+    "azure": (THEME_CLOUD, None),
+    "aws": (THEME_CLOUD, None),
+    "amazon web services": (THEME_CLOUD, None),
+    "google cloud": (THEME_CLOUD, None),
+    "networking": (THEME_CLOUD, None),
+    "network attached storage": (THEME_CLOUD, None),
+    "storage": (THEME_CLOUD, None),
+    "it management": (THEME_CLOUD, None),
+    "system management software": (THEME_CLOUD, None),
+    "temperature monitoring": (THEME_CLOUD, None),
+    "wireless service providers": (THEME_CLOUD, None),
+    "disaster recovery": (THEME_CLOUD, None),
+    "point-in-time recovery": (THEME_CLOUD, None),
+
+    # --- Security -----------------------------------------------------
+    "security": (THEME_SECURITY, None),
+    "cybersecurity": (THEME_SECURITY, None),
+    "cyber security": (THEME_SECURITY, None),
+    "cyber essentials": (THEME_SECURITY, None),
+    "zero trust": (THEME_SECURITY, None),
+    "ransomware": (THEME_SECURITY, None),
+    "malware": (THEME_SECURITY, None),
+    "phishing": (THEME_SECURITY, None),
+    "anti spam": (THEME_SECURITY, None),
+    "antivirus": (THEME_SECURITY, None),
+    "avast": (THEME_SECURITY, None),
+    "firewall": (THEME_SECURITY, None),
+    "threat detection": (THEME_SECURITY, None),
+    "incident response": (THEME_SECURITY, None),
+    "vulnerability management": (THEME_SECURITY, None),
+    "identity management": (THEME_SECURITY, None),
+    "access management": (THEME_SECURITY, None),
+    "authentication": (THEME_SECURITY, None),
+    "encryption": (THEME_SECURITY, None),
+    "data privacy": (THEME_SECURITY, None),
+    "compliance": (THEME_SECURITY, None),
+    "governance": (THEME_SECURITY, None),
+    "soc": (THEME_SECURITY, None),
+    "siem": (THEME_SECURITY, None),
+
+    # --- Financial Services & Fintech ---------------------------------
+    "fintech": (THEME_FINANCE, None),
+    "payments": (THEME_FINANCE, None),
+    "digital payments": (THEME_FINANCE, None),
+    "tokenization": (THEME_FINANCE, None),
+    "digital token": (THEME_FINANCE, None),
+    "asset tokenization": (THEME_FINANCE, None),
+    "mastercard": (THEME_FINANCE, None),
+    "visa": (THEME_FINANCE, None),
+    "banking": (THEME_FINANCE, None),
+    "credit and collections": (THEME_FINANCE, None),
+    "indicative pricing": (THEME_FINANCE, None),
+    "trading": (THEME_FINANCE, None),
+    "day trading": (THEME_FINANCE, None),
+    "hedging": (THEME_FINANCE, None),
+    "hedge funds": (THEME_FINANCE, None),
+    "interest rate risk": (THEME_FINANCE, None),
+    "trade notes": (THEME_FINANCE, None),
+    "trigger rates": (THEME_FINANCE, None),
+    "commercial mortgages": (THEME_FINANCE, None),
+    "student loans": (THEME_FINANCE, None),
+    "financial aid": (THEME_FINANCE, None),
+    "tax preparation": (THEME_FINANCE, None),
+    "payroll": (THEME_FINANCE, None),
+    "invoicing": (THEME_FINANCE, None),
+    "accounting": (THEME_FINANCE, None),
+    "legal spend management": (THEME_FINANCE, None),
+    "equities management software": (THEME_FINANCE, None),
+    "aml": (THEME_FINANCE, None),
+    "anti money laundering": (THEME_FINANCE, None),
+
+    # --- E-commerce & Logistics ---------------------------------------
+    "e-commerce": (THEME_COMMERCE, None),
+    "ecommerce": (THEME_COMMERCE, None),
+    "supply chain": (THEME_COMMERCE, None),
+    "logistics": (THEME_COMMERCE, None),
+    "warehouse": (THEME_COMMERCE, None),
+    "warehousing": (THEME_COMMERCE, None),
+    "fulfillment": (THEME_COMMERCE, None),
+    "fulfilment": (THEME_COMMERCE, None),
+    "shipping": (THEME_COMMERCE, None),
+    "freight": (THEME_COMMERCE, None),
+    "cargo": (THEME_COMMERCE, None),
+    "transportation": (THEME_COMMERCE, None),
+    "last mile": (THEME_COMMERCE, None),
+    "inventory management": (THEME_COMMERCE, None),
+    "retail": (THEME_COMMERCE, None),
+    "marketplace": (THEME_COMMERCE, None),
+    "online video marketing": (THEME_COMMERCE, None),
+    "gift with purchase": (THEME_COMMERCE, None),
+    "verizon connect": (THEME_COMMERCE, None),
+
+    # --- Print --------------------------------------------------------
     "printer": (THEME_PRINT, CAT_PRINT),
     "printers": (THEME_PRINT, CAT_PRINT),
     "print": (THEME_PRINT, CAT_PRINT),
     "printing": (THEME_PRINT, CAT_PRINT),
     "managed print": (THEME_PRINT, CAT_PRINT),
+    "document management": (THEME_PRINT, CAT_PRINT),
+    "scanning": (THEME_PRINT, CAT_PRINT),
+    "multifunction printer": (THEME_PRINT, CAT_PRINT),
 
+    # --- 3D -----------------------------------------------------------
     "3d printing": (THEME_3D, CAT_3D),
     "additive manufacturing": (THEME_3D, CAT_3D),
+    "3d printer": (THEME_3D, CAT_3D),
+    "3d printers": (THEME_3D, CAT_3D),
 }
 
 # Words that, next to a hardware-category term, mean the topic is about
@@ -88,10 +326,13 @@ NON_HARDWARE_QUALIFIERS = ("software", "advertising", "marketing", "media")
 # stays unmapped but is flagged, so a reviewer sees the near-misses first
 # instead of hunting through every unmapped topic.
 NEAR_MISS_TERMS = {
-    THEME_AI: ("ai", "artificial intelligence"),
-    THEME_DEVICES: ("desktop", "desktops", "notebook", "notebooks",
-                    "device", "devices", "hardware"),
-    THEME_COLLAB: ("collaboration", "conferencing", "meeting", "meetings"),
+    THEME_AI: ("ai",),
+    THEME_DEVICES: ("device", "devices", "hardware", "computer", "computers"),
+    THEME_COLLAB: ("meeting", "meetings", "communications"),
+    THEME_CLOUD: ("infrastructure", "network", "database", "databases"),
+    THEME_SECURITY: ("secure", "risk", "fraud"),
+    THEME_FINANCE: ("finance", "financial"),
+    THEME_COMMERCE: ("delivery", "distribution"),
     THEME_3D: ("3d",),
 }
 
@@ -117,15 +358,21 @@ def is_hiring_linked(topic: str) -> bool:
     return any(token_present(t, topic) for t in HIRING_TERMS)
 
 
-# Items in the HP category intent file that do not mean what the category
-# assumes, each seen on real account data. A category carrying one is flagged
-# on screen and is never picked as the account's primary HP category.
-NOISY_CATEGORY_TERMS = {
-    "sla": "In job postings SLA means service-level agreement, not "
-           "stereolithography (SLA) 3D printing",
-    "identified as competitor of": "A news relationship category - who the "
-                                   "company competes with - not a print signal",
-}
+# Keyword-noise gate: DISABLED by client instruction (Sep 2026).
+#
+# This dictionary used to bar a category from becoming the account's primary
+# HP category when its keywords carried an ambiguous term ("SLA" read as
+# service-level agreement rather than stereolithography). The client has ruled
+# that the HP category intent file is the source of truth: its scores are
+# vendor-verified and are to be taken and used as supplied, with no
+# second-guessing of the keywords behind them.
+#
+# It is left in place as an empty mapping rather than deleted so that every
+# reader (`urgency.py`, `intent_demand_signals.py`, the input contract) keeps
+# working and the gate degrades to a no-op: nothing is ever flagged, no
+# category is barred, and the highest-scoring category is always primary, as
+# the client's PDF states. Re-enabling is a matter of putting terms back here.
+NOISY_CATEGORY_TERMS: dict[str, str] = {}
 
 # Category names used by the HP category intent file -> the categories above.
 CATEGORY_ALIASES = {
@@ -246,6 +493,27 @@ def intensity(score) -> str | None:
     return None
 
 
+# Theme precedence for a topic whose terms name two themes. v1 sent every such
+# topic to Other; with nine themes the overlaps are ordinary ("security: cloud
+# security", "hardware: ai chips") and dropping them lost real signal.
+#
+# The order puts the HP-owned themes above the context themes, so a topic that
+# is both an HP signal and context is read as the HP signal. It applies only
+# when the themes sit at different ranks: two themes of equal rank are still
+# genuinely ambiguous and are flagged for review, as before.
+THEME_PRECEDENCE = (THEME_3D, THEME_PRINT, THEME_DEVICES, THEME_COLLAB, THEME_AI,
+                    THEME_SECURITY, THEME_CLOUD, THEME_FINANCE, THEME_COMMERCE)
+
+
+def _resolve_themes(themes: list[str]) -> str | None:
+    """The single winning theme, or None when two rank equally."""
+    ranked = sorted(themes, key=lambda t: THEME_PRECEDENCE.index(t))
+    if len(ranked) > 1 and (THEME_PRECEDENCE.index(ranked[0])
+                            == THEME_PRECEDENCE.index(ranked[1])):
+        return None
+    return ranked[0]
+
+
 def _drop_contained(terms: list[str]) -> list[str]:
     """Keep the longest terms: 'printing' goes when '3d printing' matched."""
     return [t for t in terms
@@ -275,12 +543,17 @@ def map_topic(topic: str) -> dict:
         return result
 
     if len(themes) > 1:
-        result["mapping_status"] = "flagged"
-        result["flag_reason"] = ("Matches more than one theme ("
-                                 + ", ".join(themes) + "); left unmapped for review")
-        return result
-
-    theme = themes[0]
+        theme = _resolve_themes(themes)
+        if theme is None:
+            result["mapping_status"] = "flagged"
+            result["flag_reason"] = ("Matches more than one theme ("
+                                     + ", ".join(themes) + "); left unmapped for review")
+            return result
+        # The winning theme's own terms decide the HP category; a term from the
+        # theme that lost must not carry a category across.
+        matched = [t for t in matched if TERMS[t][0] == theme]
+    else:
+        theme = themes[0]
     categories = sorted({TERMS[t][1] for t in matched if TERMS[t][1]})
 
     if categories:

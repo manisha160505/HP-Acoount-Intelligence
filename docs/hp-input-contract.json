@@ -11,7 +11,6 @@
     "widget_registry": "hp-backend/src/app/api/v1/widgets.py :: WIDGET_REGISTRY",
     "field_map": "hp-backend/src/app/api/v1/feature_mapping.py :: FEATURE_MAPPINGS"
   },
-
   "pipeline": {
     "summary": "CSV/PDF file -> upload validation -> stored on disk -> file metadata document in MongoDB -> dependent extractors run -> widget JSON documents in MongoDB -> served to frontend",
     "stages": [
@@ -27,7 +26,10 @@
             "required": true,
             "note": "One of dataset_keys below. Lower-cased and trimmed before matching."
           },
-          "file": { "type": "file", "required": true },
+          "file": {
+            "type": "file",
+            "required": true
+          },
           "file_id_to_replace": {
             "type": "string",
             "required": false,
@@ -100,7 +102,6 @@
         "note": "This is the JSON the product actually renders. 31 widgets across 11 features."
       }
     ],
-
     "upload_response": {
       "http_status": 201,
       "description": "The ONLY feedback channel telling you whether a file actually worked. Always read regenerated and regeneration_failed.",
@@ -117,9 +118,14 @@
         "status": "string",
         "uploaded_at": "ISO-8601 string",
         "updated_at": "ISO-8601 string",
-        "regenerated": ["array of feature_key strings that successfully re-ran"],
+        "regenerated": [
+          "array of feature_key strings that successfully re-ran"
+        ],
         "regeneration_failed": [
-          { "feature": "feature_key", "error": "ExceptionType: message" }
+          {
+            "feature": "feature_key",
+            "error": "ExceptionType: message"
+          }
         ]
       },
       "how_to_read_it": [
@@ -129,7 +135,6 @@
       ]
     }
   },
-
   "global_rules": {
     "column_matching": {
       "mechanism": "csv.DictReader — header strings are dict keys",
@@ -151,14 +156,26 @@
     },
     "header_rows": {
       "default": 1,
-      "exception": { "hp_category_intent": 2 }
+      "exception": {
+        "hp_category_intent": 2
+      }
     },
     "row_scope": {
-      "row_0_only": ["firmographics", "company_hierarchy", "technographics", "webstack"],
+      "row_0_only": [
+        "firmographics",
+        "company_hierarchy",
+        "technographics",
+        "webstack"
+      ],
       "note": "Extra rows in these files are silently ignored. One account per file."
     },
     "null_sentinels": {
-      "treated_as_empty": ["none", "null", "nan", "[]"],
+      "treated_as_empty": [
+        "none",
+        "null",
+        "nan",
+        "[]"
+      ],
       "case_insensitive": true,
       "instruction": "Send genuinely empty cells. Never emit these as literal text."
     },
@@ -178,17 +195,31 @@
     "multi_value_delimiters": {
       "warning": "Four different delimiters are in use. The delimiter depends on the file.",
       "comma": {
-        "files": ["technographics", "webstack"],
+        "files": [
+          "technographics",
+          "webstack"
+        ],
         "note": "Inside one double-quoted field"
       },
       "semicolon": {
-        "files": ["prospect_contacts"],
-        "fields": ["department fields"],
+        "files": [
+          "prospect_contacts"
+        ],
+        "fields": [
+          "department fields"
+        ],
         "note": "Commas are converted to semicolons first, so both work"
       },
       "pipe": {
-        "files": ["hp_category_intent"],
-        "fields": ["Topics Researched", "Keywords Matched", "Related Technologies", "Geo Source"]
+        "files": [
+          "hp_category_intent"
+        ],
+        "fields": [
+          "Topics Researched",
+          "Keywords Matched",
+          "Related Technologies",
+          "Geo Source"
+        ]
       },
       "json_array_string": {
         "fields": [
@@ -204,7 +235,10 @@
     "join_key": {
       "field": "domain",
       "normalization": "bare lower-case host — scheme, www., path, port and trailing dot stripped",
-      "example": { "input": "https://www.Astra.co.id/about", "output": "astra.co.id" },
+      "example": {
+        "input": "https://www.Astra.co.id/about",
+        "output": "astra.co.id"
+      },
       "anchor": "firmographics.Company Domain",
       "must_match_across": [
         "firmographics.Company Domain",
@@ -218,7 +252,6 @@
       "criticality": "Three of the six silent failure modes are domain mismatches. Together they account for the entire intent feature."
     }
   },
-
   "dataset_types": {
     "single_file_csv": {
       "count": 21,
@@ -227,17 +260,23 @@
     },
     "multi_file": {
       "count": 4,
-      "members": ["news_events", "news_events_additional", "google_news", "compliance_filings"],
+      "members": [
+        "news_events",
+        "news_events_additional",
+        "google_news",
+        "compliance_filings"
+      ],
       "behaviour": "Many active files coexist. Replacing one specific file requires file_id_to_replace, otherwise a new file is added."
     }
   },
-
   "datasets": {
     "firmographics": {
       "status": "consumed",
       "type": "single_file_csv",
       "canonical_filename": "firmographics.csv",
-      "allowed_extensions": [".csv"],
+      "allowed_extensions": [
+        ".csv"
+      ],
       "source_sheet": "1_Firmographics",
       "row_scope": "row 0 only",
       "role": "The anchor file. Feeds 9 of 11 features and supplies the account domain.",
@@ -245,14 +284,22 @@
         "Company Name": {
           "required": true,
           "type": "string",
-          "aliases": ["company_name", "Name"],
+          "aliases": [
+            "company_name",
+            "Name"
+          ],
           "becomes": "exec_summary_card.data.company_name"
         },
         "Company Domain": {
           "required": true,
           "is_join_key": true,
           "type": "string",
-          "aliases": ["company_domain", "Domain", "Website", "website"],
+          "aliases": [
+            "company_domain",
+            "Domain",
+            "Website",
+            "website"
+          ],
           "becomes": "exec_summary_card.data.domain",
           "transform": "normalized to bare lower-case host"
         },
@@ -267,7 +314,12 @@
           "required": false,
           "type": "string",
           "format": "band, e.g. 1001-5000",
-          "aliases": ["number_of_employees_range", "employee_count_range", "Employee Count", "employee_count"],
+          "aliases": [
+            "number_of_employees_range",
+            "employee_count_range",
+            "Employee Count",
+            "employee_count"
+          ],
           "becomes": "exec_key_metrics.data.employee_count",
           "transform": "passed through verbatim; NEVER parsed numerically; 'N/A' when blank"
         },
@@ -275,39 +327,94 @@
           "required": false,
           "type": "string",
           "format": "band",
-          "aliases": ["yearly_revenue_range", "Yearly Revenue", "revenue"],
+          "aliases": [
+            "yearly_revenue_range",
+            "Yearly Revenue",
+            "revenue"
+          ],
           "becomes": "exec_key_metrics.data.revenue",
           "transform": "passed through verbatim; NEVER parsed numerically; 'N/A' when blank"
         },
         "Linkedin Industry Category": {
           "required": false,
           "type": "string",
-          "aliases": ["linkedin_industry_category"],
+          "aliases": [
+            "linkedin_industry_category"
+          ],
           "becomes": "exec_summary_card.data.industry_classification"
         },
         "Naics Description": {
           "required": false,
           "type": "string",
-          "aliases": ["naics_description"],
+          "aliases": [
+            "naics_description"
+          ],
           "becomes": "exec_summary_card.data.industry_classification"
         },
         "Sic Code Description": {
           "required": false,
           "type": "string",
-          "aliases": ["sic_code_description"],
+          "aliases": [
+            "sic_code_description"
+          ],
           "becomes": "exec_summary_card.data.industry_classification"
         },
-        "City Name": { "required": false, "type": "string", "aliases": ["city_name"], "becomes": "exec_summary_card.data.hq_location" },
-        "Region Name": { "required": false, "type": "string", "aliases": ["region_name"], "becomes": "exec_summary_card.data.hq_location" },
-        "Country Name": { "required": false, "type": "string", "aliases": ["country_name"], "becomes": "exec_summary_card.data.hq_location" },
-        "Naics": { "required": false, "type": "string" },
-        "Sic Code": { "required": false, "type": "string" },
-        "Street": { "required": false, "type": "string" },
-        "Zip Code": { "required": false, "type": "string" },
-        "Company ID": { "required": false, "type": "string" },
-        "Business Id": { "required": false, "type": "string" },
-        "Ticker": { "required": false, "type": "string" },
-        "Linkedin Profile": { "required": false, "type": "string" }
+        "City Name": {
+          "required": false,
+          "type": "string",
+          "aliases": [
+            "city_name"
+          ],
+          "becomes": "exec_summary_card.data.hq_location"
+        },
+        "Region Name": {
+          "required": false,
+          "type": "string",
+          "aliases": [
+            "region_name"
+          ],
+          "becomes": "exec_summary_card.data.hq_location"
+        },
+        "Country Name": {
+          "required": false,
+          "type": "string",
+          "aliases": [
+            "country_name"
+          ],
+          "becomes": "exec_summary_card.data.hq_location"
+        },
+        "Naics": {
+          "required": false,
+          "type": "string"
+        },
+        "Sic Code": {
+          "required": false,
+          "type": "string"
+        },
+        "Street": {
+          "required": false,
+          "type": "string"
+        },
+        "Zip Code": {
+          "required": false,
+          "type": "string"
+        },
+        "Company ID": {
+          "required": false,
+          "type": "string"
+        },
+        "Business Id": {
+          "required": false,
+          "type": "string"
+        },
+        "Ticker": {
+          "required": false,
+          "type": "string"
+        },
+        "Linkedin Profile": {
+          "required": false,
+          "type": "string"
+        }
       },
       "derived_fields": {
         "industry_classification": {
@@ -323,39 +430,54 @@
         "Revenue and employee count arrive as BANDS. No reported revenue figure exists in this file — filed financials come only from compliance_filings."
       ]
     },
-
     "company_hierarchy": {
       "status": "consumed",
       "type": "single_file_csv",
       "canonical_filename": "company_hierarchy.csv",
-      "allowed_extensions": [".csv"],
+      "allowed_extensions": [
+        ".csv"
+      ],
       "source_sheet": "2_Company_Hierarchy",
       "row_scope": "row 0 only",
       "columns": {
         "Parent Company Name": {
           "required": true,
           "type": "string",
-          "aliases": ["parent_company_name"],
+          "aliases": [
+            "parent_company_name"
+          ],
           "becomes": "exec_summary_card.data.parent_company",
           "note": "Empty means the company is its own parent"
         },
         "Ultimate Parent Name": {
           "required": true,
           "type": "string",
-          "aliases": ["ultimate_parent_name"],
+          "aliases": [
+            "ultimate_parent_name"
+          ],
           "becomes": "exec_summary_card.data.ultimate_parent"
         },
-        "Business Id": { "required": false, "type": "string" },
-        "Parent Company Id": { "required": false, "type": "string" },
-        "Ultimate Parent Id": { "required": false, "type": "string" }
+        "Business Id": {
+          "required": false,
+          "type": "string"
+        },
+        "Parent Company Id": {
+          "required": false,
+          "type": "string"
+        },
+        "Ultimate Parent Id": {
+          "required": false,
+          "type": "string"
+        }
       }
     },
-
     "technographics": {
       "status": "consumed",
       "type": "single_file_csv",
       "canonical_filename": "technographics.csv",
-      "allowed_extensions": [".csv"],
+      "allowed_extensions": [
+        ".csv"
+      ],
       "source_sheet": "4_Technographics",
       "row_scope": "row 0 only",
       "columns": {
@@ -372,12 +494,27 @@
         "delimiter": ",",
         "note": "Unusual casing — match exactly. These give a technology its provenance on screen.",
         "exact_names": [
-          "Testing And Qa", "Sales", "Prog Langs And Frameworks",
-          "Productivity And Operations", "Product And Design", "Platform And Storage",
-          "Operations Software", "Operations Management", "Marketing", "It Security",
-          "It Management", "Hr", "Finance And Accounting", "Ecommerce",
-          "Devops And Development", "Customer Management", "Computer Networks",
-          "Communications", "Collaboration", "Bi And Analytics", "Technology"
+          "Testing And Qa",
+          "Sales",
+          "Prog Langs And Frameworks",
+          "Productivity And Operations",
+          "Product And Design",
+          "Platform And Storage",
+          "Operations Software",
+          "Operations Management",
+          "Marketing",
+          "It Security",
+          "It Management",
+          "Hr",
+          "Finance And Accounting",
+          "Ecommerce",
+          "Devops And Development",
+          "Customer Management",
+          "Computer Networks",
+          "Communications",
+          "Collaboration",
+          "Bi And Analytics",
+          "Technology"
         ],
         "casing_warnings": [
           "Testing And Qa — not 'Testing And QA'",
@@ -399,12 +536,13 @@
         }
       ]
     },
-
     "webstack": {
       "status": "consumed",
       "type": "single_file_csv",
       "canonical_filename": "webstack.csv",
-      "allowed_extensions": [".csv"],
+      "allowed_extensions": [
+        ".csv"
+      ],
       "source_sheet": "5_Webstack / 5_Tech_Breakdown",
       "row_scope": "row 0 only",
       "columns": {
@@ -415,8 +553,16 @@
           "format": "underscore-joined names, e.g. ASP.NET_Core",
           "becomes": "webstack_breakdown.data"
         },
-        "Technologies Categories": { "required": false, "type": "string", "delimiter": "," },
-        "Technologies Sub Categories": { "required": false, "type": "string", "delimiter": "," },
+        "Technologies Categories": {
+          "required": false,
+          "type": "string",
+          "delimiter": ","
+        },
+        "Technologies Sub Categories": {
+          "required": false,
+          "type": "string",
+          "delimiter": ","
+        },
         "Number Of Premium Technologies": {
           "required": false,
           "type": "string",
@@ -432,26 +578,94 @@
           "type": "string",
           "defect": "Currently emitted as 2002-01-22T23:00:00 with no timezone. Please emit full ISO-8601 with Z."
         },
-        "Status": { "required": false, "type": "string" },
-        "Umbrella": { "required": false, "type": "string" },
-        "Db Indexed": { "required": false, "type": "boolean", "format": "Yes / No" },
-        "Live Techs": { "required": false, "type": "boolean", "format": "Yes / No" },
-        "Ecommerce": { "required": false, "type": "boolean", "format": "Yes / No" },
-        "Established": { "required": false, "type": "boolean", "format": "Yes / No" },
-        "Parked": { "required": false, "type": "boolean", "format": "Yes / No" },
-        "Affiliate Links": { "required": false, "type": "boolean", "format": "Yes / No" },
-        "Payment Options": { "required": false, "type": "boolean", "format": "Yes / No" },
-        "Spend": { "required": false, "type": "string" },
-        "Number Of Pages On Sitemap": { "required": false, "type": "string" },
-        "Number Of Social Networks": { "required": false, "type": "string" },
-        "Product Count": { "required": false, "type": "string" },
-        "Premium Techs": { "required": false, "type": "string" },
-        "Q Rank": { "required": false, "type": "string" },
-        "Latest Update": { "required": false, "type": "string" },
-        "Company Vertical": { "required": false, "type": "string" },
-        "Shopify Apps In Use": { "required": false, "type": "string" },
-        "Payment Technologies In Use": { "required": false, "type": "string", "delimiter": "," },
-        "Business Id": { "required": false, "type": "string" }
+        "Status": {
+          "required": false,
+          "type": "string"
+        },
+        "Umbrella": {
+          "required": false,
+          "type": "string"
+        },
+        "Db Indexed": {
+          "required": false,
+          "type": "boolean",
+          "format": "Yes / No"
+        },
+        "Live Techs": {
+          "required": false,
+          "type": "boolean",
+          "format": "Yes / No"
+        },
+        "Ecommerce": {
+          "required": false,
+          "type": "boolean",
+          "format": "Yes / No"
+        },
+        "Established": {
+          "required": false,
+          "type": "boolean",
+          "format": "Yes / No"
+        },
+        "Parked": {
+          "required": false,
+          "type": "boolean",
+          "format": "Yes / No"
+        },
+        "Affiliate Links": {
+          "required": false,
+          "type": "boolean",
+          "format": "Yes / No"
+        },
+        "Payment Options": {
+          "required": false,
+          "type": "boolean",
+          "format": "Yes / No"
+        },
+        "Spend": {
+          "required": false,
+          "type": "string"
+        },
+        "Number Of Pages On Sitemap": {
+          "required": false,
+          "type": "string"
+        },
+        "Number Of Social Networks": {
+          "required": false,
+          "type": "string"
+        },
+        "Product Count": {
+          "required": false,
+          "type": "string"
+        },
+        "Premium Techs": {
+          "required": false,
+          "type": "string"
+        },
+        "Q Rank": {
+          "required": false,
+          "type": "string"
+        },
+        "Latest Update": {
+          "required": false,
+          "type": "string"
+        },
+        "Company Vertical": {
+          "required": false,
+          "type": "string"
+        },
+        "Shopify Apps In Use": {
+          "required": false,
+          "type": "string"
+        },
+        "Payment Technologies In Use": {
+          "required": false,
+          "type": "string",
+          "delimiter": ","
+        },
+        "Business Id": {
+          "required": false,
+          "type": "string"
+        }
       },
       "open_questions": [
         {
@@ -461,12 +675,13 @@
         }
       ]
     },
-
     "intent_topics": {
       "status": "consumed",
       "type": "single_file_csv",
       "canonical_filename": "intent_topics.csv",
-      "allowed_extensions": [".csv"],
+      "allowed_extensions": [
+        ".csv"
+      ],
       "source_sheet": "10_Intent_Topics",
       "columns": {
         "Company Website": {
@@ -479,7 +694,9 @@
           "required": true,
           "type": "string",
           "format": "YYYYMMDD",
-          "also_accepted": ["YYYY-MM-DD"],
+          "also_accepted": [
+            "YYYY-MM-DD"
+          ],
           "note": "Anything else is kept raw and not guessed. If the file carries more than one distinct value, NO time window is shown at all — send one run per file.",
           "becomes": "intent_topics_table.data.as_of"
         },
@@ -489,17 +706,29 @@
           "becomes": "intent_topics_table.data.level_of_intent",
           "defect": "Empty throughout the current file. Needs values and a defined value set."
         },
-        "Business Id": { "required": false, "type": "string" },
-        "Company Name": { "required": false, "type": "string", "note": "display only" },
-        "Topic Count": { "required": false, "type": "string", "defect": "Also empty currently" }
+        "Business Id": {
+          "required": false,
+          "type": "string"
+        },
+        "Company Name": {
+          "required": false,
+          "type": "string",
+          "note": "display only"
+        },
+        "Topic Count": {
+          "required": false,
+          "type": "string",
+          "defect": "Also empty currently"
+        }
       }
     },
-
     "intent_score": {
       "status": "consumed",
       "type": "single_file_csv",
       "canonical_filename": "intent_score.csv",
-      "allowed_extensions": [".csv"],
+      "allowed_extensions": [
+        ".csv"
+      ],
       "source_sheet": "11_intent_score",
       "role": "Bombora Company Surge topic scores — the supporting-signal source.",
       "reference_row_count": 149,
@@ -515,8 +744,14 @@
         "Composite Score": {
           "required": true,
           "type": "number",
-          "range": [0, 100],
-          "observed_range": [60, 100],
+          "range": [
+            0,
+            100
+          ],
+          "observed_range": [
+            60,
+            100
+          ],
           "note": "60 is the Bombora surge threshold.",
           "becomes": "intent_topics_table.data.topics[].composite_score"
         }
@@ -532,12 +767,13 @@
         }
       ]
     },
-
     "hp_category_intent": {
       "status": "consumed",
       "type": "single_file_csv",
       "canonical_filename": "hp_category_intent.csv",
-      "allowed_extensions": [".csv"],
+      "allowed_extensions": [
+        ".csv"
+      ],
       "role": "The PRIMARY intent signal.",
       "format": "wide, TWO header rows — the only file that does not follow the one-header-row rule",
       "encoding_note": "UTF-8 preferred; falls back to Windows-1252 where em dash 0x97 marks an empty cell",
@@ -545,25 +781,61 @@
         "header_row_1": "Category group names, each appearing once above the 10 columns it spans, remaining 10 cells blank",
         "header_row_2": "Field names, repeated per category block",
         "data_rows": "row 3 onward — one row per company per run",
-        "leading_columns": ["Company", "Domain", "Run Date", "Top HP Category", "Top Intent Score (/100)"],
+        "leading_columns": [
+          "Company",
+          "Domain",
+          "Run Date",
+          "Top HP Category",
+          "Top Intent Score (/100)"
+        ],
         "category_blocks": {
           "count": 5,
-          "order": ["PCs", "Workstations", "Poly", "Printers", "3D Printers"],
+          "order": [
+            "PCs",
+            "Workstations",
+            "Poly",
+            "Printers",
+            "3D Printers"
+          ],
           "width": 10,
           "field_order": [
-            "Intent Score (/100)", "Intent Trend", "Buying Stage", "Research Volume",
-            "Topics Researched", "Keywords Matched", "Related Technologies",
-            "First Intent Date", "Latest Intent Date", "Geo Source"
+            "Intent Score (/100)",
+            "Intent Trend",
+            "Buying Stage",
+            "Research Volume",
+            "Topics Researched",
+            "Keywords Matched",
+            "Related Technologies",
+            "First Intent Date",
+            "Latest Intent Date",
+            "Geo Source"
           ]
         }
       },
       "field_matching": "case-INsensitive and whitespace-tolerant — unlike every other file",
       "accepted_category_names": {
-        "PCs": ["pc", "pcs"],
-        "Workstations": ["workstation", "workstations"],
-        "Poly": ["poly", "poly/collaboration"],
-        "Printers": ["print", "printer", "printers"],
-        "3D Printers": ["3d", "3d printer", "3d printers"]
+        "PCs": [
+          "pc",
+          "pcs"
+        ],
+        "Workstations": [
+          "workstation",
+          "workstations"
+        ],
+        "Poly": [
+          "poly",
+          "poly/collaboration"
+        ],
+        "Printers": [
+          "print",
+          "printer",
+          "printers"
+        ],
+        "3D Printers": [
+          "3d",
+          "3d printer",
+          "3d printers"
+        ]
       },
       "field_rules": {
         "Domain": {
@@ -574,41 +846,64 @@
           "format": "ISO, string-sortable",
           "rule": "Several rows per domain is fine — the row with the greatest Run Date wins."
         },
-        "Intent Score (/100)": { "type": "number", "range": [0, 100] },
+        "Intent Score (/100)": {
+          "type": "number",
+          "range": [
+            0,
+            100
+          ]
+        },
         "Buying Stage": {
           "rule": "'no signal' or empty means no signal; any other value with a score counts as a signal"
         },
         "Intent Trend": {
-          "accepted_values": ["Increasing", "Stable", "Decreasing"],
-          "important": "NOT used as a trend. With one run and no prior score there is nothing to verify it against, so it is kept as trend_label and never drawn as a direction. Supplying a prior-window score would let it become a real trend."
+          "accepted_values": [
+            "Increasing",
+            "Stable",
+            "Decreasing"
+          ],
+          "important": "Taken as supplied and scored as written (Increasing=10 / Stable=5 / Decreasing=0 in Urgency Driver 4). It is kept under trend_label because a single run carries no prior window, but it is presented without an 'unverified' qualifier."
         },
-        "Topics Researched": { "delimiter": "|" },
-        "Keywords Matched": { "delimiter": "|" },
-        "Related Technologies": { "delimiter": "|" },
-        "Geo Source": { "delimiter": "|" }
+        "Topics Researched": {
+          "delimiter": "|"
+        },
+        "Keywords Matched": {
+          "delimiter": "|"
+        },
+        "Related Technologies": {
+          "delimiter": "|"
+        },
+        "Geo Source": {
+          "delimiter": "|"
+        }
       },
-      "empty_markers": ["", "-", "–", "—", "n/a", "na", "none"],
+      "empty_markers": [
+        "",
+        "-",
+        "–",
+        "—",
+        "n/a",
+        "na",
+        "none"
+      ],
       "behaviours": [
         {
           "name": "Top HP Category is re-checked, not trusted",
           "rule": "The system recomputes the highest-scoring category and reports whether your stated top matches. Inconsistencies surface on screen."
         },
         {
-          "name": "noisy terms are flagged",
-          "terms": {
-            "sla": "In job postings SLA means service-level agreement, not stereolithography 3D printing",
-            "identified as competitor of": "A news relationship, not a print signal"
-          },
-          "effect": "The category is flagged and barred from becoming the account's primary category."
+          "name": "the file's own values are used as supplied",
+          "rule": "Scores, Intent Trend, Buying Stage and Research Volume are taken from this file exactly as delivered and used in every calculation, including the Urgency Score. The keyword-noise check that previously flagged terms such as 'SLA' and barred a category from becoming primary is disabled: the highest-scoring category is always the account's primary category."
         }
       ]
     },
-
     "prospect_contacts": {
       "status": "consumed",
       "type": "single_file_csv",
       "canonical_filename": "prospect_contacts.csv",
-      "allowed_extensions": [".csv"],
+      "allowed_extensions": [
+        ".csv"
+      ],
       "source_sheet": "14_Prospect_Contacts",
       "documentation_warning": "Our internal feature map lists 'Full Name', 'Title', 'Department', 'Seniority', 'Linkedin Url'. NONE of those columns exist in the real file and none are read. Use the 'Prospect *' names below.",
       "column_naming_note": "Space-separated prefix style — 'Prospect full_name', not 'Prospect_full_name'.",
@@ -616,26 +911,49 @@
         "Prospect full_name": {
           "required": true,
           "type": "string",
-          "fallback_chain": ["Prospect full_name", "Prospect first_name + Prospect last_name", "Unknown Contact"],
+          "fallback_chain": [
+            "Prospect full_name",
+            "Prospect first_name + Prospect last_name",
+            "Unknown Contact"
+          ],
           "becomes": "stakeholder_contacts_grid.data.contacts[].full_name"
         },
         "Prospect job_title": {
           "required": true,
           "type": "string",
-          "aliases": ["apollo_title"],
+          "aliases": [
+            "apollo_title"
+          ],
           "becomes": "stakeholder_contacts_grid.data.contacts[].title"
         },
         "Prospect job_department_main": {
           "required": true,
           "type": "enum",
-          "aliases": ["apollo_department"],
+          "aliases": [
+            "apollo_department"
+          ],
           "becomes": "stakeholder_contacts_grid.data.contacts[].department",
           "accepted_values": [
-            "master_information_technology", "master_engineering_technical",
-            "master_operations", "master_finance", "master_legal", "master_marketing",
-            "master_sales", "master_human_resources", "product_management",
-            "consulting", "c_suite", "it", "data", "engineering", "operations",
-            "finance", "legal", "marketing", "sales", "human resources"
+            "master_information_technology",
+            "master_engineering_technical",
+            "master_operations",
+            "master_finance",
+            "master_legal",
+            "master_marketing",
+            "master_sales",
+            "master_human_resources",
+            "product_management",
+            "consulting",
+            "c_suite",
+            "it",
+            "data",
+            "engineering",
+            "operations",
+            "finance",
+            "legal",
+            "marketing",
+            "sales",
+            "human resources"
           ],
           "unmatched_behaviour": "Title-Cased and still displayed, but never matches HP relevance rules",
           "delimiter": ";"
@@ -643,28 +961,49 @@
         "Prospect job_level_main": {
           "required": true,
           "type": "enum",
-          "aliases": ["apollo_seniority"],
+          "aliases": [
+            "apollo_seniority"
+          ],
           "becomes": "stakeholder_contacts_grid.data.contacts[].seniority_band",
-          "accepted_values": ["c_suite", "c-suite", "cxo", "vp", "vice_president", "director", "head", "manager", "owner"],
+          "accepted_values": [
+            "c_suite",
+            "c-suite",
+            "cxo",
+            "vp",
+            "vice_president",
+            "director",
+            "head",
+            "manager",
+            "owner"
+          ],
           "unmatched_behaviour": "becomes 'Individual Contributor', which lowers the contact's score and can drop them off the priority list",
           "note": "Bracket/quote wrapping is tolerated — [\"c_suite\"] works"
         },
         "Contact professions_email": {
           "required": false,
           "type": "string",
-          "aliases": ["Email", "apollo_verified_work_email"],
+          "aliases": [
+            "Email",
+            "apollo_verified_work_email"
+          ],
           "note": "Note 'professions_', not 'professional_'"
         },
         "Contact professional_email_status": {
           "required": false,
           "type": "string",
-          "aliases": ["Email Status", "apollo_zerobounce_email_status"],
+          "aliases": [
+            "Email Status",
+            "apollo_zerobounce_email_status"
+          ],
           "note": "Only the exact value 'valid' (case-insensitive) earns the data-completeness credit"
         },
         "Contact mobile_phone": {
           "required": false,
           "type": "string",
-          "aliases": ["Mobile Phone", "apollo_direct_mobile_phone"],
+          "aliases": [
+            "Mobile Phone",
+            "apollo_direct_mobile_phone"
+          ],
           "format": "E.164 preferred, e.g. +6281...",
           "transform": "a trailing .0 from Excel float coercion is stripped, then non-digits removed; a + is emitted when the value started with one or has 10-15 digits",
           "instruction": "Keep this column formatted as TEXT, not number, in any Excel step"
@@ -672,7 +1011,10 @@
         "Prospect linkedin": {
           "required": false,
           "type": "string",
-          "aliases": ["Prospect linkedin_url_array", "apollo_linkedin_url"]
+          "aliases": [
+            "Prospect linkedin_url_array",
+            "apollo_linkedin_url"
+          ]
         },
         "Prospect buying_committee_personas": {
           "required": false,
@@ -685,45 +1027,74 @@
           "note": "Falls back to a positional contact_N. SUPPLY IT so contact IDs stay stable across refreshes.",
           "becomes": "stakeholder_contacts_grid.data.contacts[].contact_id"
         },
-        "Prospect skills": { "required": false, "type": "string" },
-        "Prospect experience": { "required": false, "type": "string" },
-        "Prospect city": { "required": false, "type": "string" },
-        "Prospect country_name": { "required": false, "type": "string" },
-        "Prospect first_name": { "required": false, "type": "string" },
-        "Prospect last_name": { "required": false, "type": "string" },
+        "Prospect skills": {
+          "required": false,
+          "type": "string"
+        },
+        "Prospect experience": {
+          "required": false,
+          "type": "string"
+        },
+        "Prospect city": {
+          "required": false,
+          "type": "string"
+        },
+        "Prospect country_name": {
+          "required": false,
+          "type": "string"
+        },
+        "Prospect first_name": {
+          "required": false,
+          "type": "string"
+        },
+        "Prospect last_name": {
+          "required": false,
+          "type": "string"
+        },
         "apollo_requested_contact": {
           "required": false,
           "type": "string",
           "note": "Presence flags the row as Apollo-sourced rather than Source A"
         },
-        "apollo_matched_contact": { "required": false, "type": "string" }
+        "apollo_matched_contact": {
+          "required": false,
+          "type": "string"
+        }
       },
       "scoring": {
         "note": "Contacts are SCORED, not filtered. No row is dropped.",
         "composite_weights": {
           "seniority": 0.25,
           "hp_relevance": 0.25,
-          "influence": 0.20,
+          "influence": 0.2,
           "data_completeness": 0.15,
           "priority": 0.15
         },
-        "scale": [0, 100],
+        "scale": [
+          0,
+          100
+        ],
         "priority_contact_threshold": 60,
         "priority_contact_rule": "stakeholder_score >= 60 AND hp_relevance_band != 'low'",
         "consequence": "Missing email, phone or LinkedIn directly removes real people from the priority list."
       }
     },
-
     "job_openings": {
       "status": "consumed",
       "type": "single_file_csv",
       "canonical_filename": "job_openings.csv",
-      "allowed_extensions": [".csv"],
+      "allowed_extensions": [
+        ".csv"
+      ],
       "columns": {
         "status": {
           "required": true,
           "type": "enum",
-          "open_statuses": ["", "open", "active"],
+          "open_statuses": [
+            "",
+            "open",
+            "active"
+          ],
           "comparison": "lower-cased",
           "critical_open_question": "In the reference file this column only ever holds 'closed' (60%) or EMPTY (40%). Empty counts as OPEN, so 40% of rows become open postings purely because the field is blank — and that number drives hiring-velocity and urgency signals.",
           "action_required": "Confirm whether blank means open (then emit 'open' explicitly) or unknown (then we must stop counting blanks as open)."
@@ -731,7 +1102,9 @@
         "title": {
           "required": true,
           "type": "string",
-          "aliases": ["normalized_title"],
+          "aliases": [
+            "normalized_title"
+          ],
           "note": "Blank means the row is skipped by several features",
           "becomes": "exec_hiring_velocity.data.sample_roles"
         },
@@ -752,12 +1125,24 @@
           "format": "ISO-8601 with Z",
           "warning": "Same string-sort caveat as first_seen_at"
         },
-        "company_domain": { "required": true, "is_join_key": true, "type": "string" },
-        "_related_company_domain": { "required": true, "is_join_key": true, "type": "string" },
+        "company_domain": {
+          "required": true,
+          "is_join_key": true,
+          "type": "string"
+        },
+        "_related_company_domain": {
+          "required": true,
+          "is_join_key": true,
+          "type": "string"
+        },
         "seniority": {
           "required": false,
           "type": "enum",
-          "observed_values": ["junior", "mid_senior", "manager"],
+          "observed_values": [
+            "junior",
+            "mid_senior",
+            "manager"
+          ],
           "note": "'junior' and 'intern' are excluded from role-proxy signals; blank becomes 'unspecified'"
         },
         "categories": {
@@ -766,21 +1151,70 @@
           "example": "[\"information_technology\", \"management\"]",
           "fallback": "On JSON parse failure the whole raw cell is lower-cased and used as ONE category, so a comma-joined string becomes one bogus category."
         },
-        "contract_types": { "required": false, "type": "json_array_string", "example": "[\"full_time\"]" },
-        "tags": { "required": false, "type": "json_array_string" },
-        "posted_at": { "required": false, "type": "string", "format": "ISO-8601 with Z", "defect": "71% empty currently" },
-        "language": { "required": false, "type": "string", "format": "ISO-639-1, e.g. id, en" },
-        "description": { "required": false, "type": "string" },
-        "id": { "required": false, "type": "string" },
-        "location": { "required": false, "type": "string" },
-        "location_data": { "required": false, "type": "json_string" },
-        "onet_data": { "required": false, "type": "json_string" },
-        "recruiter_data": { "required": false, "type": "json_string" },
-        "salary": { "required": false, "type": "string" },
-        "salary_data": { "required": false, "type": "json_string" },
-        "translated_title": { "required": false, "type": "string" },
-        "url": { "required": false, "type": "string" },
-        "last_processed_at": { "required": false, "type": "string" }
+        "contract_types": {
+          "required": false,
+          "type": "json_array_string",
+          "example": "[\"full_time\"]"
+        },
+        "tags": {
+          "required": false,
+          "type": "json_array_string"
+        },
+        "posted_at": {
+          "required": false,
+          "type": "string",
+          "format": "ISO-8601 with Z",
+          "defect": "71% empty currently"
+        },
+        "language": {
+          "required": false,
+          "type": "string",
+          "format": "ISO-639-1, e.g. id, en"
+        },
+        "description": {
+          "required": false,
+          "type": "string"
+        },
+        "id": {
+          "required": false,
+          "type": "string"
+        },
+        "location": {
+          "required": false,
+          "type": "string"
+        },
+        "location_data": {
+          "required": false,
+          "type": "json_string"
+        },
+        "onet_data": {
+          "required": false,
+          "type": "json_string"
+        },
+        "recruiter_data": {
+          "required": false,
+          "type": "json_string"
+        },
+        "salary": {
+          "required": false,
+          "type": "string"
+        },
+        "salary_data": {
+          "required": false,
+          "type": "json_string"
+        },
+        "translated_title": {
+          "required": false,
+          "type": "string"
+        },
+        "url": {
+          "required": false,
+          "type": "string"
+        },
+        "last_processed_at": {
+          "required": false,
+          "type": "string"
+        }
       },
       "two_different_counts": {
         "warning": "This file produces two different 'job count' numbers, deliberately, and they will not match.",
@@ -790,17 +1224,21 @@
         "intent_hiring_demand.data.open_postings_rule": "the rule is published in the payload so the screen can state it"
       }
     },
-
     "technology_detections": {
       "status": "consumed",
       "type": "single_file_csv",
       "canonical_filename": "technology_detections.csv",
-      "allowed_extensions": [".csv"],
+      "allowed_extensions": [
+        ".csv"
+      ],
       "columns": {
         "score": {
           "required": true,
           "type": "number",
-          "range": [0, 1],
+          "range": [
+            0,
+            1
+          ],
           "warning": "A 0-1 scale — DIFFERENT from every other score in the system, which are 0-100.",
           "transform": "stored as a RAW STRING, never parsed or range-checked",
           "becomes": "tech_detections_reference.data.detections[].score"
@@ -811,19 +1249,44 @@
           "note": "A row is kept only if id OR score is present",
           "becomes": "tech_detections_reference.data.detections[].id"
         },
-        "first_seen_at": { "required": true, "type": "string", "format": "ISO-8601 with Z" },
-        "last_seen_at": { "required": true, "type": "string", "format": "ISO-8601 with Z" },
+        "first_seen_at": {
+          "required": true,
+          "type": "string",
+          "format": "ISO-8601 with Z"
+        },
+        "last_seen_at": {
+          "required": true,
+          "type": "string",
+          "format": "ISO-8601 with Z"
+        },
         "department_onet_codes": {
           "required": false,
           "type": "json_array_string",
           "example": "[\"15-2051.01\"]",
           "transform": "stored verbatim, never parsed; defaults to the literal string '[]'"
         },
-        "behind_firewall": { "required": false, "type": "boolean", "format": "True / False" },
-        "company_domain": { "required": false, "is_join_key": true, "type": "string" },
-        "_related_company_domain": { "required": false, "type": "string" },
-        "location_data": { "required": false, "type": "json_string" },
-        "source_count": { "required": false, "type": "string" }
+        "behind_firewall": {
+          "required": false,
+          "type": "boolean",
+          "format": "True / False"
+        },
+        "company_domain": {
+          "required": false,
+          "is_join_key": true,
+          "type": "string"
+        },
+        "_related_company_domain": {
+          "required": false,
+          "type": "string"
+        },
+        "location_data": {
+          "required": false,
+          "type": "json_string"
+        },
+        "source_count": {
+          "required": false,
+          "type": "string"
+        }
       },
       "known_defects": [
         {
@@ -834,17 +1297,24 @@
         }
       ]
     },
-
     "google_news": {
       "status": "consumed",
       "type": "multi_file",
-      "allowed_extensions": [".xlsx", ".xls", ".csv"],
+      "allowed_extensions": [
+        ".xlsx",
+        ".xls",
+        ".csv"
+      ],
       "role": "The PRIMARY news source. news_events is the add-on.",
       "columns": {
         "event_headline": {
           "required": true,
           "type": "string",
-          "aliases": ["news_announcements", "title", "summary"],
+          "aliases": [
+            "news_announcements",
+            "title",
+            "summary"
+          ],
           "note": "All blank means the row is skipped",
           "becomes": "news_signals_feed.data.signals[].headline"
         },
@@ -852,13 +1322,28 @@
           "required": true,
           "type": "string",
           "format": "ISO-8601 or YYYY-MM-DD",
-          "aliases": ["pubDate", "found_at"],
+          "aliases": [
+            "pubDate",
+            "found_at"
+          ],
           "becomes": "news_signals_feed.data.signals[].event_date"
         },
         "event_type": {
           "required": true,
           "type": "enum",
-          "accepted_values": ["funding", "earnings", "m&a", "acquisition", "leadership", "launch", "product", "partnership", "hiring", "security", "other"],
+          "accepted_values": [
+            "funding",
+            "earnings",
+            "m&a",
+            "acquisition",
+            "leadership",
+            "launch",
+            "product",
+            "partnership",
+            "hiring",
+            "security",
+            "other"
+          ],
           "unmatched_behaviour": "becomes 'Strategic'",
           "defect": "Mixed casing in the current file — 'launch'/'other'/'leadership' but 'M&A'. Pick one convention.",
           "becomes": "news_signals_feed.data.signals[].category"
@@ -868,11 +1353,19 @@
           "type": "string",
           "note": "The ONLY URL available to either news file"
         },
-        "website_domain": { "required": true, "is_join_key": true, "type": "string" },
+        "website_domain": {
+          "required": true,
+          "is_join_key": true,
+          "type": "string"
+        },
         "relevance_confidence": {
           "required": false,
           "type": "enum",
-          "accepted_values": ["High", "Medium", "Low"],
+          "accepted_values": [
+            "High",
+            "Medium",
+            "Low"
+          ],
           "warning": "TEXT scale — inconsistent with news_events.confidence, which is a 0-1 float. Both feed the same widget."
         },
         "source_publisher": {
@@ -880,44 +1373,82 @@
           "type": "string",
           "note": "A trailing ' - Publisher' suffix in the headline OVERRIDES this column when the suffix is <=40 chars, <=6 words and does not end in punctuation"
         },
-        "coverage_depth_events_per_account_last_12mo": { "required": false, "type": "integer" },
-        "company_name": { "required": false, "type": "string" },
-        "company_linkedin_url": { "required": false, "type": "string" },
-        "news_announcements": { "required": false, "type": "string" }
+        "coverage_depth_events_per_account_last_12mo": {
+          "required": false,
+          "type": "integer"
+        },
+        "company_name": {
+          "required": false,
+          "type": "string"
+        },
+        "company_linkedin_url": {
+          "required": false,
+          "type": "string"
+        },
+        "news_announcements": {
+          "required": false,
+          "type": "string"
+        }
       }
     },
-
     "news_events": {
       "status": "consumed",
       "type": "multi_file",
-      "allowed_extensions": [".csv"],
+      "allowed_extensions": [
+        ".csv"
+      ],
       "source_sheet": "13_News_Events",
       "role": "Add-on to google_news.",
       "columns": {
         "article_sentence": {
           "required": true,
           "type": "string",
-          "aliases": ["summary", "event", "news_announcements"],
+          "aliases": [
+            "summary",
+            "event",
+            "news_announcements"
+          ],
           "note": "All blank means the row is skipped. Blanked in output when it equals the headline."
         },
-        "found_at": { "required": true, "type": "string", "format": "ISO-8601 with Z, e.g. 2022-11-28T11:01:00Z" },
+        "found_at": {
+          "required": true,
+          "type": "string",
+          "format": "ISO-8601 with Z, e.g. 2022-11-28T11:01:00Z"
+        },
         "category": {
           "required": true,
           "type": "enum",
           "accepted_values": [
-            "has_earnings", "invests_into", "invests_into_assets", "receives_financing",
-            "launches", "is_developing", "partners_with", "acquires", "sells_assets_to",
-            "expands_to", "identified_as_competitor_of", "hires",
-            "increases_headcount_by", "is_vulnerable_to"
+            "has_earnings",
+            "invests_into",
+            "invests_into_assets",
+            "receives_financing",
+            "launches",
+            "is_developing",
+            "partners_with",
+            "acquires",
+            "sells_assets_to",
+            "expands_to",
+            "identified_as_competitor_of",
+            "hires",
+            "increases_headcount_by",
+            "is_vulnerable_to"
           ],
           "unmatched_behaviour": "becomes 'Strategic'",
           "note": "identified_as_competitor_of is flagged as noisy — a news relationship, not a buying signal"
         },
-        "company_domain": { "required": true, "is_join_key": true, "type": "string" },
+        "company_domain": {
+          "required": true,
+          "is_join_key": true,
+          "type": "string"
+        },
         "confidence": {
           "required": false,
           "type": "number",
-          "range": [0, 1],
+          "range": [
+            0,
+            1
+          ],
           "example": 0.9159,
           "warning": "0-1 float — inconsistent with google_news.relevance_confidence, which is High/Medium/Low text"
         },
@@ -928,38 +1459,112 @@
           "note": "PREFERRED over found_at for the event date",
           "defect": "~49% empty currently"
         },
-        "event": { "required": false, "type": "string", "defect": "~98% empty currently" },
-        "summary": { "required": false, "type": "string" },
-        "amount": { "required": false, "type": "string" },
-        "amount_normalized": { "required": false, "type": "string" },
-        "assets": { "required": false, "type": "string" },
-        "assets_tags": { "required": false, "type": "string" },
-        "award": { "required": false, "type": "string" },
-        "contact": { "required": false, "type": "string" },
-        "division": { "required": false, "type": "string" },
-        "financing_type": { "required": false, "type": "string" },
-        "financing_type_normalized": { "required": false, "type": "string" },
-        "financing_type_tags": { "required": false, "type": "string" },
-        "headcount": { "required": false, "type": "string" },
-        "id": { "required": false, "type": "string" },
-        "job_title": { "required": false, "type": "string" },
-        "job_title_tags": { "required": false, "type": "string" },
-        "location": { "required": false, "type": "string" },
-        "location_data": { "required": false, "type": "json_string" },
-        "planning": { "required": false, "type": "string" },
-        "product": { "required": false, "type": "string" },
-        "product_data": { "required": false, "type": "json_string" },
-        "product_tags": { "required": false, "type": "string" },
-        "recognition": { "required": false, "type": "string" },
-        "vulnerability": { "required": false, "type": "string" }
+        "event": {
+          "required": false,
+          "type": "string",
+          "defect": "~98% empty currently"
+        },
+        "summary": {
+          "required": false,
+          "type": "string"
+        },
+        "amount": {
+          "required": false,
+          "type": "string"
+        },
+        "amount_normalized": {
+          "required": false,
+          "type": "string"
+        },
+        "assets": {
+          "required": false,
+          "type": "string"
+        },
+        "assets_tags": {
+          "required": false,
+          "type": "string"
+        },
+        "award": {
+          "required": false,
+          "type": "string"
+        },
+        "contact": {
+          "required": false,
+          "type": "string"
+        },
+        "division": {
+          "required": false,
+          "type": "string"
+        },
+        "financing_type": {
+          "required": false,
+          "type": "string"
+        },
+        "financing_type_normalized": {
+          "required": false,
+          "type": "string"
+        },
+        "financing_type_tags": {
+          "required": false,
+          "type": "string"
+        },
+        "headcount": {
+          "required": false,
+          "type": "string"
+        },
+        "id": {
+          "required": false,
+          "type": "string"
+        },
+        "job_title": {
+          "required": false,
+          "type": "string"
+        },
+        "job_title_tags": {
+          "required": false,
+          "type": "string"
+        },
+        "location": {
+          "required": false,
+          "type": "string"
+        },
+        "location_data": {
+          "required": false,
+          "type": "json_string"
+        },
+        "planning": {
+          "required": false,
+          "type": "string"
+        },
+        "product": {
+          "required": false,
+          "type": "string"
+        },
+        "product_data": {
+          "required": false,
+          "type": "json_string"
+        },
+        "product_tags": {
+          "required": false,
+          "type": "string"
+        },
+        "recognition": {
+          "required": false,
+          "type": "string"
+        },
+        "vulnerability": {
+          "required": false,
+          "type": "string"
+        }
       },
       "known_limitation": "news_events carries NO URL column and the code will never fabricate one, so these signals are unlinkable on screen."
     },
-
     "compliance_filings": {
       "status": "consumed",
       "type": "multi_file",
-      "allowed_extensions": [".pdf"],
+      "allowed_extensions": [
+        ".pdf"
+      ],
       "role": "The only non-tabular dataset, and the ONLY source of reported financial figures. Every other file carries a band or a category.",
       "unit_of_measure": "pages, not rows — row_count in the metadata holds the page count",
       "requirements": {
@@ -974,8 +1579,26 @@
         "rule": "A number is registered ONLY when metric + period + value + unit are all recovered together from the same page. Anything else is skipped and counted as an unbound row.",
         "unit_requirement": {
           "rule": "A scale word and a currency must appear within 60 CHARACTERS of each other on the page.",
-          "scale_words": ["trillion", "triliun", "billion", "miliar", "milyar", "million", "juta", "thousand", "ribu"],
-          "currencies": ["IDR", "Rupiah", "Rp", "USD", "SGD", "EUR", "JPY"],
+          "scale_words": [
+            "trillion",
+            "triliun",
+            "billion",
+            "miliar",
+            "milyar",
+            "million",
+            "juta",
+            "thousand",
+            "ribu"
+          ],
+          "currencies": [
+            "IDR",
+            "Rupiah",
+            "Rp",
+            "USD",
+            "SGD",
+            "EUR",
+            "JPY"
+          ],
           "consequence": "A page stating no unit yields ZERO monetary claims — by design, because an unlabelled number cannot be cited.",
           "instruction": "Keep the 'expressed in billions of Rupiah' sentence on EVERY page of tables, not only the first."
         },
@@ -988,7 +1611,11 @@
         },
         "binding": {
           "rule": "Figures bind BY POSITION, never by proximity. The count of figures in a row must match the number of period columns.",
-          "breaks_on": ["merged cells", "footnote markers glued to numbers", "a stray extra figure"]
+          "breaks_on": [
+            "merged cells",
+            "footnote markers glued to numbers",
+            "a stray extra figure"
+          ]
         },
         "accepted_number_formats": [
           "comma thousands separators, e.g. 323,392",
@@ -998,41 +1625,142 @@
       },
       "language_note": "Indonesian-language and interleaved bilingual passages are indexed but never given a citable evidence id. English narrative is what becomes quotable."
     },
-
-    "subsidiaries":           { "status": "not_consumed", "type": "single_file_csv", "canonical_filename": "subsidiaries.csv", "allowed_extensions": [".csv"], "source_sheet": "2_Subsidiaries" },
-    "funding":                { "status": "not_consumed", "type": "single_file_csv", "canonical_filename": "funding.csv", "allowed_extensions": [".csv"], "source_sheet": "3_Funding_Overview / 3_Funding_Rounds / 3_Advisors / 3_Investors" },
-    "workforce_trends":       { "status": "not_consumed", "type": "single_file_csv", "canonical_filename": "workforce_trends.csv", "allowed_extensions": [".csv"], "source_sheet": "6_Workforce_Trends", "note": "Deliberately excluded — holds role shares, not technologies, so it takes no part in the intent flow." },
-    "company_ratings":        { "status": "not_consumed", "type": "single_file_csv", "canonical_filename": "company_ratings.csv", "allowed_extensions": [".csv"], "source_sheet": "7_Company_Ratings" },
-    "website_traffic":        { "status": "not_consumed", "type": "single_file_csv", "canonical_filename": "website_traffic.csv", "allowed_extensions": [".csv"], "source_sheet": "8_Website_Traffic" },
-    "social_media":           { "status": "not_consumed", "type": "single_file_csv", "canonical_filename": "social_media.csv", "allowed_extensions": [".csv"], "source_sheet": "9_Social_Media" },
-    "company":                { "status": "not_consumed", "type": "single_file_csv", "canonical_filename": "company.csv", "allowed_extensions": [".csv"] },
-    "extended_company":       { "status": "not_consumed", "type": "single_file_csv", "canonical_filename": "extended_company.csv", "allowed_extensions": [".csv"] },
-    "connections":            { "status": "not_consumed", "type": "single_file_csv", "canonical_filename": "connections.csv", "allowed_extensions": [".csv"] },
-    "subpages":               { "status": "not_consumed", "type": "single_file_csv", "canonical_filename": "subpages.csv", "allowed_extensions": [".csv"] },
-    "similar_companies":      { "status": "not_consumed", "type": "single_file_csv", "canonical_filename": "similar_companies.csv", "allowed_extensions": [".csv"] },
-    "news_events_additional": { "status": "not_consumed", "type": "multi_file", "allowed_extensions": [".csv"], "note": "Not consumed under this key. A file filed under category 'news_events' IS picked up." }
+    "subsidiaries": {
+      "status": "not_consumed",
+      "type": "single_file_csv",
+      "canonical_filename": "subsidiaries.csv",
+      "allowed_extensions": [
+        ".csv"
+      ],
+      "source_sheet": "2_Subsidiaries"
+    },
+    "funding": {
+      "status": "not_consumed",
+      "type": "single_file_csv",
+      "canonical_filename": "funding.csv",
+      "allowed_extensions": [
+        ".csv"
+      ],
+      "source_sheet": "3_Funding_Overview / 3_Funding_Rounds / 3_Advisors / 3_Investors"
+    },
+    "workforce_trends": {
+      "status": "not_consumed",
+      "type": "single_file_csv",
+      "canonical_filename": "workforce_trends.csv",
+      "allowed_extensions": [
+        ".csv"
+      ],
+      "source_sheet": "6_Workforce_Trends",
+      "note": "Deliberately excluded — holds role shares, not technologies, so it takes no part in the intent flow."
+    },
+    "company_ratings": {
+      "status": "not_consumed",
+      "type": "single_file_csv",
+      "canonical_filename": "company_ratings.csv",
+      "allowed_extensions": [
+        ".csv"
+      ],
+      "source_sheet": "7_Company_Ratings"
+    },
+    "website_traffic": {
+      "status": "not_consumed",
+      "type": "single_file_csv",
+      "canonical_filename": "website_traffic.csv",
+      "allowed_extensions": [
+        ".csv"
+      ],
+      "source_sheet": "8_Website_Traffic"
+    },
+    "social_media": {
+      "status": "not_consumed",
+      "type": "single_file_csv",
+      "canonical_filename": "social_media.csv",
+      "allowed_extensions": [
+        ".csv"
+      ],
+      "source_sheet": "9_Social_Media"
+    },
+    "company": {
+      "status": "not_consumed",
+      "type": "single_file_csv",
+      "canonical_filename": "company.csv",
+      "allowed_extensions": [
+        ".csv"
+      ]
+    },
+    "extended_company": {
+      "status": "not_consumed",
+      "type": "single_file_csv",
+      "canonical_filename": "extended_company.csv",
+      "allowed_extensions": [
+        ".csv"
+      ]
+    },
+    "connections": {
+      "status": "not_consumed",
+      "type": "single_file_csv",
+      "canonical_filename": "connections.csv",
+      "allowed_extensions": [
+        ".csv"
+      ]
+    },
+    "subpages": {
+      "status": "not_consumed",
+      "type": "single_file_csv",
+      "canonical_filename": "subpages.csv",
+      "allowed_extensions": [
+        ".csv"
+      ]
+    },
+    "similar_companies": {
+      "status": "not_consumed",
+      "type": "single_file_csv",
+      "canonical_filename": "similar_companies.csv",
+      "allowed_extensions": [
+        ".csv"
+      ]
+    },
+    "news_events_additional": {
+      "status": "not_consumed",
+      "type": "multi_file",
+      "allowed_extensions": [
+        ".csv"
+      ],
+      "note": "Not consumed under this key. A file filed under category 'news_events' IS picked up."
+    }
   },
-
   "not_consumed_notice": {
     "count": 12,
     "meaning": "These keys are valid dataset_key values, so uploads succeed with HTTP 201 — but no code reads a single column from any of them. Uploading produces no widget and changes nothing on screen.",
     "action": "Confirm which of these you intend to deliver. We will either build consumers or close the keys so an upload cannot silently do nothing."
   },
-
   "output_json": {
     "collection": "account_widgets",
-    "upsert_key": ["account_id", "widget_key"],
+    "upsert_key": [
+      "account_id",
+      "widget_key"
+    ],
     "widget_count": 31,
     "feature_count": 11,
     "envelope": {
       "description": "Every widget document carries these fields. Only `data` differs per widget.",
       "fields": {
-        "account_id": { "type": "string" },
-        "feature_key": { "type": "string" },
-        "widget_key": { "type": "string" },
+        "account_id": {
+          "type": "string"
+        },
+        "feature_key": {
+          "type": "string"
+        },
+        "widget_key": {
+          "type": "string"
+        },
         "data_classification": {
           "type": "enum",
-          "values": ["deterministic", "derived", "inferred"],
+          "values": [
+            "deterministic",
+            "derived",
+            "inferred"
+          ],
           "meaning": {
             "deterministic": "Copied or composed from uploaded fields by Python. No model involved.",
             "derived": "Computed by Python — scores, bands, counts. Formula is fixed in code, never asked of a model.",
@@ -1041,7 +1769,11 @@
         },
         "status": {
           "type": "enum",
-          "values": ["available", "empty", "pending"],
+          "values": [
+            "available",
+            "empty",
+            "pending"
+          ],
           "triggers": {
             "available": "the source rows were present and produced content",
             "empty": "the dataset produced no usable rows — the screen renders a dash, never a zero",
@@ -1054,15 +1786,18 @@
           "note": "The widget-specific payload.",
           "empty_convention": "Most widgets set data to {} when status is 'empty'. The two intent widgets are the exception: they set status 'empty' while data still carries full provenance plus an availability/message explanation, so the screen can say WHY rather than just showing nothing."
         },
-        "source_datasets": { "type": "array of dataset_key strings" },
-        "extracted_at": { "type": "datetime UTC" },
+        "source_datasets": {
+          "type": "array of dataset_key strings"
+        },
+        "extracted_at": {
+          "type": "datetime UTC"
+        },
         "updated_at": {
           "type": "datetime UTC",
           "warning": "NOT a change timestamp. It equals extracted_at on every write, because both come from one `now` in a full $set. Do not use it to detect whether content actually changed."
         }
       }
     },
-
     "type_warnings": {
       "description": "Fields that look numeric but are stored as STRINGS. Consumers must not assume a number.",
       "stored_as_string": [
@@ -1083,7 +1818,6 @@
       ],
       "inconsistency_note": "intent_hiring_demand.category_breakdown DOES parse a JSON-array column, while tech_detections_reference.department_onet_codes does not. Same style of source column, two different treatments."
     },
-
     "absent_vs_null": {
       "description": "These keys are OMITTED entirely rather than set to null. Consumers must check for presence, not for null.",
       "keys": [
@@ -1097,7 +1831,6 @@
       ],
       "structural_note": "google_news and news_events rows produce STRUCTURALLY DIFFERENT signal dicts — location, product and amount exist only on news_events rows."
     },
-
     "provenance_block": {
       "description": "Both intent widgets always carry this block in data, in every branch including 'empty', so a screen can state where a number came from.",
       "shape": {
@@ -1126,25 +1859,63 @@
         "dictionary_version": "intent-map-v1 — bump when the topic dictionary changes"
       }
     },
-
     "widgets": {
       "exec_summary_card": {
         "feature": "executive_dashboard",
         "widget_type": "summary_card",
         "data_classification": "deterministic",
-        "source_datasets": ["firmographics", "company_hierarchy", "prospect_contacts"],
+        "source_datasets": [
+          "firmographics",
+          "company_hierarchy",
+          "prospect_contacts"
+        ],
         "empty_when": "firmographics has no rows",
         "data_shape": {
-          "company_name": { "type": "string", "from": "firmographics.Company Name" },
-          "domain": { "type": "string", "from": "firmographics.Company Domain" },
-          "business_description": { "type": "string", "from": "firmographics.Business Description" },
-          "industry_classification": { "type": "string", "from": "firmographics industry columns", "derived": "joined with ' / ', de-duplicated, 'N/A' fallback" },
-          "hq_location": { "type": "string", "from": "firmographics location columns", "derived": "'City, Region, Country', 'N/A' fallback" },
-          "parent_company": { "type": "string", "from": "company_hierarchy.Parent Company Name" },
-          "ultimate_parent": { "type": "string", "from": "company_hierarchy.Ultimate Parent Name" },
-          "stakeholders_mapped_count": { "type": "integer", "from": "prospect_contacts", "derived": "row count" },
-          "solution_narratives_count": { "type": "integer", "optional": true, "note": "read from the owning widget; ABSENT when that feature has not run, and the card shows a dash" },
-          "recent_signals_count": { "type": "integer", "optional": true, "note": "read from news_signals_feed.total_signals_count, not recomputed" }
+          "company_name": {
+            "type": "string",
+            "from": "firmographics.Company Name"
+          },
+          "domain": {
+            "type": "string",
+            "from": "firmographics.Company Domain"
+          },
+          "business_description": {
+            "type": "string",
+            "from": "firmographics.Business Description"
+          },
+          "industry_classification": {
+            "type": "string",
+            "from": "firmographics industry columns",
+            "derived": "joined with ' / ', de-duplicated, 'N/A' fallback"
+          },
+          "hq_location": {
+            "type": "string",
+            "from": "firmographics location columns",
+            "derived": "'City, Region, Country', 'N/A' fallback"
+          },
+          "parent_company": {
+            "type": "string",
+            "from": "company_hierarchy.Parent Company Name"
+          },
+          "ultimate_parent": {
+            "type": "string",
+            "from": "company_hierarchy.Ultimate Parent Name"
+          },
+          "stakeholders_mapped_count": {
+            "type": "integer",
+            "from": "prospect_contacts",
+            "derived": "row count"
+          },
+          "solution_narratives_count": {
+            "type": "integer",
+            "optional": true,
+            "note": "read from the owning widget; ABSENT when that feature has not run, and the card shows a dash"
+          },
+          "recent_signals_count": {
+            "type": "integer",
+            "optional": true,
+            "note": "read from news_signals_feed.total_signals_count, not recomputed"
+          }
         },
         "example": {
           "company_name": "PT Astra International Tbk",
@@ -1158,25 +1929,38 @@
           "recent_signals_count": 8
         }
       },
-
       "exec_key_metrics": {
         "feature": "executive_dashboard",
         "widget_type": "metric_grid",
         "data_classification": "deterministic",
-        "source_datasets": ["firmographics"],
+        "source_datasets": [
+          "firmographics"
+        ],
         "empty_when": "firmographics has no rows",
         "data_shape": {
-          "employee_count": { "type": "string", "from": "firmographics.Number Of Employees Range", "note": "a BAND, passed through verbatim; 'N/A' when blank" },
-          "revenue": { "type": "string", "from": "firmographics.Yearly Revenue Range", "note": "a BAND, passed through verbatim; 'N/A' when blank" }
+          "employee_count": {
+            "type": "string",
+            "from": "firmographics.Number Of Employees Range",
+            "note": "a BAND, passed through verbatim; 'N/A' when blank"
+          },
+          "revenue": {
+            "type": "string",
+            "from": "firmographics.Yearly Revenue Range",
+            "note": "a BAND, passed through verbatim; 'N/A' when blank"
+          }
         },
-        "example": { "employee_count": "10001+", "revenue": "$10B+" }
+        "example": {
+          "employee_count": "10001+",
+          "revenue": "$10B+"
+        }
       },
-
       "exec_hiring_velocity": {
         "feature": "executive_dashboard",
         "widget_type": "metric_card",
         "data_classification": "deterministic",
-        "source_datasets": ["job_openings"],
+        "source_datasets": [
+          "job_openings"
+        ],
         "empty_when": "job_openings has no rows",
         "data_shape": {
           "open_job_count": {
@@ -1185,45 +1969,146 @@
             "derived": "len(all rows)",
             "warning": "Despite the name this IGNORES the status column and counts every row. See intent_hiring_demand.open_postings for the status-filtered figure."
           },
-          "sample_roles": { "type": "array of string", "derived": "first 5 distinct job_openings.title values" }
+          "sample_roles": {
+            "type": "array of string",
+            "derived": "first 5 distinct job_openings.title values"
+          }
         },
-        "example": { "open_job_count": 3740, "sample_roles": ["Engineering Manager - ADMO", "Data Analyst"] }
+        "example": {
+          "open_job_count": 3740,
+          "sample_roles": [
+            "Engineering Manager - ADMO",
+            "Data Analyst"
+          ]
+        }
       },
-
       "intent_topics_table": {
         "feature": "intent_demand_signals",
         "widget_type": "topic_table",
         "data_classification": "deterministic",
-        "source_datasets": ["intent_score", "intent_topics"],
+        "source_datasets": [
+          "intent_score",
+          "intent_topics"
+        ],
         "availability_states": {
           "available": "topics present and the domain matched",
           "no_intent_data": "no Bombora topics on file for this account",
           "no_matched_signal": "topics exist but intent_topics.Company Website did not match the account domain — topics are then emptied"
         },
         "data_shape": {
-          "availability": { "type": "enum", "values": ["available", "no_intent_data", "no_matched_signal"] },
-          "message": { "type": "string", "note": "present only when availability is not 'available'" },
-          "total_topics_count": { "type": "integer" },
-          "included_topics_count": { "type": "integer" },
-          "level_of_intent": { "type": "string", "from": "intent_topics.Level Of Intent" },
-          "duplicates_removed": { "type": "array", "items": { "topic_name": "string", "composite_score": "number", "kept_score": "number" } },
-          "disclaimer": { "type": "string" },
+          "availability": {
+            "type": "enum",
+            "values": [
+              "available",
+              "no_intent_data",
+              "no_matched_signal"
+            ]
+          },
+          "message": {
+            "type": "string",
+            "note": "present only when availability is not 'available'"
+          },
+          "total_topics_count": {
+            "type": "integer"
+          },
+          "included_topics_count": {
+            "type": "integer"
+          },
+          "level_of_intent": {
+            "type": "string",
+            "from": "intent_topics.Level Of Intent"
+          },
+          "duplicates_removed": {
+            "type": "array",
+            "items": {
+              "topic_name": "string",
+              "composite_score": "number",
+              "kept_score": "number"
+            }
+          },
+          "disclaimer": {
+            "type": "string"
+          },
           "topics": {
             "type": "array",
             "sorted_by": "composite_score descending, nulls last",
             "items": {
-              "topic_name": { "type": "string", "from": "intent_score.Topic" },
-              "composite_score": { "type": "number|null", "from": "intent_score.Composite Score" },
-              "source": { "type": "string", "value": "Source A" },
-              "intensity": { "type": "enum|null", "values": ["High", "Moderate", "Low"], "derived": "score >= 85 High, >= 70 Moderate, else Low" },
-              "included": { "type": "boolean", "derived": "false when the score is not a number" },
-              "exclusion_reason": { "type": "string|null", "example": "Composite Score 'n/a' is not a number" },
-              "hiring_linked": { "type": "boolean", "derived": "topic text contains a staffing term" },
-              "theme": { "type": "enum", "values": ["AI & Compute", "Devices & Endpoints", "Collaboration & Workplace", "Print", "3D", "Other / Unmapped"] },
-              "hp_category": { "type": "enum|null", "values": ["PC", "Workstation", "Poly/Collaboration", "Print", "3D", null] },
-              "matched_terms": { "type": "array of string", "note": "which dictionary terms matched — why the topic landed where it did" },
-              "mapping_status": { "type": "enum", "values": ["mapped", "unmapped", "flagged"] },
-              "flag_reason": { "type": "string|null", "flag_triggers": ["a near-miss word with no dictionary term", "more than one theme matched", "a hardware term next to software/advertising/marketing/media", "more than one HP category named"] }
+              "topic_name": {
+                "type": "string",
+                "from": "intent_score.Topic"
+              },
+              "composite_score": {
+                "type": "number|null",
+                "from": "intent_score.Composite Score"
+              },
+              "source": {
+                "type": "string",
+                "value": "Source A"
+              },
+              "intensity": {
+                "type": "enum|null",
+                "values": [
+                  "High",
+                  "Moderate",
+                  "Low"
+                ],
+                "derived": "score >= 85 High, >= 70 Moderate, else Low"
+              },
+              "included": {
+                "type": "boolean",
+                "derived": "false when the score is not a number"
+              },
+              "exclusion_reason": {
+                "type": "string|null",
+                "example": "Composite Score 'n/a' is not a number"
+              },
+              "hiring_linked": {
+                "type": "boolean",
+                "derived": "topic text contains a staffing term"
+              },
+              "theme": {
+                "type": "enum",
+                "values": [
+                  "AI & Compute",
+                  "Devices & Endpoints",
+                  "Collaboration & Workplace",
+                  "Print",
+                  "3D",
+                  "Other / Unmapped"
+                ]
+              },
+              "hp_category": {
+                "type": "enum|null",
+                "values": [
+                  "PC",
+                  "Workstation",
+                  "Poly/Collaboration",
+                  "Print",
+                  "3D",
+                  null
+                ]
+              },
+              "matched_terms": {
+                "type": "array of string",
+                "note": "which dictionary terms matched — why the topic landed where it did"
+              },
+              "mapping_status": {
+                "type": "enum",
+                "values": [
+                  "mapped",
+                  "unmapped",
+                  "flagged"
+                ]
+              },
+              "flag_reason": {
+                "type": "string|null",
+                "flag_triggers": [
+                  "a near-miss word with no dictionary term",
+                  "more than one theme matched",
+                  "a hardware term next to software/advertising/marketing/media",
+                  "more than one HP category named"
+                ]
+              }
             }
           }
         },
@@ -1245,23 +2130,58 @@
           ]
         }
       },
-
       "intent_category_summary": {
         "feature": "intent_demand_signals",
         "widget_type": "category_summary",
         "data_classification": "derived",
-        "source_datasets": ["hp_category_intent", "intent_score", "intent_topics", "technographics", "webstack"],
+        "source_datasets": [
+          "hp_category_intent",
+          "intent_score",
+          "intent_topics",
+          "technographics",
+          "webstack"
+        ],
         "role": "Where the hp_category_intent file lands. Every score here is the provider's, as received — Python never invents one.",
         "empty_when": "Source A is unavailable AND category_file.status is not 'matched'. Even then, data still carries provenance and the full category_file so the screen can explain why.",
         "data_shape": {
-          "availability": { "type": "enum", "values": ["available", "no_intent_data", "no_matched_signal"] },
-          "source_a_status": { "type": "object|null", "note": "null when Bombora topics are available; otherwise the {availability, message} pair" },
+          "availability": {
+            "type": "enum",
+            "values": [
+              "available",
+              "no_intent_data",
+              "no_matched_signal"
+            ]
+          },
+          "source_a_status": {
+            "type": "object|null",
+            "note": "null when Bombora topics are available; otherwise the {availability, message} pair"
+          },
           "category_file": {
             "type": "object",
             "note": "The per-category entries are NOT here — they live under hp_categories[].primary.",
             "fields": {
-              "status": { "type": "enum", "values": ["matched", "mismatch", "unverified", "no_file"], "triggers": { "no_file": "fewer than 3 CSV rows", "unverified": "the account has no domain to check against", "mismatch": "no row for this account's domain" } },
-              "source": { "dataset": "hp_category_intent", "company": "from Company", "domain": "from Domain, normalized", "run_date": "from Run Date", "runs_on_file": "count of rows matching this domain — the latest Run Date wins", "refreshed_at": "from upload metadata, not the CSV" },
+              "status": {
+                "type": "enum",
+                "values": [
+                  "matched",
+                  "mismatch",
+                  "unverified",
+                  "no_file"
+                ],
+                "triggers": {
+                  "no_file": "fewer than 3 CSV rows",
+                  "unverified": "the account has no domain to check against",
+                  "mismatch": "no row for this account's domain"
+                }
+              },
+              "source": {
+                "dataset": "hp_category_intent",
+                "company": "from Company",
+                "domain": "from Domain, normalized",
+                "run_date": "from Run Date",
+                "runs_on_file": "count of rows matching this domain — the latest Run Date wins",
+                "refreshed_at": "from upload metadata, not the CSV"
+              },
               "top_check": {
                 "note": "Verifies the file against itself.",
                 "stated_category": "from Top HP Category",
@@ -1277,8 +2197,20 @@
             "length": 5,
             "sorted_by": "primary.score descending",
             "items": {
-              "category": { "type": "enum", "values": ["PC", "Workstation", "Poly/Collaboration", "Print", "3D"] },
-              "hp_play": { "type": "string|null", "note": "a static reference label, not evidence" },
+              "category": {
+                "type": "enum",
+                "values": [
+                  "PC",
+                  "Workstation",
+                  "Poly/Collaboration",
+                  "Print",
+                  "3D"
+                ]
+              },
+              "hp_play": {
+                "type": "string|null",
+                "note": "a static reference label, not evidence"
+              },
               "primary": {
                 "note": "One category block from the uploaded file, mapped field by field.",
                 "provider_category": "the row-1 group name, e.g. '3D Printers'",
@@ -1305,19 +2237,71 @@
                 "technologies": "[{name, sheet, column}] — where the technology was found",
                 "confirmed": "DERIVED: true only when there is BOTH research and matching installed technology"
               },
-              "confirmed_max": { "type": "number|null" },
-              "bombora_mapped": { "type": "object", "note": "stats over topics whose hp_category is this category" },
-              "explanation": { "type": "string", "note": "composed by Python, never by a model" }
+              "confirmed_max": {
+                "type": "number|null"
+              },
+              "bombora_mapped": {
+                "type": "object",
+                "note": "stats over topics whose hp_category is this category"
+              },
+              "explanation": {
+                "type": "string",
+                "note": "composed by Python, never by a model"
+              }
             }
           },
-          "categories_with_signal": { "type": "integer" },
-          "hp_category_total": { "type": "integer", "value": 5, "note": "a fixed taxonomy, not a discovered count" },
-          "hiring_linked": { "type": "object", "note": "stats over included topics whose text contains a staffing term" },
-          "so_what": { "type": "array of string", "length": "1-4", "note": "composed by Python" },
-          "trend": { "type": "object", "value": { "status": "unavailable", "reason": "A trend needs a prior window with the same scoring definition. Only the current export is on file." } },
-          "technology_sources": { "type": "array", "example": ["4_Technographics", "5_Webstack"] },
-          "technology_count": { "type": "integer", "note": "de-duplicated technology inventory size" },
-          "intensity_bands": { "type": "array", "value": [{ "min": 85, "label": "High" }, { "min": 70, "label": "Moderate" }, { "min": 0, "label": "Low" }] }
+          "categories_with_signal": {
+            "type": "integer"
+          },
+          "hp_category_total": {
+            "type": "integer",
+            "value": 5,
+            "note": "a fixed taxonomy, not a discovered count"
+          },
+          "hiring_linked": {
+            "type": "object",
+            "note": "stats over included topics whose text contains a staffing term"
+          },
+          "so_what": {
+            "type": "array of string",
+            "length": "1-4",
+            "note": "composed by Python"
+          },
+          "trend": {
+            "type": "object",
+            "value": {
+              "status": "unavailable",
+              "reason": "A trend needs a prior window with the same scoring definition. Only the current export is on file."
+            }
+          },
+          "technology_sources": {
+            "type": "array",
+            "example": [
+              "4_Technographics",
+              "5_Webstack"
+            ]
+          },
+          "technology_count": {
+            "type": "integer",
+            "note": "de-duplicated technology inventory size"
+          },
+          "intensity_bands": {
+            "type": "array",
+            "value": [
+              {
+                "min": 85,
+                "label": "High"
+              },
+              {
+                "min": 70,
+                "label": "Moderate"
+              },
+              {
+                "min": 0,
+                "label": "Low"
+              }
+            ]
+          }
         },
         "stats_object_shape": {
           "note": "The reusable stats shape used by themes, bombora_mapped and hiring_linked.",
@@ -1329,167 +2313,428 @@
           "topics": "array of topic names"
         }
       },
-
       "intent_hiring_demand": {
         "feature": "intent_demand_signals",
         "widget_type": "signal_card",
         "data_classification": "deterministic",
-        "source_datasets": ["job_openings"],
+        "source_datasets": [
+          "job_openings"
+        ],
         "data_shape": {
-          "source": { "type": "string", "value": "Source B" },
-          "postings_seen": { "type": "integer", "derived": "len(all rows) — the same figure the Executive Dashboard shows" },
-          "open_postings": { "type": "integer", "derived": "rows whose status is blank, 'open' or 'active'" },
-          "open_postings_rule": { "type": "string", "value": "status blank, 'open' or 'active'", "note": "the rule is published in the payload so the screen can state it" },
-          "status_breakdown": { "type": "object", "note": "Counter over status, lower-cased; blank becomes the key 'unspecified'", "example": { "closed": 60, "unspecified": 40 } },
-          "seniority_breakdown": { "type": "object", "note": "Counter over seniority; blank becomes 'unspecified'", "example": { "junior": 53, "mid_senior": 40, "manager": 7 } },
-          "category_breakdown": { "type": "object", "note": "The categories JSON array is parsed and EACH element counted separately, so these counts sum to MORE than the row count. Unparseable cells become one key from the whole raw string. Capped at the top 10.", "example": { "information_technology": 41, "management": 12 } },
-          "first_seen": { "type": "string|null", "note": "min of first_seen_at, truncated to 10 chars (date only)" },
-          "last_seen": { "type": "string|null", "note": "max of last_seen_at, truncated to 10 chars" }
+          "source": {
+            "type": "string",
+            "value": "Source B"
+          },
+          "postings_seen": {
+            "type": "integer",
+            "derived": "len(all rows) — the same figure the Executive Dashboard shows"
+          },
+          "open_postings": {
+            "type": "integer",
+            "derived": "rows whose status is blank, 'open' or 'active'"
+          },
+          "open_postings_rule": {
+            "type": "string",
+            "value": "status blank, 'open' or 'active'",
+            "note": "the rule is published in the payload so the screen can state it"
+          },
+          "status_breakdown": {
+            "type": "object",
+            "note": "Counter over status, lower-cased; blank becomes the key 'unspecified'",
+            "example": {
+              "closed": 60,
+              "unspecified": 40
+            }
+          },
+          "seniority_breakdown": {
+            "type": "object",
+            "note": "Counter over seniority; blank becomes 'unspecified'",
+            "example": {
+              "junior": 53,
+              "mid_senior": 40,
+              "manager": 7
+            }
+          },
+          "category_breakdown": {
+            "type": "object",
+            "note": "The categories JSON array is parsed and EACH element counted separately, so these counts sum to MORE than the row count. Unparseable cells become one key from the whole raw string. Capped at the top 10.",
+            "example": {
+              "information_technology": 41,
+              "management": 12
+            }
+          },
+          "first_seen": {
+            "type": "string|null",
+            "note": "min of first_seen_at, truncated to 10 chars (date only)"
+          },
+          "last_seen": {
+            "type": "string|null",
+            "note": "max of last_seen_at, truncated to 10 chars"
+          }
         },
         "example": {
           "source": "Source B",
           "postings_seen": 100,
           "open_postings": 40,
           "open_postings_rule": "status blank, 'open' or 'active'",
-          "status_breakdown": { "closed": 60, "unspecified": 40 },
+          "status_breakdown": {
+            "closed": 60,
+            "unspecified": 40
+          },
           "first_seen": "2026-07-14",
           "last_seen": "2026-08-30"
         }
       },
-
       "tech_stack_matrix": {
         "feature": "tech_landscape",
         "widget_type": "matrix_table",
         "data_classification": "deterministic",
-        "source_datasets": ["technographics"],
+        "source_datasets": [
+          "technographics"
+        ],
         "empty_when": "both the full stack list and the category matrix are empty",
         "data_shape": {
-          "total_tech_count": { "type": "integer", "from": "technographics.Full Tech Stack", "derived": "comma-split length" },
-          "full_tech_stack": { "type": "array of string", "note": "file order preserved, blanks dropped" },
+          "total_tech_count": {
+            "type": "integer",
+            "from": "technographics.Full Tech Stack",
+            "derived": "comma-split length"
+          },
+          "full_tech_stack": {
+            "type": "array of string",
+            "note": "file order preserved, blanks dropped"
+          },
           "category_matrix": {
             "type": "object",
             "note": "Key is the EXACT CSV column name, Title Case with spaces — 'It Security', 'Prog Langs And Frameworks', 'Bi And Analytics'. Blank columns are omitted entirely. The 'Technology' and 'Full Tech Stack' columns are excluded from the matrix.",
-            "example": { "It Security": ["Anomali", "Aruba ClearPass", "Cloudflare"] }
+            "example": {
+              "It Security": [
+                "Anomali",
+                "Aruba ClearPass",
+                "Cloudflare"
+              ]
+            }
           },
-          "categories_count": { "type": "integer", "note": "populated columns only" }
+          "categories_count": {
+            "type": "integer",
+            "note": "populated columns only"
+          }
         },
         "data_team_caveat": "A '(+7 more)' truncation suffix in a source cell is carried through verbatim as a list element."
       },
-
       "webstack_breakdown": {
         "feature": "tech_landscape",
         "widget_type": "breakdown_grid",
         "data_classification": "deterministic",
-        "source_datasets": ["webstack"],
+        "source_datasets": [
+          "webstack"
+        ],
         "empty_when": "the tech list, premium count and spend are ALL blank — note that categories_list alone does not make it available",
         "data_shape": {
-          "total_web_tech_count": { "type": "integer", "from": "webstack.Technologies Used By Company Website", "derived": "comma-split length" },
-          "premium_tech_count": { "type": "string", "from": "webstack.Number Of Premium Technologies", "note": "RAW STRING, not cast — e.g. '1388'" },
-          "web_spend_estimate": { "type": "string", "from": "webstack.Money Spend On Website Technologies", "note": "RAW STRING with no currency or unit attached — e.g. '5709'" },
-          "categories_list": { "type": "array of string", "from": "webstack.Technologies Categories", "note": "values keep their source underscores, e.g. 'Web_Server'" },
-          "technologies": { "type": "array of string", "from": "webstack.Technologies Used By Company Website" }
+          "total_web_tech_count": {
+            "type": "integer",
+            "from": "webstack.Technologies Used By Company Website",
+            "derived": "comma-split length"
+          },
+          "premium_tech_count": {
+            "type": "string",
+            "from": "webstack.Number Of Premium Technologies",
+            "note": "RAW STRING, not cast — e.g. '1388'"
+          },
+          "web_spend_estimate": {
+            "type": "string",
+            "from": "webstack.Money Spend On Website Technologies",
+            "note": "RAW STRING with no currency or unit attached — e.g. '5709'"
+          },
+          "categories_list": {
+            "type": "array of string",
+            "from": "webstack.Technologies Categories",
+            "note": "values keep their source underscores, e.g. 'Web_Server'"
+          },
+          "technologies": {
+            "type": "array of string",
+            "from": "webstack.Technologies Used By Company Website"
+          }
         }
       },
-
       "tech_detections_reference": {
         "feature": "tech_landscape",
         "widget_type": "detection_list",
         "data_classification": "deterministic",
-        "source_datasets": ["technology_detections"],
+        "source_datasets": [
+          "technology_detections"
+        ],
         "empty_when": "no row has an id or a score",
         "data_shape": {
-          "total_detections_count": { "type": "integer" },
+          "total_detections_count": {
+            "type": "integer"
+          },
           "detections": {
             "type": "array",
             "items": {
-              "id": { "type": "string", "from": "technology_detections.id" },
-              "score": { "type": "string", "from": "technology_detections.score", "note": "RAW STRING on a 0-1 scale, never parsed" },
-              "first_seen_at": { "type": "string" },
-              "last_seen_at": { "type": "string" },
-              "department_onet_codes": { "type": "string", "note": "JSON array kept as a string, never parsed" }
+              "id": {
+                "type": "string",
+                "from": "technology_detections.id"
+              },
+              "score": {
+                "type": "string",
+                "from": "technology_detections.score",
+                "note": "RAW STRING on a 0-1 scale, never parsed"
+              },
+              "first_seen_at": {
+                "type": "string"
+              },
+              "last_seen_at": {
+                "type": "string"
+              },
+              "department_onet_codes": {
+                "type": "string",
+                "note": "JSON array kept as a string, never parsed"
+              }
             }
           }
         },
         "known_gap": "No technology/vendor name is available, so a detection cannot be labelled on screen."
       },
-
       "stakeholder_contacts_grid": {
         "feature": "stakeholder_map",
         "widget_type": "contact_grid",
         "data_classification": "deterministic",
-        "source_datasets": ["prospect_contacts"],
+        "source_datasets": [
+          "prospect_contacts"
+        ],
         "note": "No contact row is ever dropped. Every contact is scored.",
         "data_shape": {
-          "total_contacts_count": { "type": "integer", "note": "raw row count" },
-          "source_breakdown": { "type": "object", "note": "ALWAYS has both keys, zero-filled. 'Apollo' when apollo_requested_contact or apollo_matched_contact is non-blank, else 'Source A'.", "example": { "Source A": 23, "Apollo": 0 } },
-          "department_distribution": { "type": "object", "note": "Counter over the RAW Prospect job_department_main (not the normalized label); blank becomes 'Unassigned'" },
-          "priority_contacts_count": { "type": "integer" },
-          "relevance_breakdown": { "type": "object", "note": "exactly {high, medium, low}, zero-filled" },
-          "score_weights": { "type": "object", "note": "echoed at top level and on every contact, so a score can be re-derived by hand" },
-          "priority_threshold": { "type": "integer", "value": 60 },
+          "total_contacts_count": {
+            "type": "integer",
+            "note": "raw row count"
+          },
+          "source_breakdown": {
+            "type": "object",
+            "note": "ALWAYS has both keys, zero-filled. 'Apollo' when apollo_requested_contact or apollo_matched_contact is non-blank, else 'Source A'.",
+            "example": {
+              "Source A": 23,
+              "Apollo": 0
+            }
+          },
+          "department_distribution": {
+            "type": "object",
+            "note": "Counter over the RAW Prospect job_department_main (not the normalized label); blank becomes 'Unassigned'"
+          },
+          "priority_contacts_count": {
+            "type": "integer"
+          },
+          "relevance_breakdown": {
+            "type": "object",
+            "note": "exactly {high, medium, low}, zero-filled"
+          },
+          "score_weights": {
+            "type": "object",
+            "note": "echoed at top level and on every contact, so a score can be re-derived by hand"
+          },
+          "priority_threshold": {
+            "type": "integer",
+            "value": 60
+          },
           "contacts": {
             "type": "array",
             "items": {
               "_comment_raw": "fields copied from the upload",
-              "full_name": { "type": "string", "from": "Prospect full_name" },
-              "title": { "type": "string", "from": "Prospect job_title" },
-              "department": { "type": "string", "from": "Prospect job_department_main" },
-              "seniority": { "type": "string", "from": "Prospect job_level_main" },
-              "email": { "type": "string|null" },
-              "email_status": { "type": "string|null" },
-              "phone": { "type": "string|null", "transform": "normalized to +digits" },
-              "linkedin_url": { "type": "string|null" },
-              "buying_committee_persona": { "type": "string|null" },
-              "source": { "type": "enum", "values": ["Source A", "Apollo"] },
+              "full_name": {
+                "type": "string",
+                "from": "Prospect full_name"
+              },
+              "title": {
+                "type": "string",
+                "from": "Prospect job_title"
+              },
+              "department": {
+                "type": "string",
+                "from": "Prospect job_department_main"
+              },
+              "seniority": {
+                "type": "string",
+                "from": "Prospect job_level_main"
+              },
+              "email": {
+                "type": "string|null"
+              },
+              "email_status": {
+                "type": "string|null"
+              },
+              "phone": {
+                "type": "string|null",
+                "transform": "normalized to +digits"
+              },
+              "linkedin_url": {
+                "type": "string|null"
+              },
+              "buying_committee_persona": {
+                "type": "string|null"
+              },
+              "source": {
+                "type": "enum",
+                "values": [
+                  "Source A",
+                  "Apollo"
+                ]
+              },
               "_comment_derived": "fields computed by Python",
-              "contact_id": { "type": "string", "note": "from Prospect prospect_id, else positional contact_N" },
-              "normalized_department": { "type": "string" },
-              "seniority_band": { "type": "string", "note": "'Individual Contributor' when the value is not in the enum" },
-              "seniority_source_conflict": { "type": "boolean" },
-              "influence_type": { "type": "string" },
-              "influence_source": { "type": "string" },
-              "priority": { "type": "string" },
-              "hp_relevance_score": { "type": "number" },
-              "hp_relevance_band": { "type": "enum", "values": ["high", "medium", "low"] },
-              "score_components": { "type": "object", "keys": ["seniority", "hp_relevance", "influence", "data_completeness", "priority"] },
-              "score_weights": { "type": "object", "note": "the weights are published alongside the score" },
-              "stakeholder_score": { "type": "number", "range": [0, 100] },
-              "contact_location": { "type": "string|null", "derived": "'City, Country'" },
-              "skills": { "type": "string|null" },
-              "career_history": { "type": "string|null" },
-              "is_priority_contact": { "type": "boolean", "derived": "stakeholder_score >= 60 AND hp_relevance_band != 'low'" }
+              "contact_id": {
+                "type": "string",
+                "note": "from Prospect prospect_id, else positional contact_N"
+              },
+              "normalized_department": {
+                "type": "string"
+              },
+              "seniority_band": {
+                "type": "string",
+                "note": "'Individual Contributor' when the value is not in the enum"
+              },
+              "seniority_source_conflict": {
+                "type": "boolean"
+              },
+              "influence_type": {
+                "type": "string"
+              },
+              "influence_source": {
+                "type": "string"
+              },
+              "priority": {
+                "type": "string"
+              },
+              "hp_relevance_score": {
+                "type": "number"
+              },
+              "hp_relevance_band": {
+                "type": "enum",
+                "values": [
+                  "high",
+                  "medium",
+                  "low"
+                ]
+              },
+              "score_components": {
+                "type": "object",
+                "keys": [
+                  "seniority",
+                  "hp_relevance",
+                  "influence",
+                  "data_completeness",
+                  "priority"
+                ]
+              },
+              "score_weights": {
+                "type": "object",
+                "note": "the weights are published alongside the score"
+              },
+              "stakeholder_score": {
+                "type": "number",
+                "range": [
+                  0,
+                  100
+                ]
+              },
+              "contact_location": {
+                "type": "string|null",
+                "derived": "'City, Country'"
+              },
+              "skills": {
+                "type": "string|null"
+              },
+              "career_history": {
+                "type": "string|null"
+              },
+              "is_priority_contact": {
+                "type": "boolean",
+                "derived": "stakeholder_score >= 60 AND hp_relevance_band != 'low'"
+              }
             }
           }
         }
       },
-
       "news_signals_feed": {
         "feature": "recent_news_signals",
         "widget_type": "timeline_feed",
         "data_classification": "deterministic",
-        "source_datasets": ["google_news", "news_events"],
+        "source_datasets": [
+          "google_news",
+          "news_events"
+        ],
         "note": "Both news files are normalized into one signal list, then gated, de-duplicated and scored.",
         "data_shape": {
-          "total_signals_count": { "type": "integer", "note": "after gate, dedup, publish-threshold and cap. This is what exec_summary_card.recent_signals_count reads." },
-          "raw_signal_count": { "type": "integer", "note": "google_news + news_events rows that yielded a headline" },
-          "gate_rejected_count": { "type": "integer" },
-          "gate_rejection_summary": { "type": "object", "example": { "older than 365 days": 41, "unparseable date": 4 }, "note": "THE most useful field for diagnosing a delivery — it says exactly why rows were dropped." },
-          "deduped_from": { "type": "integer", "note": "gate survivors before de-duplication" },
-          "cap": { "type": "integer", "value": 20 },
-          "gate_rejections": { "type": "array", "note": "every rejected signal in full, each with gate_reject_reason. Read this to see what was discarded." },
+          "total_signals_count": {
+            "type": "integer",
+            "note": "after gate, dedup, publish-threshold and cap. This is what exec_summary_card.recent_signals_count reads."
+          },
+          "raw_signal_count": {
+            "type": "integer",
+            "note": "google_news + news_events rows that yielded a headline"
+          },
+          "gate_rejected_count": {
+            "type": "integer"
+          },
+          "gate_rejection_summary": {
+            "type": "object",
+            "example": {
+              "older than 365 days": 41,
+              "unparseable date": 4
+            },
+            "note": "THE most useful field for diagnosing a delivery — it says exactly why rows were dropped."
+          },
+          "deduped_from": {
+            "type": "integer",
+            "note": "gate survivors before de-duplication"
+          },
+          "cap": {
+            "type": "integer",
+            "value": 20
+          },
+          "gate_rejections": {
+            "type": "array",
+            "note": "every rejected signal in full, each with gate_reject_reason. Read this to see what was discarded."
+          },
           "signals": {
             "type": "array",
             "max_length": 20,
             "items": {
-              "signal_id": { "type": "string", "derived": "sha1 of the canonical headline, first 12 chars" },
-              "headline": { "type": "string" },
-              "event_date": { "type": "string" },
-              "category": { "type": "string", "derived": "mapped from event_type / category; unmatched becomes 'Strategic'" },
-              "evidence_sentence": { "type": "string|null", "note": "blanked when it equals the headline" },
-              "source_url": { "type": "string", "note": "empty string for news_events rows — never fabricated" },
-              "source_publisher": { "type": "string|null" },
-              "merged_headlines": { "type": "array of string", "note": "present when near-duplicates were merged" },
-              "tier": { "type": "enum|null", "values": ["S", "A", "B", "C"] }
+              "signal_id": {
+                "type": "string",
+                "derived": "sha1 of the canonical headline, first 12 chars"
+              },
+              "headline": {
+                "type": "string"
+              },
+              "event_date": {
+                "type": "string"
+              },
+              "category": {
+                "type": "string",
+                "derived": "mapped from event_type / category; unmatched becomes 'Strategic'"
+              },
+              "evidence_sentence": {
+                "type": "string|null",
+                "note": "blanked when it equals the headline"
+              },
+              "source_url": {
+                "type": "string",
+                "note": "empty string for news_events rows — never fabricated"
+              },
+              "source_publisher": {
+                "type": "string|null"
+              },
+              "merged_headlines": {
+                "type": "array of string",
+                "note": "present when near-duplicates were merged"
+              },
+              "tier": {
+                "type": "enum|null",
+                "values": [
+                  "S",
+                  "A",
+                  "B",
+                  "C"
+                ]
+              }
             }
           }
         },
@@ -1510,46 +2755,154 @@
         },
         "scoring": {
           "owner": "Python — the model is never asked for the composite",
-          "weights": { "recency": 0.25, "hp_relevance": 0.30, "strategic_impact": 0.20, "actionability": 0.15, "source_reliability": 0.10 },
-          "tiers": { "S": ">=8.0", "A": ">=6.0", "B": ">=4.0", "C": ">=2.0" },
+          "weights": {
+            "recency": 0.25,
+            "hp_relevance": 0.3,
+            "strategic_impact": 0.2,
+            "actionability": 0.15,
+            "source_reliability": 0.1
+          },
+          "tiers": {
+            "S": ">=8.0",
+            "A": ">=6.0",
+            "B": ">=4.0",
+            "C": ">=2.0"
+          },
           "publish_threshold": 2.0,
           "max_signals": 20
         }
       }
     },
-
     "remaining_widgets": {
       "note": "The 31-widget registry also contains the following. They use the same envelope and read the same uploaded columns already documented above, so no new input requirement comes from them. Ask if you need a specific one expanded.",
-      "executive_dashboard": ["exec_urgency_score (derived — weights fixed, raw-data-to-driver formula deliberately undefined, so no score is computed)", "exec_strategic_priorities (inferred)"],
-      "recent_news_signals": ["news_relevance_summary (inferred — the LLM D1-D5 dimension scores behind news_signals_feed.confidence)"],
-      "stakeholder_map": ["stakeholder_influence_map (derived — department groups, buying_group_coverage, ranked entry path; all computed from the contacts grid, no new column)", "stakeholder_talking_points (inferred)"],
-      "solution_narrative_opportunity_map": ["opportunity_context_card (deterministic)", "opportunity_trigger_signals (deterministic)", "opportunity_narrative_plays (inferred)"],
-      "tech_landscape": ["technographic_map (deterministic — 7 fixed HP categories with vendor/whitespace rows; note hp_mapped_categories etc. are RATIO STRINGS like '5/7')", "technographic_hp_recommendations (inferred)"],
-      "objection_playbook": ["objection_incumbent_context (deterministic)", "objection_reframe_cards (inferred)"],
-      "content_studio": ["content_persona_context (deterministic)", "content_generated_assets (inferred)"],
-      "strategy_chat": ["strategy_snapshot_context (deterministic)", "strategy_chat_interface (inferred)"],
-      "message_evaluator": ["evaluator_persona_context (deterministic)", "evaluator_feedback_score (inferred)"],
-      "content_messaging": ["messaging_context_card (deterministic)", "messaging_pillars_output (inferred)"]
+      "executive_dashboard": [
+        "exec_urgency_score (derived — weights fixed, raw-data-to-driver formula deliberately undefined, so no score is computed)",
+        "exec_strategic_priorities (inferred)"
+      ],
+      "recent_news_signals": [
+        "news_relevance_summary (inferred — the LLM D1-D5 dimension scores behind news_signals_feed.confidence)"
+      ],
+      "stakeholder_map": [
+        "stakeholder_influence_map (derived — department groups, buying_group_coverage, ranked entry path; all computed from the contacts grid, no new column)",
+        "stakeholder_talking_points (inferred)"
+      ],
+      "solution_narrative_opportunity_map": [
+        "opportunity_context_card (deterministic)",
+        "opportunity_trigger_signals (deterministic)",
+        "opportunity_narrative_plays (inferred)"
+      ],
+      "tech_landscape": [
+        "technographic_map (deterministic — 7 fixed HP categories with vendor/whitespace rows; note hp_mapped_categories etc. are RATIO STRINGS like '5/7')",
+        "technographic_hp_recommendations (inferred)"
+      ],
+      "objection_playbook": [
+        "objection_incumbent_context (deterministic)",
+        "objection_reframe_cards (inferred)"
+      ],
+      "content_studio": [
+        "content_persona_context (deterministic)",
+        "content_generated_assets (inferred)"
+      ],
+      "strategy_chat": [
+        "strategy_snapshot_context (deterministic)",
+        "strategy_chat_interface (inferred)"
+      ],
+      "message_evaluator": [
+        "evaluator_persona_context (deterministic)",
+        "evaluator_feedback_score (inferred)"
+      ],
+      "content_messaging": [
+        "messaging_context_card (deterministic)",
+        "messaging_pillars_output (inferred)"
+      ]
     }
   },
-
   "feature_dependencies": {
     "note": "A feature produces NOTHING AT ALL if any listed dataset is registered but its file is unreadable. Stored widgets are left untouched rather than overwritten with empty data.",
-    "executive_dashboard": ["company_hierarchy", "firmographics", "job_openings", "prospect_contacts"],
-    "intent_demand_signals": ["intent_score", "intent_topics", "job_openings", "hp_category_intent", "technographics", "webstack"],
-    "stakeholder_map": ["firmographics", "google_news", "intent_score", "news_events", "prospect_contacts", "technographics"],
-    "tech_landscape": ["technographics", "technology_detections", "webstack"],
-    "recent_news_signals": ["google_news", "news_events"],
-    "content_messaging": ["firmographics", "google_news", "intent_score", "news_events", "technographics"],
-    "solution_narrative_opportunity_map": ["firmographics", "google_news", "intent_score", "news_events", "prospect_contacts", "technographics"],
-    "objection_playbook": ["firmographics", "prospect_contacts", "technographics"],
-    "content_studio": ["prospect_contacts", "job_openings", "firmographics"],
-    "message_evaluator": ["firmographics", "job_openings", "prospect_contacts"],
-    "strategy_chat": ["company_hierarchy", "firmographics", "google_news", "intent_score", "job_openings", "news_events", "prospect_contacts", "technographics", "technology_detections", "webstack"],
-    "minimum_viable_set": ["firmographics", "technographics", "prospect_contacts", "intent_score", "google_news", "news_events", "job_openings"],
+    "executive_dashboard": [
+      "company_hierarchy",
+      "firmographics",
+      "job_openings",
+      "prospect_contacts"
+    ],
+    "intent_demand_signals": [
+      "intent_score",
+      "intent_topics",
+      "job_openings",
+      "hp_category_intent",
+      "technographics",
+      "webstack"
+    ],
+    "stakeholder_map": [
+      "firmographics",
+      "google_news",
+      "intent_score",
+      "news_events",
+      "prospect_contacts",
+      "technographics"
+    ],
+    "tech_landscape": [
+      "technographics",
+      "technology_detections",
+      "webstack"
+    ],
+    "recent_news_signals": [
+      "google_news",
+      "news_events"
+    ],
+    "content_messaging": [
+      "firmographics",
+      "google_news",
+      "intent_score",
+      "news_events",
+      "technographics"
+    ],
+    "solution_narrative_opportunity_map": [
+      "firmographics",
+      "google_news",
+      "intent_score",
+      "news_events",
+      "prospect_contacts",
+      "technographics"
+    ],
+    "objection_playbook": [
+      "firmographics",
+      "prospect_contacts",
+      "technographics"
+    ],
+    "content_studio": [
+      "prospect_contacts",
+      "job_openings",
+      "firmographics"
+    ],
+    "message_evaluator": [
+      "firmographics",
+      "job_openings",
+      "prospect_contacts"
+    ],
+    "strategy_chat": [
+      "company_hierarchy",
+      "firmographics",
+      "google_news",
+      "intent_score",
+      "job_openings",
+      "news_events",
+      "prospect_contacts",
+      "technographics",
+      "technology_detections",
+      "webstack"
+    ],
+    "minimum_viable_set": [
+      "firmographics",
+      "technographics",
+      "prospect_contacts",
+      "intent_score",
+      "google_news",
+      "news_events",
+      "job_openings"
+    ],
     "minimum_viable_note": "compliance_filings additionally unlocks reported financial figures on the Executive Dashboard."
   },
-
   "edge_cases": [
     {
       "id": "EC-01",
@@ -1676,19 +3029,62 @@
       "mitigation": "None on your side — raised so a 'nothing changed' result is understood as protective rather than a failed upload."
     }
   ],
-
   "open_questions": [
-    { "id": "5.1", "priority": "critical", "dataset": "job_openings", "question": "Does blank status mean open, or unknown? 40% of rows are blank and currently count as open, driving hiring-velocity and urgency signals." },
-    { "id": "5.2", "priority": "high", "dataset": "multiple", "question": "Three incompatible score scales: intent_score and hp_category_intent are 0-100, technology_detections.score and news_events.confidence are 0-1, google_news.relevance_confidence is High/Medium/Low text. Align them, or confirm the intended mapping." },
-    { "id": "5.3", "priority": "medium", "dataset": "technographics", "question": "Can the 9 '(+N more)' truncated cells be exported in full?" },
-    { "id": "5.4", "priority": "medium", "dataset": "intent_topics", "question": "Level Of Intent and Topic Count are empty throughout. What are the values and the allowed value set?" },
-    { "id": "5.5", "priority": "medium", "dataset": "technology_detections", "question": "Can a technology/vendor name column be added, or is this dataset reference-only?" },
-    { "id": "5.6", "priority": "medium", "dataset": "webstack", "question": "Which file carries Cms, Ssl, Web Server, Hosting, Cdn, Framework, Analytics?" },
-    { "id": "5.7", "priority": "low", "dataset": "google_news", "question": "event_type mixes 'launch' with 'M&A'. Confirm one casing convention — lower snake_case preferred." },
-    { "id": "5.8", "priority": "medium", "dataset": "multiple", "question": "Which of the 12 unconsumed dataset keys do you actually intend to deliver?" },
-    { "id": "5.9", "priority": "medium", "dataset": "google_news, news_events", "question": "Is the 365-day window intended? Confirm before building a historical back-fill." }
+    {
+      "id": "5.1",
+      "priority": "critical",
+      "dataset": "job_openings",
+      "question": "Does blank status mean open, or unknown? 40% of rows are blank and currently count as open, driving hiring-velocity and urgency signals."
+    },
+    {
+      "id": "5.2",
+      "priority": "high",
+      "dataset": "multiple",
+      "question": "Three incompatible score scales: intent_score and hp_category_intent are 0-100, technology_detections.score and news_events.confidence are 0-1, google_news.relevance_confidence is High/Medium/Low text. Align them, or confirm the intended mapping."
+    },
+    {
+      "id": "5.3",
+      "priority": "medium",
+      "dataset": "technographics",
+      "question": "Can the 9 '(+N more)' truncated cells be exported in full?"
+    },
+    {
+      "id": "5.4",
+      "priority": "medium",
+      "dataset": "intent_topics",
+      "question": "Level Of Intent and Topic Count are empty throughout. What are the values and the allowed value set?"
+    },
+    {
+      "id": "5.5",
+      "priority": "medium",
+      "dataset": "technology_detections",
+      "question": "Can a technology/vendor name column be added, or is this dataset reference-only?"
+    },
+    {
+      "id": "5.6",
+      "priority": "medium",
+      "dataset": "webstack",
+      "question": "Which file carries Cms, Ssl, Web Server, Hosting, Cdn, Framework, Analytics?"
+    },
+    {
+      "id": "5.7",
+      "priority": "low",
+      "dataset": "google_news",
+      "question": "event_type mixes 'launch' with 'M&A'. Confirm one casing convention — lower snake_case preferred."
+    },
+    {
+      "id": "5.8",
+      "priority": "medium",
+      "dataset": "multiple",
+      "question": "Which of the 12 unconsumed dataset keys do you actually intend to deliver?"
+    },
+    {
+      "id": "5.9",
+      "priority": "medium",
+      "dataset": "google_news, news_events",
+      "question": "Is the 365-day window intended? Confirm before building a historical back-fill."
+    }
   ],
-
   "delivery_checklist": [
     "All files UTF-8, one header row — except hp_category_intent, which has two",
     "Headers match this contract exactly: Title Case, single spaces, no trailing whitespace",

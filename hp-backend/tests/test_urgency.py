@@ -568,29 +568,13 @@ def test_the_reversed_missing_input_rule_is_published():
     assert "REPLACES the earlier rule" in result["missing_input_rule"]
 
 
-def test_intent_trend_is_scored_but_declared_unverified():
-    """Section 4B scores Increasing=10. The input contract had deliberately
-    refused to promote that column to a trend, because the file supplies no
-    prior window to check it against. The PDF overrides that for scoring, so
-    the label scores - and the driver says the direction is the provider's
-    claim, not one computed here."""
-    driver = u.hp_solution_intent([{
-        "name": "PCs", "score": 50, "trend_label": "Increasing",
-        "stage": "Consideration", "research_volume": "Medium",
-        "keywords": ["pc refresh"]}])
+def test_intent_trend_is_taken_from_the_file_as_supplied():
+    """Section 4B scores Increasing=10.
 
-    assert driver["terms"][1]["points"] == 10
-    assert any("provider's claim" in c for c in driver["caveats"])
-
-
-def test_the_trend_number_never_reads_as_one_we_calculated():
-    """The scored number is the provider's claim and has to say so where it is
-    read, not only in a caveat a reader may never open.
-
-    We have no prior scoring window, so no trend was computed here. Wording
-    like "PCs trend is Increasing" would imply otherwise, so both the term
-    label and its basis carry the attribution and name the missing
-    verification.
+    The client has ruled the HP category intent file the source of truth: its
+    fields are vendor-verified and are used as supplied. The label therefore
+    scores and is stated plainly, with no "unverified" qualifier attached to
+    it and no caveat arguing against the number the driver just published.
     """
     driver = u.hp_solution_intent([{
         "name": "PCs", "score": 50, "trend_label": "Increasing",
@@ -599,12 +583,28 @@ def test_the_trend_number_never_reads_as_one_we_calculated():
     trend = driver["terms"][1]
 
     assert trend["points"] == 10
-    assert "provider-reported" in trend["label"]
-    assert "reported by the provider" in trend["basis"]
-    assert "not independently verified" in trend["basis"]
-    assert "no prior scoring window" in trend["basis"]
-    # And nothing claims the calculation as ours.
-    assert "PCs intent trend is Increasing" not in trend["basis"]
+    assert trend["label"] == "Intent trend"
+    assert "PCs intent trend is Increasing per the category file" in trend["basis"]
+    assert not driver.get("caveats")
+
+
+def test_no_surface_qualifies_the_file_as_unverified():
+    """The words that used to hedge this driver are gone from every string it
+    publishes, so nothing on screen argues with the file the client has
+    designated as the source of truth."""
+    driver = u.hp_solution_intent([{
+        "name": "PCs", "score": 50, "trend_label": "Increasing",
+        "stage": "Consideration", "research_volume": "Medium",
+        "keywords": ["pc refresh"]}])
+
+    published = " ".join(
+        [t["label"] + " " + t["basis"] for t in driver["terms"]]
+        + list(driver.get("notes") or [])
+        + list(driver.get("caveats") or []))
+
+    for banned in ("unverified", "provider-reported", "reported by the provider",
+                   "provider's claim", "no prior scoring window", "flagged"):
+        assert banned not in published
 
 
 def test_social_stats_absence_scores_zero_and_says_which_absence():
@@ -641,12 +641,15 @@ def test_a_single_observation_never_becomes_a_growth_rate():
     assert driver["terms"][0]["points"] == 0
 
 
-def test_noisy_keyword_bars_a_category_from_being_primary():
-    """Astra's top category is 3D Printers at 34, carried by "SLA" - which in a
-    job posting is a service-level agreement, not stereolithography. The PDF
-    says to use "the highest-scoring HP category" without addressing keyword
-    noise; this gate is retained, because without it a mis-read keyword drives
-    60 of this driver's 100 points."""
+def test_the_highest_scoring_category_is_always_primary():
+    """The keyword-noise gate is disabled by client instruction.
+
+    Astra's top category is 3D Printers at 34, whose keywords include "SLA".
+    That used to bar it from being primary. The client has ruled the category
+    file verified and authoritative, so selection is now literal: highest score
+    wins, exactly as the PDF states, and nothing is flagged or disclosed as a
+    departure.
+    """
     driver = u.hp_solution_intent([
         {"name": "3D Printers", "score": 34,
          "keywords": ["jig", "SLA", "manufacturing engineer"],
@@ -657,60 +660,33 @@ def test_noisy_keyword_bars_a_category_from_being_primary():
          "research_volume": "Low"},
     ])
 
-    assert "highest category Printers scores 12/100" in driver["terms"][0]["basis"]
-    assert any("3D Printers" in note for note in driver["notes"])
+    assert "highest category 3D Printers scores 34/100" in driver["terms"][0]["basis"]
+    assert driver["terms"][0]["points"] == pytest.approx(34 / 100 * u.HP_CATEGORY_INTENT_MAX)
+    assert not driver.get("notes")
 
 
-def test_all_categories_flagged_falls_back_rather_than_scoring_nothing():
-    """The previous implementation made Intent unavailable when every category
-    was flagged. Under the new missing-input rule that would silently score the
-    driver's 25% at 0, which overstates nothing but hides real data - so the
-    highest-scoring category is used and the fallback is disclosed."""
-    driver = u.hp_solution_intent([
-        {"name": "3D Printers", "score": 34, "keywords": ["SLA"],
-         "trend_label": "Increasing", "stage": "Awareness",
-         "research_volume": "High"}])
+def test_formerly_noisy_keywords_no_longer_change_the_outcome():
+    """Every term the old dictionary knew is now inert. A category carrying one
+    scores exactly as a category carrying none, so the file's own numbers reach
+    the score untouched."""
+    def score_with(keywords):
+        return u.hp_solution_intent([{
+            "name": "3D Printers", "score": 34, "keywords": keywords,
+            "trend_label": "Increasing", "stage": "Awareness",
+            "research_volume": "High"}])["value"]
 
-    assert driver["value"] > 0
-    assert any("flagged keyword" in note for note in driver["notes"])
+    assert score_with(["SLA"]) == score_with(["jig"])
+    assert score_with(["identified as competitor of"]) == score_with(["procurement"])
 
 
-def test_the_noisy_keyword_gate_is_a_deliberate_departure_from_literal_selection():
-    """The gate stays until the spec explicitly requires literal highest-score
-    selection, and this test is the reason a reader should not "fix" it.
+def test_the_noise_dictionary_is_empty_and_the_gate_is_a_no_op():
+    """The gate is disabled by emptying the shared dictionary rather than by
+    deleting the code, so both features degrade identically and re-enabling is
+    a matter of putting terms back."""
+    from app.services.hp import intent_topic_map
 
-    The spec says to use "the fields belonging to the highest-scoring HP
-    category" and does not address keyword noise. Read literally, Astra's top
-    category is 3D Printers at 34 - carried by "SLA", a service-level agreement
-    in a job posting, not stereolithography. That single mis-read keyword would
-    drive 60 of this driver's 100 points and put a false 3D printing signal in
-    front of a seller.
-
-    So the departure is deliberate and narrow: a flagged category keeps its
-    score everywhere else on the dashboard and is barred only from being the
-    PRIMARY signal, with the bar disclosed in the driver's notes.
-    """
-    categories = [
-        {"name": "3D Printers", "score": 34,
-         "keywords": ["jig", "SLA", "manufacturing engineer"],
-         "trend_label": "Increasing", "stage": "Decision",
-         "research_volume": "High"},
-        {"name": "PCs", "score": 12, "keywords": ["procurement"],
-         "trend_label": "Stable", "stage": "Awareness",
-         "research_volume": "Low"},
-    ]
-
-    gated = u.hp_solution_intent(categories)
-
-    # Literal highest-score selection would have taken 3D Printers at 34 and
-    # scored far higher on the strength term alone.
-    literal_strength = 34 / 100 * u.HP_CATEGORY_INTENT_MAX
-    assert gated["terms"][0]["points"] < literal_strength
-    assert "PCs" in gated["terms"][0]["basis"]
-
-    # The bar is disclosed, not silent.
-    assert any("3D Printers" in note for note in gated["notes"])
-    assert any("flagged keyword" in note for note in gated["notes"])
+    assert intent_topic_map.NOISY_CATEGORY_TERMS == {}
+    assert u.NOISY_KEYWORDS == ()
 
 
 def test_noisy_terms_come_from_the_shared_dictionary():

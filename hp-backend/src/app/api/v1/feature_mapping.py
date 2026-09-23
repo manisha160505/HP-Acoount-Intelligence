@@ -846,7 +846,7 @@ FEATURE_MAPPINGS = {
             {
                 "field_key": "hp_category_score",
                 "display_name": "HP Category Intent Score (Step 1, primary score)",
-                "purpose": "Per HP category (PCs, Workstations, Poly, Printers, 3D Printers): Intent Score, Intent Trend, Buying Stage and Research Volume, shown as received on the graph and cards. The primary HP category is the highest score whose line carries no known noisy keyword",
+                "purpose": "Per HP category (PCs, Workstations, Poly, Printers, 3D Printers): Intent Score, Intent Trend, Buying Stage and Research Volume, shown as received on the graph and cards. The primary HP category is simply the highest-scoring one",
                 "dataset_key": "hp_category_intent",
                 "source_sheet": "Intent Data (Wide)",
                 "source_column": "Intent Score (/100), Intent Trend, Buying Stage, Research Volume",

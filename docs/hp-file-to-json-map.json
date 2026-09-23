@@ -633,7 +633,7 @@
                   "has_signal": true,
                   "trend_label": "Increasing",
                   "trend": null,
-                  "quality_flags": [{ "term": "SLA", "field": "Keywords Matched", "reason": "In job postings SLA means service-level agreement, not stereolithography 3D printing" }]
+                  "quality_flags": []
                 },
                 "confirmed_max": 61
               }

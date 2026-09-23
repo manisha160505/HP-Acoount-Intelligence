@@ -870,8 +870,8 @@ def generate_messaging_pillars(account_id: str, mode: str | None = None) -> dict
     company = _text(context_card.get("company_name")
                     or business_context.get("company_name"))
 
-    candidates, retrieval = asyncio.run(_candidate_challenges(account_id, mode))
-    challenges, dropped, invalid_count = _resolve_challenges(account_id, candidates)
+    candidates, _retrieval = asyncio.run(_candidate_challenges(account_id, mode))
+    challenges, _dropped, invalid_count = _resolve_challenges(account_id, candidates)
     if not challenges:
         raise PillarError(
             "no account challenge survived evidence validation (%d candidate(s), "
@@ -890,7 +890,7 @@ def generate_messaging_pillars(account_id: str, mode: str | None = None) -> dict
         if len(pillars) >= MAX_PILLARS + 2:
             break
 
-    pillars, merged = _distinct(pillars)
+    pillars, _merged = _distinct(pillars)
     pillars = pillars[:MAX_PILLARS]
     pillars = _dedupe_proof(pillars)
 
@@ -970,20 +970,6 @@ def generate_messaging_pillars(account_id: str, mode: str | None = None) -> dict
             "pillars": pillars,
             "pillar_count": len(pillars),
             "why_hp": [p["hp_benefit"] for p in pillars],
-            "generation": {
-                "prompt_version": PROMPT_VERSION,
-                "retrieval_mode": retrieval.mode,
-                "index_workspace": retrieval.workspace,
-                "index_stale": retrieval.stale,
-                "candidates_returned": len(candidates),
-                "challenges_kept": len(challenges),
-                "dropped_challenges": dropped,
-                "merged_pillars": merged,
-                "invalid_evidence_count": invalid_count
-                + sum(len(p.get("dropped_proofs") or []) for p in pillars),
-                "restrictions": restrictions,
-                "framing_dropped": framing["framing_dropped"],
-            },
         },
         "source_datasets": ["firmographics", "technographics", "intent_score",
                             "google_news", "news_events"],

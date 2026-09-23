@@ -254,7 +254,7 @@ finance, legal, marketing, sales, human resources
 | `event` | [O] | ~98% empty currently |
 | `summary`, `amount`, `amount_normalized`, `assets`, `assets_tags`, `award`, `contact`, `division`, `financing_type`, `financing_type_normalized`, `financing_type_tags`, `headcount`, `id`, `job_title`, `job_title_tags`, `location`, `location_data`, `planning`, `product`, `product_data`, `product_tags`, `recognition`, `vulnerability` | [O] | `*_data` fields are JSON strings |
 
-> ⚠️ `identified_as_competitor_of` is explicitly flagged in code as a **noisy** category — it is a news relationship, not a buying signal, and is excluded from becoming a primary signal.
+> ℹ️ `identified_as_competitor_of` is a news relationship rather than a buying signal. It **was** excluded from becoming a primary signal; that gate is empty by client instruction (Sep 2026), so the value is now used as supplied. See section 4.
 
 ---
 
@@ -431,7 +431,7 @@ Company,Domain,Run Date,Top HP Category,Top Intent Score (/100),Intent Score (/1
 
 1. **`Intent Trend` is not used as a trend.** The file states `Increasing`/`Stable`/`Decreasing`, but with one run and no prior score there is nothing to verify it against. It is kept as the file's own words and never drawn as a direction. Sending a prior-window score would let it become a real trend.
 2. **`Top HP Category` is re-checked, not trusted.** The system recomputes the highest-scoring category and reports whether your stated top matches. Inconsistencies surface on screen.
-3. **Noisy terms are flagged.** `sla` (means service-level agreement in job postings, not stereolithography) and `identified as competitor of` cause a category to be flagged and barred from becoming the account's primary category.
+3. **Keyword noise is no longer gated.** The file is the source of truth: its scores and fields are shown and scored exactly as supplied, and the highest-scoring category is always the primary one. A keyword blocklist (`NOISY_CATEGORY_TERMS`) still exists but is **empty by client instruction (Sep 2026)**, so nothing is flagged or barred. Previously `sla` and `identified as competitor of` were flagged; re-adding a term there restores that behaviour for every feature at once.
 
 ---
 
