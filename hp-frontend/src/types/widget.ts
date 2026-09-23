@@ -24,6 +24,11 @@ export interface WidgetResponse extends WidgetContract {
   status: WidgetStatus;
   data: Record<string, any>;
   updated_at: string | null;
+  // When the ACCOUNT DATA behind this widget was ingested, as opposed to when
+  // the widget was generated. Recommendation Tuning Logic section E.
+  data_as_of_date?: string | null;
+  data_as_of?: { as_of?: string | null; by_dataset?: Record<string, string>;
+                 datasets?: number; note?: string } | null;
 }
 
 // One Bombora research topic as published by intent_topics_table. Source A is

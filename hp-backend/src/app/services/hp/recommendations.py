@@ -26,18 +26,20 @@ from datetime import UTC, datetime
 
 from app.core.llm import generate_gpt4o_json_completion
 from app.database.mongodb import get_db
+from app.services.extractors.datasets import account_data_as_of
 from app.services.extractors.grounding import (
     GroundingReport,
     build_corpus,
     check_text,
     corpus_from_texts,
 )
-from app.services.hp import rulebook as rb
+from app.services.hp import evidence_tier, lifecycle, output_record, rulebook as rb
 from app.services.hp.guardrails import (
     approve_facts,
     approve_rulebook_facts,
     prose_guardrail_faults,
     summarise,
+    tier_language_faults,
 )
 from app.services.hp.product_rules import RULES_BY_ID, match_rules
 
@@ -70,7 +72,22 @@ logger = logging.getLogger(__name__)
 #      reported once rather than twice.
 # 12 - provenance drops the widget-derived restatement of a dataset it already
 #      names, so a card does not cite "Autodesk" twice from two places.
-RECOMMENDATION_PROMPT_VERSION = 12
+# 13 - section J: an offering past its HP lifecycle end date is not
+#      recommended, and one approaching it carries a flag.
+# 14 - the lifecycle lookup was passing a pymongo Database into a truth test
+#      and silently reading every product as "not listed".
+# 15 - sections C and D: each card carries the evidence tier its pipelines
+#      earn, and the language that tier permits.
+# 16 - the widget-derived technology cells count as the Technographics
+#      pipeline, which they are; without that a rule matched only on them
+#      tiered as Context Only with no evidence.
+# 17 - banned output K1: where a card's own HP category shows no intent
+#      signal, detected technology is context rather than corroboration.
+# 18 - section C's permitted language is enforced on the prose, not only
+#      published beside it.
+# 19 - section F: every card carries the nine-field structured record, with a
+#      stable id per material claim and per evidence row.
+RECOMMENDATION_PROMPT_VERSION = 19
 
 # Whether hardware facts come from the rulebook (C 02) or from the decks.
 #
@@ -245,8 +262,10 @@ def _category_families(category: dict) -> frozenset:
     return frozenset(families)
 
 
-def _part_b_cards(book, matches: list, categories: list, country: str,
-                  now) -> list:
+def _part_b_cards(book, matches: list, categories: list, country: str,  # noqa: PLR0913, PLR0917 - section F needs the account, the snapshot and the rows
+                  now, items: list | None = None,
+                  intent: dict | None = None, account_id: str = "",
+                  as_of_date: str | None = None) -> list:
     """Part B recommendations, placed in the category they speak to.
 
     Part A is HP's client-hardware chapter: 12 of its 18 rules are notebooks and
@@ -259,6 +278,8 @@ def _part_b_cards(book, matches: list, categories: list, country: str,
     "use exact facts", and passing an approved sentence through a model to be
     reworded is the one step that could turn it into an unapproved one.
     """
+    items = list(items or [])
+    intent = dict(intent or {})
     cards, used = [], set()
     for category in categories or []:
         if not isinstance(category, dict):
@@ -269,11 +290,22 @@ def _part_b_cards(book, matches: list, categories: list, country: str,
         for match in matches:
             if match["family"] not in families or match["rule_label"] in used:
                 continue
+            life = lifecycle.status_for(match.get("offering") or "",
+                                        now.date())
+            if not life["recommendable"]:
+                continue
+
+            fired = [items[i] for i in sorted(match["evidence_indices"])
+                     if i < len(items)]
+            tier = evidence_tier.tier_for(
+                fired, category_intent=intent.get(category.get("category_key")))
+
             approved, rejected = approve_rulebook_facts(
                 match["rule"], country, now)
             if not approved:
                 continue
             used.add(match["rule_label"])
+            facts = [d.as_dict() for d in approved[:MAX_FACTS_PER_RECOMMENDATION]]
             cards.append({
                 "rule_id": match["rule_label"],
                 "part": "B",
@@ -287,8 +319,7 @@ def _part_b_cards(book, matches: list, categories: list, country: str,
                 "matched_tokens": (match.get("qualifying_terms")
                                    or match.get("matched_terms")),
                 "indicative_tokens": match.get("indicative_terms") or [],
-                "approved_facts": [d.as_dict()
-                                   for d in approved[:MAX_FACTS_PER_RECOMMENDATION]],
+                "approved_facts": facts,
                 "withheld_summary": summarise(rejected),
                 "prohibitions": list(match["rule"].get("prohibitions") or []),
                 # No confidence band: the Part A bands are computed from the
@@ -298,12 +329,60 @@ def _part_b_cards(book, matches: list, categories: list, country: str,
                 "confidence": None,
                 "deck": match["rule"].get("evidence_source"),
                 "quoted_verbatim": True,
+                "lifecycle": life,
+                # Sections C and D. Not a score - the tier says what the PROSE
+                # may claim on top of the band, and it is keyed on how many
+                # independent pipelines saw this, not how many rows did.
+                "evidence_tier": tier,
+                "confidence_tier": tier["tier"],
+                # Section F. Part B's seller-facing conclusion is HP's own
+                # approved wording, so each fact is its own material claim.
+                "output_record": output_record.record(
+                    feature="tech_landscape",
+                    account_id=account_id,
+                    as_of_date=as_of_date,
+                    recommendation_text=(facts[0].get("text") if facts else None),
+                    claims={"fact_%d" % n: f.get("text")
+                            for n, f in enumerate(facts, 1)},
+                    evidence_rows=fired,
+                    hp_offering_ids=[match["rule_label"]],
+                    confidence_tier=tier["tier"],
+                    scope=str(match["rule_label"])),
             })
             if len([c for c in cards
                     if c["category_key"] == category.get("category_key")
                     ]) >= MAX_PART_B_PER_CATEGORY:
                 break
     return cards
+
+
+def _category_intent(account_id: str) -> dict:
+    """HP-category intent score per card category, for banned output K1.
+
+    Deferred imports: `tech_landscape` pulls this module in at the bottom of
+    its own extractor, so importing it at module scope here closes the cycle.
+    """
+    try:
+        from app.services.extractors.tech_landscape import _hp_category_intent
+        from app.services.hp import tech_confidence as tconf
+    except Exception:
+        logger.exception("recommendations: intent lookup unavailable")
+        return {}
+
+    try:
+        scores = _hp_category_intent(account_id) or {}
+    except Exception:
+        logger.exception("recommendations: could not read HP category intent")
+        return {}
+
+    out = {}
+    for key in ("pc_laptop_brands", "workstations_compute", "collaboration_hybrid",
+                "print_fleet", "client_os", "it_security_parity", "uem_mdm"):
+        category = tconf.hp_category_for(key)
+        # Absent stays absent. K1 keys on a score of 0, and section 3 is
+        # explicit that missing data must not be read as a negative.
+        out[key] = scores.get(category) if category else None
+    return out
 
 
 def _blocked_placement(rule_label: str) -> dict:
@@ -325,7 +404,7 @@ def _blocked_placement(rule_label: str) -> dict:
             "deck": (bridge or {}).get("deck")}
 
 
-def _rulebook_candidates(db, evidence: dict, now):
+def _rulebook_candidates(db, account_id: str, evidence: dict, now):
     """Part A rules this account's evidence earns, as recommendation candidates.
 
     The same shape the deck path produces, so everything downstream - the
@@ -345,6 +424,9 @@ def _rulebook_candidates(db, evidence: dict, now):
     # Provenanced, so a matched rule knows which file fired it. Widget-derived
     # cells carry no dataset of their own and are labelled as such rather than
     # borrowed from one.
+    as_of_date = (account_data_as_of(account_id) or {}).get("as_of")
+    intent_by_category = _category_intent(account_id)
+
     items = list(evidence.get("research") or [])
     known = {i["text"] for i in items}
     items += [{"text": t, "dataset": "technographic_map", "field": "derived"}
@@ -357,7 +439,8 @@ def _rulebook_candidates(db, evidence: dict, now):
     # evidence rather than two.
     part_b = _part_b_cards(book, [m for m in every if m["rule"].get("part") != "A"],
                            evidence.get("categories") or [],
-                           evidence["hq_location"], now)
+                           evidence["hq_location"], now, items,
+                           intent_by_category, account_id, as_of_date)
     matches = [m for m in every if m["rule"].get("part") == "A"]
     chosen = rb.select(matches)
     if not chosen["primary"]:
@@ -394,9 +477,24 @@ def _rulebook_candidates(db, evidence: dict, now):
             **_blocked_placement(str(match["rule_label"])),
         })
 
+    life_rows = lifecycle.load(db)
+
     for match in [chosen["primary"], *chosen["secondary"]]:
         rule = match["rule"]
         label = rule["rule_label"]
+
+        # Section J. A product this file lists whose last end date has passed is
+        # not recommended; one approaching its end still is, carrying a flag.
+        # A product the file does not name is never blocked by it.
+        life = lifecycle.status_for(rule.get("offering") or "",
+                                    now.date(), life_rows)
+        if not life["recommendable"]:
+            blocked.append({"rule_id": label,
+                            "offering": rule.get("offering"),
+                            "blocked": life["basis"],
+                            "lifecycle_status": life["status"],
+                            **_blocked_placement(str(label))})
+            continue
         bridge = RULES_BY_ID.get(int(label)) if str(label).isdigit() else None
 
         approved, rejected = approve_rulebook_facts(
@@ -440,6 +538,12 @@ def _rulebook_candidates(db, evidence: dict, now):
 
         category_key, category_name = DEVICE_TYPE_TO_CATEGORY.get(
             shim["device_type"] or "", (None, None))
+
+        # After `category_key`: K1 keys on the HP-category intent for the
+        # category this card lands in, so the category has to be known first.
+        _tier = evidence_tier.tier_for(
+            fired_rows, category_intent=intent_by_category.get(category_key))
+
         candidates.append({
             "rule_id": label,
             "rule_condition": rule.get("signal_text"),
@@ -462,10 +566,26 @@ def _rulebook_candidates(db, evidence: dict, now):
             "account_evidence": [
                 {"text": str(r.get("text") or "")[:300],
                  "dataset": r.get("dataset"),
-                 "field": r.get("field")}
+                 "field": r.get("field"),
+                 # Section F: the displayed provenance line carries the same id
+                 # the record cites, so a seller reading the card and an
+                 # engineer reading the record are looking at one row.
+                 "evidence_id": output_record.evidence_id(r)}
                 for r in fired_rows[:4]],
+            # Every supporting row, not just the four shown. Derived from the
+            # untruncated text, so the id survives the 300-character display cut.
+            "evidence_ids": sorted({output_record.evidence_id(r)
+                                    for r in fired_rows} - {None}),
             "unverified_conditions": match["unverified_conditions"],
             "fact_source": "rulebook",
+            # Published whatever the outcome, so a seller can see that the
+            # check ran and what it found.
+            "lifecycle": life,
+            # Sections C and D. Not a score - the tier says what the PROSE may
+            # claim on top of the confidence band, and it is keyed on how many
+            # independent pipelines saw this, not how many rows did.
+            "evidence_tier": _tier,
+            "confidence_tier": _tier["tier"],
         })
 
     return candidates + part_b, blocked, rb.knowledge_version(db)
@@ -508,6 +628,13 @@ RULES, all mandatory:
    standard.
 6. If a fact carries a condition, keep the condition with it.
 7. Write plainly. No "perfect time", "ideal", "guarantees", "ensures".
+8. MATCH THE CLAIM TO THE TIER. Each recommendation carries an evidence_tier and
+   the permitted_language for it. Only "Opportunity" may state that the account
+   has an HP-addressable need. For any other tier, do NOT write that the account
+   needs, requires, plans to, is evaluating, is replacing or is refreshing
+   anything - say that the evidence creates a relevant conversation, or present
+   it as context. A product CONDITION is unaffected: "Wolf Pro Security requires
+   a supported Windows PC" is a fact about HP, not a claim about the account.
 
 Return JSON only:
 {"recommendations": [{"rule_id": <int>, "rationale": "2-3 sentences connecting the
@@ -520,6 +647,10 @@ def generate_hp_recommendations(account_id: str) -> dict | None:
     db = get_db()
     now = datetime.now(UTC)
     kversion = knowledge_version(db)
+    # Section E. The snapshot this output was built from - the ingestion date of
+    # the account's own files, not today. A cached payload keeps the date it was
+    # built on, which is the point of recording it.
+    as_of_date = (account_data_as_of(account_id) or {}).get("as_of")
 
     evidence = _account_evidence(db, account_id)
     if not evidence["texts"]:
@@ -528,7 +659,7 @@ def generate_hp_recommendations(account_id: str) -> dict | None:
     rulebook_candidates, rulebook_blocked, rversion = [], [], ""
     if RULEBOOK_PART_A:
         rulebook_candidates, rulebook_blocked, rversion = _rulebook_candidates(
-            db, evidence, now)
+            db, account_id, evidence, now)
 
     matched, live, blocked = [], [], []
     if not RULEBOOK_PART_A:
@@ -629,6 +760,9 @@ def generate_hp_recommendations(account_id: str) -> dict | None:
             "hp_family": c["hp_family"],
             "device_type": c["device_type"],
             "account_evidence": c["account_evidence"],
+            # Section C's permitted language for the tier this card earned.
+            "evidence_tier": (c.get("evidence_tier") or {}).get("tier"),
+            "permitted_language": (c.get("evidence_tier") or {}).get("permitted_language"),
             "approved_facts": [{"text": f["text"], "qualifiers": f["qualifiers"],
                                 "conditions": f["conditions"]} for f in c["approved_facts"]],
         } for c in candidates],
@@ -696,9 +830,39 @@ def generate_hp_recommendations(account_id: str) -> dict | None:
                                label, faults)
                 why = ""
 
+        # Section C, enforced rather than only published: a card resting on
+        # one pipeline may not be worded as a settled requirement.
+        tier_name = (candidate.get("evidence_tier") or {}).get("tier")
+        for field, value in (("rationale", rationale), ("why_this_product", why)):
+            over = tier_language_faults(value, tier_name)
+            if not over:
+                continue
+            report.hp_facts_rejected.append("%s: %s" % (label, "; ".join(over)))
+            logger.warning("hp recommendations: %s dropped %s - %s",
+                           label, field, over)
+            if field == "rationale":
+                rationale = ""
+            else:
+                why = ""
+
         candidate.update({"rationale": rationale or None,
                           "why_this_product": why or None,
                           "discovery_question": question or None})
+
+        # Section F, built last: a claim id is a hash of the sentence, so it can
+        # only be minted once the sentence is the one that will ship - after the
+        # grounding, guardrail and tier checks have had their chance to empty it.
+        candidate["output_record"] = output_record.record(
+            feature="tech_landscape",
+            account_id=account_id,
+            as_of_date=as_of_date,
+            recommendation_text=rationale,
+            claims={"rationale": rationale, "why_this_product": why,
+                    "discovery_question": question},
+            evidence_ids=candidate.get("evidence_ids"),
+            hp_offering_ids=[candidate["rule_id"]],
+            confidence_tier=(candidate.get("evidence_tier") or {}).get("tier"),
+            scope=str(candidate["rule_id"]))
         out.append(candidate)
 
     # Part B after Part A, so a category that has both reads hardware first.

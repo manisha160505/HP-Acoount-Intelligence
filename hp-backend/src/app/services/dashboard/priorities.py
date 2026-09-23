@@ -53,6 +53,8 @@ from datetime import UTC, datetime
 from app.core.llm import generate_gpt4o_json_completion
 from app.database.mongodb import get_db
 from app.services.dashboard import evidence_strength
+from app.services.extractors import grounding
+from app.services.hp import case_studies as cs
 from app.services.retrieval import evidence as ev, index_state, query
 
 logger = logging.getLogger(__name__)
@@ -64,7 +66,20 @@ PROMPT_VERSION = 1
 
 MIN_PRIORITIES = 3
 MAX_PRIORITIES = 6
+NL = chr(10)
+
 MIN_EVIDENCE_PER_PRIORITY = 1
+
+# The Recommendation Tuning Logic sets a length for each feature's seller-facing
+# output. Executive Dashboard: "Minimum 100 words; maximum 120 words."
+#
+# The maximum is enforced hard - a card that runs long is a card that was not
+# written to the brief. The minimum is retried rather than enforced, because the
+# only thing below this function is a one-line deterministic fallback, and a
+# 90-word grounded paragraph beats "X is evidenced by 4 source sentences" every
+# time. A card that is still short after the retry publishes and says so.
+DESCRIPTION_MIN_WORDS = 100
+DESCRIPTION_MAX_WORDS = 120
 MAX_SUMMARY_SENTENCES = 4
 
 ORDERING_BASIS = (
@@ -356,23 +371,45 @@ def _supports(row, wanted) -> bool:
     return any(word[:6] in body for word in wanted)
 
 
-def _hp_facts(db, account_id: str, limit: int = 25) -> list:
+def _hp_facts(db, account_id: str, limit: int = 40) -> list:
     """HP capability statements already approved for this account.
 
     Read from the recommendations widget rather than written here, so the
     description can say what HP offers without a model inventing a product. Only
     facts the country guardrails kept are present in that widget.
     """
+    facts = []
+
     recs = (db["account_widgets"].find_one(
         {"account_id": account_id,
          "widget_key": "technographic_hp_recommendations"}) or {}
     ).get("data") or {}
-    facts = []
     for rec in (recs.get("recommendations") or []):
         family = _text(rec.get("hp_family"))
         for fact in (rec.get("approved_facts") or []):
             if fact.get("kept") and _text(fact.get("text")):
                 facts.append("%s: %s" % (family or "HP", _text(fact.get("text"))))
+            if len(facts) >= limit:
+                return facts
+
+    # The service half of the rulebook, from the Opportunity Map.
+    #
+    # The recommendations widget carries HARDWARE rules and whatever Part B
+    # rule earned a category card - for one account that was eight EliteDesk
+    # specifications and a Wolf licence. A catalyst about operational
+    # efficiency then had PCIe slots and USB ports to answer it with, while
+    # the rulebook's workforce-experience, Care Pack and deployment rules -
+    # the ones that actually speak to efficiency - were sitting in the
+    # Opportunity Map unread.
+    plays = (db["account_widgets"].find_one(
+        {"account_id": account_id,
+         "widget_key": "opportunity_narrative_plays"}) or {}
+    ).get("data") or {}
+    for play in (plays.get("service_plays") or []):
+        offering = _text(play.get("title")) or _text(play.get("offering"))
+        for fact in (play.get("allowed_facts") or []):
+            if _text(fact):
+                facts.append("%s: %s" % (offering or "HP", _text(fact)))
             if len(facts) >= limit:
                 return facts
     return facts
@@ -397,7 +434,8 @@ Rules:
 - Never name an HP product that does not appear verbatim in the approved HP statements.
 - Never name a competitor, and never claim the account already uses HP.
 - Write in English even when the evidence is not.
-- 2 to 4 sentences, at most 85 words. Plain declarative prose.
+- Between 100 and 120 words. Plain declarative prose, no padding: use the extra room for the
+  account's own specifics, not for restating the point.
 
 Return JSON only: {"description": "..."}"""
 
@@ -418,8 +456,9 @@ def _validate_description(body: str, evidence_text: str, hp_text: str) -> tuple:
     """
     if not body:
         return False, "empty"
-    if len(body.split()) > 110:
-        return False, "longer than the brief allows"
+    if len(body.split()) > DESCRIPTION_MAX_WORDS:
+        return False, "longer than the brief allows (%d words, max %d)" % (
+            len(body.split()), DESCRIPTION_MAX_WORDS)
     if re.match(r"^(the account|the company|this account|this company)\b", body, re.I):
         return False, "opens with a stock phrase instead of the specific fact"
 
@@ -451,6 +490,47 @@ def _digits_only(value) -> str:
     whose figures were all perfectly well grounded.
     """
     return re.sub(r"[^\d.]+", " ", str(value or "")).strip(" .")
+
+
+def _proof_for(db, priority: dict, industry: str, taken: set, here: set):
+    """A published HP case study supporting the HP offering this catalyst names.
+
+    The offering is read back out of the finished paragraph rather than chosen
+    beside it, because the paragraph is the thing a seller reads: proof that
+    supports a line the text never mentions is decoration, not evidence.
+
+    Returns None when the paragraph names no HP line, when no study covers it,
+    or when every candidate is already cited elsewhere on this account. The
+    Executive Dashboard picks last of the five surfaces (`cs.SURFACE_ORDER`),
+    so "none left" is a real and acceptable outcome here.
+    """
+    body = _text((priority.get("description") or {}).get("text"))
+    if not body:
+        return None
+
+    # Matched with the same token map that validates HP product names
+    # everywhere else, rather than by pulling a name out of the sentence.
+    # `_HP_MENTION_RE` captures at most two capitalised words, so it read
+    # "HP Workforce Experience Platform" as "Workforce Experience" - a name no
+    # line map contains, which quietly cost every catalyst its proof.
+    lowered = body.lower()
+    lines: list = []
+    for tokens, canonical in grounding.HP_LINE_TOKENS:
+        if not any(token in lowered for token in tokens):
+            continue
+        for line in cs.lines_for_hp_line(canonical):
+            if line not in lines:
+                lines.append(line)
+    if not lines:
+        return None
+
+    try:
+        return cs.allocate(db, lines, industry=industry,
+                           taken=taken, used_here=here)
+    except Exception:
+        logger.exception("executive_dashboard: proof allocation failed for %r",
+                         _text(priority.get("title"))[:60])
+        return None
 
 
 def _describe(priority: dict, hp_facts: list, company: str = "") -> dict:
@@ -488,8 +568,33 @@ def _describe(priority: dict, hp_facts: list, company: str = "") -> dict:
 
     body = _text(raw.get("description"))
     ok, reason = _validate_description(body, evidence_text, hp_text)
+
+    # One retry for length alone. The first answer was valid - grounded,
+    # correctly figured, no invented product - it was merely short, and
+    # discarding it for that would publish the fallback instead.
+    if ok and len(body.split()) < DESCRIPTION_MIN_WORDS:
+        try:
+            retry = generate_gpt4o_json_completion(
+                DESCRIPTION_SYSTEM,
+                user + NL + NL
+                + ("The previous answer was %d words. The brief is %d to %d. "
+                   "Expand it using only the evidence and approved statements "
+                   "above - more of the account's own specifics, no padding "
+                   "and no new claims."
+                   % (len(body.split()), DESCRIPTION_MIN_WORDS,
+                      DESCRIPTION_MAX_WORDS))) or {}
+            longer = _text(retry.get("description"))
+            good, _why = _validate_description(longer, evidence_text, hp_text)
+            if good and len(longer.split()) > len(body.split()):
+                body = longer
+        except Exception:
+            logger.exception("executive_dashboard: description retry failed")
+
     if ok:
-        return {"text": body, "written_by": "model", "validated": True}
+        short = len(body.split()) < DESCRIPTION_MIN_WORDS
+        return {"text": body, "written_by": "model", "validated": True,
+                "word_count": len(body.split()),
+                "below_brief": short or None}
 
     logger.info("executive_dashboard: description rejected for %r - %s",
                 priority["title"][:60], reason)
@@ -803,8 +908,23 @@ def generate_dashboard_intelligence(account_id: str, mode: str | None = None) ->
             priority["evidence_strength"] = None
 
     hp_facts = _hp_facts(db, account_id)
+    industry = cs.normalise_industry(
+        _text((summary_card or {}).get("industry_classification")))
+    elsewhere = cs.cited_above(db, account_id, cs.SURFACE_EXEC)
+    here: set = set()
+
     for priority in priorities:
         priority["description"] = _describe(priority, hp_facts, company)
+        # Proof is attached AFTER the paragraph is written, to the HP offering
+        # the paragraph actually named. The tuning logic is explicit that a case
+        # study "must not create the account need" - so it can only follow a
+        # recommendation that the account's own evidence already earned, and a
+        # catalyst whose paragraph names no HP offering gets none.
+        proof = _proof_for(db, priority, industry, elsewhere, here)
+        priority["hp_proof_point"] = (proof or {}).get("text")
+        priority["hp_proof_point_detail"] = proof
+        if proof and proof.get("study_id"):
+            here.add(proof["study_id"])
 
     reported = _reported_metrics(account_id)
     _publish_metrics(db, account_id, reported, now)

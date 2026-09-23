@@ -35,7 +35,15 @@ from app.services.extractors.grounding import (
 
 logger = logging.getLogger(__name__)
 
-MAP_NARRATIVE_PROMPT_VERSION = 1
+# 2 - "what_it_means" is written to the tuning logic's 70-100 word band. Rule 6
+#     said "keep it to one sentence each" two lines under a request for two to
+#     three, and the shorter instruction won: the median card ran 30 words.
+MAP_NARRATIVE_PROMPT_VERSION = 2
+
+# Recommendation Tuning Logic, Technographic Map: "What It Means for HP +
+# supported motion. Minimum 70 words; maximum 100 words."
+MEANING_MIN_WORDS = 70
+MEANING_MAX_WORDS = 100
 
 # Wording that would turn a positioning line into an unsupported product claim.
 BANNED = [
@@ -56,10 +64,12 @@ Produce ONE account-level summary:
     observed - do not say what the account plans, wants or needs.
 
 Produce, per category:
-  - what_it_means: 2 to 3 sentences on what this category means for HP. Name at
-    least one vendor actually detected in that category and say what the stated
-    relationship means in practice for a seller. Be specific to these vendors,
-    not to the category in the abstract.
+  - what_it_means: BETWEEN 70 AND 100 WORDS on what this category means for HP.
+    Name at least one vendor actually detected in that category, say what the
+    stated relationship means in practice for a seller, and say which motion it
+    supports - displacement, attach, upgrade, coexistence or whitespace. Be
+    specific to these vendors, not to the category in the abstract. Use the room
+    for the detected estate, not for restating the relationship label.
 
 Produce, per vendor:
   - hp_product: the HP line to position, chosen ONLY from allowed_hp_products.
@@ -76,7 +86,9 @@ RULES, all mandatory:
 4. Never claim the account has a problem, plan or intention. You are describing
    a technology's relationship to HP, not the customer's state.
 5. No superlatives and no guarantees.
-6. Keep it to one sentence each. Plain, specific, no marketing language.
+6. "play_text" is ONE sentence. That limit is for play_text alone - it is not
+   the limit for what_it_means, which has its own word band above.
+7. Plain, specific, no marketing language.
 
 Return JSON only:
 {"strategic_read": "...",
@@ -98,6 +110,53 @@ def _is_acceptable(text: str, account_corpus) -> bool:
     # A positioning line has no business carrying numbers. If one appears, it
     # must at least trace to the account's own data.
     return not account_corpus.unsourced_numbers(text)
+
+
+def _retry_meaning(category: dict, account_name: str, current: str,
+                   account_corpus) -> str | None:
+    """One rewrite of a single category's meaning, for length alone.
+
+    Returns the new text only when it is grounded AND closer to the band than
+    what it would replace - a rewrite asked for length can come back shorter,
+    and publishing the worse of two valid answers would be a regression.
+    """
+    def miss(text):
+        n = len(str(text or "").split())
+        if not n:
+            return 10 ** 6
+        return max(MEANING_MIN_WORDS - n, n - MEANING_MAX_WORDS, 0)
+
+    try:
+        again = generate_gpt4o_json_completion(SYSTEM_PROMPT, json.dumps({
+            "account_name": account_name,
+            "allowed_hp_products": HP_PRODUCT_LINES,
+            "note": ("Rewrite what_it_means for this one category only. The "
+                     "previous answer was %d words and the brief is %d to %d. "
+                     "Use the extra room for the detected vendors and the motion "
+                     "they support, not for padding, and add no new fact."
+                     % (len(current.split()), MEANING_MIN_WORDS, MEANING_MAX_WORDS)),
+            "categories": [{
+                "category_key": category.get("category_key"),
+                "category_name": category.get("category_name"),
+                "hp_relationship": category.get("hp_relationship_label"),
+                "vendors": [{"vendor_name": v.get("vendor_name"),
+                             "description": v.get("description"),
+                             "is_whitespace": bool(v.get("is_whitespace"))}
+                            for v in (category.get("vendors") or [])],
+            }],
+        }, ensure_ascii=False)) or {}
+    except Exception:
+        logger.exception("map narrative: meaning retry failed for %s",
+                         category.get("category_key"))
+        return None
+
+    for entry in (again.get("categories") or []):
+        if not isinstance(entry, dict):
+            continue
+        text = _clean(entry.get("what_it_means"))
+        if text and _is_acceptable(text, account_corpus) and miss(text) < miss(current):
+            return text
+    return None
 
 
 def generate_map_narrative(categories: list, account_texts: list,
@@ -148,7 +207,16 @@ def generate_map_narrative(categories: list, account_texts: list,
 
         meaning = _clean(entry.get("what_it_means"))
         if meaning and _is_acceptable(meaning, account_corpus):
+            # Length, retried one category at a time. Asked for six at once the
+            # model writes about thirty words each whatever the brief says;
+            # asked for one it writes to the brief.
+            if not (MEANING_MIN_WORDS <= len(meaning.split()) <= MEANING_MAX_WORDS):
+                longer = _retry_meaning(category, account_name, meaning,
+                                        account_corpus)
+                if longer:
+                    meaning = longer
             category["what_it_means"] = meaning
+            category["what_it_means_word_count"] = len(meaning.split())
             generated += 1
         elif meaning:
             rejected.append("%s.what_it_means" % category.get("category_key"))
