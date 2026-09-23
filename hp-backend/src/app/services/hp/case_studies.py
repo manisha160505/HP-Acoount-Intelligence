@@ -392,8 +392,14 @@ SURFACE_OPPORTUNITIES = "opportunity_narrative_plays"
 SURFACE_MESSAGING = "messaging_pillars_output"
 SURFACE_CONTENT = "content_generated_assets"
 
+# The Executive Dashboard picks LAST. Its catalysts are derived from whatever
+# the account's own filings say, so the HP line a catalyst touches is the most
+# flexible of any surface - it can nearly always take the next-best study, while
+# the Objection Playbook's five fixed areas cannot.
+SURFACE_EXEC = "exec_strategic_priorities"
+
 SURFACE_ORDER = (SURFACE_OBJECTIONS, SURFACE_OPPORTUNITIES,
-                 SURFACE_MESSAGING, SURFACE_CONTENT)
+                 SURFACE_MESSAGING, SURFACE_CONTENT, SURFACE_EXEC)
 
 # Where each surface keeps the records that carry a proof point. A path is
 # walked by `_walk` below; "[]" means "every item in this list".
@@ -402,6 +408,7 @@ SURFACE_PATHS = {
     SURFACE_OPPORTUNITIES: ("data", "opportunity_plays", "[]"),
     SURFACE_MESSAGING: ("data", "pillars", "[]"),
     SURFACE_CONTENT: ("data", "assets", "[]", "generated"),
+    SURFACE_EXEC: ("data", "priorities", "[]"),
 }
 
 

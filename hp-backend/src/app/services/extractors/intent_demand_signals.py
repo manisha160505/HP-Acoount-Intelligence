@@ -37,11 +37,13 @@ other account evidence already supports; on its own it recommends nothing.
 """
 
 import json
+import logging
 import math
 import re
 from collections import Counter
 from datetime import UTC, datetime
 
+from app.core.llm import generate_gpt4o_json_completion
 from app.database.mongodb import get_db
 from app.services.extractors.datasets import (
     account_domain,
@@ -50,7 +52,9 @@ from app.services.extractors.datasets import (
     read_dataset_rows,
     requires_local_datasets,
 )
-from app.services.hp import intent_topic_map as tm
+from app.services.hp import evidence_tier, intent_topic_map as tm
+
+logger = logging.getLogger(__name__)
 
 
 def _find_file_path(rel_path: str) -> str | None:
@@ -467,6 +471,165 @@ def _carries_buying_signal(entry: dict | None) -> bool:
     return bool(entry) and bool(entry.get("has_signal")) and not entry.get("quality_flags")
 
 
+# Recommendation Tuning Logic, Intent & Demand: "So What for HP by prioritized
+# theme. Minimum 80 words; maximum 90 words."
+SO_WHAT_MIN_WORDS = 80
+SO_WHAT_MAX_WORDS = 90
+
+SO_WHAT_SYSTEM = """You write the "So What for HP" for one HP category's research intent.
+
+You are given, for each category, ONLY: its intent score out of 100, its trend,
+its buying stage, its research volume, the topics researched, and any supporting
+signal the account's own detected technology confirms. Nothing else is known.
+
+Rules, all mandatory:
+1. Use ONLY the figures and terms given for that category. Never introduce a
+   number, product, customer, date or technology that is not there.
+2. Preserve what each field means. "Trend = Increasing" means research activity
+   is increasing, NOT that purchasing is increasing. A detected technology means
+   it was detected, not that the account wants to replace it.
+3. MATCH THE CLAIM TO THE TIER. Each category carries an evidence_tier and the
+   permitted_language for it.
+   - "Opportunity": may say the combined evidence supports an HP-addressable
+     opportunity and name a seller focus.
+   - "Conversation Starter": say it creates a relevant conversation or may
+     warrant discussion. Do NOT say the account needs, plans, is evaluating or
+     is replacing anything.
+   - "Context Only": present it as seller context. Do NOT create an HP
+     opportunity or recommend a product. A category whose stage reads "No
+     Signal" is exactly this - say plainly that intent alone does not support
+     prioritising it.
+4. Each category is a SEPARATE seller conversation. Do not merge them, and do
+   not let a strong category lend its weight to a weak one.
+5. Between 80 and 90 words. Plain prose, no bullet points, no headings.
+
+Return JSON only:
+{"categories": [{"category": "<name exactly as given>", "so_what": "..."}]}"""
+
+
+def _category_tier(entry: dict) -> dict:
+    """The evidence tier one intent category earns.
+
+    `has_signal` is the category file's own judgement that the score means
+    something, and it decides `hp_addressable`: a category reading No Signal
+    establishes no HP-addressable opportunity however high a neighbouring
+    category scores. The score is passed as `category_intent` so banned output
+    K1 applies here too - detected technology stops corroborating a category
+    whose own intent is zero.
+    """
+    primary = entry.get("primary") or {}
+    signals = entry.get("supporting_signals") or []
+
+    rows = [{"dataset": "hp_category_intent"}]
+    if any(sig.get("confirmed") for sig in signals):
+        rows.append({"dataset": "technographics"})
+
+    return evidence_tier.tier_for(
+        rows,
+        hp_addressable=bool(primary.get("has_signal")),
+        category_intent=primary.get("score"))
+
+
+def _so_what(company: str, categories: list) -> dict:
+    """One "So What for HP" per category, strongest first. {category: text}.
+
+    One call for every category rather than one each: the document asks for
+    these to read as separate conversations that a seller compares, and the
+    model can only avoid lending a strong category's weight to a weak one if it
+    sees them together.
+    """
+    scored = [c for c in categories if (c.get("primary") or {}).get("score") is not None]
+    if not scored:
+        return {}
+    scored = sorted(scored, key=lambda c: c["primary"].get("score") or 0, reverse=True)
+
+    payload = []
+    for entry in scored:
+        primary = entry.get("primary") or {}
+        tier = entry.get("evidence_tier") or {}
+        payload.append({
+            "category": entry.get("category"),
+            "hp_play": entry.get("hp_play"),
+            "score_out_of_100": primary.get("score"),
+            "trend": primary.get("trend_label"),
+            "buying_stage": primary.get("stage"),
+            "research_volume": primary.get("research_volume"),
+            "topics_researched": primary.get("topics_researched") or [],
+            "confirmed_supporting_technology": [
+                {"signal": sig.get("signal"), "technologies": sig.get("technologies") or []}
+                for sig in (entry.get("supporting_signals") or [])
+                if sig.get("confirmed")],
+            "evidence_tier": tier.get("tier"),
+            "permitted_language": tier.get("permitted_language"),
+        })
+
+    try:
+        raw = generate_gpt4o_json_completion(
+            SO_WHAT_SYSTEM,
+            json.dumps({"company": company, "categories": payload},
+                       ensure_ascii=False)) or {}
+    except Exception:
+        logger.exception("intent: So What generation failed")
+        return {}
+
+    out = {}
+    for item in (raw.get("categories") or []):
+        if not isinstance(item, dict):
+            continue
+        name = _clean(item.get("category"))
+        text = " ".join(str(item.get("so_what") or "").split())
+        if name and text:
+            out[name] = text
+
+    # Length, retried one category at a time.
+    #
+    # Asked for five paragraphs in one response the model answers each at about
+    # forty words whatever the brief says - the same behaviour Live Signals
+    # showed with eight signals in one call. Asked for one it writes to the
+    # brief. Only the categories that actually missed are retried, and a retry
+    # that comes back no closer is discarded rather than published.
+    by_name = {e["category"]: e for e in payload}
+    for name, text in list(out.items()):
+        if SO_WHAT_MIN_WORDS <= len(text.split()) <= SO_WHAT_MAX_WORDS:
+            continue
+        entry = by_name.get(name)
+        if not entry:
+            continue
+        try:
+            again = generate_gpt4o_json_completion(
+                SO_WHAT_SYSTEM,
+                json.dumps({"company": company, "categories": [entry],
+                            "note": ("The previous answer for this category was "
+                                     "%d words. The brief is %d to %d. Use the "
+                                     "extra room for this category's own figures "
+                                     "and researched topics, not for padding, and "
+                                     "do not raise the claim above its tier."
+                                     % (len(text.split()), SO_WHAT_MIN_WORDS,
+                                        SO_WHAT_MAX_WORDS))},
+                           ensure_ascii=False)) or {}
+        except Exception:
+            logger.exception("intent: So What retry failed for %s", name)
+            continue
+
+        for item in (again.get("categories") or []):
+            if not isinstance(item, dict):
+                continue
+            longer = " ".join(str(item.get("so_what") or "").split())
+            if longer and _closer_to_band(longer, text):
+                out[name] = longer
+    return out
+
+
+def _closer_to_band(candidate: str, current: str) -> bool:
+    """Whether `candidate` misses the word band by less than `current`."""
+    def miss(text):
+        n = len(str(text or "").split())
+        if not n:
+            return 10 ** 6
+        return max(SO_WHAT_MIN_WORDS - n, n - SO_WHAT_MAX_WORDS, 0)
+    return miss(candidate) < miss(current)
+
+
 def _summarise(topics: list[dict], category_file: dict, inventory: list[dict]) -> dict:
     """Category scores from the file, supporting signals from Bombora and the
     account's technology, and theme summaries from the included topics only."""
@@ -507,6 +670,10 @@ def _summarise(topics: list[dict], category_file: dict, inventory: list[dict]) -
     # vs internally mapped scores". The categories stay ordered by the file's own
     # score, so every score is shown as received and none is hidden by a caveat.
     categories.sort(key=lambda c: -((c["primary"] or {}).get("score") or 0))
+
+    # The tier each category earns, before any prose is written against it.
+    for entry in categories:
+        entry["evidence_tier"] = _category_tier(entry)
 
     ai = next(t for t in themes if t["theme"] == tm.THEME_AI)
     if ai["topic_count"]:
@@ -704,13 +871,29 @@ def extract_intent_demand_signals(account_id: str) -> list[dict]:
                                    "category_file": category_file}
     else:
         included = [t for t in topics if t["included"]]
+
+        # The feature's mandatory seller-facing output: "So What for HP by
+        # prioritized theme". Written after the tiers, so each category's prose
+        # is held to what its own evidence permits.
+        summary = _summarise(topics, category_file, inventory)
+        company = _clean((provenance.get("account_match") or {}).get("provider_company"))             or _clean((provenance.get("account_match") or {}).get("account_domain"))
+        try:
+            so_what = _so_what(company, summary.get("hp_categories") or [])
+        except Exception:
+            logger.exception("intent: So What unavailable")
+            so_what = {}
+        for entry in (summary.get("hp_categories") or []):
+            text = so_what.get(entry.get("category"))
+            entry["so_what"] = text or None
+            entry["so_what_word_count"] = len(text.split()) if text else None
+
         summary_payload["status"] = "available"
         summary_payload["data"] = {
             **provenance,
             "availability": "available",
             "source_a_status": source_a_unavailable,
             "category_file": {k: v for k, v in category_file.items() if k != "categories"},
-            **_summarise(topics, category_file, inventory),
+            **summary,
             "hp_category_total": len(tm.HP_CATEGORIES),
             "total_topics_count": len(topics),
             "included_topics_count": len(included),

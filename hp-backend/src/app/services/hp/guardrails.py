@@ -208,6 +208,57 @@ def prose_guardrail_faults(text: str, facts: list) -> list:
     return faults
 
 
+# Wording that asserts the ACCOUNT has a settled requirement, project or
+# buying motion. Section C allows that only at the Opportunity tier: a
+# Conversation Starter may say a topic "creates a relevant conversation", and
+# must not say the account needs, plans, is evaluating or is replacing
+# anything.
+#
+# Deliberately anchored to the account, not to HP. "Wolf Pro Security requires
+# a supported Windows PC" is an approved product condition and must survive;
+# "Astra requires endpoint protection" is the claim the section forbids.
+_CONFIRMED_NEED_RE = re.compile(
+    r"\b(?:needs?|requires?|is\s+seeking|are\s+seeking|is\s+looking\s+(?:to|for)|"
+    r"plans?\s+to|intends?\s+to|is\s+evaluating|are\s+evaluating|"
+    r"is\s+replacing|are\s+replacing|is\s+refreshing|are\s+refreshing|"
+    r"has\s+budget|have\s+budget|is\s+procuring|is\s+purchasing|will\s+purchase|"
+    r"has\s+a\s+requirement|is\s+in\s+market)\b", re.I)
+
+# Sentence openers that make the subject HP rather than the account, so the
+# same verb is a product condition instead of an account claim.
+_HP_SUBJECT_RE = re.compile(r"^\s*(?:hp\b|wolf\b|poly\b|z\s+by\s+hp\b|elite|pro\b)", re.I)
+
+TIER_OPPORTUNITY = "Opportunity"
+
+
+def tier_language_faults(text: str, tier: str) -> list:
+    """Where this prose claims more than its evidence tier permits.
+
+    Section C attaches permitted language to each tier, and until this existed
+    the tier was published beside prose that ignored it - a card resting on one
+    pipeline could still read as a settled requirement.
+
+    Only the account half is tested. A sentence whose subject is HP is stating
+    a product condition, which every tier may state.
+    """
+    faults = []
+    said = " ".join(str(text or "").split())
+    if not said or str(tier or "") == TIER_OPPORTUNITY:
+        return faults
+
+    for sentence in re.split(r"(?<=[.;])\s+", said):
+        if _HP_SUBJECT_RE.match(sentence):
+            continue
+        hit = _CONFIRMED_NEED_RE.search(sentence)
+        if hit:
+            faults.append(
+                "tier %s: says %r, which states a confirmed need, project or "
+                "buying motion that only the Opportunity tier may claim"
+                % (tier or "Context Only", hit.group(0)))
+            break
+    return faults
+
+
 def approve_rulebook_facts(rule, account_country, now=None):
     """The same filter, applied to a rule of the HP 220 Account Rulebook.
 

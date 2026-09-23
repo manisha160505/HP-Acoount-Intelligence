@@ -8,6 +8,7 @@ from fastapi.responses import StreamingResponse
 
 from app.database.mongodb import get_db
 from app.errors import APIError, ErrorCode
+from app.services.extractors.datasets import account_data_as_of
 
 logger = logging.getLogger(__name__)
 from app.core.deps import require_admin_role, require_user_role
@@ -571,6 +572,9 @@ def get_account_feature_widgets(
 
     extracted_widgets_map = {w["widget_key"]: w for w in stored}
 
+    # One snapshot date for every widget in this response, computed once.
+    as_of = account_data_as_of(account_id)
+
     responses = []
 
     for contract in widget_contracts:
@@ -593,7 +597,13 @@ def get_account_feature_widgets(
                 "source_datasets": contract["source_datasets"],
                 "source_fields": contract["source_fields"],
                 "display_order": contract["display_order"],
-                "updated_at": updated_at_str
+                "updated_at": updated_at_str,
+                # Section E of the Recommendation Tuning Logic. `updated_at`
+                # says when this widget was generated; this says when the
+                # ACCOUNT DATA behind it was loaded, so a dashboard opened
+                # months later still names the snapshot it reasoned from.
+                "data_as_of_date": as_of.get("as_of"),
+                "data_as_of": as_of,
             })
         else:
             responses.append({

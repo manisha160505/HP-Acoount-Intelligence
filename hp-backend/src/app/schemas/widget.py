@@ -34,6 +34,13 @@ class WidgetResponse(BaseModel):
     source_fields: list[str]
     display_order: int
     updated_at: str | None = None
+    # When the ACCOUNT DATA behind this widget was loaded, which is not
+    # `updated_at` - that is when the widget was last generated. The
+    # Recommendation Tuning Logic section E asks for the former on every feature
+    # output, so that a dashboard opened four months after ingestion still says
+    # which snapshot it is reasoning from.
+    data_as_of_date: str | None = None
+    data_as_of: dict[str, Any] | None = None
 
 class ContentGenerateRequest(BaseModel):
     persona_id: str

@@ -87,6 +87,57 @@ def _parse(full_path: str) -> list[dict]:
         return []
 
 
+def account_data_as_of(account_id: str) -> dict:
+    """When this account's data snapshot was ingested.
+
+    Recommendation Tuning Logic, section E: "The data_as_of_date is the date the
+    dataset was ingested / loaded into the engine, not the date the seller
+    happens to open the dashboard. For example, if the account data is ingested
+    in September 2026 and the dashboard is opened four months later, the UI
+    should still show that the recommendation is based on data as of September
+    2026."
+
+    Read from `uploaded_at`, never `updated_at`. The latter moves whenever a
+    file record is touched - a status change, a re-parse - and on this account
+    it reads today while the data itself was loaded on 4 September. Reporting
+    that would be exactly the "date the seller happens to open the dashboard"
+    the section rules out.
+
+    The headline `as_of` is the most recent active upload: that is the newest
+    thing the engine could have reasoned from. `by_dataset` is published beside
+    it because the section only promises one shared date "if all data pipelines
+    are ingested together", and a caller should be able to see when they were
+    not.
+    """
+    dates: dict = {}
+    try:
+        rows = get_db()["account_data_files"].find(
+            {"account_id": str(account_id), "status": "active"},
+            {"dataset_key": 1, "uploaded_at": 1})
+    except Exception:
+        logger.exception("data as-of: could not read the file records for %s",
+                         account_id)
+        return {"as_of": None, "by_dataset": {}, "datasets": 0}
+
+    for row in rows:
+        key = str(row.get("dataset_key") or "").strip()
+        stamp = row.get("uploaded_at")
+        if not key or not stamp:
+            continue
+        day = stamp.date().isoformat() if hasattr(stamp, "date") else str(stamp)[:10]
+        # The newest load of a dataset that has been supplied more than once.
+        if day > dates.get(key, ""):
+            dates[key] = day
+
+    return {
+        "as_of": max(dates.values()) if dates else None,
+        "by_dataset": dict(sorted(dates.items())),
+        "datasets": len(dates),
+        "note": ("The date this account's data was loaded into the engine, not "
+                 "the date this page was opened."),
+    }
+
+
 def read_dataset_records(account_id: str, dataset_key: str,
                          strict: bool = True) -> list[dict]:
     """Rows for one dataset.

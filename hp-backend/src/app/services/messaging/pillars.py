@@ -51,7 +51,18 @@ logger = logging.getLogger(__name__)
 
 INDEX = "content_messaging"
 WIDGET_KEY = "messaging_pillars_output"
-PROMPT_VERSION = 2
+# 3 - target_role is chosen from this account's own mapped roster and checked
+#     against it, instead of being invented ("IT decision-makers").
+# 4 - the pillar is written to the tuning logic's 90-150 word band, retried
+#     one pillar at a time when it comes back short.
+PROMPT_VERSION = 4
+
+# Recommendation Tuning Logic, Content Messaging: "Minimum 90 words; maximum
+# 150 words per pillar", measured across the challenge and the benefit.
+PILLAR_MIN_WORDS = 90
+PILLAR_MAX_WORDS = 150
+
+NL = chr(10)
 
 MIN_PILLARS = 3
 MAX_PILLARS = 5
@@ -342,6 +353,8 @@ Rules that are checked in code after you answer:
    labelled "HP account analysis" and must not read like a sourced claim.
 
 WRITE PROPERLY, NOT IN SUMMARY:
+- "challenge_detail" and "hp_benefit" together must run BETWEEN 90 AND 150 WORDS.
+  Use the room for this account's own specifics, never for padding.
 - "challenge_detail" is 3-6 sentences telling the account's situation in its own
   specifics - the systems it runs, what it is hiring for or researching, what it
   has announced, and what that implies about its hardware. Use the dates, names
@@ -396,6 +409,47 @@ def _account_evidence_block(db, account_id: str, limit: int = 90) -> str:
         for row in rows[:limit])
 
 
+def _matched_role(written: str, roles: list) -> str:
+    """The roster role this text names, or "" when it names none."""
+    want = " ".join(str(written or "").split()).lower()
+    if not want:
+        return ""
+    for role in roles:
+        low = role.lower()
+        if want == low or want in low or low in want:
+            return role
+    return ""
+
+
+def _stakeholder_roles(db, account_id: str) -> list:
+    """The roles this account actually has, from the Stakeholder Map.
+
+    The Recommendation Tuning Logic lists "Stakeholder context" among this
+    feature's inputs. Without it `target_role` was written by the model from
+    nothing, and came back as "IT decision-makers" on three of five pillars for
+    an account whose mapped roster names a Head of Information Technology
+    Project Procurement, a Head of End User Service Level Operations and a Head
+    of Data Governance. Inventing a persona is the one thing this codebase does
+    not do anywhere else.
+
+    Titles only. Names, emails and contact ids stay out of the messaging
+    prompt - a pillar speaks to a ROLE, and naming an individual in marketing
+    copy is a different decision that nobody has asked for.
+    """
+    grid = (db["account_widgets"].find_one(
+        {"account_id": account_id,
+         "widget_key": "stakeholder_contacts_grid"}) or {}).get("data") or {}
+
+    roles, seen = [], set()
+    for contact in (grid.get("contacts") or []):
+        title = _text(contact.get("title") or contact.get("job_title"))
+        if not title or title.lower() in seen:
+            continue
+        seen.add(title.lower())
+        roles.append(title)
+    return roles
+
+
 def _hp_fact_block(db, account_id: str) -> tuple:
     """Approved HP facts with their evidence ids, for the prompt."""
     rows = list(db[ev.COLLECTION].find(
@@ -418,8 +472,10 @@ def _restrictions(db, account_id: str) -> dict:
 
 
 def _build_pillar(account_id: str, challenge: dict, hp_facts: str,
-                  account_facts: str, restrictions: dict) -> dict | None:
+                  account_facts: str, restrictions: dict,
+                  roles: list | None = None) -> dict | None:
     """One pillar. Returns None when nothing survives validation."""
+    roles = list(roles or [])
     guard = []
     if restrictions["superlatives_blocked"]:
         guard.append("Superlative claims are not permitted in %s - do not write "
@@ -447,6 +503,11 @@ def _build_pillar(account_id: str, challenge: dict, hp_facts: str,
         "",
         "HP lines you may name: %s" % ", ".join(HP_PRODUCT_LINES),
         "",
+        "ROLES MAPPED AT THIS ACCOUNT - \"target_role\" must be one of these, "
+        "copied exactly, or left empty. Do not invent a role, and do not write "
+        "a generic one such as \"IT decision-makers\":",
+        "; ".join(roles) or "(no stakeholder map for this account - leave it empty)",
+        "",
         "\n".join(guard),
         "",
         "Return JSON only.",
@@ -455,6 +516,34 @@ def _build_pillar(account_id: str, challenge: dict, hp_facts: str,
     raw = generate_gpt4o_json_completion(PILLAR_SYSTEM, user) or {}
     if not isinstance(raw, dict):
         return None
+
+    # Length, retried for this pillar alone. A pillar is already generated one
+    # at a time, so the short answer is not the model dividing its budget - it
+    # is the sentence counts above reading as the real brief. Saying the band
+    # back to it, with what it actually wrote, is what lands it.
+    written = len((_text(raw.get("challenge_detail")) + " "
+                   + _text(raw.get("hp_benefit"))).split())
+    if written and not (PILLAR_MIN_WORDS <= written <= PILLAR_MAX_WORDS):
+        try:
+            again = generate_gpt4o_json_completion(
+                PILLAR_SYSTEM,
+                user + NL + NL
+                + ("The previous answer ran %d words across challenge_detail and "
+                   "hp_benefit. The brief is %d to %d. Rewrite it using only the "
+                   "evidence and approved statements above - more of this "
+                   "account's own specifics, no padding and no new claims."
+                   % (written, PILLAR_MIN_WORDS, PILLAR_MAX_WORDS))) or {}
+            if isinstance(again, dict):
+                longer = len((_text(again.get("challenge_detail")) + " "
+                              + _text(again.get("hp_benefit"))).split())
+
+                def _miss(n):
+                    return max(PILLAR_MIN_WORDS - n, n - PILLAR_MAX_WORDS, 0) if n else 10 ** 6
+
+                if _text(again.get("hp_benefit")) and _miss(longer) < _miss(written):
+                    raw = again
+        except Exception:
+            logger.exception("pillars: length retry failed")
 
     benefit = _text(raw.get("hp_benefit"))
     if not benefit:
@@ -490,7 +579,10 @@ def _build_pillar(account_id: str, challenge: dict, hp_facts: str,
         "hp_benefit_label": "HP account analysis",
         "hp_solutions": products,
         "proof_points": proofs,
-        "target_role": _text(raw.get("target_role")),
+        # Enum-checked against the account's own roster, the way HP product
+        # names are checked against HP_PRODUCT_LINES. An invented role is
+        # dropped rather than published.
+        "target_role": _matched_role(_text(raw.get("target_role")), roles),
         "next_step": _text(raw.get("next_step")),
         "rejected_products": rejected_products,
         "dropped_proofs": dropped_proofs,
@@ -874,13 +966,14 @@ def generate_messaging_pillars(account_id: str, mode: str | None = None) -> dict
             "%d unresolvable evidence id(s))" % (len(candidates), invalid_count))
 
     hp_facts, _hp_ids = _hp_fact_block(db, account_id)
+    roles = _stakeholder_roles(db, account_id)
     account_facts = _account_evidence_block(db, account_id)
     restrictions = _restrictions(db, account_id)
 
     pillars = []
     for challenge in challenges[:MAX_PILLARS + 2]:
         pillar = _build_pillar(account_id, challenge, hp_facts,
-                               account_facts, restrictions)
+                               account_facts, restrictions, roles)
         if pillar:
             pillars.append(pillar)
         if len(pillars) >= MAX_PILLARS + 2:

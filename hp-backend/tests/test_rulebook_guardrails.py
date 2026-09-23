@@ -270,3 +270,45 @@ class TestARefusedRuleSaysWhereItWouldHaveAppeared:
     def test_a_part_b_label_is_not_forced_into_a_hardware_category(self):
         from app.services.hp.recommendations import _blocked_placement
         assert _blocked_placement("WOLF 09")["category_key"] is None
+
+
+class TestTheProseMayNotClaimMoreThanItsTier:
+    """Section C attaches permitted language to each tier. Until this was
+    enforced the tier was published beside prose that ignored it, so a card
+    resting on one pipeline could still read as a settled requirement."""
+
+    def test_a_conversation_starter_may_not_state_a_need(self):
+        from app.services.hp.guardrails import tier_language_faults
+        assert tier_language_faults(
+            "Astra requires endpoint protection across its estate.",
+            "Conversation Starter")
+
+    def test_context_only_may_not_state_a_plan(self):
+        from app.services.hp.guardrails import tier_language_faults
+        assert tier_language_faults(
+            "Astra plans to refresh its notebook fleet this year.",
+            "Context Only")
+
+    def test_an_opportunity_may(self):
+        """"May state that the combined evidence indicates or supports an
+        HP-addressable opportunity." Two pipelines earned that."""
+        from app.services.hp.guardrails import tier_language_faults
+        assert tier_language_faults(
+            "Astra requires endpoint protection across its estate.",
+            "Opportunity") == []
+
+    def test_a_product_condition_survives_every_tier(self):
+        """"Wolf Pro Security requires a supported Windows PC" is a fact about
+        HP, not a claim about the account. Losing it would strip the approved
+        conditions the rulebook insists travel with a claim."""
+        from app.services.hp.guardrails import tier_language_faults
+        assert tier_language_faults(
+            "Wolf Pro Security requires a supported Windows 10 or 11 PC.",
+            "Context Only") == []
+
+    def test_conversation_language_is_what_the_tier_wants(self):
+        from app.services.hp.guardrails import tier_language_faults
+        assert tier_language_faults(
+            "The detected estate creates a relevant conversation about fleet "
+            "management, and may warrant discussion with IT procurement.",
+            "Conversation Starter") == []
