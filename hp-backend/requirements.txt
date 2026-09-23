@@ -24,6 +24,11 @@ lightrag-hku==1.5.7
 pymupdf>=1.26,<2
 python-pptx>=1.0,<2
 
+# scripts/load_rulebook.py reads the HP 220 Account Rulebook, which the client
+# supplies as .docx. It is the authority for which HP offering fits which
+# verified account signal, so the parse has to be exact rather than inferred.
+python-docx>=1.1,<2
+
 # Observability. The app degrades cleanly without these - every OpenTelemetry
 # import is deferred into a function body and guarded, so a missing package
 # turns tracing or metrics off and logs one line rather than failing to start.

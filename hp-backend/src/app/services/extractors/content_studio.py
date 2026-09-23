@@ -320,7 +320,7 @@ def _read_dataset_records(account_id: str, dataset_key: str) -> list[dict]:
 # takes seller input; the other four key on the account's data alone.
 
 # Bump when the prompt changes so cached assets are regenerated.
-CONTENT_PROMPT_VERSION = "2026-09-17.1"    # HP case studies fill the Proof Points section
+CONTENT_PROMPT_VERSION = "2026-09-23.1"    # HP lines offered now match the enum that validates them
 
 # The one mandated section an HP case study belongs in. Named rather than
 # repeated, because the contract, the fallback template and the attach all have
@@ -450,8 +450,14 @@ CONTENT_TYPE_CONTRACTS = {
     },
 }
 
-HP_LINES_FOR_PROMPT = ("Z by HP Workstations, HP Elite / Pro PCs (EliteBook, ProBook), HP Wolf Security, "
-                       "Poly Collaboration (Poly Studio), HP Enterprise Print / MPS, HP Anyware / DaaS")
+# The HP lines the prompt may name, from the one list that also validates the
+# answer. Typed out by hand it listed six while `HP_PRODUCT_LINES` accepted
+# seventeen, so an asset could never name HP Care Pack Services, the lifecycle
+# or deployment services, HP IQ or Original HP Ink - all of which the rulebook
+# now carries rules for and all of which would have passed validation. Asking
+# for a name the validator rejects, or withholding one it accepts, are the same
+# bug in opposite directions; deriving it makes both impossible.
+HP_LINES_FOR_PROMPT = ", ".join(HP_PRODUCT_LINES)
 
 # Soft warnings only - never block publication. Kept to genuinely hollow phrases;
 # the confident HP voice of the reference emails ("At HP, we are impressed by ...",
@@ -627,10 +633,11 @@ def _persona_rule(kind: str, company_name: str, contract: dict) -> str:
     )
 
 
-def _request_fingerprint(evidence_cells: list[str], persona: dict, content_type: str,
+def _request_fingerprint(evidence_cells: list[str], persona: dict, content_type: str,  # noqa: PLR0913, PLR0917 - cache keys, each one a thing that must invalidate
                          topic: str, additional_context: str,
                          instructions_text: str, guardrails_text: str,
-                         case_studies_version: str = "") -> str:
+                         case_studies_version: str = "",
+                         cited_above: set | None = None) -> str:
     # The account team's instructions and guardrails are part of the key, so an
     # edit to them regenerates on the next request instead of serving the cache.
     payload = {
@@ -645,6 +652,9 @@ def _request_fingerprint(evidence_cells: list[str], persona: dict, content_type:
         # A one-pager stores the case study in its Proof Points section, so
         # reloading the corpus has to rebuild the assets that quote it.
         "case_studies_version": case_studies_version,
+        # Content Studio chooses last, so a study claimed by any of the three
+        # standing surfaces changes what this asset may cite.
+        "cited_above": sorted(cited_above or ()),
     }
     return hashlib.sha256(
         json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
@@ -1216,7 +1226,8 @@ def _build_generation_context(db, account_id: str, persona_id: str, content_type
 
     fingerprint = _request_fingerprint(list(labels.values()), persona, content_type, topic, additional_context,
                                        instructions_text, guardrails_text,
-                                       cs.knowledge_version(db))
+                                       cs.knowledge_version(db),
+                                       cs.cited_above(db, account_id, cs.SURFACE_CONTENT))
 
     return {
         "contract": contract, "persona": persona, "company_name": company_name,
@@ -1531,8 +1542,14 @@ def generate_content_asset(account_id: str, persona_id: str, content_type: str,
         for product in asset.get("hp_products") or []:
             proof_lines.extend(line for line in cs.lines_for_hp_line(product)
                                if line not in proof_lines)
-        proof = cs.proof_point_for(
-            db, proof_lines, industry=cs.normalise_industry(ctx.get("industry") or ""))
+        # Content Studio chooses last (see `cs.SURFACE_ORDER`): a written asset
+        # is generated on request and is the cheapest thing to re-run, so it
+        # yields to the three standing surfaces rather than taking a customer
+        # one of them is already built around.
+        proof = cs.allocate(
+            db, proof_lines,
+            industry=cs.normalise_industry(ctx.get("industry") or ""),
+            taken=cs.cited_above(db, account_id, cs.SURFACE_CONTENT))
         if proof:
             for written in [asset, *[v["asset"] for v in variants]]:
                 _attach_proof_point(written, proof, contract)

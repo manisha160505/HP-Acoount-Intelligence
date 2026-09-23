@@ -76,6 +76,14 @@ LINE_COLLABORATION = "collaboration"
 LINE_DEVICE_SERVICES = "device_services"
 LINE_SITEPRINT = "siteprint"
 
+# PROVISIONAL - replace when the Rulebook is wired in.
+#
+# Which HP offering belongs to which line is read here from keywords, and those
+# keywords are this module's own reading rather than anything the client
+# defined. HP_220_Account_Combined_Product_Services_and_Solutions_Rulebook is
+# the file that settles it authoritatively; it is not loaded yet. When it is,
+# this table should give way to its definitions rather than being kept in step
+# with them by hand.
 OFFERING_KEYWORDS = (
     (LINE_3D, ("multi jet fusion", "jet fusion", "metal jet", "3d print", "3d")),
     (LINE_SITEPRINT, ("siteprint",)),
@@ -118,6 +126,38 @@ HP_LINE_TO_LINES = {
     "poly collaboration": (LINE_COLLABORATION,),
     "hp anyware / daas": (LINE_DEVICE_SERVICES, LINE_WXP),
     "hp workforce experience platform": (LINE_WXP,),
+
+    # The service lines the rulebook names. Added when the Objection Playbook
+    # was wired to it: without them "Client Devices" reached no rule at all,
+    # because every rule that speaks to a client-device objection - support
+    # cover, deployment, lifecycle - sits in one of these three families and
+    # this map had no route to them.
+    #
+    # All three are device services in the sense this codebase already uses the
+    # term: they attach to a client estate rather than constituting one. That
+    # is the same reading under which "HP Elite / Pro PCs" already carries
+    # LINE_DEVICE_SERVICES beside LINE_PC.
+    "hp care pack services": (LINE_DEVICE_SERVICES,),
+    "hp deployment & configuration services": (LINE_DEVICE_SERVICES,),
+    "hp lifecycle & sustainability services": (LINE_DEVICE_SERVICES,),
+
+    # Ink is print supplies, so it reaches the print line and nothing else.
+    "original hp ink": (LINE_PRINT,),
+
+    # HP IQ for Enterprise is deliberately absent. It is the rulebook's
+    # enterprise-AI family and no canonical line here corresponds to it;
+    # attaching it to the workforce line would be a guess, and IQ rules already
+    # reach the Opportunity Map through their own routing type.
+
+    # Alternate spellings of lines already mapped above. The same canonical
+    # lines, so a study or rule tagged with either wording resolves identically
+    # rather than falling through as unmapped.
+    "hp elitebook": (LINE_PC, LINE_DEVICE_SERVICES),
+    "hp probook": (LINE_PC, LINE_DEVICE_SERVICES),
+    "poly studio": (LINE_COLLABORATION,),
+    "hp enterprise printing & mps": (LINE_PRINT,),
+    "hp anyware": (LINE_DEVICE_SERVICES, LINE_WXP),
+    "hp daas": (LINE_DEVICE_SERVICES, LINE_WXP),
 }
 
 # The Objection Playbook's five fixed areas. An area is a technology category
@@ -141,9 +181,14 @@ SCORE_HAS_CHALLENGE = 1
 # thing here, so anything narrated outranks it.
 SCORE_NARRATED = 2
 
-# How far down the ranked list a caller will look. Features that cite one study
-# per card walk it themselves to skip customers already used elsewhere.
+# How far down the ranked list a caller will look.
 PROOF_POINT_CANDIDATES = 5
+
+# How deep `allocate` searches for an uncited study. Deeper than any single
+# surface needs, because several surfaces draw on one line - four reach device
+# services - and the fourth still has to find something rather than give up and
+# repeat what the first took.
+ALLOCATION_DEPTH = 25
 
 
 # The corpus labels each study with one of eleven industries. An account's
@@ -307,6 +352,10 @@ def as_proof_point(study: dict) -> dict | None:
     outcome = str(study.get("outcome") or "").strip()
     return {
         "text": ("%s %s" % (headline, outcome)).strip() if outcome else headline,
+        # Carried so cross-surface allocation can match on identity rather than
+        # on a display name. Two HP studies can share a customer name; none
+        # share an id.
+        "study_id": str(study.get("_id") or "") or None,
         "customer": study.get("customer"),
         "industry": study.get("industry"),
         "hp_product": study.get("product_featured"),
@@ -318,6 +367,176 @@ def as_proof_point(study: dict) -> dict | None:
         "source_url": study.get("source_url"),
         "source": "hp_case_studies",
     }
+
+
+# The surfaces that cite a case study, in the order they get to choose.
+#
+# Allocation has to be DETERMINISTIC, not first-come. If each feature simply
+# avoided whatever the others had already stored, the answer would depend on
+# which feature was regenerated last: regenerate the map and it takes one
+# study; regenerate messaging first and messaging takes it instead. A seller
+# would watch references shuffle between surfaces for no reason they could see.
+#
+# So the order is fixed here and a surface yields ONLY to the surfaces above it.
+# Whatever regenerates, the same surface wins the same study.
+#
+# Ordered by how little freedom each has. The Objection Playbook's five areas
+# are fixed, always rendered, and land on the corpus's thinnest lines
+# (collaboration holds one study, security one, print two), so it chooses
+# first. The Opportunity Map's plays vary with the account but each names its
+# own HP lines. Messaging pillars name several lines each, so they have the
+# most room to move. Content Studio is one asset generated on request and is
+# the easiest thing to re-run, so it goes last.
+SURFACE_OBJECTIONS = "objection_reframe_cards"
+SURFACE_OPPORTUNITIES = "opportunity_narrative_plays"
+SURFACE_MESSAGING = "messaging_pillars_output"
+SURFACE_CONTENT = "content_generated_assets"
+
+SURFACE_ORDER = (SURFACE_OBJECTIONS, SURFACE_OPPORTUNITIES,
+                 SURFACE_MESSAGING, SURFACE_CONTENT)
+
+# Where each surface keeps the records that carry a proof point. A path is
+# walked by `_walk` below; "[]" means "every item in this list".
+SURFACE_PATHS = {
+    SURFACE_OBJECTIONS: ("data", "cards", "[]"),
+    SURFACE_OPPORTUNITIES: ("data", "opportunity_plays", "[]"),
+    SURFACE_MESSAGING: ("data", "pillars", "[]"),
+    SURFACE_CONTENT: ("data", "assets", "[]", "generated"),
+}
+
+
+def _quality_tier(study: dict, industry: str) -> tuple:
+    """What a reader would actually notice, highest first.
+
+    Spreading customers across surfaces is only worth doing while it costs
+    nothing a seller can see. These are the two things they would see:
+
+      - whether the study is in their prospect's industry, which is what makes
+        a proof point persuasive rather than merely true;
+      - whether it tells a story at all, rather than being the bare attribution
+        written for a source that described no engagement.
+
+    Everything else `_score` weighs - a shared signal tag, a stated challenge -
+    orders equally good candidates and is invisible on the page. So variety may
+    trade those away, and may never trade these.
+    """
+    return (
+        1 if industry and _norm(study.get("industry")) == _norm(industry) else 0,
+        0 if study.get("attribution_only") else 1,
+    )
+
+
+def _walk(node, path):
+    """Every value at `path` inside a widget document."""
+    if not path:
+        yield node
+        return
+    head, rest = path[0], path[1:]
+    if head == "[]":
+        for item in (node if isinstance(node, list) else []):
+            yield from _walk(item, rest)
+    elif isinstance(node, dict):
+        yield from _walk(node.get(head), rest)
+
+
+def _study_identity(study: dict) -> str:
+    """A corpus row, in the same terms a stored proof point is recognised by."""
+    return _identity({"study_id": str(study.get("_id") or ""),
+                      "customer": study.get("customer")})
+
+
+def _identity(detail) -> str:
+    """How a stored proof point is recognised again.
+
+    The id when one is there. A record written before proof points carried an
+    id falls back to the customer name, so an older widget still reserves its
+    study instead of being silently re-cited somewhere else.
+    """
+    if not isinstance(detail, dict):
+        return ""
+    return str(detail.get("study_id") or "").strip() or _norm(detail.get("customer"))
+
+
+def cited_above(db, account_id: str, surface: str) -> set:
+    """Studies already cited on this account by higher-priority surfaces.
+
+    Read from what those surfaces actually stored rather than from a ledger of
+    our own: the widgets ARE the record, so there is no second copy to fall out
+    of step when one is regenerated, deleted, or was written before any of this
+    existed.
+
+    A surface not named in `SURFACE_ORDER` yields to all of them, which is the
+    safe default for a caller added later.
+    """
+    try:
+        rank = SURFACE_ORDER.index(surface)
+    except ValueError:
+        rank = len(SURFACE_ORDER)
+
+    taken: set = set()
+    for above in SURFACE_ORDER[:rank]:
+        try:
+            doc = db["account_widgets"].find_one(
+                {"account_id": account_id, "widget_key": above})
+        except Exception:
+            logger.exception("case studies: could not read %s for allocation", above)
+            continue
+        for record in _walk(doc or {}, SURFACE_PATHS[above]):
+            if not isinstance(record, dict):
+                continue
+            key = _identity(record.get("hp_proof_point_detail"))
+            if key:
+                taken.add(key)
+    return taken
+
+
+def allocate(db, lines, industry: str = "", signals=None,
+             taken=None, used_here=None) -> dict | None:
+    """The best study for one card, preferring one nothing else has cited.
+
+    Two exclusion sets, because the two kinds of repeat are not equally bad:
+
+    `used_here` - studies this surface has already cited on an earlier card. A
+    HARD constraint. The five objection cards, or the pillars of one message
+    house, are read together as a single document, so the same customer twice
+    reads as a mistake rather than as emphasis. Rather than repeat, this
+    returns None and the card carries no proof point.
+
+    `taken` - studies cited on OTHER surfaces, from `cited_above`. A SOFT
+    constraint. Nobody reads the objection playbook and the message house side
+    by side, so a genuinely apt study appearing on both is a far smaller cost
+    than a weak study, or an empty slot, on either. It is avoided where the
+    corpus allows and repeated where it does not.
+
+    Variety is a tie-break, never a trade. The best candidate sets the quality
+    bar (`_quality_tier`) and an uncited study is preferred only if it meets
+    that same bar - so spreading customers about can never cost the reader an
+    industry match or a narrated story. Where a line holds a single study -
+    collaboration holds exactly one - the cross-surface repeat is correct and
+    is returned.
+
+    Returns the stored shape, or None when the lines reach nothing usable.
+    """
+    spoken = {str(t) for t in (taken or []) if str(t)}
+    mine = {str(t) for t in (used_here or []) if str(t)}
+
+    candidates = [study for study in match(db, lines, industry, signals,
+                                           limit=ALLOCATION_DEPTH)
+                  if str(study.get("headline") or "").strip()
+                  and _study_identity(study) not in mine]
+    if not candidates:
+        return None
+
+    bar = _quality_tier(candidates[0], industry)
+    for study in candidates:
+        if _quality_tier(study, industry) < bar:
+            break           # ranked by tier, so nothing below here clears it
+        if _study_identity(study) not in spoken:
+            return as_proof_point(study)
+
+    # Everything good enough is cited on another surface. Repeat the best of
+    # them rather than drop to a weaker study or leave the card empty.
+    return as_proof_point(candidates[0])
 
 
 def proof_point_for(db, lines, industry: str = "", signals=None) -> dict | None:

@@ -58,8 +58,29 @@ class FakeCollection:
         return next((s for s in self.studies if s.get("_id") == wanted), None)
 
 
-def fake_db(studies, version=None):
-    return {cs.COLLECTION: FakeCollection(studies, version)}
+class FakeWidgets:
+    """The account_widgets collection, holding whatever other surfaces stored."""
+
+    def __init__(self, widgets=None):
+        self.widgets = widgets or {}
+
+    def find_one(self, query, _projection=None):
+        return self.widgets.get(query.get("widget_key"))
+
+
+def fake_db(studies, version=None, widgets=None):
+    return {cs.COLLECTION: FakeCollection(studies, version),
+            "account_widgets": FakeWidgets(widgets)}
+
+
+def cited(surface, *customers):
+    """A stored widget for `surface` citing each of `customers`."""
+    records = [{"hp_proof_point_detail": {"study_id": c.lower(), "customer": c}}
+               for c in customers]
+    path = cs.SURFACE_PATHS[surface]
+    if surface == cs.SURFACE_CONTENT:
+        records = [{"generated": r} for r in records]
+    return {surface: {"data": {path[1]: records}}}
 
 
 def study(customer, product, industry="Other", tags=(), outcome=None,
@@ -441,3 +462,179 @@ class TestAnUnpublishableStudyNeverWinsACard:
 
     def test_a_corpus_of_only_unpublishable_studies_returns_none(self):
         assert cs.proof_point_for(fake_db([self.HEADLESS]), (cs.LINE_PC,)) is None
+
+
+class TestCrossSurfaceAllocation:
+    """The same customer was appearing on an objection card, an opportunity
+    play and a messaging pillar at once. The corpus is lopsided - most of it is
+    3D printing, which no PC or print surface can reach - so the handful of
+    studies a given account CAN use get drawn on by every feature.
+
+    Spreading them is worth doing, but only while it is free. These tests are
+    mostly about the cases where it is not free and the repeat is correct.
+    """
+
+    def test_an_uncited_study_is_preferred_over_a_repeat(self):
+        """Two equally good studies, one already on another surface: take the
+        other one."""
+        point = cs.allocate(fake_db(CORPUS), (cs.LINE_PC,),
+                            taken={"kinepolis"})
+        assert point["customer"] == "DLG"
+
+    def test_the_best_study_is_still_taken_when_nothing_is_cited(self):
+        assert cs.allocate(fake_db(CORPUS), (cs.LINE_PC,))["customer"] \
+            == cs.proof_point_for(fake_db(CORPUS), (cs.LINE_PC,))["customer"]
+
+    def test_a_line_with_one_study_repeats_rather_than_going_empty(self):
+        """Collaboration holds exactly one study in the real corpus. A seller
+        reading the Collaboration card needs it whether or not the Poly play
+        cites the same customer - silence would be the worse answer."""
+        only = study("Ulster University", "", "Education",
+                     offering="HP Managed Collaboration Services")
+        point = cs.allocate(fake_db([only]), (cs.LINE_COLLABORATION,),
+                            taken={"ulster university"})
+        assert point is not None
+        assert point["customer"] == "Ulster University"
+
+    def test_variety_never_costs_the_industry_match(self):
+        """An in-industry study that is already cited beats an out-of-industry
+        one that is free. Relevance is what makes a proof point persuasive;
+        being unused is not something the reader can even see."""
+        relevant = study("Local Manufacturer", "HP EliteBook",
+                         "Industrial Manufacturing", outcome="It went well.")
+        point = cs.allocate(fake_db([relevant, *CORPUS]), (cs.LINE_PC,),
+                            industry="Industrial Manufacturing",
+                            taken={"local manufacturer"})
+        assert point["customer"] == "Local Manufacturer"
+
+    def test_variety_never_costs_a_narrated_study(self):
+        """A bare attribution - written where the source described no
+        engagement - must not be preferred just because it is unused."""
+        bare = {
+            "_id": "bare", "customer": "City of Somewhere",
+            "product_featured": "HP EliteBook", "hp_offering": None,
+            "industry": "Other", "signal_tags": [], "attribution_only": True,
+            "headline": "HP published a case study with City of Somewhere.",
+            "outcome": None, "challenge": None,
+            "source_url": "https://h20195.www2.hp.com/somewhere.pdf",
+        }
+        point = cs.allocate(fake_db([bare, *CORPUS]), (cs.LINE_PC,),
+                            taken={"kinepolis", "dlg", "carlsberg"})
+        assert point["customer"] in ("Kinepolis", "DLG")
+
+    def test_it_carries_the_study_id_so_the_next_caller_can_exclude_it(self):
+        point = cs.allocate(fake_db(CORPUS), (cs.LINE_SECURITY,))
+        assert point["study_id"] == "city of bonn"
+
+    def test_an_unreachable_line_still_returns_nothing(self):
+        assert cs.allocate(fake_db(CORPUS), ()) is None
+        assert cs.allocate(fake_db([]), (cs.LINE_PC,)) is None
+
+
+class TestWhoYieldsToWhom:
+    """Allocation must not depend on which feature was regenerated last. A
+    surface yields only to the surfaces above it in `SURFACE_ORDER`, so the
+    same surface wins the same study however the account is rebuilt."""
+
+    def test_the_objection_playbook_yields_to_nobody(self):
+        """It chooses first: its five areas are fixed and land on the corpus's
+        thinnest lines, so it has the least room to move."""
+        widgets = cited(cs.SURFACE_OPPORTUNITIES, "Kinepolis")
+        assert cs.cited_above(fake_db(CORPUS, widgets=widgets),
+                              "acct", cs.SURFACE_OBJECTIONS) == set()
+
+    def test_the_map_yields_to_the_playbook_only(self):
+        widgets = {**cited(cs.SURFACE_OBJECTIONS, "Kinepolis"),
+                   **cited(cs.SURFACE_MESSAGING, "DLG")}
+        taken = cs.cited_above(fake_db(CORPUS, widgets=widgets), "acct",
+                               cs.SURFACE_OPPORTUNITIES)
+        assert taken == {"kinepolis"}
+
+    def test_content_studio_yields_to_all_three(self):
+        widgets = {**cited(cs.SURFACE_OBJECTIONS, "Kinepolis"),
+                   **cited(cs.SURFACE_OPPORTUNITIES, "DLG"),
+                   **cited(cs.SURFACE_MESSAGING, "Carlsberg")}
+        taken = cs.cited_above(fake_db(CORPUS, widgets=widgets), "acct",
+                               cs.SURFACE_CONTENT)
+        assert taken == {"kinepolis", "dlg", "carlsberg"}
+
+    def test_a_surface_nobody_declared_yields_to_everything(self):
+        """The safe default for a feature wired up later: it takes what is
+        left rather than displacing a surface that is already built."""
+        widgets = cited(cs.SURFACE_OBJECTIONS, "Kinepolis")
+        assert cs.cited_above(fake_db(CORPUS, widgets=widgets),
+                              "acct", "some_new_widget") == {"kinepolis"}
+
+    def test_an_older_record_without_an_id_still_reserves_its_study(self):
+        """Proof points stored before they carried an id fall back to the
+        customer name, so a rebuild does not re-cite them elsewhere."""
+        widgets = {cs.SURFACE_OBJECTIONS: {"data": {"cards": [
+            {"hp_proof_point_detail": {"customer": "Kinepolis"}}]}}}
+        assert cs.cited_above(fake_db(CORPUS, widgets=widgets),
+                              "acct", cs.SURFACE_MESSAGING) == {"kinepolis"}
+
+    def test_a_surface_with_no_proof_points_reserves_nothing(self):
+        widgets = {cs.SURFACE_OBJECTIONS: {"data": {"cards": [
+            {"area": "Print / MPS", "hp_proof_point_detail": None}]}}}
+        assert cs.cited_above(fake_db(CORPUS, widgets=widgets),
+                              "acct", cs.SURFACE_MESSAGING) == set()
+
+    def test_a_missing_widget_is_not_an_error(self):
+        assert cs.cited_above(fake_db(CORPUS), "acct", cs.SURFACE_CONTENT) == set()
+
+    def test_every_surface_has_a_path(self):
+        """A surface in the order with no path would raise mid-generation."""
+        for surface in cs.SURFACE_ORDER:
+            assert surface in cs.SURFACE_PATHS
+
+
+class TestTheTwoKindsOfRepeat:
+    """A repeat inside one document and a repeat across two features are not
+    the same mistake, so they are not held to the same rule.
+
+    The five objection cards, or the pillars of one message house, are read
+    together: the same customer twice there reads as an error. Nobody reads the
+    playbook and the message house side by side, so a genuinely apt study on
+    both costs far less than a weak one - or an empty slot - on either.
+    """
+
+    def test_the_same_customer_is_never_cited_twice_in_one_document(self):
+        """Even when it means the card carries nothing. This is the bug that
+        prompted the split: one message house named the same university on two
+        pillars because every alternative was taken elsewhere."""
+        only_one = [study("Ulster University", "", "Education",
+                          offering="HP Managed Collaboration Services")]
+        assert cs.allocate(fake_db(only_one), (cs.LINE_COLLABORATION,),
+                           used_here={"ulster university"}) is None
+
+    def test_a_cross_feature_repeat_is_allowed_when_nothing_else_fits(self):
+        """The same line, the same single study, but cited by another feature
+        rather than by this one: the seller still gets it."""
+        only_one = [study("Ulster University", "", "Education",
+                          offering="HP Managed Collaboration Services")]
+        point = cs.allocate(fake_db(only_one), (cs.LINE_COLLABORATION,),
+                            taken={"ulster university"})
+        assert point["customer"] == "Ulster University"
+
+    def test_the_two_sets_apply_together(self):
+        """`used_here` removes a study from consideration entirely; `taken`
+        only pushes it down. With the best study used on this document and the
+        second cited elsewhere, the third - uncited and equally good - wins."""
+        point = cs.allocate(fake_db(CORPUS), (cs.LINE_PC,),
+                            taken={"dlg"}, used_here={"kinepolis"})
+        assert point["customer"] == "Carlsberg"
+
+    def test_a_study_used_here_is_never_returned_even_if_it_is_the_best(self):
+        for _ in range(3):      # the ranking is stable, so this is not luck
+            point = cs.allocate(fake_db(CORPUS), (cs.LINE_PC,),
+                                used_here={"kinepolis"})
+            assert point["customer"] != "Kinepolis"
+
+    def test_an_empty_slot_beats_a_duplicate_but_not_a_weaker_study(self):
+        """Within one document the fallback is silence; across documents it is
+        the best study again. Both are checked here so the two paths cannot be
+        collapsed back into one by a later edit."""
+        assert cs.allocate(fake_db(CORPUS), (cs.LINE_SECURITY,),
+                           used_here={"city of bonn"}) is None
+        assert cs.allocate(fake_db(CORPUS), (cs.LINE_SECURITY,),
+                           taken={"city of bonn"})["customer"] == "City of Bonn"
