@@ -1,0 +1,85 @@
+# HP 220: open decisions and data questions before the 220-account run
+
+Each line has the question, what we will do if you do not say otherwise (our default), and what it affects. Approve or change each line; the approved list becomes the spec for the run.
+
+## A. Account list and identity
+
+1. **Canonical account list.** 220 Explorium workbooks resolve to 217 unique domains and identity is blank on 209 of 219 rows. Question: please confirm the master list of 220 accounts with one authoritative domain each. Default: the domains in our _RUN_SUMMARY (account_domains) are used. Affects: every join, every feature.
+2. **Entity scope: global parent or APAC entity?** The vendor logged 141 field conflicts and kept the global HQ value each time (e.g. Jabil recorded as Waltham, MA, not Shatin, HK). Question: which entity does each account represent, and how does it reconcile with the parent/child mapping? Default: APAC entity as named in the account list; firmographics shown as delivered. Affects: firmographics, hierarchy, Executive Dashboard.
+3. **Shared domains: jabil.com and mufg.jp.** Two companies each. Question: which entity owns the rows, or treat each pair as one account? Default: Jabil Malaysia and MUFG Japan keep the rows; Jabil Singapore and the Bangkok branch stay near-empty. Affects: jobs, tech detections, news, connections for those four accounts.
+4. **Blank domains.** Public Bank and Westpac have no Company Domain. Question: confirm publicbankgroup.com and westpac.com.au. Default: use those. Affects: all datasets for those two accounts.
+5. **Vendor domain mismatches.** Posco, Pilipinas Shell, Shiseido, Stanley Electric use different domains across Explorium and PredictLeads/news. Question: confirm the four aliases; is there a stable account ID we can join on instead? Default: our four aliases stay; any others we have not found stay silently unmatched. Affects: hiring, news, tech detections for those accounts.
+6. **pbebank.com.** Named Public Bank Bhd by Exa and Public Bank Lao by PredictLeads. Question: which company? Default: Public Bank Bhd; the PredictLeads rows are withheld. Affects: one account.
+7. **Hierarchy.** Company Hierarchy sheet present for 165 of 220. Confirmed on 23 Sep: use Explorium hierarchy; blank parent = ignore. Question: for the 55 accounts with no sheet, show "no hierarchy data" or leave the section out? Default: show "no hierarchy data". Affects: firmographics, Executive Dashboard.
+
+## B. Contacts (blocks five features)
+
+8. **Contact file.** Contacts sheet is empty in all 220 Explorium workbooks (0/220). The Apollo_All_Contacts file listed in v4 has not been received. Question: when does it arrive, and keyed on what (domain, company name, or seed ID)? Default: none; Stakeholder Map, Opportunity Map, Objection Playbook, Content Studio and Message Evaluator do not run until it arrives and is checked.
+9. **Role coverage.** 15 Sep minutes: ~30 buying-committee roles, with 5 to 8 more in a second round. Question: is the first file the ~30 roles only, and does a second file follow? Default: we build on whatever arrives first and regenerate once when the second round lands. Affects: the same five features, twice.
+10. **Empty-state rule.** Question: for an account with zero matched contacts, show an empty Stakeholder Map with a clear message, or hide the feature? Default: show the empty state with the message. Affects: UI for every account until contacts arrive.
+
+## C. Compliance and filings
+
+11. **Which filings source is authoritative.** We have filings 1.csv (your email says 184 of 220 accounts; the file shows 186 unique company names; our earlier count was 192 rows-based) and, from 23 Sep, the PredictLeads SEC Filings sheet to be used alongside it. In our per-account split, compliance_filings is currently 0/220 because neither is mapped yet. Question: confirm the count and send the list of accounts without filings and why. Default: filings 1.csv plus PredictLeads SEC Filings, merged on domain, document_url first, source_page_url as fallback, records with neither excluded (as you confirmed on 18 Sep). Affects: Executive Dashboard financials and priorities, Strategy Chat.
+12. **Documents, not just links.** The filings file gives URLs. To extract financial figures and strategic priorities we need the documents themselves ingested. Question: do you expect financial figures and priorities for all ~184 accounts from these documents, and if so, are the URLs directly downloadable, or will you provide the files? Default: we ingest what is downloadable from the URLs; accounts whose links fail show "no filing data". Affects: Executive Dashboard, and ingestion time before the run.
+13. **Window.** 15 Sep minutes: last 12 months, latest four quarters. Question: confirm 12 months; older filings are dropped at ingestion. Default: 12 months. Affects: Executive Dashboard.
+14. **Two NZ accounts linked to Malaysian parents** in the filings file, and one account whose filing links point at a different company. Question: we will send the three names today; please correct the mapping. Default: those records are excluded until corrected.
+15. **Stock Exchange data.** Named in Konika's 3 Sep email but never attached. Question: is it superseded by filings 1.csv? Default: yes, superseded.
+
+## D. News (Google News RSS and Exa)
+
+16. **Precedence.** Both feeds have the same schema; your 18 Sep email says together they cover all 220. We merged and removed 356 duplicates. Question: when both carry the same event with different details, which wins? Default: Exa row kept, RSS row kept as a supporting reference. Affects: Live Signals.
+17. **Undated rows.** 5,120 of 9,221 Exa rows have no event date; 3 RSS rows carry 1970-01-01. Question: can Exa be re-exported with ISO dates, and can the epoch dates be returned blank? Default: undated rows are shown as context only and never scored for recency; epoch dates treated as blank. Affects: Live Signals, urgency, every time-based signal.
+18. **Exa dataset key.** Exa is not an accepted dataset key in the input contract, so today it is filed under Google News and labelled as such on screen. Question: add a dedicated Exa key, or accept the label? Default: add the key and label the source correctly. Affects: source labels on every news card.
+19. **12-month window and 20-signal cap.** Anything older than 12 months is discarded at ingestion; about half of all news supplied never reaches the product (14,289 rows to 7,614; RSS 7,913 to 2,893; Exa 9,221 to 2,491). Question: keep the 12-month window and the 20-signals-per-account cap? Default: keep both. Affects: Live Signals volume.
+20. **Low-confidence news.** Both feeds carry a relevance rating (RSS: 4,049 Low vs 1,771 High) that nothing reads today. Question: exclude Low, down-weight it, or leave as is? Default: down-weight Low, never let it outrank High. Affects: Live Signals ranking.
+21. **Corrupted text and HTML.** 28 cells with replacement characters (mostly Thai), 73 files with raw HTML. Question: re-export Exa as UTF-8, or accept loss? Default: HTML stripped on ingest; corrupted cells shown as delivered. Affects: news cards for Thai accounts.
+
+## E. Intent, hiring, technographics coverage
+
+22. **Coverage gaps.** Intent scores 173/220, job openings 175/220, technographics 207/220, PredictLeads news events 213/220, tech detections 216/220. Question: genuine no-data or partial pulls that can be re-run? Default: treated as source limits; the widget shows an empty state naming the missing dataset. Affects: Intent & Demand, hiring signals, Technographic Map for those accounts.
+23. **219 vs 220.** The PredictLeads file is named 219 accounts against 220 workbooks. Question: which account is absent and why? Default: the account shows empty PredictLeads datasets.
+24. **Duplicate record IDs inside PredictLeads.** technology_detections 715, news_events 68, subpages 10, job_openings 2. Question: genuine duplicates to remove at source, or distinct records? Default: de-duplicated on ID on ingest, first row kept. Affects: technology counts, news counts.
+25. **Vendor-flagged bad rows.** PredictLeads review_records name rows it was not confident about (e.g. a court job wrongly attributed, "MISO" read as a framework). Question: drop flagged IDs before import? Default: dropped. Affects: hiring and technographic signals.
+26. **490 logged corrections** (283 technology detections, 186 job openings, mostly dates recovered from Excel serials). Question: is the delivered file post-correction, or is the log a to-do list? Default: assumed post-correction. Affects: dates on hiring and tech signals.
+27. **Job status.** Confirmed 16 Sep: include blank and closed status within 12 months for the Urgency Score. Question: for hiring widgets, label as "postings seen" with open count beside it? Default: yes. Affects: hiring widgets.
+28. **Datasets with no consumer.** Twelve PredictLeads keys upload but produce nothing (subpages 15,163 rows, connections 19,583, social 7,668, products 2,246, similar companies 1,010, and others). On 23 Sep you said: use SEC Filings and the Products sheet; ignore the rest. Question: confirm the Products sheet is for recommendations only and the others can be removed from the upload contract so nothing silently does nothing. Default: Products consumed by recommendations; the rest removed from the contract.
+
+## F. Recommendation logic and rules
+
+29. **Relevance threshold.** RESOLVED by Dhruvi (24 Sep, WhatsApp): use-case/opportunity fit, not exact-name matching. Ladder: technology or integration-route match alone = possible fit, not recommended; plus related evidence from another pipeline = "may be relevant / explore fit"; combined evidence satisfies the applicable Rulebook conditions = "relevant". Case study is relevant when it supports the same use case/opportunity already established. Seller-facing wording must reflect the certainty. Three small confirmations remain (29a to 29c).
+29a. **"Possible fit" on screen?** When only the integration route is detected, show it as a context line ("Intune detected; possible WXP integration route, no need evidenced") or not at all? Default: context line, never in the recommendation.
+29b. **Conditions the data cannot evaluate** (seat counts for Care Pack, WXP tier, print volumes). Treat as unmet, so the offering can reach "may be relevant" but never "relevant"? Default: yes.
+29c. **Use-case vocabulary for case studies.** Matching by use case needs a table from Rulebook opportunity type to case-study solution area and tags. We will write it and send it for approval. Default: our table until you change it.
+
+30. **Where the Rulebook and case studies appear.** RESOLVED by Dhruvi's 18 Sep file explanation: both are available to all 11 features and "do not need to be available for every recommendation", i.e. used only where a relevant signal exists. No decision needed; item 29 (what counts as a relevant match) is the only open part.
+
+31. **Case-study cleaning.** 384 rows reduced to 89 distinct studies; the file marks every row validated, including broken ones, publication date is empty on all rows, and some outcome figures are corrupted. Question: confirm our cleaned set of 89 is acceptable as the proof-point corpus. Default: the 89 are used; corrupted figures never shown.
+32. **"Recommendation for HP" on the Technographic Map.** Maps to two categories with the Rulebook as it stands; extending to every section or merging graph-based recommendations is a much heavier pipeline. Question: keep as is for the 25th and extend after? Default: keep as is.
+33. **3D printing route.** The logic deck makes 3D the lead in its own Astra example and half the case studies are 3D, but the Rulebook has no 3D rules and no workstation rules. Question: do we build a 3D route, and from what rules? Default: 3D intent is scored but produces no product recommendation until rules exist.
+34. **One recommendation or five routes.** The Rulebook says one main recommendation; the deck wants all five routes kept with a verdict each. Question: one primary plus secondaries? Default: one primary, others listed as secondary.
+35. **Confidence tiers T0 to T3.** Required on every signal, never defined. Question: what does each tier mean, and is the case-study file's T0/T2 the same scale? Default: mapped to our existing High/Medium/Low.
+36. **Live Signal tiers and minimum score.** The new scoring defines neither S/A/B/C tiers nor a minimum publish score; without them every signal shows, including undated ones. Question: keep our tiers and cut-off? Default: keep both.
+37. **Technographic Map risk labels.** You asked on 23 Sep what logic assigns Low/Medium/High Risk. We owe you that; it will be in the decision list. Default: current logic stays until you change it.
+38. **Services rules that need inputs the data does not have.** Care Pack rules select on PC seat count (250 / 1,000 / 5,000); we hold only an employee range. WXP tier mapping, print licences, scan credits and Poly premium tier are marked "pending HP input" in the Rulebook. Question: seat count entered by the seller? (Lifecycle file: confirmed 18 Sep as not used, so no question.) Default: seat-count rules do not fire; the pending items show as pending, not guessed.
+
+## F2. Case-study and Rulebook placement per feature (from comparing v4 with the build)
+
+44. **Four features have no row in the v4 logic table:** Objection Playbook, Content Studio, Strategy Chat, Message Evaluator. The 18 Sep sheet lists both files against them but gives no method. Today: Objection Playbook attaches one case study per area card, Content Studio fills the "Proof Points" section of each asset, Strategy Chat cites the proof points already attached to plays and objection cards, Message Evaluator uses Rulebook facts only. Question: confirm these four methods, or supply rows for them. Default: as built.
+45. **Four features where v4 asks for case-study proof and the build has none:** Live Signals (Implication for HP), Intent & Demand (So What by theme), Stakeholder Map (HP Play Focus), Technographic Map (What It Means for HP; the BHP example attaches Kansas to the WXP motion and NASA to the engineering motion). Question: add proof to these four for the 25th, or after? Default: after, on the same deterministic matcher.
+46. **Opportunity Map service plays.** Today proof is attached to hardware play cards only; service plays (WXP, Care, Poly, Print) get none, although the BHP example is a WXP opportunity with a case study. Question: attach proof to service plays too? Default: yes.
+47. **Evidence-tier gate.** v4: Rulebook and case studies only after the account evidence establishes an Opportunity (two independent pipelines); never at Conversation Starter or Context Only. Today the matcher gates on the HP line named in the text, and the Objection Playbook attaches one study per fixed area regardless of account evidence. Question: apply the tier gate to proof everywhere, which will remove proof from most objection cards on thin accounts? Default: apply it.
+48. **Region preference.** v4 section H: prefer APJ/APAC proof for APJ accounts where comparable proof exists. Today: industry preference only. Question: add region as the second sort key? Default: yes.
+49. **Lifecycle file: contradiction.** The 18 Sep sheet says "not used as of now"; v4 section J says check the Lifecycle file before surfacing any offering listed in it and block it after its end date. Question: which applies for the 25th? Default: 18 Sep (not used) until the date cells (two to six unlabelled dates per cell) are clarified.
+50. **Product-line mapping for matching.** Today a study is mapped to an HP line by a keyword table marked provisional in code, not by the Rulebook's offering IDs. Question: accept for the 25th and switch to Rulebook IDs after? Default: yes.
+
+## G. Product behaviour
+
+39. **Empty-state behaviour.** For any dataset missing for an account (items 7, 10, 22, 23), show the widget with a "no data from source" message, or hide it? Default: show with the message, so nobody reads absence as a bug.
+40. **Source labels.** Raw file names on the UI create a negative impression (23 Sep call). Question: agree the replacement label set (e.g. "Firmographics", "Hiring", "News", "Filings", "Intent"). Default: those five plus "HP Rulebook" and "HP case study".
+41. **Data as-of date.** v4 asks for one shared data_as_of_date per snapshot. Question: the date of the 23 Sep drop, or the date of the final consolidated drop? Default: the date of the final consolidated drop.
+
+## H. Environment
+
+42. **GCP.** Access not granted as of this morning. Once granted: a few hours to redeploy and load. Question: which project ID, and is the Cloud Run region fixed? Default: as in the attached access request.
+43. **Inspection window.** When the contact file and the remaining data arrive, we need time to check them against this list before they enter the pipeline. Question: agree that a late-night drop is checked the next working morning, not run overnight. Default: yes.
