@@ -4,7 +4,7 @@ One short file per issue where we asked, the client replied (or promised a deliv
 
 | File | Issue | Status | Ids |
 |---|---|---|---|
-| `01_canonical_account_list.md` | Canonical account list with one domain each | OPEN | D1 |
+| `01_canonical_account_list.md` | Canonical account list with one domain each | PARTIALLY RESOLVED | D1 |
 | `02_entity_scope_resolved_ambiguously.md` | Entity scope: APAC entity or global parent | PARTIALLY RESOLVED | D2 |
 | `03_shared_domains_name_country_columns.md` | Shared domains jabil.com and mufg.jp: which entity owns the rows | PARTIALLY RESOLVED | D3 |
 | `04_public_bank_domain_and_pbebank_rows.md` | Blank domains: Public Bank and Westpac | PARTIALLY RESOLVED / UNRESOLVED | D4, D6 |

@@ -28,7 +28,7 @@ Source abbreviations: **MAIN** = Gmail thread 1a082bca2581fea0; **opens_1** = cl
 - **Question:** Which accounts?
 - **Answer:** APAC_Account_Parent_Child_Mapping.xlsx, "Sheet: Master List, Column B: Sales Territory Name. These are the 220 accounts".
 - **Decision date:** 22 Aug 2026 · **Who:** Dhruvi · **Source:** MAIN 22 Aug; C03
-- **Status:** CURRENT, but **one authoritative domain per account is still OPEN** (opens_2 item 1: "OPEN: WILL GIVE THAT"; R3 A1). · **Impact:** every join, every per-account run, the 220-account split.
+- **Status:** CURRENT; the authoritative domain per account was sent on 25 Sep as PredictLeads_219_Account_Domain_Audit.xlsx (DEC-052, C43) — not yet downloaded. · **Impact:** every join, every per-account run, the 220-account split.
 
 ### DEC-003 · Reference implementations — CLIENT REFERENCE
 - **Answer:** HP Sea Limited POC (hp-sea-abm.vercel.app + codebase zip) is the HP-specific reference; Palo Alto Caterpillar POC (paloalto-abm.vercel.app) is the reference for Executive Dashboard, Stakeholder Map, Solution Narrative and Tech Landscape. "These steps are not intended to restrict the technical approach."
@@ -90,7 +90,7 @@ Source abbreviations: **MAIN** = Gmail thread 1a082bca2581fea0; **opens_1** = cl
 ### DEC-013 · Vendors are fetched by Company Name + Country, not by domain; PredictLeads domains are canonical; four overrides — CLIENT DECISION
 - **Answer:** "For Explorium, we do not fetch the company using the domain. We fetch using Company Name + Country and explorium's business id … Similarly, for PredictLeads … For the news data, including Exa.ai, we use the domain obtained from PredictLeads. … For the final account-level mapping, please use the canonical domains listed in predictleads data and for 4 companies … Posco Group → posco.com, Pilipinas Shell → shell.com.ph, Shiseido → corp.shiseido.com, Stanley Electric → stanley.co.jp. Also where domain matching is ambiguous, use Company Name + Country as the fallback logic."
 - **Date:** 24 Sep 2026 · **Who:** Dhruvi · **Source:** opens_1 answer 4; opens_2 item 5 "ALREADY RESOLVED"
-- **Status:** CURRENT. **Watch:** the 25 Sep split (`_CORRECTIONS.txt`) rewrites Posco and Pilipinas Shell *toward the Explorium* domains and labels them "explicit approved alias" — that is the opposite direction (CONFLICT I-03). · **Impact:** every domain join.
+- **Status:** SUPERSEDED on 25 Sep by DEC-052: the domain-audit sheet now gives the canonical domain per account (the four overrides should be checked against it). The split's alias rewrites (CONFLICT I-03) are moot once the sheet is used. · **Impact:** every domain join.
 
 ### DEC-014 · Use Domain + Company Name (+ Country) for matching, never vendor record ids — CLIENT DECISION
 - **Answer:** "Why are we using IDs? We should use Domain + Company name for mapping." (answer 8); "Why are we using ids, already mentioned that pls use domain, company name and country" (opens_2 item 24); "Resolved: pls use domain + company name + country" (item 18).
@@ -258,6 +258,18 @@ Source abbreviations: **MAIN** = Gmail thread 1a082bca2581fea0; **opens_1** = cl
 - **Answer:** "pls ignore that pending HP input, and use whose data we fully have, no as of now we might not ask seller to enter seats, so hold employee range. lifecycle date, which columns to look into? -> clarifications needed"
 - **Date:** 24 Sep 2026 · **Source:** opens_2 item 38
 - **Status:** PARTIALLY RESOLVED — the employee-range thresholds used as the seat proxy (501 / 1,001 / 5,001) are an INTERNAL ASSUMPTION still awaiting a yes (R3 F6); which Lifecycle column to read (PE vs EM, stacked dates) is OPEN. · **Impact:** Care Pack / WXP tier / Poly rules in rulebook.py; lifecycle check.
+
+### DEC-052 · The PredictLeads domain-audit file is the canonical domain list; Column B is the display name — CLIENT DECISION (file not yet on this machine)
+- **Question:** D1 canonical account list with one domain each; how to treat vendor name variations for one domain.
+- **Answer:** "The file contains the correct domain to be used for each account. Therefore, please use the domain as the primary reference for data mapping, along with company name keeping caveat mentioned in Column H where applicable. For the company/account name displayed on the dashboard, please use the account name provided in Column B of this file, rather than the company name returned by the individual data sources." Clarification: "Please refer only to the sheet: 219_Account_Domain_Audit and ignore the other sheets … Column H: 'OK' means the company names are similar … 'Consider both names same' means different tools have returned very different company names for the same domain, but they should be treated as the same account … if you see: domain is matching irrespective of their names."
+- **Decision date:** 25 Sep 2026 · **Who:** Dhruvi Patel · **Source:** MAIN 25 Sep 05:50 and 06:24 UTC; C43, C45
+- **Current status:** CURRENT rule; **file not yet downloaded** (C43). Supersedes the interim "PredictLeads domain canonical + four overrides" reading of DEC-013 and every domain the split derived (Public Bank, aliases). · **Impact:** every join; the split's `_ACCOUNTS.csv` must be rebuilt from this sheet; dashboard account names come from Column B, not vendor names.
+
+### DEC-053 · Relevance direction: account evidence first, then the Rulebook; wording by evidence; conflicting signals count; never force an offering — CLIENT DECISION
+- **Question:** D29 / round-3 F1 restatement of the relevance rule.
+- **Answer (seven pointers, quoted short):** "Start with the account evidence first … Do not start with an HP offering from rulebook and then try to find evidence to support it." "Then check the Rulebook for an offering that supports the same opportunity." "Technology presence alone is not enough to recommend an offering." Wording: Intune/ServiceNow only → "Possible WXP fit internally, but do not recommend WXP yet"; + related fleet-management evidence → "HP WXP may be relevant to this opportunity"; + applicable Rulebook conditions supported → "HP WXP is relevant to this opportunity." "Consider conflicting evidence as well … BHP has Cisco WebEx and Cisco TelePresence detected, but Poly Intent = 0 / No Signal. Therefore, the collaboration technologies alone should not create an active Poly recommendation." "Case studies should be matched to the same use case/opportunity … not … only because it contains the same product name or comes from the same industry." "If no suitable HP offering is supported, do not force one" — show the evidenced opportunity/conversation instead (print example).
+- **Decision date:** 25 Sep 2026 · **Who:** Dhruvi Patel · **Source:** MAIN 25 Sep 05:50 UTC; C45
+- **Current status:** CURRENT; confirms and extends DEC-040. Answers the restatement asked in round-3 F1. Sub-items 29a–c are answered in the annotated OPEN_v2 (C44) — ingest when downloaded. · **Impact:** recommendations.py relevance logic (build must move from exact/alias matching to use-case fit, CONFLICT X-09); a new negative rule: a technology signal contradicted by zero intent in the matching category must not produce a recommendation.
 
 ---
 

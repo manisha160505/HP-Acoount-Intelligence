@@ -1,5 +1,6 @@
-# Open and unresolved questions (40)
+# Open and unresolved questions (39)
 
+> **25 Sep 05:50 UTC:** Dhruvi returned our OPEN_v2 with answers highlighted (provenance C44). That file is not on this machine yet, so every round-3 open item below (A1, A3, B2–B4, C4, C5, D1, D2, E1, F7, G1–G3, H1, I1, I2, F1a–c, F8–F13) may already be answered. Download it into `01_Client_Provided/Client_Answers/`, then update the matching `q(...)` entries in `00_INDEX/_build/build_questions.py` and re-run.
 > Status values: RESOLVED = client answer settles it. PARTIALLY RESOLVED = answered, but a delivery, confirmation or sub-question is still outstanding (each has a file in `06_Unresolved_and_Open/`). OPEN = no answer. UNRESOLVED = answered, but the answer does not settle the point.
 > IDs: D1–D43 = the 43 items of 220-Open-Decisions-List.md as numbered in clarifying opens_2.docx; D44–D53 = items added 24 Sep after the list went out; E18-x / E23-x = email Q&A of 18 and 23 Sep; QA16-x = the 16 Sep QA discussion points.
 
@@ -7,7 +8,6 @@
 
 | Id | Question | Feature | Status | Answered | Fully resolved? |
 |---|---|---|---|---|---|
-| D1 | Canonical account list with one domain each | Identity / every join | OPEN | 2026-09-24 | No — a delivery was promised, nothing received. |
 | D6 | pbebank.com: Public Bank Bhd or Public Bank Lao? | One account | UNRESOLVED | 2026-09-24 | No — see D4; corrected rows promised. |
 | D8 | Contact file for the 220 accounts | Stakeholder Map, Opportunity Map, Objection Playbook, Content Studio, Message Evaluator (BLOCKER) | OPEN | 2026-09-24 | No. |
 | D9 | Role coverage: ~30 buying-committee roles, then 5-8 more | Contacts | OPEN | 2026-09-24 | No. |
@@ -49,18 +49,6 @@
 | TESTS22 | Client UI test observations of 22 Sep (tests on current HP 220.docx) | UI | OPEN | 2026-09-22 | No. |
 
 ## Detail
-
-### D1 · Canonical account list with one domain each
-
-- **Feature / topic:** Identity / every join
-- **Original question:** 220-Open-Decisions-List item 1 (24 Sep). 220 Explorium workbooks resolve to 217 unique domains; identity blank on 209 of 219 rows. Default offered: the domains in _RUN_SUMMARY.
-- **Original source:** see `00_INDEX/EMAIL_TIMELINE.md`; documents in `05_Questions_and_Clarifications/Source_Documents/`
-- **Client answer:** "OPEN: WILL GIVE THAT" (clarifying opens_2, 24 Sep). Round 3 A1 re-asks: "Please send the master list of 220 accounts with one domain each."
-- **Date answered:** 2026-09-24
-- **Status:** **OPEN**
-- **Does the answer fully resolve it?** No — a delivery was promised, nothing received.
-- **Implementation impact:** Every join, the split, every per-account run. Three accounts appeared to have no intent data until alias domains were applied.
-- **Unresolved-issue file:** `06_Unresolved_and_Open/01_canonical_account_list.md`
 
 ### D6 · pbebank.com: Public Bank Bhd or Public Bank Lao?
 

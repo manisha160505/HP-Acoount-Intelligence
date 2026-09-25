@@ -324,6 +324,59 @@ One block per important file: where it came from, where it lives now, which vers
 | Size / md5 | 133.0 KB / 0e9a51b2ed0a431da8aa46e93db5df89 |
 | Used for | Client answers (inline "->") to the 43-item 220-Open-Decisions-List.md sent 24 Sep 07:35 UTC. Source for most decisions in DECISION_LOG.md. |
 
+## C43 — PredictLeads_219_Account_Domain_Audit.xlsx
+
+| Field | Value |
+|---|---|
+| Origin | CLIENT DATA |
+| Received from | Dhruvi Patel (BridgeAI) |
+| Email / channel | Gmail thread "HP Account Based Intelligence (220 accounts)" (id 1a082bca2581fea0), 25 Sep 2026 05:50 UTC (message 1a0d71dc51f96712); clarified 06:24 UTC (1a0d73ce30f04282) |
+| Date | 2026-09-25 |
+| Version | 1 |
+| Status | **CURRENT - NOT ON THIS MACHINE** |
+| Supersedes | DEC-013 interim rule (PredictLeads domain canonical + 4 overrides) and the split's derived domains |
+| Superseded by | - |
+| Original local path | none found |
+| In this structure | `04_Data_and_Source_Definitions/Account_List/PredictLeads_219_Account_Domain_Audit.xlsx.MISSING.md`, `02_Decision_Maker/PredictLeads_219_Account_Domain_Audit.xlsx.MISSING.md` |
+| Size / md5 | - / - |
+| Used for | THE canonical domain per account: "The file contains the correct domain to be used for each account … use the domain as the primary reference for data mapping". Use ONLY sheet 219_Account_Domain_Audit. Column H: "OK" = names similar; "Consider both names same" = different vendor names, same account. Column B = the account name to display on the dashboard. |
+| Notes | Answers open item D1 (canonical account list) once downloaded. Gmail connector cannot fetch attachments - download by hand into this folder. |
+
+## C44 — clarifying_opens_3_OPEN_v2.docx (client-annotated)
+
+| Field | Value |
+|---|---|
+| Origin | CLIENT |
+| Received from | Dhruvi Patel (BridgeAI) |
+| Email / channel | Gmail thread "HP Account Based Intelligence (220 accounts)" (id 1a082bca2581fea0), 25 Sep 2026 05:50 UTC (message 1a0d71dc51f96712) |
+| Date | 2026-09-25 |
+| Version | annotated copy of our OPEN_v2 of 25 Sep 02:35 UTC |
+| Status | **CURRENT - NOT ON THIS MACHINE** |
+| Supersedes | - |
+| Superseded by | - |
+| Original local path | none found |
+| In this structure | `01_Client_Provided/Client_Answers/clarifying_opens_3_OPEN_v2.docx.MISSING.md`, `02_Decision_Maker/clarifying_opens_3_OPEN_v2.docx.MISSING.md`, `05_Questions_and_Clarifications/Source_Documents/clarifying_opens_3_OPEN_v2.docx.MISSING.md` |
+| Size / md5 | - / - |
+| Used for | Client answers ("highlighted the answers to this particular doc only") to the 25 open items A1, A3, B2-B4, C4, C5, D1, D2, E1, F7, G1-G3, H1, I1, I2, F1a-c, F8-F13. CLARIFICATIONS and UNRESOLVED_v2 were not answered in this message. |
+| Notes | Download by hand from the message; then ingest each answer into build_questions.py and DECISION_LOG.md. |
+
+## C45 — 2026-09-25_Dhruvi_email_relevance_directions_and_domain_audit.md
+
+| Field | Value |
+|---|---|
+| Origin | CLIENT |
+| Received from | Dhruvi Patel (BridgeAI) |
+| Email / channel | Gmail thread "HP Account Based Intelligence (220 accounts)" (id 1a082bca2581fea0), 25 Sep 2026 05:50 and 06:24 UTC - email body saved verbatim |
+| Date | 2026-09-25 |
+| Version | verbatim copy |
+| Status | **CURRENT** |
+| Supersedes | - |
+| Superseded by | - |
+| Original local path | /Users/yogeshyadav/Desktop/HP/project-documentation/01_Client_Provided/Client_Answers/2026-09-25_Dhruvi_email_relevance_directions_and_domain_audit.md |
+| In this structure | `01_Client_Provided/Client_Answers/2026-09-25_Dhruvi_email_relevance_directions_and_domain_audit.md`, `02_Decision_Maker/2026-09-25_Dhruvi_email_relevance_directions_and_domain_audit.md`, `05_Questions_and_Clarifications/Source_Documents/2026-09-25_Dhruvi_email_relevance_directions_and_domain_audit.md` |
+| Size / md5 | 5.8 KB / f0fe980a76f678079edba33ef830456d |
+| Used for | Written client rules with no attachment of their own: evidence-first relevance direction (7 pointers with BHP examples, conflicting-evidence rule, print example of not forcing an offering); domain as primary mapping key; Column H same-account markers; Column B display name; use only sheet 219_Account_Domain_Audit. |
+
 ## C37 — HP_220_Refinements_Updated.docx
 
 | Field | Value |

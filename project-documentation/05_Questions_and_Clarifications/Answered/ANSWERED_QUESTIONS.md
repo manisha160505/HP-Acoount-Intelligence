@@ -1,5 +1,6 @@
-# Answered questions (34)
+# Answered questions (35)
 
+> **25 Sep 05:50 UTC:** Dhruvi returned our OPEN_v2 with answers highlighted (provenance C44). That file is not on this machine yet, so every round-3 open item below (A1, A3, B2–B4, C4, C5, D1, D2, E1, F7, G1–G3, H1, I1, I2, F1a–c, F8–F13) may already be answered. Download it into `01_Client_Provided/Client_Answers/`, then update the matching `q(...)` entries in `00_INDEX/_build/build_questions.py` and re-run.
 > Status values: RESOLVED = client answer settles it. PARTIALLY RESOLVED = answered, but a delivery, confirmation or sub-question is still outstanding (each has a file in `06_Unresolved_and_Open/`). OPEN = no answer. UNRESOLVED = answered, but the answer does not settle the point.
 > IDs: D1–D43 = the 43 items of 220-Open-Decisions-List.md as numbered in clarifying opens_2.docx; D44–D53 = items added 24 Sep after the list went out; E18-x / E23-x = email Q&A of 18 and 23 Sep; QA16-x = the 16 Sep QA discussion points.
 
@@ -7,6 +8,7 @@
 
 | Id | Question | Feature | Status | Answered | Fully resolved? |
 |---|---|---|---|---|---|
+| D1 | Canonical account list with one domain each | Identity / every join | PARTIALLY RESOLVED | 2026-09-25 | The rule and the file exist; the file has not been downloaded to this machine, so the spli… |
 | D2 | Entity scope: APAC entity or global parent | Firmographics, hierarchy, Executive Dashboard | PARTIALLY RESOLVED | 2026-09-24 | Partly — a bare "RESOLVED" against a question that offered a default; taken as default acc… |
 | D3 | Shared domains jabil.com and mufg.jp: which entity owns the rows | Hiring, tech detections, news, connections for 4 accounts | PARTIALLY RESOLVED | 2026-09-24 | Rule yes, data no. Round 3 A3: the columns exist but are populated on 384 of 14,965 job ro… |
 | D4 | Blank domains: Public Bank and Westpac | All datasets for two accounts | PARTIALLY RESOLVED | 2026-09-24 | Westpac yes. Public Bank no — see D6; the two answers pull against each other (round 3 UNR… |
@@ -27,7 +29,7 @@
 | D26 | 490 logged corrections: applied or to-do? | Hiring and tech dates | RESOLVED | 2026-09-24 | Yes, by inspection (internal finding stated to the client). |
 | D27 | Job status: label wording and whether blank means open | exec_hiring_velocity, intent_hiring_demand, urgency driver 3 | PARTIALLY RESOLVED | 2026-09-24 | Scoring rule yes; label wording and the meaning of a blank status no. |
 | D28 | Twelve PredictLeads keys with no consumer | Upload contract | RESOLVED | 2026-09-24 | Yes. The feature list for the Products sheet is only in a 23 Sep screenshot not on this ma… |
-| D29 | Relevance threshold for Rulebook offerings and case studies | Every recommendation | PARTIALLY RESOLVED | 2026-09-24 | The rule is stated. Round 3 F1 asks for a one-line restatement and describes the build as … |
+| D29 | Relevance threshold for Rulebook offerings and case studies | Every recommendation | PARTIALLY RESOLVED | 2026-09-25 | The rule is stated and was restated on 25 Sep 05:50 UTC with seven pointers (evidence firs… |
 | D30 | Where the Rulebook and case studies appear | All features | RESOLVED | 2026-09-24 | Yes: as built (Objection Playbook, Opportunity Map, Content Messaging, Content Studio, Str… |
 | D31 | 89 cleaned case studies as the corpus | Proof library | RESOLVED | 2026-09-24 | Yes. |
 | D32 | "Recommendation for HP" on every Technographic Map section | Technographic Map | RESOLVED | 2026-09-24 | Yes. |
@@ -43,6 +45,18 @@
 | E23-4 | Which new PredictLeads sheets to use | Upload contract | PARTIALLY RESOLVED | 2026-09-23 | Yes, except the feature list for Products exists only in a screenshot not on this machine. |
 
 ## Detail
+
+### D1 · Canonical account list with one domain each
+
+- **Feature / topic:** Identity / every join
+- **Original question:** 220-Open-Decisions-List item 1 (24 Sep). 220 Explorium workbooks resolve to 217 unique domains; identity blank on 209 of 219 rows. Default offered: the domains in _RUN_SUMMARY.
+- **Original source:** see `00_INDEX/EMAIL_TIMELINE.md`; documents in `05_Questions_and_Clarifications/Source_Documents/`
+- **Client answer:** "OPEN: WILL GIVE THAT" (clarifying opens_2, 24 Sep). Round 3 A1 re-asked. 25 Sep 05:50 UTC: Dhruvi sent PredictLeads_219_Account_Domain_Audit.xlsx — "The file contains the correct domain to be used for each account … use the domain as the primary reference for data mapping" (sheet 219_Account_Domain_Audit only; Column H marks same-account name variants; Column B = dashboard display name).
+- **Date answered:** 2026-09-25
+- **Status:** **PARTIALLY RESOLVED**
+- **Does the answer fully resolve it?** The rule and the file exist; the file has not been downloaded to this machine, so the split still runs on derived domains.
+- **Implementation impact:** Every join, the split, every per-account run. Three accounts appeared to have no intent data until alias domains were applied.
+- **Unresolved-issue file:** `06_Unresolved_and_Open/01_canonical_account_list.md`
 
 ### D2 · Entity scope: APAC entity or global parent
 
@@ -279,9 +293,9 @@
 - **Original question:** 21 Sep (email), 24 Sep email §5.1, item 29, round 3 F1. Exact/alias match only, or category-level match too?
 - **Original source:** see `00_INDEX/EMAIL_TIMELINE.md`; documents in `05_Questions_and_Clarifications/Source_Documents/`
 - **Client answer:** Dhruvi 24 Sep 09:30 UTC: use-case/opportunity fit; "relevant" when clearly supported, "may be relevant / explore fit" when conditional; a technology or integration-route match alone is not sufficient (BHP Intune/ServiceNow example); case studies support an established opportunity, they do not create it. opens_2 item 29: "Already resolved: Explained in the email".
-- **Date answered:** 2026-09-24
+- **Date answered:** 2026-09-25
 - **Status:** **PARTIALLY RESOLVED**
-- **Does the answer fully resolve it?** The rule is stated. Round 3 F1 asks for a one-line restatement and describes the build as "exact or known-alias matches only" — the build and the rule differ (CONFLICT X-09). Sub-items 29a-c not yet answered.
+- **Does the answer fully resolve it?** The rule is stated and was restated on 25 Sep 05:50 UTC with seven pointers (evidence first; Rulebook second; technology alone insufficient; wording by evidence; conflicting evidence such as WebEx + Poly Intent 0 blocks a Poly recommendation; case studies by use case; never force). The build as described on 25 Sep still uses exact/alias matching (CONFLICT X-09). Sub-items 29a-c are answered in the annotated OPEN_v2 (C44), not yet downloaded.
 - **Implementation impact:** Every recommendation across all features.
 - **Unresolved-issue file:** `06_Unresolved_and_Open/15_relevance_rule_implementation.md`
 

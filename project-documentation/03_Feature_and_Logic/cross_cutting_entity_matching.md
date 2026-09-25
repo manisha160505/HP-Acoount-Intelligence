@@ -1,6 +1,7 @@
 # Cross-cutting: entity and domain matching
 
-**CLIENT DECISIONS** (DEC-013, DEC-014, DEC-015, DEC-016, DEC-018)
+**CLIENT DECISIONS** (DEC-052 — newest, DEC-013, DEC-014, DEC-015, DEC-016, DEC-018)
+- **25 Sep:** `PredictLeads_219_Account_Domain_Audit.xlsx`, sheet `219_Account_Domain_Audit` only, is the canonical domain per account: "use the domain as the primary reference for data mapping". Column H: "OK" = vendor names similar; "Consider both names same" = different vendor names, same account — treat as one account. Column B = the account name shown on the dashboard (never a vendor's company name). **File not yet downloaded** (C43); until it is, the rules below are the interim state.
 - Vendors fetch by Company Name + Country (Explorium business id; PredictLeads); the domain is a *result*, not the key. Differing domains across vendors do not mean a wrong company.
 - Final account-level mapping: PredictLeads domains are canonical; four overrides (Posco → posco.com, Pilipinas Shell → shell.com.ph, Shiseido → corp.shiseido.com, Stanley Electric → stanley.co.jp); fallback Company Name + Country where the domain is ambiguous.
 - Never key on vendor record ids.

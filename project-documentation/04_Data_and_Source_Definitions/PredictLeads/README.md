@@ -11,4 +11,4 @@
 | Data-quality issues | 9 vendor-flagged rows (review_records) — drop pending (D25). 490 corrections already applied (D26, verified). Duplicate ids (technology_detections 715, news_events 68 …) — do not key on ids (D24). Job status: blank or closed only in the seed (D27). |
 | Authoritative or supporting | **Authoritative** for hiring; **supporting** for technographics ("shown for reference only"); news_events is the add-on layer to RSS + Exa; sec_filings authoritative alongside filings 1.csv. Twelve sheets have no consumer and are removed from the upload contract (DEC-026). |
 
-Domain is canonical from this file (DEC-013), with four client overrides.
+Domain: the 25 Sep audit workbook `PredictLeads_219_Account_Domain_Audit.xlsx` (in `Account_List/`, not yet downloaded) is now the canonical domain source (DEC-052); the earlier rule "PredictLeads domain canonical + four overrides" (DEC-013) is the interim state until then.

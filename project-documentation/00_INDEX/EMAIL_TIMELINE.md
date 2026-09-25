@@ -60,7 +60,9 @@ Messages before 8 Sep exist only as quoted/forwarded text (Yogesh was added to t
 | 24 Sep 07:35 | Yogesh | Att: 220-Open-Decisions-List.md | 43 open decisions with defaults. | I10 |
 | 24 Sep 09:30 | Dhruvi | Att: clarifying opens_1.docx; inline annotations of the 04:52 email | Answers to the 10 data questions; relevance rule (use-case fit; "relevant" vs "may be relevant / explore fit"); Tech Map extra card → drop; JEV → drop; Rulebook/case-study placement "already resolved" (18 Sep mapping). | C34 |
 | 24 Sep 14:43 | Dhruvi | Att: clarifying opens_2.docx, clarifying opens_1.docx (re-send), image.png | Answers to the 43 decisions; six items forwarded to Sahaj (news precedence, risk labels, empty state, source labels, as-of date, GCP). | C35, C36 |
-| 25 Sep 02:35 | Yogesh | Att: clarifying_opens_3_CLARIFICATIONS.docx, clarifying_opens_3_OPEN_v2.docx, clarifying_opens_3_UNRESOLVED_v2.docx | Round 3: 7 clarifications, 14 + 11 open items, 2 unresolved. **Awaiting client answers.** | I14 |
+| 25 Sep 02:35 | Yogesh | Att: clarifying_opens_3_CLARIFICATIONS.docx, clarifying_opens_3_OPEN_v2.docx, clarifying_opens_3_UNRESOLVED_v2.docx | Round 3: 7 clarifications, 14 + 11 open items, 2 unresolved. | I14 |
+| 25 Sep 05:50 | Dhruvi | Att: clarifying_opens_3_OPEN_v2.docx (client-annotated), PredictLeads_219_Account_Domain_Audit.xlsx (**neither on this machine**) | Answers to the 25 open items; seven relevance-direction pointers (evidence first, technology alone insufficient, graded wording, conflicting evidence, case studies by use case, never force); domain-audit file = correct domain per account, Column H same-account markers, Column B = dashboard name. | C43, C44, C45 |
+| 25 Sep 06:24 | Dhruvi | — | Use only sheet 219_Account_Domain_Audit; Column H semantics ("OK" / "Consider both names same"); domain match wins irrespective of names. | C45 |
 
 ## Items exchanged outside email (not retrievable)
 - WhatsApp: GCP role list (23 Sep 18:31 IST), GCP access request doc (23 Sep 19:11 IST), Gap Analysis docx (18 Sep), and "what I have shared with you on WP" referenced on 24 Sep 07:35.

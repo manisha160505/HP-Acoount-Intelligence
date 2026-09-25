@@ -108,6 +108,21 @@ add(id='C36', name='clarifying opens_2.docx', src=ROOT/'NewDocs/clarifying opens
     status='CURRENT', used_for='Client answers (inline "->") to the 43-item 220-Open-Decisions-List.md sent 24 Sep 07:35 UTC. Source for most decisions in DECISION_LOG.md.',
     also=['02_Decision_Maker','05_Questions_and_Clarifications/Source_Documents'])
 
+# ---------------- CLIENT: 25 Sep answers (round 3) ----------------
+add(id='C43', name='PredictLeads_219_Account_Domain_Audit.xlsx', src=None, dest='04_Data_and_Source_Definitions/Account_List', origin='CLIENT DATA', sender='Dhruvi Patel (BridgeAI)',
+    channel=MAIN+', 25 Sep 2026 05:50 UTC (message 1a0d71dc51f96712); clarified 06:24 UTC (1a0d73ce30f04282)', date='2026-09-25', version='1',
+    status='CURRENT - NOT ON THIS MACHINE', supersedes='DEC-013 interim rule (PredictLeads domain canonical + 4 overrides) and the split\'s derived domains',
+    used_for='THE canonical domain per account: "The file contains the correct domain to be used for each account … use the domain as the primary reference for data mapping". Use ONLY sheet 219_Account_Domain_Audit. Column H: "OK" = names similar; "Consider both names same" = different vendor names, same account. Column B = the account name to display on the dashboard.',
+    notes='Answers open item D1 (canonical account list) once downloaded. Gmail connector cannot fetch attachments - download by hand into this folder.', also=['02_Decision_Maker'])
+add(id='C44', name='clarifying_opens_3_OPEN_v2.docx (client-annotated)', src=None, dest='01_Client_Provided/Client_Answers', origin='CLIENT', sender='Dhruvi Patel (BridgeAI)',
+    channel=MAIN+', 25 Sep 2026 05:50 UTC (message 1a0d71dc51f96712)', date='2026-09-25', version='annotated copy of our OPEN_v2 of 25 Sep 02:35 UTC',
+    status='CURRENT - NOT ON THIS MACHINE', used_for='Client answers ("highlighted the answers to this particular doc only") to the 25 open items A1, A3, B2-B4, C4, C5, D1, D2, E1, F7, G1-G3, H1, I1, I2, F1a-c, F8-F13. CLARIFICATIONS and UNRESOLVED_v2 were not answered in this message.',
+    notes='Download by hand from the message; then ingest each answer into build_questions.py and DECISION_LOG.md.', also=['02_Decision_Maker','05_Questions_and_Clarifications/Source_Documents'])
+add(id='C45', name='2026-09-25_Dhruvi_email_relevance_directions_and_domain_audit.md', src=OUT/'01_Client_Provided/Client_Answers/2026-09-25_Dhruvi_email_relevance_directions_and_domain_audit.md', dest='01_Client_Provided/Client_Answers', origin='CLIENT', sender='Dhruvi Patel (BridgeAI)',
+    channel=MAIN+', 25 Sep 2026 05:50 and 06:24 UTC - email body saved verbatim', date='2026-09-25', version='verbatim copy',
+    status='CURRENT', used_for='Written client rules with no attachment of their own: evidence-first relevance direction (7 pointers with BHP examples, conflicting-evidence rule, print example of not forcing an offering); domain as primary mapping key; Column H same-account markers; Column B display name; use only sheet 219_Account_Domain_Audit.',
+    also=['02_Decision_Maker','05_Questions_and_Clarifications/Source_Documents'])
+
 # ---------------- CLIENT: reviews / tests ----------------
 add(id='C37', name='HP_220_Refinements_Updated.docx', src=None, dest='01_Client_Provided/Client_Reviews',
     origin='CLIENT', sender='Dhruvi Patel (BridgeAI)', channel=PROG+', 12 Sep 2026 11:26 UTC', date='2026-09-12', version='Updated',
