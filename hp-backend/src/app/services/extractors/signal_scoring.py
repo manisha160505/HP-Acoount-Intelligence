@@ -514,7 +514,9 @@ def source_reliability_points(
 
 TIER_THRESHOLDS = _scoring.bands("live_signal", "tier_thresholds")
 MIN_CONFIDENCE_TO_PUBLISH = _CFG["min_confidence_to_publish"]
-MAX_SIGNALS = _CFG["max_signals"]
+# None rather than 0, so `signals[:MAX_SIGNALS]` keeps the whole list instead of
+# emptying it. A cap of 0 in the config means "no cap".
+MAX_SIGNALS = _CFG["max_signals"] or None
 DEDUP_SIMILARITY = _CFG["dedup_similarity"]
 
 

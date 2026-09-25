@@ -55,6 +55,25 @@ from app.services.retrieval import (
     registry as retrieval_registry,
 )
 
+
+def _widget_datasets(as_of: dict, source_datasets) -> dict:
+    """The load date of each dataset this widget actually reads."""
+    by = (as_of or {}).get("by_dataset") or {}
+    return {d: by[d] for d in (source_datasets or []) if by.get(d)}
+
+
+def _widget_as_of(as_of: dict, source_datasets) -> str | None:
+    """The date to print on this widget.
+
+    The newest load date among the datasets the widget reads, rather than the
+    newest across the whole account: a Technographic Map built from a file
+    loaded on the 4th should say the 4th, even when filings arrived on the 14th.
+    Falls back to the account-wide date when the widget names no dataset we
+    have a date for.
+    """
+    dates = sorted(_widget_datasets(as_of, source_datasets).values())
+    return dates[-1] if dates else (as_of or {}).get("as_of")
+
 router = APIRouter(tags=["Widget Contracts & Dashboard Shell"])
 
 
@@ -572,7 +591,8 @@ def get_account_feature_widgets(
 
     extracted_widgets_map = {w["widget_key"]: w for w in stored}
 
-    # One snapshot date for every widget in this response, computed once.
+    # The snapshot behind this account, computed once and then narrowed per
+    # widget below.
     as_of = account_data_as_of(account_id)
 
     responses = []
@@ -602,8 +622,17 @@ def get_account_feature_widgets(
                 # says when this widget was generated; this says when the
                 # ACCOUNT DATA behind it was loaded, so a dashboard opened
                 # months later still names the snapshot it reasoned from.
-                "data_as_of_date": as_of.get("as_of"),
-                "data_as_of": as_of,
+                #
+                # Client ruling, 24 Sep: show the retrieval date of the data
+                # itself - "if we ingested the data for eg on 20th sept, keep
+                # that" - rather than one rolled-up date for the account. So
+                # each widget reports the date of the datasets IT reads, which
+                # for a widget built from one pipeline is that pipeline's own
+                # load date.
+                "data_as_of_date": _widget_as_of(as_of, contract["source_datasets"]),
+                "data_as_of": {**as_of,
+                               "widget_datasets": _widget_datasets(
+                                   as_of, contract["source_datasets"])},
             })
         else:
             responses.append({
@@ -619,7 +648,11 @@ def get_account_feature_widgets(
                 "source_datasets": contract["source_datasets"],
                 "source_fields": contract["source_fields"],
                 "display_order": contract["display_order"],
-                "updated_at": None
+                "updated_at": None,
+                "data_as_of_date": _widget_as_of(as_of, contract["source_datasets"]),
+                "data_as_of": {**as_of,
+                               "widget_datasets": _widget_datasets(
+                                   as_of, contract["source_datasets"])},
             })
 
     return responses

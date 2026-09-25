@@ -52,7 +52,7 @@ from app.services.extractors.datasets import (
     read_dataset_rows,
     requires_local_datasets,
 )
-from app.services.hp import evidence_tier, intent_topic_map as tm
+from app.services.hp import case_studies as cs, evidence_tier, intent_topic_map as tm
 
 logger = logging.getLogger(__name__)
 
@@ -886,6 +886,42 @@ def extract_intent_demand_signals(account_id: str) -> list[dict]:
             text = so_what.get(entry.get("category"))
             entry["so_what"] = text or None
             entry["so_what_word_count"] = len(text.split()) if text else None
+
+        # F9: a case study may strengthen "So What for HP", and nowhere else on
+        # this widget. Intent picks near-last of all the surfaces, so a category
+        # carries proof only where nothing that needs it more has taken it.
+        try:
+            db = get_db()
+            firmo = (read_dataset_records(account_id, "firmographics",
+                                          strict=False) or [{}])[0]
+            industry = cs.normalise_industry(
+                firmo.get("Linkedin Industry Category")
+                or firmo.get("Naics Description") or "")
+            taken = cs.cited_above(db, account_id, cs.SURFACE_INTENT)
+            here: set = set()
+            for entry in (summary.get("hp_categories") or []):
+                if not entry.get("so_what"):
+                    continue
+                # Proof strengthens a recommendation; it must never create one.
+                # A Context Only category is one the evidence does not support
+                # recommending against at all, so attaching a case study there
+                # manufactures an opportunity out of a customer story. On the
+                # first account that put a workstation case on a category
+                # scoring 2/100 and a print case on one the text itself calls
+                # "no signal of immediate interest".
+                if (entry.get("evidence_tier") or {}).get("tier") == evidence_tier.CONTEXT_ONLY:
+                    continue
+                lines = cs.lines_for_product_text(str(entry.get("hp_play") or ""))
+                if not lines:
+                    continue
+                point = cs.allocate(db, lines, industry=industry,
+                                    taken=taken, used_here=here)
+                if point:
+                    entry["hp_proof_point"] = point
+                    if point.get("study_id"):
+                        here.add(point["study_id"])
+        except Exception:
+            logger.exception("intent: proof allocation failed for %s", account_id)
 
         summary_payload["status"] = "available"
         summary_payload["data"] = {

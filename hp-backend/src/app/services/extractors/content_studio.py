@@ -1546,10 +1546,22 @@ def generate_content_asset(account_id: str, persona_id: str, content_type: str,
         # is generated on request and is the cheapest thing to re-run, so it
         # yields to the three standing surfaces rather than taking a customer
         # one of them is already built around.
+        # Studies this surface has already used, read back off the assets it
+        # has stored. Every other surface passes `used_here` from a set it
+        # builds while looping; this one generates a single asset per call, so
+        # there is no loop to accumulate in and the widget itself is the record.
+        # Without it the same customer was chosen again on every asset - four
+        # of five drafts on the first account carried one university.
+        mine = {
+            (a.get("generated") or {}).get("hp_proof_point_detail", {}).get("study_id")
+            for a in (existing_assets or [])
+            if isinstance(a, dict) and isinstance(a.get("generated"), dict)
+        }
         proof = cs.allocate(
             db, proof_lines,
             industry=cs.normalise_industry(ctx.get("industry") or ""),
-            taken=cs.cited_above(db, account_id, cs.SURFACE_CONTENT))
+            taken=cs.cited_above(db, account_id, cs.SURFACE_CONTENT),
+            used_here={m for m in mine if m})
         if proof:
             for written in [asset, *[v["asset"] for v in variants]]:
                 _attach_proof_point(written, proof, contract)

@@ -216,11 +216,54 @@ function AnswerWithCitations({ text, citations, idPrefix }:
   return <p className="text-xs leading-relaxed whitespace-pre-wrap">{parts}</p>;
 }
 
+// A case study attached to a recommendation that already stands on its own
+// evidence. Added 24 Sep for the three places the client named: Live Signals'
+// Implication for HP, Intent's So What for HP, and the Technographic Map's what
+// it means for HP - "nowhere else". It strengthens a recommendation and never
+// creates one, so it renders below the prose rather than inside it.
+function ProofPoint({ proof }: { proof: any }) {
+  if (!proof?.text) return null;
+  return (
+    <div className="bg-amber-50/60 border border-amber-200 rounded-xl px-3 py-2 space-y-1 mt-2">
+      <span className="text-[9px] font-mono font-extrabold uppercase tracking-widest text-amber-800 block">
+        HP proof point
+      </span>
+      <p className="text-[11px] text-amber-900 leading-relaxed">{proof.text}</p>
+      {(proof.customer || proof.source_url) && (
+        <p className="text-[10px] text-amber-800">
+          {proof.customer && <span className="font-semibold">{proof.customer}</span>}
+          {proof.industry && <span className="text-amber-700"> &middot; {proof.industry}</span>}
+          {proof.source_url && (
+            <>
+              {' · '}
+              <a
+                href={proof.source_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline hover:text-amber-950"
+              >
+                View the HP case study
+              </a>
+            </>
+          )}
+        </p>
+      )}
+    </div>
+  );
+}
+
+// Client ruling, 24 Sep, on what to show when a dataset is missing: "leave it
+// out, do not write anything as of now". They asked us to stay flexible because
+// the decision is still with Sahaj, so this is one flag rather than deleted
+// code - flip it back to true and every empty state returns exactly as it was.
+const SHOW_EMPTY_STATE_NOTICES = false;
+
 // A widget that never generated stores the reason on its payload. Showing it
 // turns an unexplained empty panel into something a reader can act on - most
 // often a missing OPENAI_API_KEY, or source files absent from this machine.
 function PendingNotice({ widget, title }: { widget: any; title: string }) {
   const notice = widget?.data?.notice;
+  if (!SHOW_EMPTY_STATE_NOTICES) return null;
   if (!widget || widget.status === 'available' || !notice) return null;
   return (
     <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
@@ -973,19 +1016,31 @@ export default function UserDashboardPage() {
                 Tuning Logic section E: a dashboard opened months after
                 ingestion must still name the snapshot it is reasoning from. */}
             {(() => {
-              const asOf = widgets.find(w => w.data_as_of_date)?.data_as_of_date;
-              if (!asOf) return null;
-              const spread = widgets.find(w => w.data_as_of)?.data_as_of?.by_dataset || {};
-              const days = Array.from(new Set(Object.values(spread)));
+              // Client ruling, 24 Sep: show the retrieval date of the data
+              // itself, not one rolled-up date for the account. Each dataset
+              // is named with the day it was loaded; where every pipeline
+              // arrived together this collapses back to a single date.
+              const spread: Record<string, string> =
+                widgets.find(w => w.data_as_of)?.data_as_of?.by_dataset || {};
+              const days = Array.from(new Set(Object.values(spread))).sort();
+              if (!days.length) return null;
+              const byDay = days.map(day => ({
+                day,
+                sets: Object.keys(spread).filter(k => spread[k] === day).sort(),
+              }));
               return (
                 <span
                   className="text-[10px] font-mono text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 whitespace-nowrap"
-                  title={days.length > 1
-                    ? `Pipelines were loaded on different days: ${days.sort().join(', ')}. The date shown is the most recent.`
-                    : 'The date this account’s data was loaded into the engine.'}
+                  title={byDay
+                    .map(({ day, sets }) => `${day}: ${sets.join(', ')}`)
+                    .join('\n')}
                 >
-                  Data as of {asOf}
-                  {days.length > 1 && <span className="text-slate-400"> &middot; mixed</span>}
+                  {days.length === 1
+                    ? `Data as of ${days[0]}`
+                    : `Data as of ${days[0]} – ${days[days.length - 1]}`}
+                  {days.length > 1 && (
+                    <span className="text-slate-400"> &middot; {Object.keys(spread).length} sources</span>
+                  )}
                 </span>
               );
             })()}
@@ -2354,6 +2409,7 @@ export default function UserDashboardPage() {
                                       <p>
                                         <span className="font-semibold">Implication for HP: </span>{sc.sales_angle}
                                       </p>
+                                      <ProofPoint proof={s.hp_proof_point} />
                                     </div>
                                   )}
 
@@ -2728,6 +2784,27 @@ export default function UserDashboardPage() {
                                 </p>
                               ))}
                             </div>
+
+                            {/* Case-study proof for the categories this read
+                                covers. Client direction, 24 Sep: proof may
+                                strengthen the So What for HP, and it follows
+                                the read rather than creating it. Each is
+                                labelled with the category it supports, so a
+                                seller can see which part of the read it backs. */}
+                            {hpCategories.some((c: any) => c.hp_proof_point) && (
+                              <div className="space-y-2 pt-1">
+                                {hpCategories
+                                  .filter((c: any) => c.hp_proof_point)
+                                  .map((c: any) => (
+                                    <div key={c.category}>
+                                      <span className="text-[10px] font-bold uppercase tracking-wider text-blue-700/80">
+                                        {c.category}
+                                      </span>
+                                      <ProofPoint proof={c.hp_proof_point} />
+                                    </div>
+                                  ))}
+                              </div>
+                            )}
                             <p className="text-[11px] leading-relaxed text-blue-950 font-bold flex items-start gap-2.5 pt-2 border-t border-blue-200/60">
                               <Info className="w-4 h-4 flex-shrink-0 mt-0.5" />
                               <span>{disclaimer}</span>
@@ -3298,10 +3375,10 @@ export default function UserDashboardPage() {
                           <span className="px-3 py-1 bg-white border border-slate-200 shadow-xs rounded-full text-slate-700">
                             {isAvailable ? generatedPlays.length : 0} HP Plays
                           </span>
-                          {/* Nothing is badged while it is working. The
-                              "Inferred TBD" state still shows, because that
-                              tells a seller the plays are not ready yet. */}
-                          {!isAvailable && (
+                          {/* Nothing is badged while it is working, and under
+                              the client's "write nothing" ruling the not-ready
+                              badge is suppressed too. */}
+                          {!isAvailable && SHOW_EMPTY_STATE_NOTICES && (
                             <span className="px-3 py-1 rounded-full bg-purple-50 text-purple-800 border border-purple-200">
                               Inferred TBD
                             </span>
@@ -3618,7 +3695,7 @@ export default function UserDashboardPage() {
                               );
                             })}
                           </div>
-                        ) : (
+                        ) : !SHOW_EMPTY_STATE_NOTICES ? null : (
                           /* Inferred TBD Placeholder State */
                           <div className="space-y-4">
                             {[
@@ -4605,6 +4682,24 @@ export default function UserDashboardPage() {
                               </p>
                             )}
 
+                            {/* Integration routes. Context only, by the
+                                client's direction: a detected technology HP
+                                names as an integration target shows
+                                compatibility, never a need, so it sits outside
+                                the recommendation and is styled as a note. */}
+                            {(mapData.integration_routes || []).length > 0 && (
+                              <div className="rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3 space-y-1.5">
+                                <p className="text-[10px] font-mono font-extrabold uppercase tracking-widest text-slate-400">
+                                  Integration routes &middot; context
+                                </p>
+                                {(mapData.integration_routes || []).map((r: any, i: number) => (
+                                  <p key={i} className="text-xs text-slate-600 leading-relaxed">
+                                    {r.text}
+                                  </p>
+                                ))}
+                              </div>
+                            )}
+
                             {/* 4 Stat Cards */}
                             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
                               <div className="bg-slate-50/80 p-3.5 rounded-xl border border-slate-200 space-y-1">
@@ -4697,6 +4792,7 @@ export default function UserDashboardPage() {
                                     <p className="text-xs text-slate-700 font-medium leading-relaxed">
                                       {cat.what_it_means || cat.hp_relationship}
                                     </p>
+                                    <ProofPoint proof={cat.hp_proof_point} />
                                   </div>
                                 )}
 
