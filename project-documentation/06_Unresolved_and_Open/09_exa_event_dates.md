@@ -21,4 +21,4 @@ Without dates most Exa rows are dropped under the skip rule.
 Re-exported Exa file with ISO dates and a count of how many of the 5,120 received a date.
 
 ## Current status
-PARTIALLY RESOLVED. Last movement: 2026-09-24. Tracked in `05_Questions_and_Clarifications/Open/OPEN_QUESTIONS.md` and, where already sent, in `07_Internal_Generated/Client_Facing_Round3/`.
+PARTIALLY RESOLVED. Last movement: 2026-09-25. Tracked in `05_Questions_and_Clarifications/Open/OPEN_QUESTIONS.md` and, where already sent, in `07_Internal_Generated/Client_Facing_Round3/`.

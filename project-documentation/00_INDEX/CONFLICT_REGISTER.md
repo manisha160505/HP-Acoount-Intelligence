@@ -20,7 +20,7 @@ Numbers and quotes come from the plain-text extractions of the documents; the de
 
 ### C-02 · Recency reference date
 - **A (Live Signal Logic):** age measured to a "Scoring date: 17 September 2026". · **B (v4 §E):** every output carries `data_as_of_date` = "the date the dataset was ingested … not the date the seller happens to open the dashboard". · **C (Urgency):** "latest 12 months" with no anchor.
-- **Latest:** v4. · **Interpretation:** ingestion date; the as-of date itself is OPEN (DEC-048). · **Needs confirmation:** YES.
+- **Resolved 25 Sep:** each dataset's own ingestion/retrieval date (DEC-054d). · **Needs confirmation:** NO.
 
 ### C-03 · WXP from a technology detection alone
 - **A (Tech Landscape Confidence FINAL, 18 Sep):** "Microsoft Windows detected" → WXP 04 → Driver 1 = 10/10 with a card "Consider HP Workforce Experience Platform (WXP)"; Intune alone also 10/10.
@@ -81,7 +81,7 @@ Numbers and quotes come from the plain-text extractions of the documents; the de
 
 ### X-02 · News de-duplication rule
 - **Client:** "same underlying event", keep the strongest source (v4, Live Signal); "skip the item if the two feeds disagree" (opens_1 answer 6). · **Internal:** similarity ≥ 0.85 OR identical sentence + date (Rules doc); same account + date + normalised headline (split).
-- **Needs confirmation:** YES (R3 D1 asks for it).
+- **25 Sep:** disagreement rule changed to "consider Exa news" (DEC-054a); the same-event definition itself was not commented on. · **Needs confirmation:** YES for the definition (low risk).
 
 ### X-03 · Proof corpus
 - **Internal Rules doc:** "no HP proof corpus is connected, so an unrelated case study is never substituted". · **Client v4 §H:** hp_case_studies_final.csv is the proof library; opens_2 item 31 accepts the 89. · **Interpretation:** Rules doc is stale; corpus is in use. · **Needs confirmation:** NO.
@@ -118,25 +118,32 @@ Numbers and quotes come from the plain-text extractions of the documents; the de
 
 ## I. Internal vs internal
 
+### I-00 · Client answers that changed between rounds (latest wins)
+- News disagreement: opens_1 answer 6 (24 Sep) "skip that particular news item" → OPEN_v2 D1 (25 Sep) "consider exa news". **Current: keep the Exa row.**
+- Stakeholder Map proof: opens_2 #30 (24 Sep) "pls include stakeholder map as well" → OPEN_v2 F9 (25 Sep) "stakeholder … not right now". **Current: no case-study proof on the Stakeholder Map for now.**
+- Public Bank rows: opens_1 answer 5 (24 Sep) "we will try and give you exact 'public bank bhd' data" → audit sheet (25 Sep) marks the Public Bank Lao row OK. **Current: use the pbebank.com rows as delivered.**
+- Empty state: opens_2 #7 hierarchy "say nothing" now generalised (25 Sep G1/B4). **Current: leave sections out.**
+
+
 ### I-01 · Empty-state default
 - 220-Open-Decisions-List (25 Sep working copy) and 220-Open-Items-and-Clarifications: leave the section out. · clarifying_opens_3_OPEN_v2 B4/G1 (sent): "Our default is to show it with the message". · Manisha's non-v2 OPEN: show with message.
-- **Latest sent:** OPEN_v2 (show with message). · **Needs confirmation:** YES (client).
+- **Resolved 25 Sep:** client chose "leave it out, do not write anything" (DEC-054b). · **Needs confirmation:** NO (provisional pending Sahaj).
 
 ### I-02 · Public Bank domain
 - Decisions List / Open-Items / UNRESOLVED_v2 A4: domain **held**. · `_CORRECTIONS.txt` (split, 25 Sep 05:16 UTC): "derived: publicbankgroup.com" from the Website column. · Client: pbebank.com.
-- **Needs confirmation:** YES; the split must not run with the derived value.
+- **Resolved 25 Sep:** audit sheet says pbebank.com and accepts the Lao-named rows (DEC-055). The split must be changed to pbebank.com. · **Needs confirmation:** NO.
 
 ### I-03 · Alias direction
 - Decisions List D5: "PredictLeads domain is canonical" (posco.com, shell.com.ph …). · Split: rewrites posco.com → posco-inc.com and shell.com.ph → pilipinas.shell.com.ph, labelled "explicit approved alias" (toward Explorium).
-- **Needs confirmation:** YES (engineering).
+- **Resolved 25 Sep:** audit sheet Master Domain = posco.com and shell.com.ph (DEC-055); the split's rewrites must be reversed. · **Needs confirmation:** NO (engineering fix).
 
 ### I-04 · Jabil Inc. SEC 10-Q rows
 - Decisions List / Open-Items / Tracker: Singapore only. · OPEN_v2 C5 (sent): attach to **both** Jabil accounts as keyed, labelled as the parent's filings, if no answer.
-- **Latest sent:** OPEN_v2. · **Needs confirmation:** YES (client).
+- **Resolved 25 Sep:** "yes you can for now" — both accounts (DEC-054f). · **Needs confirmation:** NO.
 
 ### I-05 · Master account list
 - Decisions List D1: "RESOLVED (25 Sep discussion). No separate master list is needed." · OPEN_v2 A1 (sent): "Please send the master list of 220 accounts with one domain each." · Client: "OPEN: WILL GIVE THAT".
-- **Needs confirmation:** the client already agreed to send it; treat as OPEN delivery.
+- **Resolved 25 Sep:** the audit sheet is the list (DEC-055). · **Needs confirmation:** NO.
 
 ### I-06 · Items 26 and 34 status
 - Decisions List: "CLARIFICATION SENT". · CLARIFICATIONS (sent): "now cleared" (corrections already applied; one primary + secondary routes).

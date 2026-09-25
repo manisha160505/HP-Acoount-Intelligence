@@ -333,16 +333,16 @@ One block per important file: where it came from, where it lives now, which vers
 | Email / channel | Gmail thread "HP Account Based Intelligence (220 accounts)" (id 1a082bca2581fea0), 25 Sep 2026 05:50 UTC (message 1a0d71dc51f96712); clarified 06:24 UTC (1a0d73ce30f04282) |
 | Date | 2026-09-25 |
 | Version | 1 |
-| Status | **CURRENT - NOT ON THIS MACHINE** |
+| Status | **CURRENT** |
 | Supersedes | DEC-013 interim rule (PredictLeads domain canonical + 4 overrides) and the split's derived domains |
 | Superseded by | - |
-| Original local path | none found |
-| In this structure | `04_Data_and_Source_Definitions/Account_List/PredictLeads_219_Account_Domain_Audit.xlsx.MISSING.md`, `02_Decision_Maker/PredictLeads_219_Account_Domain_Audit.xlsx.MISSING.md` |
-| Size / md5 | - / - |
+| Original local path | /Users/yogeshyadav/Desktop/HP/project-documentation/04_Data_and_Source_Definitions/Account_List/PredictLeads_219_Account_Domain_Audit.xlsx |
+| In this structure | `04_Data_and_Source_Definitions/Account_List/PredictLeads_219_Account_Domain_Audit.xlsx`, `02_Decision_Maker/PredictLeads_219_Account_Domain_Audit.xlsx` |
+| Size / md5 | 29.1 KB / 2fcd74953de2236ed8e77d88f935115c |
 | Used for | THE canonical domain per account: "The file contains the correct domain to be used for each account … use the domain as the primary reference for data mapping". Use ONLY sheet 219_Account_Domain_Audit. Column H: "OK" = names similar; "Consider both names same" = different vendor names, same account. Column B = the account name to display on the dashboard. |
-| Notes | Answers open item D1 (canonical account list) once downloaded. Gmail connector cannot fetch attachments - download by hand into this folder. |
+| Notes | Downloaded by the user 25 Sep 12:30 IST. Actual sheet name is "219 Account Audit" (email said 219_Account_Domain_Audit); 219 rows - Astra absent (seed delivery); Column H "considerations to keep in mind": OK ×204, "consider both names same" ×13, blank ×2 (Stanley, Shiseido). Domains differ from the 25 Sep split for Posco, Pilipinas Shell and Public Bank. |
 
-## C44 — clarifying_opens_3_OPEN_v2.docx (client-annotated)
+## C44 — clarifying_opens_3_OPEN_v2_provided.docx (client-annotated OPEN_v2)
 
 | Field | Value |
 |---|---|
@@ -351,14 +351,14 @@ One block per important file: where it came from, where it lives now, which vers
 | Email / channel | Gmail thread "HP Account Based Intelligence (220 accounts)" (id 1a082bca2581fea0), 25 Sep 2026 05:50 UTC (message 1a0d71dc51f96712) |
 | Date | 2026-09-25 |
 | Version | annotated copy of our OPEN_v2 of 25 Sep 02:35 UTC |
-| Status | **CURRENT - NOT ON THIS MACHINE** |
+| Status | **CURRENT** |
 | Supersedes | - |
 | Superseded by | - |
-| Original local path | none found |
-| In this structure | `01_Client_Provided/Client_Answers/clarifying_opens_3_OPEN_v2.docx.MISSING.md`, `02_Decision_Maker/clarifying_opens_3_OPEN_v2.docx.MISSING.md`, `05_Questions_and_Clarifications/Source_Documents/clarifying_opens_3_OPEN_v2.docx.MISSING.md` |
-| Size / md5 | - / - |
-| Used for | Client answers ("highlighted the answers to this particular doc only") to the 25 open items A1, A3, B2-B4, C4, C5, D1, D2, E1, F7, G1-G3, H1, I1, I2, F1a-c, F8-F13. CLARIFICATIONS and UNRESOLVED_v2 were not answered in this message. |
-| Notes | Download by hand from the message; then ingest each answer into build_questions.py and DECISION_LOG.md. |
+| Original local path | /Users/yogeshyadav/Desktop/HP/project-documentation/01_Client_Provided/Client_Answers/clarifying_opens_3_OPEN_v2_provided.docx |
+| In this structure | `01_Client_Provided/Client_Answers/clarifying_opens_3_OPEN_v2_provided.docx`, `02_Decision_Maker/clarifying_opens_3_OPEN_v2_provided.docx`, `05_Questions_and_Clarifications/Source_Documents/clarifying_opens_3_OPEN_v2_provided.docx` |
+| Size / md5 | 302.0 KB / f83218842c6167b9004420f4b662028e |
+| Used for | Client answers (highlighted) to the 25 open items A1, A3, B2-B4, C4, C5, D1, D2, E1, F7, G1-G3, H1, I1, I2, F1a-c, F8-F13. CLARIFICATIONS and UNRESOLVED_v2 were not answered in this message. |
+| Notes | Saved by the user as clarifying_opens_3_OPEN_v2_provided.docx (25 Sep 12:30 IST); original attachment name clarifying_opens_3_OPEN_v2.docx. Answers ingested into the question register and DECISION_LOG on 25 Sep. |
 
 ## C45 — 2026-09-25_Dhruvi_email_relevance_directions_and_domain_audit.md
 

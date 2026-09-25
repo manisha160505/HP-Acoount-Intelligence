@@ -6,8 +6,6 @@ Every file the email record proves exists but that has no copy anywhere on this 
 
 | Id | File | Sent by / when | Why it matters | Drop into |
 |---|---|---|---|---|
-| C44 | clarifying_opens_3_OPEN_v2.docx (client-annotated) | Dhruvi, 25 Sep 2026 05:50 UTC, message 1a0d71dc51f96712 | **The client's answers to all 25 open round-3 items.** Nothing in `05_Questions_and_Clarifications/Open/` can be closed until this is read. | `01_Client_Provided/Client_Answers/` (also `02_Decision_Maker/`) |
-| C43 | PredictLeads_219_Account_Domain_Audit.xlsx | Dhruvi, 25 Sep 2026 05:50 UTC, same message | **The canonical domain per account** (sheet 219_Account_Domain_Audit; Column H same-account markers; Column B display name). Replaces every derived domain in the split. | `04_Data_and_Source_Definitions/Account_List/` (also `02_Decision_Maker/`) |
 | C29 | HP_220_Account_Combined_Product_Services_and_Solutions_Rulebook_FINAL_.docx | Dhruvi, 23 Sep 2026 05:53 UTC, thread 1a082bca2581fea0 | **The current Rulebook.** Adds the Print rules (highlighted yellow). The only local Rulebook is the 17 Sep v1; every later logic doc cites Rulebook rule ids that may have changed. | `01_Client_Provided/Logic_and_Scoring/` and `02_Decision_Maker/` |
 | C27 | tests on current HP 220.docx | Dhruvi, 22 Sep 11:58 UTC | Client UI test observations and questions on the current build; never answered in writing. | `01_Client_Provided/Client_Reviews/` |
 | C37 | HP_220_Refinements_Updated.docx | Dhruvi, 12 Sep 11:26 UTC, thread 1a0911ab27454237 | Client's screenshot review vs HP SEA Limited; the basis of the 16 Sep QA response. | `01_Client_Provided/Client_Reviews/` |

@@ -9,7 +9,7 @@ GCP access, project id, region.
 - (D42) 15 Sep action item; 24 Sep email §4; item 42; round 3 H1; access request doc sent 23 Sep via WhatsApp.
 
 ## What they answered
-- (D42) "-> open"; "RESOLVED: Already followed up with sahaj" (on the follow-up action only).
+- (D42) "-> open"; "RESOLVED: Already followed up with sahaj" (on the follow-up action only); round 3 H1 (25 Sep): "Open: escalated to sahaj".
 
 ## What is still unclear
 Project id, region, when.
@@ -18,7 +18,7 @@ Project id, region, when.
 Blocks the 220-account run.
 
 ## What we need from the client
-Access, project id, region.
+Access, project id, region — from Sahaj.
 
 ## Current status
-OPEN. Last movement: 2026-09-24. Tracked in `05_Questions_and_Clarifications/Open/OPEN_QUESTIONS.md` and, where already sent, in `07_Internal_Generated/Client_Facing_Round3/`.
+OPEN. Last movement: 2026-09-25. Tracked in `05_Questions_and_Clarifications/Open/OPEN_QUESTIONS.md` and, where already sent, in `07_Internal_Generated/Client_Facing_Round3/`.

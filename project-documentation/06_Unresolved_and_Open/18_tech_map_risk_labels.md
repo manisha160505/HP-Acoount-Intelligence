@@ -10,7 +10,7 @@ Technographic Map Low/Medium/High risk logic.
 - (E23-3) 23 Sep question 3 (with the risk labels).
 
 ## What they answered
-- (D37) 23 Sep: "Please retain the Low Risk / Medium Risk / High Risk labels … what logic is currently being used"; opens_2: "open" and forwarded to Sahaj 24 Sep 14:43 UTC ("whether the risk logic is good to go from your end").
+- (D37) 23 Sep: "Please retain the Low Risk / Medium Risk / High Risk labels … what logic is currently being used"; opens_2: "open" and forwarded to Sahaj; round 3 F7 (25 Sep): "OPEN; already escalated to Sahaj".
 - (E23-3) Only the risk-label half was answered.
 
 ## What is still unclear
@@ -20,7 +20,7 @@ Whether Sahaj accepts the lookup (High = competing vendor confirmed; Medium = ne
 Labels are shown today on the client's own logic request.
 
 ## What we need from the client
-"Good to go", rename to Competitive position (Incumbent / Open / Complementary), or drop.
+"Good to go", rename to Competitive position (Incumbent / Open / Complementary), or drop — from Sahaj.
 
 ## Current status
-OPEN. Last movement: 2026-09-24. Tracked in `05_Questions_and_Clarifications/Open/OPEN_QUESTIONS.md` and, where already sent, in `07_Internal_Generated/Client_Facing_Round3/`.
+OPEN. Last movement: 2026-09-25. Tracked in `05_Questions_and_Clarifications/Open/OPEN_QUESTIONS.md` and, where already sent, in `07_Internal_Generated/Client_Facing_Round3/`.

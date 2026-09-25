@@ -105,7 +105,7 @@ Source abbreviations: **MAIN** = Gmail thread 1a082bca2581fea0; **opens_1** = cl
 ### DEC-016 · Blank domains: Westpac = westpac.com.au; Public Bank = pbebank.com — CLIENT DECISION, Public Bank PARTIALLY RESOLVED
 - **Answer:** "pls look at below two domains: pbebank.com, westpac.com.au"; and on pbebank.com: "Public Bank Lao Limited is a wholly-owned subsidiary of Public Bank Berhad, which is why the same domain is associated with both entities … We will try and give you exact name 'public bank bhd' data".
 - **Date:** 24 Sep 2026 · **Who:** Dhruvi · **Source:** opens_1 answers 3 and 5; opens_2 items 4, 6
-- **Status:** Westpac CURRENT. Public Bank **UNRESOLVED** (R3 UNRESOLVED A4: adopting pbebank.com today puts the Lao subsidiary's rows on the Malaysian page; domain held until corrected rows arrive). **Watch:** the split derives `publicbankgroup.com` (INTERNAL ASSUMPTION, contradicts "held"). · **Impact:** one account's PredictLeads data.
+- **Status:** RESOLVED 25 Sep by the audit sheet (DEC-055): Public Bank = pbebank.com and the "Public Bank Lao Limited" PredictLeads row is accepted as the account ("domain is matching irrespective of their names"). Our A4 concern is on record; the split's publicbankgroup.com must change. · **Impact:** one account's PredictLeads data.
 
 ### DEC-017 · Entity scope: APAC entity as named; firmographics as delivered — PARTIALLY RESOLVED
 - **Question (DL 2):** "which entity does each account represent … Default: APAC entity as named in the account list; firmographics shown as delivered."
@@ -126,7 +126,7 @@ Source abbreviations: **MAIN** = Gmail thread 1a082bca2581fea0; **opens_1** = cl
 ### DEC-020 · Two news feeds, merged; disagreeing items skipped — CLIENT DECISION, "same event" definition OPEN
 - **Answer:** "no it is not a replacement … merging both … Please merge both. For most companies, you are getting around 10-15 news articles, so it might be rare for the two sources to disagree on the same event. However, in the rare case that this happens, please skip that particular news item. Do not skip the company directly." Earlier: "For the news data, the Google News RSS and Exa files together cover all 220 APAC accounts" (18 Sep).
 - **Date:** 18 and 24 Sep 2026 · **Who:** Dhruvi · **Source:** MAIN 18 Sep 05:51 UTC; opens_1 answer 6
-- **Status:** CURRENT rule. **OPEN:** opens_2 item 16 (precedence) was marked "open" and forwarded to Sahaj on 24 Sep even though answer 6 covers it; the *definition* of "same event" (same account + same date + normalised headline match, 356 duplicates removed) is an INTERNAL IMPLEMENTATION DECISION awaiting a yes/no (R3 D1). · **Impact:** Live Signals feed content.
+- **Status:** SUPERSEDED on the disagreement rule by DEC-054a (25 Sep): keep the Exa row instead of skipping the item. Merge rule and "never skip the company" still stand. Same-event definition remains INTERNAL. · **Impact:** Live Signals feed content.
 
 ### DEC-021 · Undated news rows are skipped; epoch dates skipped; client to re-crawl dates — CLIENT DECISION, delivery OPEN
 - **Answer:** "We will provide the date wherever possible by crawling the URLs. For any rows where the date will still not available, please skip that news row for now, do not skip whole company/account"; "skip these three news items as of now".
@@ -239,7 +239,7 @@ Source abbreviations: **MAIN** = Gmail thread 1a082bca2581fea0; **opens_1** = cl
 ### DEC-041 · Where the Rulebook and case studies appear: as mapped on 18 Sep, plus the Stakeholder Map — CLIENT DECISION
 - **Answer:** "resolved: pls include stakeholder map as well" (opens_2 item 30); "ALREADY RESOLVED … my 18 September email … Excel file with the feature-level mapping" (24 Sep annotation of the 21 Sep question).
 - **Date:** 24 Sep 2026 · **Source:** opens_2 item 30; C26
-- **Status:** CURRENT. Open follow-ups (R3 F8–F13): method for the four features with no v4 row, case-study proof on the signal features now or later, proof on service plays, evidence-tier gate on proof, APJ preference, keyword vs Rulebook-id mapping — all INTERNAL ASSUMPTIONS with stated defaults. · **Impact:** proof-point placement.
+- **Status:** AMENDED 25 Sep (DEC-054k): Stakeholder Map is **not** to carry case-study proof for now; signal features carry it only in the named slots; four-feature method confirmed as built (DEC-054j); proof on service plays yes (DEC-054l); no mapping table (DEC-054i). Still open: evidence-tier gate (F11) and APJ preference (F12). · **Impact:** proof-point placement.
 
 ### DEC-042 · 89 cleaned case studies are the proof corpus; corrupted figures never shown — CLIENT DECISION
 - **Answer:** "resolved: yes" (opens_2 item 31). Client dataset: hp_case_studies_final.csv (17 Sep; 384 rows).
@@ -263,13 +263,35 @@ Source abbreviations: **MAIN** = Gmail thread 1a082bca2581fea0; **opens_1** = cl
 - **Question:** D1 canonical account list with one domain each; how to treat vendor name variations for one domain.
 - **Answer:** "The file contains the correct domain to be used for each account. Therefore, please use the domain as the primary reference for data mapping, along with company name keeping caveat mentioned in Column H where applicable. For the company/account name displayed on the dashboard, please use the account name provided in Column B of this file, rather than the company name returned by the individual data sources." Clarification: "Please refer only to the sheet: 219_Account_Domain_Audit and ignore the other sheets … Column H: 'OK' means the company names are similar … 'Consider both names same' means different tools have returned very different company names for the same domain, but they should be treated as the same account … if you see: domain is matching irrespective of their names."
 - **Decision date:** 25 Sep 2026 · **Who:** Dhruvi Patel · **Source:** MAIN 25 Sep 05:50 and 06:24 UTC; C43, C45
-- **Current status:** CURRENT rule; **file not yet downloaded** (C43). Supersedes the interim "PredictLeads domain canonical + four overrides" reading of DEC-013 and every domain the split derived (Public Bank, aliases). · **Impact:** every join; the split's `_ACCOUNTS.csv` must be rebuilt from this sheet; dashboard account names come from Column B, not vendor names.
+- **Current status:** CURRENT; file received 25 Sep 12:30 IST (see DEC-055 for what it settles). Supersedes the interim "PredictLeads domain canonical + four overrides" reading of DEC-013 and every domain the split derived (Public Bank, aliases). · **Impact:** every join; the split's `_ACCOUNTS.csv` must be rebuilt from this sheet; dashboard account names come from Column B, not vendor names.
 
 ### DEC-053 · Relevance direction: account evidence first, then the Rulebook; wording by evidence; conflicting signals count; never force an offering — CLIENT DECISION
 - **Question:** D29 / round-3 F1 restatement of the relevance rule.
 - **Answer (seven pointers, quoted short):** "Start with the account evidence first … Do not start with an HP offering from rulebook and then try to find evidence to support it." "Then check the Rulebook for an offering that supports the same opportunity." "Technology presence alone is not enough to recommend an offering." Wording: Intune/ServiceNow only → "Possible WXP fit internally, but do not recommend WXP yet"; + related fleet-management evidence → "HP WXP may be relevant to this opportunity"; + applicable Rulebook conditions supported → "HP WXP is relevant to this opportunity." "Consider conflicting evidence as well … BHP has Cisco WebEx and Cisco TelePresence detected, but Poly Intent = 0 / No Signal. Therefore, the collaboration technologies alone should not create an active Poly recommendation." "Case studies should be matched to the same use case/opportunity … not … only because it contains the same product name or comes from the same industry." "If no suitable HP offering is supported, do not force one" — show the evidenced opportunity/conversation instead (print example).
 - **Decision date:** 25 Sep 2026 · **Who:** Dhruvi Patel · **Source:** MAIN 25 Sep 05:50 UTC; C45
-- **Current status:** CURRENT; confirms and extends DEC-040. Answers the restatement asked in round-3 F1. Sub-items 29a–c are answered in the annotated OPEN_v2 (C44) — ingest when downloaded. · **Impact:** recommendations.py relevance logic (build must move from exact/alias matching to use-case fit, CONFLICT X-09); a new negative rule: a technology signal contradicted by zero intent in the matching category must not produce a recommendation.
+- **Current status:** CURRENT; confirms and extends DEC-040. Sub-items 29a–c answered the same day (DEC-054g/h/i). · **Impact:** recommendations.py relevance logic (build must move from exact/alias matching to use-case fit, CONFLICT X-09); a new negative rule: a technology signal contradicted by zero intent in the matching category must not produce a recommendation.
+
+### DEC-054 · Round-3 answers of 25 Sep (client-annotated OPEN_v2) — CLIENT DECISIONS
+Source for all sub-items: `01_Client_Provided/Client_Answers/clarifying_opens_3_OPEN_v2_provided.docx` (C44), Dhruvi Patel, 25 Sep 2026 05:50 UTC. Quotes are the highlighted answers.
+- **DEC-054a · News precedence:** "Resolved: to disagreement; consider exa news." When Exa and Google News RSS carry the same event with different details, **keep the Exa row**. This **replaces** the 24 Sep opens_1 answer 6 ("skip that particular news item"). Same-event definition (same account + date + normalised headline) not commented on — remains INTERNAL. Impact: Live Signals merge.
+- **DEC-054b · Empty state:** "leave it out, do not write anything as of now" (G1) and, for the Stakeholder Map with no contacts, "do not write anything, leave that space empty" (B4). Provisional: "already escalated to sahaj … can we pls be flexible". Overturns our default (show with a message). Impact: every widget on accounts with gaps.
+- **DEC-054c · Source labels:** "Right now go ahead with your labels" — Firmographics, Technographics, Hiring, News, Filings, Intent, HP Rulebook, HP case study; publisher name on news cards; no vendor names. Provisional pending Sahaj. Impact: every source chip; Exa label question closed in practice.
+- **DEC-054d · As-of date:** "let us show dataset's own retrieval date: meaning if we ingested the data for eg on 20th sept, keep that." Per-dataset ingestion date, not one drop date. Overturns our default; matches v4 §E. Impact: as-of line; recency anchor (closes CONFLICT C-02).
+- **DEC-054e · Contacts:** one file only — "as of now we go with whatever we have, you will get one file" (B3); delivery still open ("will give that", B2). Impact: the five contact features are built once.
+- **DEC-054f · Filings re-keying:** Fletcher Building Holdings NZ → fletcherbuilding.com; Fonterra → fonterra.com; the blank-domain Astra row holding United Tractors statements → "leave that row if it is not matching to astra" (exclude). Jabil Inc. 10-Q rows → attach to both Jabil accounts "for now". Hyundai DART rows → the account is "HKMC GROUP(HYUNDAI AUTOEVER) – KR", domain hyundai-autoever.com; the reports are Hyundai Autoever Corp.'s. Impact: filings index mapping; no corrected file is coming — we re-key.
+- **DEC-054g · Integration-route context line:** "'Intune detected; possible WXP integration route' (do not mention no evidence)". Impact: wording of the context line (drop "no need evidenced").
+- **DEC-054h · Unevaluable conditions:** treated as unmet → offering can reach "may be relevant" but never "relevant" — "yes". Impact: seat count / WXP tier / print-volume rules.
+- **DEC-054i · No Rulebook-to-case-study mapping table:** "We do not want a fixed Rulebook-to-case-study mapping table. Both should be checked independently against the account evidence/use case." Four cases: offering + similar case study → use both; offering, no case study → offering only; case study, no supported offering → case study as supporting proof, do not force an offering; neither → use neither. Also answers F13 (no keyword/Rulebook-id table). Overturns our F1c and F13 defaults. Impact: case-study matcher decoupled from the Rulebook router.
+- **DEC-054j · Proof method for the four features without a v4 row:** "yes" (as built), under the same four-case rule. Impact: Objection Playbook, Content Studio, Strategy Chat, Message Evaluator.
+- **DEC-054k · Case-study proof on signal features — now, in named slots only:** Live Signals "Implication for HP"; Intent & Demand "So what for HP"; Technographic Map "what it means for HP"; **Stakeholder Map: not right now** ("Sahaj mentioned not right now in yesterday's meeting" — reverses opens_2 #30); "nowhere else"; optional ("we are not trying to compulsorily include it … if we can use, it would be appreciated"). Impact: proof placement.
+- **DEC-054l · Proof on service plays:** "keep default" (yes). Impact: Opportunity Map service plays carry proof.
+- **DEC-054m · Delivery dates and drops:** dates and timelines go to the WhatsApp group, "sahaj is the one deciding that"; consolidated drop request "noted". Process only.
+- **Still open after this round:** A3 Name + Country columns ("will give that"), B2 contacts ("will give that"), D2 Exa dates ("we will send shortly"), E1 job rows for 45 accounts ("we will send shortly"), F7 risk-label logic and H1 GCP (both "escalated to Sahaj"), F11 evidence-tier gate and F12 APJ preference ("clarification needed pls" — re-ask in plain words). The CLARIFICATIONS (7) and UNRESOLVED_v2 (2) documents were not answered.
+
+### DEC-055 · Domain audit sheet received: what it settles — CLIENT DATA (C43)
+- Sheet "219 Account Audit" (the email's "219_Account_Domain_Audit"): 219 rows = the 220 accounts minus PT Astra International (its data is the separate seed delivery). Domain Check = MATCH on every row; Column H = "OK" ×204, "consider both names same, we get different name from diff tools" ×13 (Binus, ANA Holdings, Seiko Epson, Sony, CJ Group, KT Corp, Posco Group, NZ Defence Force, PwC NZ, Pilipinas Shell, Optum PH, Sagility PH, Siam Commercial Bank), blank ×2 (Stanley Electric, Shiseido — the two former domain mismatches, now resolved to stanley.co.jp and corp.shiseido.com).
+- Confirms: Posco = posco.com; Pilipinas Shell = shell.com.ph; Shiseido = corp.shiseido.com; Stanley = stanley.co.jp; Westpac AU = westpac.com.au; Westpac NZ = westpac.co.nz; Pioneer = global.pioneer (kept); Jabil MY and SG both jabil.com; MUFG JP and the Bangkok branch both mufg.jp; **Public Bank = pbebank.com with the PredictLeads "Public Bank Lao Limited" row marked OK** — the client thereby closes our UNRESOLVED A4 (we had flagged that those rows are the Lao subsidiary's).
+- Versus the 25 Sep split: three domains must change (Posco posco-inc.com → posco.com; Pilipinas Shell pilipinas.shell.com.ph → shell.com.ph; Public Bank publicbankgroup.com → pbebank.com). The split's `_ACCOUNTS.csv` should be rebuilt from this sheet, and Column B "Master Company" (e.g. "AUSTRALIA POST - AU") is the dashboard display name.
 
 ---
 
@@ -278,12 +300,12 @@ Source abbreviations: **MAIN** = Gmail thread 1a082bca2581fea0; **opens_1** = cl
 ### DEC-046 · Empty-state behaviour for a missing dataset — OPEN QUESTION
 - **Question:** show the widget with a "no data from source" message, or hide it? Default offered: show with the message.
 - **Answer:** "-> open" (opens_2 item 39; forwarded to Sahaj). Only precedent: hierarchy → say nothing (DEC-018).
-- **Status:** OPEN. **Internal conflict:** DL / Open-Items propose "leave the section out"; R3 OPEN_v2 B4/G1 propose "show with message" (CONFLICT I-01). · **Impact:** every widget on accounts with gaps; Stakeholder Map on all accounts until contacts arrive.
+- **Status:** RESOLVED 25 Sep (DEC-054b): leave the section out, write nothing; provisional pending Sahaj. Closes CONFLICT I-01. · **Impact:** every widget on accounts with gaps; Stakeholder Map on all accounts until contacts arrive.
 
 ### DEC-047 · Source labels on screen — OPEN QUESTION
 - **Question:** replace raw file names with Firmographics, Technographics, Hiring, News, Filings, Intent, HP Rulebook, HP case study; publisher name on news cards; no vendor names.
 - **Answer:** "-> open" (opens_2 item 40; forwarded to Sahaj). Exa-vs-Google-News label unresolved (R3 UNRESOLVED D3).
-- **Status:** OPEN; proposed set is an INTERNAL ASSUMPTION. · **Impact:** every source chip.
+- **Status:** RESOLVED 25 Sep (DEC-054c): our label set applies for now; provisional pending Sahaj. · **Impact:** every source chip.
 
 ### DEC-048 · Data as-of date — OPEN QUESTION
 - **Question:** date of the 23 Sep drop or of the final consolidated drop? v4 says data_as_of_date = ingestion date.
@@ -296,11 +318,11 @@ Source abbreviations: **MAIN** = Gmail thread 1a082bca2581fea0; **opens_1** = cl
 
 ### DEC-050 · Contacts: 0 of 220; five features cannot run until the contact file arrives — CLIENT DATA, OPEN
 - **Answer:** "Ans 1) Contact Data open" (opens_1); section B "->OPEN" (opens_2 items 8–10). Client has since said (per R3 B2) that some accounts will get names and details, the rest names or roles only, with prompts and supporting material to follow.
-- **Status:** OPEN — the single biggest blocker. · **Impact:** Stakeholder Map, Opportunity Map, Objection Playbook, Content Studio, Message Evaluator for all accounts.
+- **Status:** OPEN — the single biggest blocker; 25 Sep: "will give that", one file only (DEC-054e). · **Impact:** Stakeholder Map, Opportunity Map, Objection Playbook, Content Studio, Message Evaluator for all accounts.
 
 ### DEC-051 · GCP environment — OPEN
 - **Answer:** "-> open" (opens_2 item 42); "RESOLVED: Already followed up with sahaj" on the 24 Sep timeline item, but access itself "->OPEN".
-- **Status:** OPEN; project id and region unknown. · **Impact:** 220-account deployment.
+- **Status:** OPEN; "escalated to sahaj" (25 Sep); project id and region unknown. · **Impact:** 220-account deployment.
 
 ---
 

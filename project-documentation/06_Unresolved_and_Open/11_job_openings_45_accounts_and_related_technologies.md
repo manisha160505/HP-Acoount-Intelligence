@@ -21,4 +21,4 @@ Hiring feeds two widgets and 30% of the urgency weight.
 Job rows for the 45 accounts in the job_openings layout (name + country on every row, posted date, status, tool name) and one line on Related Technologies.
 
 ## Current status
-PARTIALLY RESOLVED. Last movement: 2026-09-24. Tracked in `05_Questions_and_Clarifications/Open/OPEN_QUESTIONS.md` and, where already sent, in `07_Internal_Generated/Client_Facing_Round3/`.
+PARTIALLY RESOLVED. Last movement: 2026-09-25. Tracked in `05_Questions_and_Clarifications/Open/OPEN_QUESTIONS.md` and, where already sent, in `07_Internal_Generated/Client_Facing_Round3/`.

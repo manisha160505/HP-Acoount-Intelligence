@@ -21,4 +21,4 @@ Until the columns are populated on every row the interim split gives Jabil SG an
 input_company_name and input_country_code populated on every row of job_openings, technology_detections, news_events, connections, subpages and sec_filings.
 
 ## Current status
-PARTIALLY RESOLVED. Last movement: 2026-09-24. Tracked in `05_Questions_and_Clarifications/Open/OPEN_QUESTIONS.md` and, where already sent, in `07_Internal_Generated/Client_Facing_Round3/`.
+PARTIALLY RESOLVED. Last movement: 2026-09-25. Tracked in `05_Questions_and_Clarifications/Open/OPEN_QUESTIONS.md` and, where already sent, in `07_Internal_Generated/Client_Facing_Round3/`.

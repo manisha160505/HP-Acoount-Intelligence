@@ -1,6 +1,6 @@
-# Open and unresolved questions (39)
+# Open and unresolved questions (22)
 
-> **25 Sep 05:50 UTC:** Dhruvi returned our OPEN_v2 with answers highlighted (provenance C44). That file is not on this machine yet, so every round-3 open item below (A1, A3, B2–B4, C4, C5, D1, D2, E1, F7, G1–G3, H1, I1, I2, F1a–c, F8–F13) may already be answered. Download it into `01_Client_Provided/Client_Answers/`, then update the matching `q(...)` entries in `00_INDEX/_build/build_questions.py` and re-run.
+> **25 Sep 05:50 UTC:** the client answered all 25 round-3 open items in the annotated `clarifying_opens_3_OPEN_v2_provided.docx` (C44); those answers are ingested below. The CLARIFICATIONS (7) and UNRESOLVED_v2 (2) documents have not been answered yet.
 > Status values: RESOLVED = client answer settles it. PARTIALLY RESOLVED = answered, but a delivery, confirmation or sub-question is still outstanding (each has a file in `06_Unresolved_and_Open/`). OPEN = no answer. UNRESOLVED = answered, but the answer does not settle the point.
 > IDs: D1–D43 = the 43 items of 220-Open-Decisions-List.md as numbered in clarifying opens_2.docx; D44–D53 = items added 24 Sep after the list went out; E18-x / E23-x = email Q&A of 18 and 23 Sep; QA16-x = the 16 Sep QA discussion points.
 
@@ -8,30 +8,13 @@
 
 | Id | Question | Feature | Status | Answered | Fully resolved? |
 |---|---|---|---|---|---|
-| D6 | pbebank.com: Public Bank Bhd or Public Bank Lao? | One account | UNRESOLVED | 2026-09-24 | No — see D4; corrected rows promised. |
-| D8 | Contact file for the 220 accounts | Stakeholder Map, Opportunity Map, Objection Playbook, Content Studio, Message Evaluator (BLOCKER) | OPEN | 2026-09-24 | No. |
-| D9 | Role coverage: ~30 buying-committee roles, then 5-8 more | Contacts | OPEN | 2026-09-24 | No. |
-| D10 | Stakeholder Map with zero contacts: message or hidden | UI for every account until contacts arrive | OPEN | 2026-09-24 | No. |
-| D14 | Three accounts with a wrong filings mapping | Filings | OPEN | 2026-09-24 | No. |
-| D18 | Exa as its own dataset key and on-screen label | Source labels on news cards | UNRESOLVED | 2026-09-24 | No — the answer addresses a different question. |
+| D8 | Contact file for the 220 accounts | Stakeholder Map, Opportunity Map, Objection Playbook, Content Studio, Message Evaluator (BLOCKER) | OPEN | 2026-09-25 | No. |
 | D25 | Vendor-flagged doubtful rows (9) | Hiring and technographic signals | OPEN | 2026-09-24 | No. |
 | D35 | Confidence tiers T0-T3 | Every signal; case-study file | OPEN | 2026-09-24 | No. |
-| D37 | Technographic Map Low/Medium/High risk logic | Technographic Map | OPEN | 2026-09-24 | Labels yes; approval of the logic no. |
-| D39 | Empty-state behaviour for any missing dataset | Every widget | OPEN | 2026-09-24 | No. |
-| D40 | Source label set on screen | Every source chip | OPEN | 2026-09-24 | No. |
-| D41 | Data as-of date | As-of line on every screen; recency anchor | OPEN | 2026-09-24 | No. |
-| D42 | GCP access, project id, region | Environment | OPEN | 2026-09-24 | No. |
-| D44 | Proof method for the four features with no v4 row (Objection Playbook, Content Studio, Strategy Chat, Message Evaluator) | Proof placement | OPEN | 2026-09-25 | No. |
-| D45 | Case-study proof on the signal features (Live Signals, Intent & Demand, Stakeholder Map, Technographic Map): now or after? | Proof placement | OPEN | 2026-09-25 | No. |
-| D46 | Proof on service plays in the Opportunity Map | Opportunity Map | OPEN | 2026-09-25 | No. |
-| D47 | Evidence-tier gate on proof (only once an Opportunity is established by two pipelines) | Proof placement | OPEN | 2026-09-25 | No. |
+| D37 | Technographic Map Low/Medium/High risk logic | Technographic Map | OPEN | 2026-09-25 | Labels yes; approval of the logic still with Sahaj. |
+| D42 | GCP access, project id, region | Environment | OPEN | 2026-09-25 | No. |
+| D47 | Evidence-tier gate on proof (only once an Opportunity is established by two pipelines) | Proof placement | OPEN | 2026-09-25 | No — the client did not understand the question. |
 | D48 | APJ region preference as the second sort key for proof | Proof ranking | OPEN | 2026-09-25 | No. |
-| D49 | Product-line mapping for case studies: keyword table now, Rulebook offering ids after | Proof matching | OPEN | 2026-09-25 | No. |
-| D29a | Integration route detected on its own shown as a context line? | Recommendations | OPEN | 2026-09-25 | No. |
-| D29b | Conditions the data cannot evaluate treated as unmet (offering reaches "may be relevant" but never "relevant") | Recommendations | OPEN | 2026-09-25 | No. |
-| D29c | Use-case vocabulary table (Rulebook opportunity type → case-study solution area/tags) — we write it | Case studies | OPEN | 2026-09-25 | No. |
-| D51 | A realistic delivery date starting from the day data and GCP access are in hand | Process | OPEN | 2026-09-25 | No. |
-| D53 | Remaining deliveries as one consolidated drop with a contents list | Process | OPEN | 2026-09-25 | No. |
 | E23-3 | "Contextual — no direct HP line" relationship tag | Technographic Map | OPEN | 2026-09-23 | No (by omission). |
 | QA16-1 | Objection Playbook wording "Could be raised by" vs QA check "Likely raised by" (OP-03/OP-07) | Objection Playbook | OPEN | 2026-09-16 | No. |
 | QA16-2 | "Counter Question" box reported missing (OP-06) — rendered in capitals | Objection Playbook | OPEN | 2026-09-16 | No. |
@@ -50,77 +33,17 @@
 
 ## Detail
 
-### D6 · pbebank.com: Public Bank Bhd or Public Bank Lao?
-
-- **Feature / topic:** One account
-- **Original question:** Data question 5 and item 6.
-- **Original source:** see `00_INDEX/EMAIL_TIMELINE.md`; documents in `05_Questions_and_Clarifications/Source_Documents/`
-- **Client answer:** opens_1 answer 5: "open: We will try and give you exact name 'public bank bhd' data for predictleads_combined_219_accounts.xlsx … Public Bank Lao Limited is a wholly-owned subsidiary of Public Bank Berhad, which is why the same domain is associated with both entities."
-- **Date answered:** 2026-09-24
-- **Status:** **UNRESOLVED**
-- **Does the answer fully resolve it?** No — see D4; corrected rows promised.
-- **Implementation impact:** Public Bank PredictLeads data withheld.
-- **Unresolved-issue file:** `06_Unresolved_and_Open/04_public_bank_domain_and_pbebank_rows.md`
-
 ### D8 · Contact file for the 220 accounts
 
 - **Feature / topic:** Stakeholder Map, Opportunity Map, Objection Playbook, Content Studio, Message Evaluator (BLOCKER)
 - **Original question:** Data question 1 (23 Sep), item 8, 24 Sep email §3, round 3 B2. Contacts sheet empty in all 220 workbooks; Apollo_All_Contacts named in v4 not received.
 - **Original source:** see `00_INDEX/EMAIL_TIMELINE.md`; documents in `05_Questions_and_Clarifications/Source_Documents/`
-- **Client answer:** opens_1: "Ans 1) Contact Data open". opens_2 section B: "->OPEN". Per round 3 B2 the client has since said contacts cannot be fetched for every account: some accounts get names and details, the rest names or roles only, with prompts and supporting material to follow.
-- **Date answered:** 2026-09-24
+- **Client answer:** opens_1: "Ans 1) Contact Data open". opens_2 section B: "->OPEN". Round 3 B2 (25 Sep): "-> open: will give that". Per B3 there will be ONE file: "as of now we go with whatever we have, you will get one file".
+- **Date answered:** 2026-09-25
 - **Status:** **OPEN**
 - **Does the answer fully resolve it?** No.
 - **Implementation impact:** None of the five features can be generated for any account; once the file lands all five must be built and re-tested.
 - **Unresolved-issue file:** `06_Unresolved_and_Open/05_contact_file_missing.md`
-
-### D9 · Role coverage: ~30 buying-committee roles, then 5-8 more
-
-- **Feature / topic:** Contacts
-- **Original question:** Item 9 and round 3 B3.
-- **Original source:** see `00_INDEX/EMAIL_TIMELINE.md`; documents in `05_Questions_and_Clarifications/Source_Documents/`
-- **Client answer:** No answer (section B marked OPEN).
-- **Date answered:** 2026-09-24
-- **Status:** **OPEN**
-- **Does the answer fully resolve it?** No.
-- **Implementation impact:** Whether the five contact features are built once or twice.
-- **Unresolved-issue file:** `06_Unresolved_and_Open/05_contact_file_missing.md`
-
-### D10 · Stakeholder Map with zero contacts: message or hidden
-
-- **Feature / topic:** UI for every account until contacts arrive
-- **Original question:** Item 10 and round 3 B4. Default: show the empty state with a message.
-- **Original source:** see `00_INDEX/EMAIL_TIMELINE.md`; documents in `05_Questions_and_Clarifications/Source_Documents/`
-- **Client answer:** No answer (section B OPEN).
-- **Date answered:** 2026-09-24
-- **Status:** **OPEN**
-- **Does the answer fully resolve it?** No.
-- **Implementation impact:** Stakeholder Map on all 220 accounts today.
-- **Unresolved-issue file:** `06_Unresolved_and_Open/06_empty_state_behaviour.md`
-
-### D14 · Three accounts with a wrong filings mapping
-
-- **Feature / topic:** Filings
-- **Original question:** 18 Sep question 3 and item 14; names sent in round 3 C4: Fletcher Building (rows carry sunway.com.my), Fonterra (uob.com.my), Astra (fifgroup.co.id; plus a blank-domain row holding United Tractors statements).
-- **Original source:** see `00_INDEX/EMAIL_TIMELINE.md`; documents in `05_Questions_and_Clarifications/Source_Documents/`
-- **Client answer:** opens_2: "open: pls send, noted!" — names sent 25 Sep; no correction received.
-- **Date answered:** 2026-09-24
-- **Status:** **OPEN**
-- **Does the answer fully resolve it?** No.
-- **Implementation impact:** Those rows are excluded until corrected; Federal International Finance has no filings of its own.
-- **Unresolved-issue file:** `06_Unresolved_and_Open/07_filings_reconciliation.md`
-
-### D18 · Exa as its own dataset key and on-screen label
-
-- **Feature / topic:** Source labels on news cards
-- **Original question:** Item 18 and round 3 UNRESOLVED D3. Add a dedicated Exa key, or accept the "Google News" label?
-- **Original source:** see `00_INDEX/EMAIL_TIMELINE.md`; documents in `05_Questions_and_Clarifications/Source_Documents/`
-- **Client answer:** "Resolved: pls use domain + company name + country" — answers matching, not labelling.
-- **Date answered:** 2026-09-24
-- **Status:** **UNRESOLVED**
-- **Does the answer fully resolve it?** No — the answer addresses a different question.
-- **Implementation impact:** Every news card sourced from Exa (215 accounts) is labelled Google News today.
-- **Unresolved-issue file:** `06_Unresolved_and_Open/10_exa_source_label.md`
 
 ### D25 · Vendor-flagged doubtful rows (9)
 
@@ -151,181 +74,48 @@
 - **Feature / topic:** Technographic Map
 - **Original question:** 23 Sep (Dhruvi asked us); item 37; logic sent 23 Sep as a screenshot and in words in round 3 F7.
 - **Original source:** see `00_INDEX/EMAIL_TIMELINE.md`; documents in `05_Questions_and_Clarifications/Source_Documents/`
-- **Client answer:** 23 Sep: "Please retain the Low Risk / Medium Risk / High Risk labels … what logic is currently being used"; opens_2: "open" and forwarded to Sahaj 24 Sep 14:43 UTC ("whether the risk logic is good to go from your end").
-- **Date answered:** 2026-09-24
+- **Client answer:** 23 Sep: "Please retain the Low Risk / Medium Risk / High Risk labels … what logic is currently being used"; opens_2: "open" and forwarded to Sahaj; round 3 F7 (25 Sep): "OPEN; already escalated to Sahaj".
+- **Date answered:** 2026-09-25
 - **Status:** **OPEN**
-- **Does the answer fully resolve it?** Labels yes; approval of the logic no.
+- **Does the answer fully resolve it?** Labels yes; approval of the logic still with Sahaj.
 - **Implementation impact:** technographic_map risk column.
 - **Unresolved-issue file:** `06_Unresolved_and_Open/18_tech_map_risk_labels.md`
-
-### D39 · Empty-state behaviour for any missing dataset
-
-- **Feature / topic:** Every widget
-- **Original question:** Item 39, round 3 G1. Show with a "no data from source" message or hide?
-- **Original source:** see `00_INDEX/EMAIL_TIMELINE.md`; documents in `05_Questions_and_Clarifications/Source_Documents/`
-- **Client answer:** "-> open" (forwarded to Sahaj).
-- **Date answered:** 2026-09-24
-- **Status:** **OPEN**
-- **Does the answer fully resolve it?** No.
-- **Implementation impact:** Contacts (all accounts), hiring (45 accounts), filings (31 accounts).
-- **Unresolved-issue file:** `06_Unresolved_and_Open/06_empty_state_behaviour.md`
-
-### D40 · Source label set on screen
-
-- **Feature / topic:** Every source chip
-- **Original question:** Item 40, round 3 G2. Approve Firmographics, Technographics, Hiring, News, Filings, Intent, HP Rulebook, HP case study; publisher name on news cards; no vendor names.
-- **Original source:** see `00_INDEX/EMAIL_TIMELINE.md`; documents in `05_Questions_and_Clarifications/Source_Documents/`
-- **Client answer:** "-> open" (forwarded to Sahaj).
-- **Date answered:** 2026-09-24
-- **Status:** **OPEN**
-- **Does the answer fully resolve it?** No.
-- **Implementation impact:** UI labels everywhere.
-- **Unresolved-issue file:** `06_Unresolved_and_Open/20_source_labels.md`
-
-### D41 · Data as-of date
-
-- **Feature / topic:** As-of line on every screen; recency anchor
-- **Original question:** Item 41, round 3 G3. Date of the 23 Sep drop or of the final consolidated drop?
-- **Original source:** see `00_INDEX/EMAIL_TIMELINE.md`; documents in `05_Questions_and_Clarifications/Source_Documents/`
-- **Client answer:** "-> open"
-- **Date answered:** 2026-09-24
-- **Status:** **OPEN**
-- **Does the answer fully resolve it?** No.
-- **Implementation impact:** Every screen; recency calculations (CONFLICT C-02).
-- **Unresolved-issue file:** `06_Unresolved_and_Open/21_data_as_of_date.md`
 
 ### D42 · GCP access, project id, region
 
 - **Feature / topic:** Environment
 - **Original question:** 15 Sep action item; 24 Sep email §4; item 42; round 3 H1; access request doc sent 23 Sep via WhatsApp.
 - **Original source:** see `00_INDEX/EMAIL_TIMELINE.md`; documents in `05_Questions_and_Clarifications/Source_Documents/`
-- **Client answer:** "-> open"; "RESOLVED: Already followed up with sahaj" (on the follow-up action only).
-- **Date answered:** 2026-09-24
+- **Client answer:** "-> open"; "RESOLVED: Already followed up with sahaj" (on the follow-up action only); round 3 H1 (25 Sep): "Open: escalated to sahaj".
+- **Date answered:** 2026-09-25
 - **Status:** **OPEN**
 - **Does the answer fully resolve it?** No.
 - **Implementation impact:** The current environment cannot hold 220 accounts; a few hours of redeploy/load once granted.
 - **Unresolved-issue file:** `06_Unresolved_and_Open/22_gcp_access.md`
 
-### D44 · Proof method for the four features with no v4 row (Objection Playbook, Content Studio, Strategy Chat, Message Evaluator)
-
-- **Feature / topic:** Proof placement
-- **Original question:** Round 3 F8 (item 44). Not in the version the client answered.
-- **Original source:** see `00_INDEX/EMAIL_TIMELINE.md`; documents in `05_Questions_and_Clarifications/Source_Documents/`
-- **Client answer:** Not yet put to the client / not answered.
-- **Date answered:** 2026-09-25
-- **Status:** **OPEN**
-- **Does the answer fully resolve it?** No.
-- **Implementation impact:** Proof placement
-
-### D45 · Case-study proof on the signal features (Live Signals, Intent & Demand, Stakeholder Map, Technographic Map): now or after?
-
-- **Feature / topic:** Proof placement
-- **Original question:** Round 3 F9 (item 45). Not in the version the client answered.
-- **Original source:** see `00_INDEX/EMAIL_TIMELINE.md`; documents in `05_Questions_and_Clarifications/Source_Documents/`
-- **Client answer:** Not yet put to the client / not answered.
-- **Date answered:** 2026-09-25
-- **Status:** **OPEN**
-- **Does the answer fully resolve it?** No.
-- **Implementation impact:** Proof placement
-
-### D46 · Proof on service plays in the Opportunity Map
-
-- **Feature / topic:** Opportunity Map
-- **Original question:** Round 3 F10 (item 46). Not in the version the client answered.
-- **Original source:** see `00_INDEX/EMAIL_TIMELINE.md`; documents in `05_Questions_and_Clarifications/Source_Documents/`
-- **Client answer:** Not yet put to the client / not answered.
-- **Date answered:** 2026-09-25
-- **Status:** **OPEN**
-- **Does the answer fully resolve it?** No.
-- **Implementation impact:** Opportunity Map
-
 ### D47 · Evidence-tier gate on proof (only once an Opportunity is established by two pipelines)
 
 - **Feature / topic:** Proof placement
-- **Original question:** Round 3 F11 (item 47). Not in the version the client answered.
+- **Original question:** Round 3 F11 (item 47). Default: apply it.
 - **Original source:** see `00_INDEX/EMAIL_TIMELINE.md`; documents in `05_Questions_and_Clarifications/Source_Documents/`
-- **Client answer:** Not yet put to the client / not answered.
+- **Client answer:** "clarification needed pls"
 - **Date answered:** 2026-09-25
 - **Status:** **OPEN**
-- **Does the answer fully resolve it?** No.
-- **Implementation impact:** Proof placement
+- **Does the answer fully resolve it?** No — the client did not understand the question.
+- **Implementation impact:** Whether thin accounts show proof on objection cards.
+- **Unresolved-issue file:** `06_Unresolved_and_Open/27_evidence_tier_gate_and_region_preference.md`
 
 ### D48 · APJ region preference as the second sort key for proof
 
 - **Feature / topic:** Proof ranking
-- **Original question:** Round 3 F12 (item 48). Not in the version the client answered.
+- **Original question:** Round 3 F12 (item 48). Default: yes.
 - **Original source:** see `00_INDEX/EMAIL_TIMELINE.md`; documents in `05_Questions_and_Clarifications/Source_Documents/`
-- **Client answer:** Not yet put to the client / not answered.
+- **Client answer:** "clarification needed pls"
 - **Date answered:** 2026-09-25
 - **Status:** **OPEN**
 - **Does the answer fully resolve it?** No.
-- **Implementation impact:** Proof ranking
-
-### D49 · Product-line mapping for case studies: keyword table now, Rulebook offering ids after
-
-- **Feature / topic:** Proof matching
-- **Original question:** Round 3 F13 (item 50). Not in the version the client answered.
-- **Original source:** see `00_INDEX/EMAIL_TIMELINE.md`; documents in `05_Questions_and_Clarifications/Source_Documents/`
-- **Client answer:** Not yet put to the client / not answered.
-- **Date answered:** 2026-09-25
-- **Status:** **OPEN**
-- **Does the answer fully resolve it?** No.
-- **Implementation impact:** Proof matching
-
-### D29a · Integration route detected on its own shown as a context line?
-
-- **Feature / topic:** Recommendations
-- **Original question:** Round 3 F1a (item 29a). Not in the version the client answered.
-- **Original source:** see `00_INDEX/EMAIL_TIMELINE.md`; documents in `05_Questions_and_Clarifications/Source_Documents/`
-- **Client answer:** Not yet put to the client / not answered.
-- **Date answered:** 2026-09-25
-- **Status:** **OPEN**
-- **Does the answer fully resolve it?** No.
-- **Implementation impact:** Recommendations
-
-### D29b · Conditions the data cannot evaluate treated as unmet (offering reaches "may be relevant" but never "relevant")
-
-- **Feature / topic:** Recommendations
-- **Original question:** Round 3 F1b (item 29b). Not in the version the client answered.
-- **Original source:** see `00_INDEX/EMAIL_TIMELINE.md`; documents in `05_Questions_and_Clarifications/Source_Documents/`
-- **Client answer:** Not yet put to the client / not answered.
-- **Date answered:** 2026-09-25
-- **Status:** **OPEN**
-- **Does the answer fully resolve it?** No.
-- **Implementation impact:** Recommendations
-
-### D29c · Use-case vocabulary table (Rulebook opportunity type → case-study solution area/tags) — we write it
-
-- **Feature / topic:** Case studies
-- **Original question:** Round 3 F1c (item 29c). Not in the version the client answered.
-- **Original source:** see `00_INDEX/EMAIL_TIMELINE.md`; documents in `05_Questions_and_Clarifications/Source_Documents/`
-- **Client answer:** Not yet put to the client / not answered.
-- **Date answered:** 2026-09-25
-- **Status:** **OPEN**
-- **Does the answer fully resolve it?** No.
-- **Implementation impact:** Case studies
-
-### D51 · A realistic delivery date starting from the day data and GCP access are in hand
-
-- **Feature / topic:** Process
-- **Original question:** 24 Sep email §7.4; round 3 I1. Not in the version the client answered.
-- **Original source:** see `00_INDEX/EMAIL_TIMELINE.md`; documents in `05_Questions_and_Clarifications/Source_Documents/`
-- **Client answer:** Not yet put to the client / not answered.
-- **Date answered:** 2026-09-25
-- **Status:** **OPEN**
-- **Does the answer fully resolve it?** No.
-- **Implementation impact:** Process
-
-### D53 · Remaining deliveries as one consolidated drop with a contents list
-
-- **Feature / topic:** Process
-- **Original question:** 24 Sep email §3; round 3 I2. Not in the version the client answered.
-- **Original source:** see `00_INDEX/EMAIL_TIMELINE.md`; documents in `05_Questions_and_Clarifications/Source_Documents/`
-- **Client answer:** Not yet put to the client / not answered.
-- **Date answered:** 2026-09-25
-- **Status:** **OPEN**
-- **Does the answer fully resolve it?** No.
-- **Implementation impact:** Process
+- **Implementation impact:** Order of case studies when several match.
+- **Unresolved-issue file:** `06_Unresolved_and_Open/27_evidence_tier_gate_and_region_preference.md`
 
 ### E23-3 · "Contextual — no direct HP line" relationship tag
 
