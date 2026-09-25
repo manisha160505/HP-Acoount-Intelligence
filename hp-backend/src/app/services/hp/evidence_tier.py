@@ -80,16 +80,67 @@ DATASET_PIPELINES = {
 # band - but on their own they cannot lift anything above Context Only.
 CONTEXT_PIPELINES = frozenset(("Firmographics", "Contacts"))
 
+# The client's relevance ladder, 25 Sep email, verbatim:
+#
+#   "Technology only (Intune/ServiceNow): an internal 'possible fit' only, NOT
+#    recommended.
+#    Technology plus related account evidence: 'HP WXP may be relevant to this
+#    opportunity.'
+#    A clear opportunity plus the Rulebook's conditions supported: 'HP WXP is
+#    relevant to this opportunity.'"
+#
+# This is a second axis on top of the v4 section C tiers, not a replacement for
+# them. A tier says how strong the EVIDENCE is; a rung says how an HP OFFERING
+# may be worded on the back of it. They line up one to one, which is why the
+# rung is derived from the tier rather than computed again from the same
+# pipelines.
+RELEVANCE_NOT_RECOMMENDED = "possible fit"
+RELEVANCE_MAY = "may be relevant"
+RELEVANCE_IS = "is relevant"
+
+RELEVANCE_BY_TIER = {
+    OPPORTUNITY: RELEVANCE_IS,
+    CONVERSATION_STARTER: RELEVANCE_MAY,
+    CONTEXT_ONLY: RELEVANCE_NOT_RECOMMENDED,
+}
+
+# The sentence a feature may write for each rung. The offering's name is
+# substituted in; nothing else about the phrasing is the model's choice.
+RELEVANCE_WORDING = {
+    RELEVANCE_IS: '"%s is relevant to this opportunity."',
+    RELEVANCE_MAY: '"%s may be relevant to this opportunity."',
+    RELEVANCE_NOT_RECOMMENDED: (
+        "Do not recommend %s. It is a possible fit internally; say only that "
+        "the technology was detected and name the integration route."),
+}
+
+
+def relevance_for(tier: str, conditions_unevaluable: bool = False) -> str:
+    """How strongly an HP offering may be worded on this evidence.
+
+    `conditions_unevaluable` is the client's rule 5: "A Rulebook condition that
+    cannot be evaluated counts as unmet. The offering can reach 'may be
+    relevant' but never 'is relevant'." Seat-count and licence-tier rules are
+    the live examples - the data carries an employee band, not a seat count, so
+    those conditions can never be tested and must not produce a settled claim.
+    """
+    rung = RELEVANCE_BY_TIER.get(str(tier or ""), RELEVANCE_NOT_RECOMMENDED)
+    if conditions_unevaluable and rung == RELEVANCE_IS:
+        return RELEVANCE_MAY
+    return rung
+
+
 PERMITTED_LANGUAGE = {
     OPPORTUNITY: ("May state that the combined evidence indicates or supports "
                   "an HP-addressable opportunity, and recommend a specific "
-                  "seller focus."),
-    CONVERSATION_STARTER: ("Use language such as \"creates a relevant "
-                           "conversation\" or \"may warrant discussion\". Do "
-                           "not state a confirmed need, project or buying "
-                           "motion."),
+                  "seller focus. An offering whose conditions are supported "
+                  "\"is relevant to this opportunity\"."),
+    CONVERSATION_STARTER: ("An offering here \"may be relevant to this "
+                           "opportunity\" - never \"is relevant\". Do not "
+                           "state a confirmed need, project or buying motion."),
     CONTEXT_ONLY: ("Present as seller context only. Do not create an HP "
-                   "opportunity or product recommendation."),
+                   "opportunity or product recommendation. A detected "
+                   "technology is a possible integration route, nothing more."),
 }
 
 # Section D's wording, for an account where nothing is addressable.

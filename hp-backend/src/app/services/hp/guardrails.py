@@ -229,6 +229,25 @@ _CONFIRMED_NEED_RE = re.compile(
 _HP_SUBJECT_RE = re.compile(r"^\s*(?:hp\b|wolf\b|poly\b|z\s+by\s+hp\b|elite|pro\b)", re.I)
 
 TIER_OPPORTUNITY = "Opportunity"
+TIER_CONTEXT_ONLY = "Context Only"
+
+# The client's ladder, 25 Sep: an offering "is relevant" only where the
+# evidence reaches the Opportunity tier and the Rulebook's conditions are
+# supported. Below that it "may be relevant", and at Context Only it is not
+# recommended at all.
+#
+# These match the settled wording and the ordinary ways a model reaches for it.
+# "may be relevant" is deliberately excluded - it is the permitted phrasing one
+# rung down, and matching it here would reject the correct sentence.
+_SETTLED_RELEVANCE_RE = re.compile(
+    r"\b(?:is\s+relevant|are\s+relevant|is\s+(?:a\s+)?(?:strong|clear|direct|"
+    r"natural)\s+fit|is\s+well[\s-]suited|is\s+the\s+right\s+(?:fit|solution)|"
+    r"clearly\s+addresses|directly\s+addresses)\b", re.I)
+
+# Wording that recommends an HP offering at all. Context Only may not.
+_RECOMMENDS_RE = re.compile(
+    r"\b(?:we\s+recommend|recommend(?:ed|ing)?|should\s+(?:deploy|adopt|buy|"
+    r"purchase|consider)|propose|positions?\s+HP|pitch)\b", re.I)
 
 
 def tier_language_faults(text: str, tier: str) -> list:
@@ -243,7 +262,29 @@ def tier_language_faults(text: str, tier: str) -> list:
     """
     faults = []
     said = " ".join(str(text or "").split())
-    if not said or str(tier or "") == TIER_OPPORTUNITY:
+    if not said:
+        return faults
+
+    tier_name = str(tier or "") or TIER_CONTEXT_ONLY
+
+    # The relevance ladder. Unlike the account-need check below, this one tests
+    # HP-subject sentences too: "HP WXP is relevant to this opportunity" is
+    # exactly the claim the ladder governs, and it is always HP-subject.
+    if tier_name != TIER_OPPORTUNITY:
+        hit = _SETTLED_RELEVANCE_RE.search(said)
+        if hit:
+            faults.append(
+                "tier %s: says %r, which states settled relevance. On this "
+                "evidence an offering may only \"be relevant\", never \"is "
+                "relevant\"" % (tier_name, hit.group(0)))
+    if tier_name == TIER_CONTEXT_ONLY:
+        hit = _RECOMMENDS_RE.search(said)
+        if hit:
+            faults.append(
+                "tier Context Only: says %r, but a detected technology alone is "
+                "a possible fit and must not be recommended" % hit.group(0))
+
+    if tier_name == TIER_OPPORTUNITY:
         return faults
 
     for sentence in re.split(r"(?<=[.;])\s+", said):
@@ -254,7 +295,7 @@ def tier_language_faults(text: str, tier: str) -> list:
             faults.append(
                 "tier %s: says %r, which states a confirmed need, project or "
                 "buying motion that only the Opportunity tier may claim"
-                % (tier or "Context Only", hit.group(0)))
+                % (tier_name, hit.group(0)))
             break
     return faults
 

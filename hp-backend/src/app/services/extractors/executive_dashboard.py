@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 
 from app.database.mongodb import get_db
 from app.services.extractors.datasets import (
+    account_display_name,
     find_file_path,
     read_dataset_records,
     requires_local_datasets,
@@ -107,7 +108,9 @@ def extract_executive_dashboard(account_id: str) -> list[dict]:
         parent_company = _resolve_parent(hier_rows[0] if hier_rows else None)
 
         summary_data = {
-            "company_name": (row.get("Company Name") or row.get("Name") or "").strip(),
+            # DEC-052: the audit sheet's name, held on the account record,
+            # not the vendor's name for the domain.
+            "company_name": account_display_name(account_id, row),
             "domain": (row.get("Company Domain") or row.get("Website") or "").strip(),
             "business_description": business_description,
             "industry_classification": industry_classification,

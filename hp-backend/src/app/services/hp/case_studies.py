@@ -170,16 +170,92 @@ AREA_TO_LINES = {
     "collaboration": (LINE_COLLABORATION,),
 }
 
-# Ranking. Deliberately small: the candidate set after the product filter is
-# usually under a dozen, so elaborate scoring would be false precision.
-SCORE_SAME_INDUSTRY = 10
-SCORE_PER_SHARED_SIGNAL = 3
-SCORE_HAS_OUTCOME = 4          # a stated result is the most persuasive thing here
+# Ranking, in the order the client settled on 25 Sep:
+#
+#     "1. Same use case -> 2. Same industry -> 3. APJ/APAC region ->
+#      4. Stated outcome/metric -> 5. HP.com (T0) before third-party (T2)"
+#     "the same use case should always be the first priority. Region should not
+#      override the use-case match."
+#
+# The weights are spaced so a lower key can never outrank a higher one however
+# the counts fall: one shared use-case tag beats any combination of industry,
+# outcome and tier. Before this, industry was the highest key at 10 and the use
+# case scored 3 - and never fired at all, because no caller passed `signals`.
+#
+# Region (key 3) is deliberately absent. It is not in the corpus and cannot be
+# derived: all 89 studies carry a global HP URL ("us-en" pages, or GetDocument
+# ids), so none of them says where the customer is. Inventing a region from the
+# customer's name would be a guess presented as a fact. The client has been
+# asked for a region column; the key slots in between industry and outcome when
+# it arrives.
+SCORE_PER_SHARED_SIGNAL = 100  # key 1, use case
+SCORE_SAME_INDUSTRY = 10       # key 2
+SCORE_HAS_OUTCOME = 4          # key 4, a stated result
+SCORE_HP_PUBLISHED = 2         # key 5, T0 over T2
 SCORE_HAS_CHALLENGE = 1
 # A study whose source described no engagement carries only its attribution -
 # "HP published a case study with X featuring Y". Real, citable, and the weakest
 # thing here, so anything narrated outranks it.
 SCORE_NARRATED = 2
+
+# The corpus's own use-case vocabulary, read off `signal_tags` (present on all
+# 89 studies). These are the tags the case-study file itself supplies in
+# `account_signal_match`; nothing here is invented.
+#
+# The map goes from the opportunity a feature is already holding - an objection
+# area, a play's opportunity type, a Tech Map or Intent category - to the tags
+# that describe the same work. That direction matters: the client asked for case
+# studies to be checked against "the account evidence/use case", and refused a
+# fixed Rulebook-to-case-study table. The Rulebook is not consulted here.
+USE_CASE_TAGS = {
+    "Engineering-Product-Development": (
+        "workstation", "engineering", "design", "cad", "3d", "product development",
+        "simulation", "rendering", "modelling", "modeling", "prototyp"),
+    "Production-Optimization": (
+        "production", "manufactur", "factory", "throughput", "tooling",
+        "additive", "supply chain", "cost reduction", "efficiency"),
+    "Industrial-Manufacturing": (
+        "industrial", "manufactur", "heavy equipment", "automotive", "mining",
+        "plant", "machinery"),
+    "Digital-Transformation": (
+        "digital transformation", "modernis", "moderniz", "transformation",
+        "cloud", "automation", "digitis", "digitiz"),
+    # "fleet" on its own is not here: it matches "Print Fleet & Document
+    # Infrastructure", which is a different fleet entirely. The corpus has no
+    # print use-case tag, so a print opportunity correctly matches nothing and
+    # falls back to industry and outcome.
+    "Fleet-Refresh": (
+        "device fleet", "fleet refresh", "refresh", "pc", "laptop", "notebook",
+        "client device", "device lifecycle", "daas", "device as a service",
+        "deployment"),
+    "Workforce-Modernization": (
+        "workforce", "employee experience", "hybrid", "flexible working",
+        "wxp", "workforce experience", "productivity", "endpoint experience"),
+    "Security": (
+        "security", "endpoint protection", "threat", "wolf", "compliance",
+        "zero trust"),
+    "Remote-Collaboration": (
+        "collaboration", "poly", "meeting", "conferencing", "hybrid workplace",
+        "video"),
+}
+
+
+def signals_for_opportunity(*texts) -> list:
+    """The corpus's use-case tags an opportunity speaks to.
+
+    Callers pass whatever names the opportunity they are about to attach proof
+    to - a category name, a play title and its type, an objection area. Several
+    arguments are accepted because the name alone is often too short to match on
+    ("PC", "3D"), while the title beside it is not.
+
+    Returns [] when nothing matches, which leaves ranking exactly as it was
+    before this existed: industry, then outcome, then tier.
+    """
+    blob = " ".join(_norm(t) for t in texts if _norm(t))
+    if not blob:
+        return []
+    return [tag for tag, words in USE_CASE_TAGS.items()
+            if any(word in blob for word in words)]
 
 # How far down the ranked list a caller will look.
 PROOF_POINT_CANDIDATES = 5
@@ -265,6 +341,42 @@ def lines_for_hp_line(hp_line: str) -> tuple:
     return HP_LINE_TO_LINES.get(_norm(hp_line), ())
 
 
+def lines_for_product_text(text: str) -> tuple:
+    """The canonical lines named anywhere in a piece of product text.
+
+    `lines_for_hp_line` is an exact lookup, so it answers only for names
+    spelled exactly as the map spells them. The features name their HP play in
+    their own words - "HP Multi Jet Fusion (3D)", "Poly Collaboration
+    Hardware", "HP Enterprise Printing & Managed Print Services" - and every
+    one of those missed. This runs the same token map that validates HP product
+    names everywhere else, then maps what it finds.
+    """
+    from app.services.extractors import grounding
+
+    lowered = str(text or "").lower()
+    if not lowered.strip():
+        return ()
+    out: list = []
+    for tokens, canonical in grounding.HP_LINE_TOKENS:
+        if not any(token in lowered for token in tokens):
+            continue
+        for line in lines_for_hp_line(canonical):
+            if line not in out:
+                out.append(line)
+
+    # Then the corpus's own vocabulary, which is what classified the studies in
+    # the first place. Without this, 3D is unreachable: `HP_LINE_TO_LINES` has
+    # no key for it, so "HP Multi Jet Fusion (3D)" mapped to nothing while 63 of
+    # the 89 studies sit on the 3D line. Using one table for both directions is
+    # also what keeps them from drifting apart.
+    for line, keywords in OFFERING_KEYWORDS:
+        if line in out:
+            continue
+        if any(keyword in lowered for keyword in keywords):
+            out.append(line)
+    return tuple(out)
+
+
 def lines_for_area(area: str) -> tuple:
     """The canonical lines an Objection Playbook area corresponds to."""
     return AREA_TO_LINES.get(_norm(area), ())
@@ -282,6 +394,11 @@ def _score(study: dict, industry: str, signals) -> tuple:
 
     if study.get("outcome"):
         points += SCORE_HAS_OUTCOME
+    # Key 5: HP's own page before a third party's. T0 is hp.com, T2 is everyone
+    # else. A study with no tier recorded is not penalised - absence of the
+    # field is not evidence that HP did not publish it.
+    if _norm(study.get("source_tier")) == "t0":
+        points += SCORE_HP_PUBLISHED
     if study.get("challenge"):
         points += SCORE_HAS_CHALLENGE
     if not study.get("attribution_only"):
@@ -398,8 +515,24 @@ SURFACE_CONTENT = "content_generated_assets"
 # the Objection Playbook's five fixed areas cannot.
 SURFACE_EXEC = "exec_strategic_priorities"
 
+# The three signal surfaces the client added on 24 Sep: proof may strengthen an
+# existing recommendation in Live Signals' "Implication for HP", Intent's "So
+# What for HP" and the Technographic Map's "what it means for HP" - "nowhere
+# else", and "we are not trying to compulsorily include it".
+#
+# They pick AFTER the Executive Dashboard, and therefore last of all. Each one
+# strengthens a recommendation that already stands on its own evidence, so an
+# empty slot costs the reader nothing, while taking a study from the Objection
+# Playbook - where the card exists to carry proof - costs a great deal. The
+# Stakeholder Map is deliberately absent: it was asked for under item 30 and
+# then withdrawn ("Sahaj mentioned not right now").
+SURFACE_SIGNALS = "news_signals_feed"
+SURFACE_INTENT = "intent_category_summary"
+SURFACE_TECHMAP = "technographic_map"
+
 SURFACE_ORDER = (SURFACE_OBJECTIONS, SURFACE_OPPORTUNITIES,
-                 SURFACE_MESSAGING, SURFACE_CONTENT, SURFACE_EXEC)
+                 SURFACE_MESSAGING, SURFACE_CONTENT, SURFACE_EXEC,
+                 SURFACE_SIGNALS, SURFACE_INTENT, SURFACE_TECHMAP)
 
 # Where each surface keeps the records that carry a proof point. A path is
 # walked by `_walk` below; "[]" means "every item in this list".
@@ -409,6 +542,9 @@ SURFACE_PATHS = {
     SURFACE_MESSAGING: ("data", "pillars", "[]"),
     SURFACE_CONTENT: ("data", "assets", "[]", "generated"),
     SURFACE_EXEC: ("data", "priorities", "[]"),
+    SURFACE_SIGNALS: ("data", "signals", "[]"),
+    SURFACE_INTENT: ("data", "hp_categories", "[]"),
+    SURFACE_TECHMAP: ("data", "categories", "[]"),
 }
 
 

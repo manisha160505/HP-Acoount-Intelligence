@@ -126,8 +126,27 @@ NewDocs/*
 scripts/split_baseline.json
 scripts/validate_split_data.py
 
-# Local zip snapshots. Archive.zip is the 220-account data (160MB) and
-# project-documentation.zip is a copy of the already-tracked docs folder
-# (624MB, includes the ignored client files). Never committed.
-Archive.zip
-project-documentation.zip
+# ==============================================================================
+# Local-only working folders (added 25 Sep). None of this is tracked today; the
+# rules make that explicit so a stray `git add -A` cannot pick them up.
+# ==============================================================================
+
+# The delivered 220-account source data: explorium workbooks, exa, google news
+# RSS, predictleads and the intent results. ~67MB of real client account data.
+# Note the older "220 account data /" rule above names a folder that no longer
+# exists, and carries a stray space before its slash; this is the live one.
+220 accounts/
+
+# Working archive of superseded drops and documents.
+Archive/
+
+# Project documentation kept locally rather than in the repository.
+project-documentation/
+
+# Internal delivery planning for the 220-account run. Working document, kept
+# local rather than pushed.
+DELIVERY_ROADMAP_220_2026-09-25.md
+
+# Internal rule book for the 220-account run: every client rule against what
+# the build actually does. Working document, kept local.
+HP_220_FINAL_RULE_BOOK_2026-09-25.md

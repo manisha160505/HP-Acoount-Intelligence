@@ -216,11 +216,54 @@ function AnswerWithCitations({ text, citations, idPrefix }:
   return <p className="text-xs leading-relaxed whitespace-pre-wrap">{parts}</p>;
 }
 
+// A case study attached to a recommendation that already stands on its own
+// evidence. Added 24 Sep for the three places the client named: Live Signals'
+// Implication for HP, Intent's So What for HP, and the Technographic Map's what
+// it means for HP - "nowhere else". It strengthens a recommendation and never
+// creates one, so it renders below the prose rather than inside it.
+function ProofPoint({ proof }: { proof: any }) {
+  if (!proof?.text) return null;
+  return (
+    <div className="bg-amber-50/60 border border-amber-200 rounded-xl px-3 py-2 space-y-1 mt-2">
+      <span className="text-[9px] font-mono font-extrabold uppercase tracking-widest text-amber-800 block">
+        HP proof point
+      </span>
+      <p className="text-[11px] text-amber-900 leading-relaxed">{proof.text}</p>
+      {(proof.customer || proof.source_url) && (
+        <p className="text-[10px] text-amber-800">
+          {proof.customer && <span className="font-semibold">{proof.customer}</span>}
+          {proof.industry && <span className="text-amber-700"> &middot; {proof.industry}</span>}
+          {proof.source_url && (
+            <>
+              {' · '}
+              <a
+                href={proof.source_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline hover:text-amber-950"
+              >
+                View the HP case study
+              </a>
+            </>
+          )}
+        </p>
+      )}
+    </div>
+  );
+}
+
+// Client ruling, 24 Sep, on what to show when a dataset is missing: "leave it
+// out, do not write anything as of now". They asked us to stay flexible because
+// the decision is still with Sahaj, so this is one flag rather than deleted
+// code - flip it back to true and every empty state returns exactly as it was.
+const SHOW_EMPTY_STATE_NOTICES = false;
+
 // A widget that never generated stores the reason on its payload. Showing it
 // turns an unexplained empty panel into something a reader can act on - most
 // often a missing OPENAI_API_KEY, or source files absent from this machine.
 function PendingNotice({ widget, title }: { widget: any; title: string }) {
   const notice = widget?.data?.notice;
+  if (!SHOW_EMPTY_STATE_NOTICES) return null;
   if (!widget || widget.status === 'available' || !notice) return null;
   return (
     <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
@@ -973,19 +1016,31 @@ export default function UserDashboardPage() {
                 Tuning Logic section E: a dashboard opened months after
                 ingestion must still name the snapshot it is reasoning from. */}
             {(() => {
-              const asOf = widgets.find(w => w.data_as_of_date)?.data_as_of_date;
-              if (!asOf) return null;
-              const spread = widgets.find(w => w.data_as_of)?.data_as_of?.by_dataset || {};
-              const days = Array.from(new Set(Object.values(spread)));
+              // Client ruling, 24 Sep: show the retrieval date of the data
+              // itself, not one rolled-up date for the account. Each dataset
+              // is named with the day it was loaded; where every pipeline
+              // arrived together this collapses back to a single date.
+              const spread: Record<string, string> =
+                widgets.find(w => w.data_as_of)?.data_as_of?.by_dataset || {};
+              const days = Array.from(new Set(Object.values(spread))).sort();
+              if (!days.length) return null;
+              const byDay = days.map(day => ({
+                day,
+                sets: Object.keys(spread).filter(k => spread[k] === day).sort(),
+              }));
               return (
                 <span
                   className="text-[10px] font-mono text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 whitespace-nowrap"
-                  title={days.length > 1
-                    ? `Pipelines were loaded on different days: ${days.sort().join(', ')}. The date shown is the most recent.`
-                    : 'The date this account’s data was loaded into the engine.'}
+                  title={byDay
+                    .map(({ day, sets }) => `${day}: ${sets.join(', ')}`)
+                    .join('\n')}
                 >
-                  Data as of {asOf}
-                  {days.length > 1 && <span className="text-slate-400"> &middot; mixed</span>}
+                  {days.length === 1
+                    ? `Data as of ${days[0]}`
+                    : `Data as of ${days[0]} – ${days[days.length - 1]}`}
+                  {days.length > 1 && (
+                    <span className="text-slate-400"> &middot; {Object.keys(spread).length} sources</span>
+                  )}
                 </span>
               );
             })()}
@@ -1071,9 +1126,9 @@ export default function UserDashboardPage() {
                           <option value="Firmographics">Firmographics (1_Firmographics)</option>
                           <option value="Hierarchy">Hierarchy (2_Company_Hierarchy)</option>
                           <option value="Technographics">Technographics (4_Technographics)</option>
-                          <option value="Bombora">Bombora (Intent)</option>
+                          <option value="Bombora">Intent</option>
                           <option value="Google News">Google News RSS</option>
-                          <option value="Job Openings">Job Openings (Source B)</option>
+                          <option value="Job Openings">Hiring</option>
                         </select>
                       </div>
                     </div>
@@ -1425,10 +1480,20 @@ export default function UserDashboardPage() {
                                 ? 'border-amber-400 bg-amber-50/50'
                                 : 'border-slate-300 bg-slate-50'
                             }`}>
-                              <span className={`font-extrabold ${
-                                urgencyData?.score != null ? 'text-3xl text-slate-800' : 'text-base text-slate-400'
-                              }`}>
-                                {urgencyData?.score ?? 'N/A'}
+                              <span
+                                className={`font-extrabold ${
+                                  urgencyData?.score != null ? 'text-3xl text-slate-800' : 'text-base text-slate-400'
+                                }`}
+                                // Withheld rather than absent: the client's
+                                // 16 Sep gate publishes a score only where at
+                                // least 60% of the weighted driver coverage is
+                                // available. Showing 0 there would read as "not
+                                // urgent" when the truth is "not measured".
+                                title={urgencyData?.publishable === false
+                                  ? `Not published: ${urgencyData?.coverage_percent}% of the weighted driver coverage is available, and the minimum is ${urgencyData?.coverage_minimum}%.`
+                                  : undefined}
+                              >
+                                {urgencyData?.score ?? '—'}
                               </span>
                               <span className="text-[10px] font-bold text-slate-400">/100</span>
                             </div>
@@ -2354,6 +2419,7 @@ export default function UserDashboardPage() {
                                       <p>
                                         <span className="font-semibold">Implication for HP: </span>{sc.sales_angle}
                                       </p>
+                                      <ProofPoint proof={s.hp_proof_point} />
                                     </div>
                                   )}
 
@@ -2451,7 +2517,8 @@ export default function UserDashboardPage() {
                                         );
                                       })}
                                       <p className="text-[10px] text-slate-500 pt-1 border-t border-slate-200">
-                                        Weighted total <span className="font-semibold text-slate-700">{s.confidence?.toFixed(2)}</span> /10 &middot; tier {s.tier}
+                                        Weighted total <span className="font-semibold text-slate-700">{s.confidence?.toFixed(2)}</span> /10
+                                        {s.tier && <> &middot; tier {s.tier}</>}
                                       </p>
                                     </div>
                                   )}
@@ -2494,7 +2561,12 @@ export default function UserDashboardPage() {
                   const staffingTopics = topicsList.filter(t => t.included && t.hiring_linked);
                   const disclaimer: string = summaryData?.disclaimer || topicsData?.disclaimer || 'Intent indicates research activity, not confirmed purchase intent.';
                   // Source A that is missing or belongs to another domain is stated, never drawn as zero scores.
-                  const sourceAMessage: string | null = topicsData ? null : (topicsWidget?.data?.message || 'Intent unavailable: no Bombora intent topics have been extracted for this account.');
+                  // Client ruling, 24 Sep: when a dataset is missing, leave the section
+                  // out and write nothing. Behind the same flag as the other empty
+                  // states so the whole behaviour reverses in one place.
+                  const sourceAMessage: string | null = (topicsData || !SHOW_EMPTY_STATE_NOTICES)
+                    ? null
+                    : (topicsWidget?.data?.message || 'Intent unavailable: no intent topics have been extracted for this account.');
                   const otherTheme = themes.find((t: any) => t.theme === 'Other / Low Relevance');
                   const includedCount: number = topicsData?.included_topics_count || 0;
                   const unmappedPct = includedCount && otherTheme ? Math.round((otherTheme.topic_count / includedCount) * 100) : 0;
@@ -2581,7 +2653,7 @@ export default function UserDashboardPage() {
 
                   // Steps 2-4: Bombora signals with exact scores, and the technologies that confirm them.
                   const renderSignals = (signals: any[], topicLimit: number) => {
-                    if (!signals?.length) return <p className="text-[11px] text-slate-400">No supporting Bombora research.</p>;
+                    if (!signals?.length) return <p className="text-[11px] text-slate-400">No supporting intent research.</p>;
                     return (
                       <div className="space-y-2">
                         {signals.map((sg: any) => (
@@ -2611,10 +2683,10 @@ export default function UserDashboardPage() {
                                   <span className="font-bold text-slate-400 uppercase mr-1">Technologies</span>
                                   {sg.technologies.map((t: any) => t.name).join(', ')}
                                   <span className="text-slate-400"> ({Array.from(new Set(sg.technologies.map((t: any) => `${t.sheet} · ${t.column}`))).join('; ')})</span>
-                                  {sg.topics.length === 0 && <span className="text-slate-400"> · no Bombora signal to score it</span>}
+                                  {sg.topics.length === 0 && <span className="text-slate-400"> · no intent signal to score it</span>}
                                 </>
                               ) : (
-                                'No matching technology in Explorium sheets 4–5'
+                                'No matching technology in the technographics data'
                               )}
                             </p>
                           </div>
@@ -2640,7 +2712,7 @@ export default function UserDashboardPage() {
                           <div className={`${barClass} h-1.5 rounded-full`} style={{ width: `${Math.min(100, Math.max(0, item.composite_score ?? 0))}%` }}></div>
                         </div>
                         <span className="font-mono font-bold text-slate-900 w-8 text-right">{item.composite_score}</span>
-                        <span className="text-[10px] text-slate-400 font-medium w-12">{provider?.name || 'Bombora'}</span>
+                        <span className="text-[10px] text-slate-400 font-medium w-12">{'Intent'}</span>
                       </div>
                     </div>
                   );
@@ -2657,7 +2729,7 @@ export default function UserDashboardPage() {
                           </h2>
                           <p className="text-xs text-slate-500 mt-0.5">
                             {categoryFileMatched ? `${summaryData?.categories_with_signal ?? 0} of ${chartCats.length} HP categories with a signal in the category file • ` : ''}
-                            {topicsList.length} Bombora intent topics for {selectedAccount?.name}
+                            {topicsList.length} intent topics for {selectedAccount?.name}
                           </p>
                         </div>
                         <div className="flex flex-wrap items-center gap-2 text-xs font-bold">
@@ -2668,7 +2740,7 @@ export default function UserDashboardPage() {
                           )}
                           {observation?.as_of && (
                             <span className="px-3 py-1 bg-slate-100 text-slate-600 border border-slate-200 rounded-full text-[11px]">
-                              {provider ? `${provider.name} ${provider.product}` : 'Bombora'} · as of {observation.as_of}
+                              Intent · as of {observation.as_of}
                             </span>
                           )}
                           {accountMatch && (
@@ -2686,7 +2758,7 @@ export default function UserDashboardPage() {
                           <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
                           <div className="space-y-1">
                             <h3 className="text-sm font-extrabold text-slate-900">
-                              {topicsWidget?.data?.availability === 'no_matched_signal' ? 'No Matched Signal (Source A)' : 'Intent Unavailable (Source A)'}
+                              {topicsWidget?.data?.availability === 'no_matched_signal' ? 'No Matched Signal' : 'Intent Unavailable'}
                             </h3>
                             <p className="text-xs text-slate-600 leading-relaxed">{sourceAMessage}</p>
                           </div>
@@ -2712,7 +2784,7 @@ export default function UserDashboardPage() {
                                 <span>SO WHAT FOR HP</span>
                                 {includedCount > 0 && (
                                   <span className="normal-case tracking-normal font-medium text-[11px] text-blue-700/80">
-                                    · {includedCount} Bombora topics categorized, {otherTheme?.topic_count ?? 0} ({unmappedPct}%) low-relevance and kept out of the theme read below
+                                    · {includedCount} intent topics categorized, {otherTheme?.topic_count ?? 0} ({unmappedPct}%) low-relevance and kept out of the theme read below
                                   </span>
                                 )}
                               </h3>
@@ -2728,6 +2800,27 @@ export default function UserDashboardPage() {
                                 </p>
                               ))}
                             </div>
+
+                            {/* Case-study proof for the categories this read
+                                covers. Client direction, 24 Sep: proof may
+                                strengthen the So What for HP, and it follows
+                                the read rather than creating it. Each is
+                                labelled with the category it supports, so a
+                                seller can see which part of the read it backs. */}
+                            {hpCategories.some((c: any) => c.hp_proof_point) && (
+                              <div className="space-y-2 pt-1">
+                                {hpCategories
+                                  .filter((c: any) => c.hp_proof_point)
+                                  .map((c: any) => (
+                                    <div key={c.category}>
+                                      <span className="text-[10px] font-bold uppercase tracking-wider text-blue-700/80">
+                                        {c.category}
+                                      </span>
+                                      <ProofPoint proof={c.hp_proof_point} />
+                                    </div>
+                                  ))}
+                              </div>
+                            )}
                             <p className="text-[11px] leading-relaxed text-blue-950 font-bold flex items-start gap-2.5 pt-2 border-t border-blue-200/60">
                               <Info className="w-4 h-4 flex-shrink-0 mt-0.5" />
                               <span>{disclaimer}</span>
@@ -2915,7 +3008,7 @@ export default function UserDashboardPage() {
                                     // carries the Bombora research and the HP play, so it is shown
                                     // rather than collapsed to an empty box.
                                     <p className="text-[11px] text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5">
-                                      No HP Category Intent file for this account, so there is no category score. The Bombora research below still applies.
+                                      No HP Category Intent file for this account, so there is no category score. The intent research below still applies.
                                     </p>
                                   )}
 
@@ -2972,7 +3065,7 @@ export default function UserDashboardPage() {
                                   <details open={!p} className="pt-3 border-t border-slate-100 group">
                                     <summary className="text-[10px] font-bold text-slate-400 uppercase tracking-wider cursor-pointer list-none flex items-center gap-1.5 hover:text-slate-600">
                                       <ChevronDown className="w-3.5 h-3.5 transition-transform group-open:rotate-180" />
-                                      Supporting Intent Signals (Bombora)
+                                      Supporting Intent Signals
                                     </summary>
                                     <div className="mt-2.5">{renderSignals(cat.supporting_signals, 3)}</div>
                                   </details>
@@ -2986,7 +3079,7 @@ export default function UserDashboardPage() {
                         </>
                       )}
 
-                      {/* Broader intent topics (Source A raw view) */}
+                      {/* Broader intent topics, raw view */}
                       {topicsData && (
                         <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-6">
                           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
@@ -2996,7 +3089,7 @@ export default function UserDashboardPage() {
                                 <span>BROADER INTENT TOPICS ({topicsList.length})</span>
                               </h3>
                               <p className="text-xs text-slate-500 mt-0.5">
-                                As received from {provider ? `${provider.name} ${provider.product} (${provider.source})` : 'Bombora'} · {provider?.scoring_definition}
+                                As received from the intent data · {provider?.scoring_definition}
                               </p>
                             </div>
 
@@ -3077,7 +3170,7 @@ export default function UserDashboardPage() {
                                       <div className="absolute right-12 bottom-full mb-1 bg-white border border-slate-300 rounded-xl p-3 shadow-2xl z-50 text-xs font-medium w-64 animate-fade-in pointer-events-none">
                                         <span className="font-extrabold text-slate-900 block truncate">{item.topic_name}</span>
                                         <span className="text-[11px] text-hp-navy font-bold block mt-0.5">
-                                          Composite score: {item.composite_score}/100 — {provider?.name || 'Bombora'}
+                                          Composite score: {item.composite_score}/100
                                         </span>
                                         <span className="text-[10px] text-slate-500 block mt-0.5">
                                           {item.theme}{item.hp_category ? ` · ${categoryLabel(item.hp_category)}` : ''}
@@ -3174,7 +3267,7 @@ export default function UserDashboardPage() {
                         </div>
                       )}
 
-                      {/* Hiring-linked demand (Source B) */}
+                      {/* Hiring-linked demand */}
                       <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-4">
                         <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                           <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700 flex items-center gap-2">
@@ -3182,7 +3275,7 @@ export default function UserDashboardPage() {
                             <span>HIRING-LINKED INTENT DEMAND</span>
                           </h3>
                           <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-50 text-hp-navy border border-blue-200">
-                            Source B job_openings + Source A staffing topics
+                            Hiring records and staffing research topics
                           </span>
                         </div>
                         {hiringData ? (
@@ -3220,7 +3313,7 @@ export default function UserDashboardPage() {
                         {staffingTopics.length > 0 && (
                           <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2 text-xs">
                             <div className="flex flex-wrap items-center justify-between gap-2">
-                              <span className="text-slate-400 font-bold uppercase text-[10px]">Staffing research (Source A · Bombora)</span>
+                              <span className="text-slate-400 font-bold uppercase text-[10px]">Staffing research</span>
                               <span className="text-[11px] text-slate-500 font-semibold">
                                 {hiringLinked?.topic_count ?? staffingTopics.length} topics · max {hiringLinked?.max} · avg {hiringLinked?.average}
                               </span>
@@ -3298,10 +3391,10 @@ export default function UserDashboardPage() {
                           <span className="px-3 py-1 bg-white border border-slate-200 shadow-xs rounded-full text-slate-700">
                             {isAvailable ? generatedPlays.length : 0} HP Plays
                           </span>
-                          {/* Nothing is badged while it is working. The
-                              "Inferred TBD" state still shows, because that
-                              tells a seller the plays are not ready yet. */}
-                          {!isAvailable && (
+                          {/* Nothing is badged while it is working, and under
+                              the client's "write nothing" ruling the not-ready
+                              badge is suppressed too. */}
+                          {!isAvailable && SHOW_EMPTY_STATE_NOTICES && (
                             <span className="px-3 py-1 rounded-full bg-purple-50 text-purple-800 border border-purple-200">
                               Inferred TBD
                             </span>
@@ -3583,7 +3676,9 @@ export default function UserDashboardPage() {
                                               </div>
                                             ) : (
                                               <span className="text-slate-500 font-normal">
-                                                {play.entry_path?.no_contact_note || 'No matching contact identified in supplied data.'}
+                                                {SHOW_EMPTY_STATE_NOTICES
+                                                  ? (play.entry_path?.no_contact_note || 'No matching contact identified in supplied data.')
+                                                  : null}
                                               </span>
                                             )}
                                           </div>
@@ -3618,7 +3713,7 @@ export default function UserDashboardPage() {
                               );
                             })}
                           </div>
-                        ) : (
+                        ) : !SHOW_EMPTY_STATE_NOTICES ? null : (
                           /* Inferred TBD Placeholder State */
                           <div className="space-y-4">
                             {[
@@ -4153,7 +4248,7 @@ export default function UserDashboardPage() {
                           </p>
                           {sourceBreakdown['Source A'] !== undefined && (
                             <p className="text-[11px] text-slate-400 mt-0.5">
-                              Source A: {sourceBreakdown['Source A']} &middot; Apollo: {sourceBreakdown['Apollo']}
+                              Intent: {sourceBreakdown['Source A']} &middot; Contacts: {sourceBreakdown['Apollo']}
                             </p>
                           )}
                         </div>
@@ -4605,6 +4700,24 @@ export default function UserDashboardPage() {
                               </p>
                             )}
 
+                            {/* Integration routes. Context only, by the
+                                client's direction: a detected technology HP
+                                names as an integration target shows
+                                compatibility, never a need, so it sits outside
+                                the recommendation and is styled as a note. */}
+                            {(mapData.integration_routes || []).length > 0 && (
+                              <div className="rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3 space-y-1.5">
+                                <p className="text-[10px] font-mono font-extrabold uppercase tracking-widest text-slate-400">
+                                  Integration routes &middot; context
+                                </p>
+                                {(mapData.integration_routes || []).map((r: any, i: number) => (
+                                  <p key={i} className="text-xs text-slate-600 leading-relaxed">
+                                    {r.text}
+                                  </p>
+                                ))}
+                              </div>
+                            )}
+
                             {/* 4 Stat Cards */}
                             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
                               <div className="bg-slate-50/80 p-3.5 rounded-xl border border-slate-200 space-y-1">
@@ -4697,6 +4810,7 @@ export default function UserDashboardPage() {
                                     <p className="text-xs text-slate-700 font-medium leading-relaxed">
                                       {cat.what_it_means || cat.hp_relationship}
                                     </p>
+                                    <ProofPoint proof={cat.hp_proof_point} />
                                   </div>
                                 )}
 

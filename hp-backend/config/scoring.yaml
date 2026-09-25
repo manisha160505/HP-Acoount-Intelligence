@@ -136,13 +136,18 @@ live_signal:
   source_structured: 6
   source_weak: 3
   source_unverifiable: 0
-  tier_thresholds:
-    - [8.0, "S"]
-    - [6.0, "A"]
-    - [4.0, "B"]
-    - [2.0, "C"]
-  min_confidence_to_publish: 2.0
-  max_signals: 20
+  # Emptied on 25 Sep. The client: "use live signal scoring logic as given as I
+  # can see in sea limited, there is a score instead of tiers". The 0-10 score
+  # is what a seller reads; the S/A/B/C letters were ours and are not in any
+  # client document.
+  tier_thresholds: []
+  # 0 means publish every signal that passes the 12-month window. The 2.0 floor
+  # was ours too, and silently dropped low-scoring but current news.
+  min_confidence_to_publish: 0
+  # 0 means no cap. The client removed the 20-signal limit on 23 Sep - "we
+  # should not keep the cap, pls use 12 month window" - so the 12-month
+  # ingestion window is now the only thing that bounds the feed.
+  max_signals: 0
   dedup_similarity: 0.85
 
 # ============================================================================

@@ -231,6 +231,45 @@ def dataset_file_paths(account_id: str, dataset_key: str,
     return sorted(found)
 
 
+def account_display_name(account_id: str, firmo_row: dict | None = None) -> str:
+    """The name to show for this account, and to write into generated prose.
+
+    Client decision DEC-052: the name on screen is the one in column B of the
+    220-account audit sheet, never a vendor's. The loader writes that name to
+    the account record, so the record is authoritative and is read first.
+
+    Every feature read the firmographics `Company Name` first instead, which is
+    whatever the data provider returned for the domain - "Epson America Inc."
+    for SEIKO EPSON CORPORATION - JP, "All Nippon Airways Co." for ANA HOLDINGS.
+    The audit sheet exists precisely because those names differ; preferring them
+    put the vendor's answer on the page.
+
+    Firmographics remains the fallback, for an account created before the sheet
+    or loaded by hand.
+    """
+    from bson import ObjectId
+
+    name = ""
+    try:
+        if ObjectId.is_valid(str(account_id)):
+            doc = get_db()["accounts"].find_one({"_id": ObjectId(account_id)})
+            name = str((doc or {}).get("name") or "").strip()
+    except Exception:
+        logger.exception("account_display_name: account lookup failed for %s",
+                         account_id)
+
+    if name:
+        return name
+
+    row = firmo_row
+    if row is None:
+        rows = read_dataset_records(account_id, "firmographics", strict=False)
+        row = rows[0] if rows else {}
+    return str((row or {}).get("Company Name")
+               or (row or {}).get("company_name")
+               or (row or {}).get("Name") or "").strip()
+
+
 def account_domain(account_id: str) -> str:
     """The account's domain, or "" when genuinely unknown.
 

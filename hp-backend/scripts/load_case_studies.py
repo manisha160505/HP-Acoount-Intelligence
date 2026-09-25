@@ -473,6 +473,11 @@ def build_document(row: dict, enriched: dict, rejected: list) -> dict:
                         _text(row.get("account_signal_match")).split(";") if t.strip()],
         "source_url": _text(row.get("source_url")) or None,
         "asset_type": _text(row.get("asset_type")) or None,
+        # The client's 25 Sep ranking ends "HP.com (T0) before third-party
+        # (T2)", so the tier has to survive the load. It was dropped until
+        # 25 Sep and backfilled by scripts/backfill_case_study_tier.py; this
+        # keeps it on every future load.
+        "source_tier": _text(row.get("source_tier")).upper() or None,
         # Model-written, every figure verified against the row above.
         **{field: enriched.get(field) for field in ENRICHED_FIELDS},
         # What was rejected, kept so a thin record is explicable rather than
