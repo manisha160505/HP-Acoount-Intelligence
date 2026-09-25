@@ -1,0 +1,106 @@
+{
+  "recorded_at": "2026-09-25T05:26:10.120323+00:00",
+  "accounts": 220,
+  "coverage": {
+    "company": {
+      "accounts_with_rows": 216,
+      "total_rows": 218
+    },
+    "company_hierarchy": {
+      "accounts_with_rows": 165,
+      "total_rows": 165
+    },
+    "company_ratings": {
+      "accounts_with_rows": 156,
+      "total_rows": 156
+    },
+    "compliance_filings": {
+      "accounts_with_rows": 0,
+      "total_rows": 0
+    },
+    "connections": {
+      "accounts_with_rows": 216,
+      "total_rows": 19483
+    },
+    "extended_company": {
+      "accounts_with_rows": 216,
+      "total_rows": 218
+    },
+    "firmographics": {
+      "accounts_with_rows": 220,
+      "total_rows": 220
+    },
+    "funding": {
+      "accounts_with_rows": 220,
+      "total_rows": 220
+    },
+    "google_news": {
+      "accounts_with_rows": 218,
+      "total_rows": 16778
+    },
+    "hp_category_intent": {
+      "accounts_with_rows": 218,
+      "total_rows": 220
+    },
+    "intent_score": {
+      "accounts_with_rows": 173,
+      "total_rows": 116076
+    },
+    "intent_topics": {
+      "accounts_with_rows": 173,
+      "total_rows": 173
+    },
+    "job_openings": {
+      "accounts_with_rows": 176,
+      "total_rows": 15065
+    },
+    "news_events": {
+      "accounts_with_rows": 214,
+      "total_rows": 14294
+    },
+    "news_events_additional": {
+      "accounts_with_rows": 168,
+      "total_rows": 819
+    },
+    "prospect_contacts": {
+      "accounts_with_rows": 1,
+      "total_rows": 23
+    },
+    "similar_companies": {
+      "accounts_with_rows": 201,
+      "total_rows": 1005
+    },
+    "social_media": {
+      "accounts_with_rows": 220,
+      "total_rows": 7668
+    },
+    "subpages": {
+      "accounts_with_rows": 216,
+      "total_rows": 15081
+    },
+    "subsidiaries": {
+      "accounts_with_rows": 160,
+      "total_rows": 2142
+    },
+    "technographics": {
+      "accounts_with_rows": 207,
+      "total_rows": 207
+    },
+    "technology_detections": {
+      "accounts_with_rows": 217,
+      "total_rows": 17852
+    },
+    "website_traffic": {
+      "accounts_with_rows": 216,
+      "total_rows": 216
+    },
+    "webstack": {
+      "accounts_with_rows": 219,
+      "total_rows": 219
+    },
+    "workforce_trends": {
+      "accounts_with_rows": 215,
+      "total_rows": 215
+    }
+  }
+}

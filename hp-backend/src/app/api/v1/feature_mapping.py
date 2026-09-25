@@ -19,8 +19,12 @@ FEATURE_MAPPINGS = {
         # builds the regeneration list from exactly this key - so uploading a
         # filing rebuilt nothing. The client's file-usage mapping names this
         # feature as one of the five it feeds.
+        #
+        # prospect_contacts: the summary card's `stakeholders_mapped_count` is
+        # read from it, so contacts uploaded after the account must re-run this
+        # feature or the count stays at 0.
         "dependent_datasets": ["firmographics", "company_hierarchy", "job_openings",
-                               "compliance_filings"],
+                               "prospect_contacts", "compliance_filings"],
         "mapped_fields": [
             {
                 "field_key": "company_name",
@@ -654,8 +658,13 @@ FEATURE_MAPPINGS = {
         # builds the regeneration list from exactly this key - so uploading a
         # filing rebuilt nothing. The client's file-usage mapping names this
         # feature as one of the five it feeds.
+        #
+        # prospect_contacts: `stakeholders_count` is read from the Stakeholder
+        # Map grid, which a contacts upload republishes. This feature sits after
+        # stakeholder_map in this dict, and `_features_for_dataset` runs them in
+        # dict order, so it reads the new grid rather than the old one.
         "dependent_datasets": ["firmographics", "company_hierarchy", "technographics", "webstack", "job_openings", "google_news", "news_events", "intent_score", "technology_detections",
-                               "compliance_filings"],
+                               "prospect_contacts", "compliance_filings"],
         "mapped_fields": [
             {
                 "field_key": "firmographics_context",

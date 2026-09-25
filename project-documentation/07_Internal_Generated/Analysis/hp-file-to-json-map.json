@@ -1,0 +1,764 @@
+{
+  "title": "HP Account Intelligence — File to JSON Map",
+  "purpose": "One entry per uploadable file. For each file: what you upload, which JSON it produces, where that JSON is stored and read, and which product features depend on it. Read this alongside hp-input-contract.json, which holds the column-level detail.",
+  "how_to_read_an_entry": {
+    "file_you_upload": "The filename and dataset_key you send to the upload API.",
+    "produces_json": "The widget JSON documents this file creates or contributes to. Each is one document in the account_widgets collection.",
+    "stored_in": "Where that JSON lives.",
+    "read_by": "The API endpoint the frontend calls to get it.",
+    "supports_features": "The product features that stop working, or degrade, without this file.",
+    "if_missing": "What the user actually sees when this file is absent or unreadable."
+  },
+  "generated_at": "2026-09-15",
+  "verified_against": "ingestion source code and the reference account files",
+
+  "quick_reference": {
+    "note": "Files ranked by how much of the product depends on them. Send the top of this list first.",
+    "table": [
+      { "rank": 1,  "file": "firmographics.csv",         "features_supported": 9, "json_documents_produced": 14, "priority": "send first — the anchor file" },
+      { "rank": 2,  "file": "technographics.csv",        "features_supported": 8, "json_documents_produced": 13, "priority": "send first" },
+      { "rank": 3,  "file": "prospect_contacts.csv",     "features_supported": 8, "json_documents_produced": 7,  "priority": "send first" },
+      { "rank": 4,  "file": "intent_score.csv",          "features_supported": 6, "json_documents_produced": 9,  "priority": "send first" },
+      { "rank": 5,  "file": "google_news.csv / .xlsx",   "features_supported": 6, "json_documents_produced": 10, "priority": "send first" },
+      { "rank": 6,  "file": "news_events.csv",           "features_supported": 6, "json_documents_produced": 6,  "priority": "send first" },
+      { "rank": 7,  "file": "job_openings.csv",          "features_supported": 6, "json_documents_produced": 8,  "priority": "send first" },
+      { "rank": 8,  "file": "webstack.csv",              "features_supported": 3, "json_documents_produced": 5,  "priority": "second wave" },
+      { "rank": 9,  "file": "company_hierarchy.csv",     "features_supported": 2, "json_documents_produced": 2,  "priority": "second wave" },
+      { "rank": 10, "file": "technology_detections.csv", "features_supported": 2, "json_documents_produced": 4,  "priority": "second wave" },
+      { "rank": 11, "file": "intent_topics.csv",         "features_supported": 1, "json_documents_produced": 2,  "priority": "required for Intent" },
+      { "rank": 12, "file": "hp_category_intent.csv",    "features_supported": 1, "json_documents_produced": 1,  "priority": "required for Intent — the primary intent signal" },
+      { "rank": 13, "file": "*.pdf (compliance_filings)","features_supported": 1, "json_documents_produced": 0,  "priority": "feeds the search index, not a widget" }
+    ]
+  },
+
+  "files": [
+
+    {
+      "file_you_upload": "firmographics.csv",
+      "dataset_key": "firmographics",
+      "format": "CSV, one header row, ONE data row (row 0 only)",
+      "what_it_is": "The account's identity card: name, domain, description, industry, location, size and revenue bands.",
+      "role": "THE ANCHOR FILE. It supplies the account domain that every other file is matched against.",
+
+      "produces_json": [
+        {
+          "json_document": "exec_summary_card",
+          "classification": "deterministic",
+          "built_from_your_columns": ["Company Name", "Company Domain", "Business Description", "Linkedin Industry Category", "Naics Description", "Sic Code Description", "City Name", "Region Name", "Country Name"],
+          "also_needs": ["company_hierarchy.csv", "prospect_contacts.csv"],
+          "example_json": {
+            "company_name": "PT Astra International Tbk",
+            "domain": "astra.co.id",
+            "business_description": "PT Astra International Tbk is a diversified conglomerate...",
+            "industry_classification": "automation machinery manufacturing / Other Industrial Machinery Manufacturing",
+            "hq_location": "Jakarta, Indonesia",
+            "parent_company": "",
+            "ultimate_parent": "pt astra international tbk",
+            "stakeholders_mapped_count": 23
+          }
+        },
+        {
+          "json_document": "exec_key_metrics",
+          "classification": "deterministic",
+          "built_from_your_columns": ["Number Of Employees Range", "Yearly Revenue Range"],
+          "example_json": { "employee_count": "10001+", "revenue": "10B-100B" },
+          "note": "Both are BANDS passed through as strings, never parsed as numbers. 'N/A' when blank."
+        },
+        { "json_document": "opportunity_context_card",    "classification": "deterministic", "contributes": "Business Description" },
+        { "json_document": "objection_incumbent_context",  "classification": "deterministic", "contributes": "Business Description" },
+        { "json_document": "content_persona_context",      "classification": "deterministic", "contributes": "Business Description, industry fields" },
+        { "json_document": "strategy_snapshot_context",    "classification": "deterministic", "contributes": "all firmographic fields" },
+        { "json_document": "messaging_context_card",       "classification": "deterministic", "contributes": "Business Description" },
+        { "json_document": "exec_strategic_priorities",    "classification": "inferred",      "contributes": "Business Description as LLM grounding" },
+        { "json_document": "stakeholder_talking_points",   "classification": "inferred",      "contributes": "account context" },
+        { "json_document": "opportunity_narrative_plays",  "classification": "inferred",      "contributes": "account context" },
+        { "json_document": "technographic_hp_recommendations", "classification": "inferred",  "contributes": "account context" },
+        { "json_document": "objection_reframe_cards",      "classification": "inferred",      "contributes": "account context" },
+        { "json_document": "strategy_chat_interface",      "classification": "inferred",      "contributes": "account context" },
+        { "json_document": "messaging_pillars_output",     "classification": "inferred",      "contributes": "account context" }
+      ],
+
+      "stored_in": "MongoDB collection account_widgets, one document per widget_key",
+      "read_by": "GET /api/v1/accounts/{account_id}/widgets/{feature_key}",
+
+      "supports_features": [
+        "Executive Dashboard",
+        "Stakeholder Map",
+        "Solution Narrative / Opportunity Map",
+        "Technographic Map",
+        "Objection Playbook",
+        "Content Studio",
+        "Strategy Chat",
+        "Message Evaluator",
+        "Content Messaging"
+      ],
+
+      "if_missing": "Nine of eleven features produce nothing. The Executive Dashboard shows an empty summary card and empty metrics. Worse, without Company Domain the intent features cannot match this account at all, so Intent & Demand Signals reports 'no matched signal' even when the intent files are perfect.",
+      "most_important_column": "Company Domain — it is the join key for the entire system."
+    },
+
+    {
+      "file_you_upload": "technographics.csv",
+      "dataset_key": "technographics",
+      "format": "CSV, one header row, ONE data row (row 0 only)",
+      "what_it_is": "The technology stack installed at the account, as one full list plus 20 category columns.",
+
+      "produces_json": [
+        {
+          "json_document": "tech_stack_matrix",
+          "classification": "deterministic",
+          "built_from_your_columns": ["Full Tech Stack", "the 20 category columns"],
+          "example_json": {
+            "total_tech_count": 220,
+            "full_tech_stack": ["ARCore", "ASP.NET", "Adobe Creative Cloud", "..."],
+            "category_matrix": { "It Security": ["Anomali", "Aruba ClearPass", "Cloudflare"] },
+            "categories_count": 3
+          },
+          "note": "The category_matrix keys are your EXACT column names, so casing matters: 'It Security', not 'IT Security'."
+        },
+        {
+          "json_document": "technographic_map",
+          "classification": "deterministic",
+          "built_from_your_columns": ["Full Tech Stack", "category columns"],
+          "also_needs": ["technology_detections.csv", "webstack.csv"],
+          "note": "Maps your stack onto 7 fixed HP categories, marking each as compete, complement or whitespace."
+        },
+        { "json_document": "opportunity_context_card",        "classification": "deterministic", "contributes": "Full Tech Stack" },
+        { "json_document": "objection_incumbent_context",      "classification": "deterministic", "contributes": "Full Tech Stack, category columns" },
+        { "json_document": "strategy_snapshot_context",        "classification": "deterministic", "contributes": "Full Tech Stack" },
+        { "json_document": "messaging_context_card",           "classification": "deterministic", "contributes": "Full Tech Stack" },
+        { "json_document": "intent_category_summary",          "classification": "derived",       "contributes": "technologies that CONFIRM an intent signal" },
+        { "json_document": "stakeholder_talking_points",       "classification": "inferred" },
+        { "json_document": "opportunity_narrative_plays",      "classification": "inferred" },
+        { "json_document": "technographic_hp_recommendations", "classification": "inferred" },
+        { "json_document": "objection_reframe_cards",          "classification": "inferred" },
+        { "json_document": "strategy_chat_interface",          "classification": "inferred" },
+        { "json_document": "messaging_pillars_output",         "classification": "inferred" }
+      ],
+
+      "stored_in": "MongoDB account_widgets",
+      "read_by": "GET /api/v1/accounts/{account_id}/widgets/{feature_key}",
+
+      "supports_features": [
+        "Technographic Map",
+        "Intent & Demand Signals",
+        "Stakeholder Map",
+        "Solution Narrative / Opportunity Map",
+        "Objection Playbook",
+        "Strategy Chat",
+        "Content Messaging",
+        "Message Evaluator"
+      ],
+
+      "if_missing": "The Technographic Map is empty. Intent loses its confirmation layer — an intent signal can no longer be shown as backed by technology the account actually runs, which is what makes it credible.",
+      "known_problem": "9 cells currently end in '(+11 more)', '(+15 more)' etc. Nothing strips these, so '(+15 more)' appears on screen as if it were a product name. Please export full lists."
+    },
+
+    {
+      "file_you_upload": "prospect_contacts.csv",
+      "dataset_key": "prospect_contacts",
+      "format": "CSV, one header row, one row per contact",
+      "what_it_is": "The people at the account — names, titles, departments, seniority, contact details.",
+      "important": "Column names use the 'Prospect ' prefix with a space: 'Prospect full_name', 'Prospect job_title'. Our older internal doc listed 'Full Name' and 'Title'; those columns do not exist and are not read.",
+
+      "produces_json": [
+        {
+          "json_document": "stakeholder_contacts_grid",
+          "classification": "deterministic",
+          "built_from_your_columns": ["Prospect full_name", "Prospect job_title", "Prospect job_department_main", "Prospect job_level_main", "Email", "Email Status", "Contact mobile_phone", "Prospect linkedin", "Prospect buying_committee_personas", "Prospect prospect_id"],
+          "example_json": {
+            "total_contacts_count": 23,
+            "priority_contacts_count": 7,
+            "priority_threshold": 60,
+            "contacts": [
+              {
+                "full_name": "Budi Santoso",
+                "title": "Head of IT Project Procurement",
+                "department": "it",
+                "seniority": "director",
+                "email": "budi.santoso@astra.co.id",
+                "phone": "+6281293986658",
+                "seniority_band": "Director",
+                "influence_type": "Budget Holder",
+                "hp_relevance_score": 100,
+                "stakeholder_score": 79,
+                "is_priority_contact": true
+              }
+            ]
+          },
+          "note": "No contact is ever dropped. Each is scored 0-100 and needs 60+ to be a priority contact."
+        },
+        {
+          "json_document": "stakeholder_influence_map",
+          "classification": "derived",
+          "note": "Department groups, buying-group coverage and a ranked entry path. Computed from the contacts grid — no extra column needed."
+        },
+        { "json_document": "content_persona_context",   "classification": "deterministic", "contributes": "Title, Department" },
+        { "json_document": "evaluator_persona_context", "classification": "deterministic", "contributes": "Title, Department, Seniority" },
+        { "json_document": "stakeholder_talking_points","classification": "inferred" },
+        { "json_document": "content_generated_assets",  "classification": "inferred" },
+        { "json_document": "evaluator_feedback_score",  "classification": "inferred" }
+      ],
+
+      "stored_in": "MongoDB account_widgets",
+      "read_by": "GET /api/v1/accounts/{account_id}/widgets/{feature_key}",
+
+      "supports_features": [
+        "Stakeholder Map",
+        "Content Studio",
+        "Message Evaluator",
+        "Executive Dashboard",
+        "Solution Narrative / Opportunity Map",
+        "Objection Playbook",
+        "Strategy Chat",
+        "Content Messaging"
+      ],
+
+      "if_missing": "No Stakeholder Map. Content Studio and Message Evaluator have no persona to write for or evaluate against.",
+      "watch_out_for": [
+        "A missing email, phone or LinkedIn lowers the data-completeness score, which can push a real decision maker below the 60-point priority threshold and off the list.",
+        "Prospect job_level_main and Prospect job_department_main are controlled vocabularies. A value outside the list still displays but stops matching HP relevance rules.",
+        "Supply Prospect prospect_id, or contact IDs are positional and change between refreshes.",
+        "Export phone as TEXT. An Excel round-trip turns it into a float with a trailing .0."
+      ]
+    },
+
+    {
+      "file_you_upload": "intent_score.csv",
+      "dataset_key": "intent_score",
+      "format": "CSV, one header row, one row per topic (149 in the reference file)",
+      "what_it_is": "Bombora Company Surge topic scores — what the account has been researching.",
+      "note": "No domain column; the whole file belongs to one account.",
+
+      "produces_json": [
+        {
+          "json_document": "intent_topics_table",
+          "classification": "deterministic",
+          "built_from_your_columns": ["Topic", "Composite Score"],
+          "also_needs": ["intent_topics.csv — for the domain match and the observation date"],
+          "example_json": {
+            "availability": "available",
+            "total_topics_count": 149,
+            "included_topics_count": 149,
+            "topics": [
+              {
+                "topic_name": "business solutions: data insights",
+                "composite_score": 100,
+                "intensity": "High",
+                "included": true,
+                "hiring_linked": false,
+                "theme": "Other / Unmapped",
+                "mapping_status": "unmapped"
+              }
+            ],
+            "duplicates_removed": []
+          },
+          "derived_on_top_of_your_data": {
+            "intensity": "High at 85+, Moderate at 70+, else Low",
+            "theme / hp_category / mapping_status": "your topic text matched against the HP topic dictionary",
+            "hiring_linked": "true when the topic text contains a staffing term"
+          }
+        },
+        {
+          "json_document": "intent_category_summary",
+          "classification": "derived",
+          "contributes": "your topics become the SUPPORTING signals under each HP category"
+        },
+        { "json_document": "opportunity_context_card",        "classification": "deterministic", "contributes": "Topic, Composite Score" },
+        { "json_document": "strategy_snapshot_context",        "classification": "deterministic", "contributes": "Topic, Composite Score" },
+        { "json_document": "messaging_context_card",           "classification": "deterministic", "contributes": "Topic, Composite Score" },
+        { "json_document": "exec_urgency_score",               "classification": "derived" },
+        { "json_document": "stakeholder_talking_points",       "classification": "inferred" },
+        { "json_document": "technographic_hp_recommendations", "classification": "inferred" },
+        { "json_document": "messaging_pillars_output",         "classification": "inferred" }
+      ],
+
+      "stored_in": "MongoDB account_widgets",
+      "read_by": "GET /api/v1/accounts/{account_id}/widgets/intent_demand_signals",
+
+      "supports_features": [
+        "Intent & Demand Signals",
+        "Solution Narrative / Opportunity Map",
+        "Content Messaging",
+        "Strategy Chat",
+        "Executive Dashboard",
+        "Stakeholder Map"
+      ],
+
+      "if_missing": "The intent topic table is empty and every HP category loses its supporting evidence, leaving only the raw category score with nothing behind it.",
+      "watch_out_for": [
+        "Keep the 'family: detail' topic convention — the prefix before the colon drives grouping.",
+        "A non-numeric score is NOT treated as zero. The topic is kept, marked excluded, and contributes nothing.",
+        "Duplicate topics: the first row wins and the repeat is discarded, never averaged. De-duplicate before sending."
+      ]
+    },
+
+    {
+      "file_you_upload": "google_news.csv or .xlsx",
+      "dataset_key": "google_news",
+      "format": "CSV or Excel, MULTI-FILE — several can coexist",
+      "what_it_is": "News events about the account. This is the PRIMARY news source; news_events.csv is the add-on.",
+
+      "produces_json": [
+        {
+          "json_document": "news_signals_feed",
+          "classification": "deterministic",
+          "built_from_your_columns": ["event_headline", "event_date", "event_type", "event_url", "source_publisher", "relevance_confidence"],
+          "also_needs": ["news_events.csv — merged into the same feed"],
+          "example_json": {
+            "raw_signal_count": 55,
+            "gate_rejected_count": 45,
+            "gate_rejection_summary": { "older than 365 days": 41, "unparseable date": 4 },
+            "deduped_from": 10,
+            "cap": 20,
+            "total_signals_count": 8,
+            "signals": [
+              {
+                "signal_id": "a3f19c04bb27",
+                "headline": "Astra Financial Report for the Third Quarter of 2025",
+                "event_date": "2026-02-26",
+                "category": "Financial",
+                "source_url": "https://news.google.com/rss/articles/...",
+                "source_publisher": "PT Astra International Tbk",
+                "tier": "A"
+              }
+            ]
+          },
+          "read_this_to_diagnose_your_delivery": "gate_rejection_summary names exactly why rows were dropped. 'older than 365 days' means the delivery was mostly outside the window; 'unparseable date' means a date-format problem. You do not need to ask us."
+        },
+        { "json_document": "opportunity_trigger_signals", "classification": "deterministic", "contributes": "headline, date, type" },
+        { "json_document": "strategy_snapshot_context",   "classification": "deterministic", "contributes": "title, summary, pubDate" },
+        { "json_document": "messaging_context_card",      "classification": "deterministic", "contributes": "title, summary" },
+        { "json_document": "exec_urgency_score",          "classification": "derived" },
+        { "json_document": "news_relevance_summary",      "classification": "inferred", "note": "the LLM dimension scores behind each signal's tier" },
+        { "json_document": "exec_strategic_priorities",   "classification": "inferred" },
+        { "json_document": "stakeholder_talking_points",  "classification": "inferred" },
+        { "json_document": "opportunity_narrative_plays", "classification": "inferred" },
+        { "json_document": "strategy_chat_interface",     "classification": "inferred" }
+      ],
+
+      "stored_in": "MongoDB account_widgets",
+      "read_by": "GET /api/v1/accounts/{account_id}/widgets/recent_news_signals",
+
+      "supports_features": [
+        "Recent News Signals",
+        "Executive Dashboard",
+        "Stakeholder Map",
+        "Solution Narrative / Opportunity Map",
+        "Strategy Chat",
+        "Content Messaging"
+      ],
+
+      "if_missing": "No news feed, and the Executive Dashboard's signal count shows a dash.",
+      "watch_out_for": [
+        "Anything older than 365 days is DISCARDED after a successful upload. A historical back-fill would be thrown away — confirm the window with us first.",
+        "Dates must be ISO-8601. '03/04/2025' is read as 4 March, not 3 April.",
+        "At most 20 signals are published per account.",
+        "Near-identical headlines from different publishers are merged at 85% similarity. That is expected, not a bug.",
+        "event_type currently mixes 'launch' with 'M&A'. Pick one casing convention."
+      ]
+    },
+
+    {
+      "file_you_upload": "news_events.csv",
+      "dataset_key": "news_events",
+      "format": "CSV, MULTI-FILE — several can coexist",
+      "what_it_is": "Structured news events with a category verb and a confidence score. The add-on to google_news.",
+
+      "produces_json": [
+        {
+          "json_document": "news_signals_feed",
+          "classification": "deterministic",
+          "built_from_your_columns": ["article_sentence", "found_at", "effective_date", "category", "confidence", "location", "product", "amount"],
+          "note": "Merged into the same feed as google_news. Rows from this file carry location, product and amount; google_news rows do not."
+        },
+        { "json_document": "opportunity_trigger_signals", "classification": "deterministic" },
+        { "json_document": "strategy_snapshot_context",   "classification": "deterministic" },
+        { "json_document": "messaging_context_card",      "classification": "deterministic" },
+        { "json_document": "news_relevance_summary",      "classification": "inferred" },
+        { "json_document": "stakeholder_talking_points",  "classification": "inferred" }
+      ],
+
+      "stored_in": "MongoDB account_widgets",
+      "read_by": "GET /api/v1/accounts/{account_id}/widgets/recent_news_signals",
+
+      "supports_features": [
+        "Recent News Signals",
+        "Stakeholder Map",
+        "Solution Narrative / Opportunity Map",
+        "Strategy Chat",
+        "Content Messaging"
+      ],
+
+      "if_missing": "The news feed still works from google_news alone, but loses the structured event categories (partners_with, acquires, launches) and the location/product/amount detail.",
+      "watch_out_for": [
+        "This file has NO url column, and we will never invent one, so its signals are unlinkable on screen. Only google_news supplies a clickable link.",
+        "confidence here is a 0-1 float while google_news uses High/Medium/Low text. Both land in the same field — see open question 5.2.",
+        "'identified_as_competitor_of' is treated as a news relationship, not a buying signal, and cannot become a primary signal.",
+        "The same 365-day window applies."
+      ]
+    },
+
+    {
+      "file_you_upload": "job_openings.csv",
+      "dataset_key": "job_openings",
+      "format": "CSV, one header row, one row per posting",
+      "what_it_is": "Open roles at the account, used as a hiring-velocity and urgency proxy.",
+
+      "produces_json": [
+        {
+          "json_document": "exec_hiring_velocity",
+          "classification": "deterministic",
+          "built_from_your_columns": ["title", "normalized_title"],
+          "example_json": {
+            "open_job_count": 100,
+            "sample_roles": ["Engineering Manager - ADMO", "Data Engineer - GSI", "Backend Developer - Java"]
+          },
+          "warning": "open_job_count counts EVERY row and ignores the status column. The name overstates it — see intent_hiring_demand.open_postings for the filtered figure."
+        },
+        {
+          "json_document": "intent_hiring_demand",
+          "classification": "deterministic",
+          "built_from_your_columns": ["status", "seniority", "categories", "first_seen_at", "last_seen_at"],
+          "example_json": {
+            "source": "Source B",
+            "postings_seen": 100,
+            "open_postings": 40,
+            "open_postings_rule": "status blank, 'open' or 'active'",
+            "status_breakdown": { "closed": 60, "unspecified": 40 },
+            "seniority_breakdown": { "junior": 53, "mid_senior": 40, "manager": 7 },
+            "first_seen": "2026-07-14",
+            "last_seen": "2026-08-30"
+          }
+        },
+        { "json_document": "content_persona_context",   "classification": "deterministic", "contributes": "title, normalized_title, seniority" },
+        { "json_document": "evaluator_persona_context", "classification": "deterministic", "contributes": "title, normalized_title, seniority" },
+        { "json_document": "strategy_snapshot_context", "classification": "deterministic" },
+        { "json_document": "exec_urgency_score",        "classification": "derived" },
+        { "json_document": "content_generated_assets",  "classification": "inferred" },
+        { "json_document": "evaluator_feedback_score",  "classification": "inferred" }
+      ],
+
+      "stored_in": "MongoDB account_widgets",
+      "read_by": "GET /api/v1/accounts/{account_id}/widgets/{executive_dashboard | intent_demand_signals}",
+
+      "supports_features": [
+        "Executive Dashboard",
+        "Intent & Demand Signals",
+        "Content Studio",
+        "Message Evaluator",
+        "Strategy Chat",
+        "Solution Narrative / Opportunity Map"
+      ],
+
+      "if_missing": "No hiring-velocity signal on the Executive Dashboard and no Source B demand signal under Intent.",
+      "biggest_open_question": "status is blank on 40% of rows, and blank currently counts as OPEN. That number drives hiring velocity and urgency. Please confirm whether blank means open (emit 'open' explicitly) or unknown (we must stop counting it). This is open question 5.1.",
+      "watch_out_for": [
+        "first_seen_at and last_seen_at are sorted as TEXT. A non-ISO format silently produces wrong first/last dates.",
+        "categories must be a valid JSON array. A comma-joined string becomes one bogus category."
+      ]
+    },
+
+    {
+      "file_you_upload": "webstack.csv",
+      "dataset_key": "webstack",
+      "format": "CSV, one header row, ONE data row (row 0 only)",
+      "what_it_is": "Technology detected on the account's public website, plus site-level counts and spend.",
+
+      "produces_json": [
+        {
+          "json_document": "webstack_breakdown",
+          "classification": "deterministic",
+          "built_from_your_columns": ["Technologies Used By Company Website", "Technologies Categories", "Number Of Premium Technologies", "Money Spend On Website Technologies"],
+          "example_json": {
+            "total_web_tech_count": 65,
+            "premium_tech_count": "1388",
+            "web_spend_estimate": "5709",
+            "categories_list": ["Server", "Web_Master", "analytics", "cdn", "cms"],
+            "technologies": ["Amazon CloudFront", "Google Analytics", "Nginx"]
+          },
+          "note": "premium_tech_count and web_spend_estimate are RAW STRINGS with no currency or unit attached."
+        },
+        { "json_document": "technographic_map",                "classification": "deterministic" },
+        { "json_document": "strategy_snapshot_context",        "classification": "deterministic" },
+        { "json_document": "intent_category_summary",          "classification": "derived", "contributes": "website technologies that confirm an intent signal" },
+        { "json_document": "technographic_hp_recommendations", "classification": "inferred" }
+      ],
+
+      "stored_in": "MongoDB account_widgets",
+      "read_by": "GET /api/v1/accounts/{account_id}/widgets/tech_landscape",
+
+      "supports_features": ["Technographic Map", "Intent & Demand Signals", "Strategy Chat"],
+
+      "if_missing": "The webstack panel is empty and intent confirmation loses its website-technology evidence.",
+      "open_question": "Cms, Ssl, Web Server, Hosting, Cdn, Framework and Analytics are documented against this file but absent from the delivered version. Which file carries them? (Open question 5.6)"
+    },
+
+    {
+      "file_you_upload": "company_hierarchy.csv",
+      "dataset_key": "company_hierarchy",
+      "format": "CSV, one header row, ONE data row (row 0 only)",
+      "what_it_is": "The account's position in its corporate group — parent and ultimate parent.",
+
+      "produces_json": [
+        {
+          "json_document": "exec_summary_card",
+          "classification": "deterministic",
+          "built_from_your_columns": ["Parent Company Name", "Ultimate Parent Name"],
+          "example_json": { "parent_company": "", "ultimate_parent": "pt astra international tbk" },
+          "note": "Contributes two fields to a card that firmographics.csv mostly builds."
+        },
+        { "json_document": "strategy_snapshot_context", "classification": "deterministic" }
+      ],
+
+      "stored_in": "MongoDB account_widgets",
+      "read_by": "GET /api/v1/accounts/{account_id}/widgets/executive_dashboard",
+      "supports_features": ["Executive Dashboard", "Strategy Chat"],
+      "if_missing": "The parent and ultimate-parent lines on the summary card are blank. Nothing else breaks — but note the Executive Dashboard declares this file as a hard dependency, so if it is registered and then goes missing from the server, the WHOLE feature stops rebuilding.",
+      "note": "An empty Parent Company Name means the company is its own parent. That is valid, not missing data."
+    },
+
+    {
+      "file_you_upload": "technology_detections.csv",
+      "dataset_key": "technology_detections",
+      "format": "CSV, one header row, one row per detection",
+      "what_it_is": "Individual technology detection events with a confidence score and a first/last-seen window.",
+
+      "produces_json": [
+        {
+          "json_document": "tech_detections_reference",
+          "classification": "deterministic",
+          "built_from_your_columns": ["id", "score", "first_seen_at", "last_seen_at", "department_onet_codes"],
+          "example_json": {
+            "total_detections_count": 100,
+            "detections": [
+              {
+                "id": "ec63c921-5ba1-4d2f-bc0f-d6e2bab82ab4",
+                "score": "0.5",
+                "first_seen_at": "2026-08-04T22:00:00Z",
+                "last_seen_at": "2026-08-04T22:00:00Z",
+                "department_onet_codes": "[]"
+              }
+            ]
+          },
+          "note": "Every value is a STRING, including score. department_onet_codes stays an unparsed JSON string."
+        },
+        { "json_document": "technographic_map",                "classification": "deterministic" },
+        { "json_document": "strategy_snapshot_context",        "classification": "deterministic" },
+        { "json_document": "technographic_hp_recommendations", "classification": "inferred" }
+      ],
+
+      "stored_in": "MongoDB account_widgets",
+      "read_by": "GET /api/v1/accounts/{account_id}/widgets/tech_landscape",
+      "supports_features": ["Technographic Map", "Strategy Chat"],
+      "if_missing": "The detections reference panel is empty.",
+      "known_problem": "This file has NO technology or vendor name column, so each row is a score and a date with nothing attached — a detection cannot be labelled on screen. Our older doc claimed a 'vendor' column; it does not exist. Please add the technology name, or confirm the dataset is reference-only. (Open question 5.5)",
+      "watch_out_for": "score here is 0-1, while every other score in the system is 0-100."
+    },
+
+    {
+      "file_you_upload": "intent_topics.csv",
+      "dataset_key": "intent_topics",
+      "format": "CSV, one header row",
+      "what_it_is": "The metadata row for the intent export — which company it covers, and when it was observed.",
+      "role": "Small file, outsized importance. It is what attaches the intent scores to this account.",
+
+      "produces_json": [
+        {
+          "json_document": "intent_topics_table",
+          "classification": "deterministic",
+          "built_from_your_columns": ["Company Website", "Date Stamp", "Level Of Intent", "Topic Count"],
+          "contributes": "the account match, the observation window, and the level-of-intent label",
+          "example_json": {
+            "account_match": {
+              "status": "matched",
+              "account_domain": "astra.co.id",
+              "provider_domain": "astra.co.id"
+            },
+            "observation": { "date_stamp": "20260830", "as_of": "2026-08-30" },
+            "level_of_intent": null
+          }
+        },
+        { "json_document": "intent_category_summary", "classification": "derived" }
+      ],
+
+      "stored_in": "MongoDB account_widgets",
+      "read_by": "GET /api/v1/accounts/{account_id}/widgets/intent_demand_signals",
+      "supports_features": ["Intent & Demand Signals"],
+
+      "if_missing": "Intent reports 'unverified' — the scores cannot be tied to this account.",
+      "most_important_column": "Company Website. If it does not normalize-match firmographics.Company Domain, EVERY Bombora topic is discarded and the widget says 'No matched signal' — even when intent_score.csv is perfect. This is the single most load-bearing column in the whole contract.",
+      "watch_out_for": [
+        "Date Stamp is YYYYMMDD, e.g. 20260830.",
+        "Send ONE run per file. More than one distinct Date Stamp and no time window is shown at all.",
+        "Level Of Intent is empty throughout the current file and is a required input. We need the values and the allowed value set. (Open question 5.4)"
+      ]
+    },
+
+    {
+      "file_you_upload": "hp_category_intent.csv",
+      "dataset_key": "hp_category_intent",
+      "format": "CSV with TWO header rows, wide layout — the only file that breaks the one-header-row rule",
+      "what_it_is": "Per-HP-category intent scores: PCs, Workstations, Poly, Printers, 3D Printers.",
+      "role": "THE PRIMARY INTENT SIGNAL. Everything else in the intent feature supports the numbers in this file.",
+      "layout": {
+        "row_1": "category group names, each above the 10 columns it spans",
+        "row_2": "field names, repeated per category block",
+        "row_3_onward": "one row per company per run",
+        "blocks": "exactly 5 categories x 10 fields",
+        "list_delimiter": "pipe |  — not comma"
+      },
+
+      "produces_json": [
+        {
+          "json_document": "intent_category_summary",
+          "classification": "derived",
+          "built_from_your_columns": ["Domain", "Run Date", "Top HP Category", "Top Intent Score (/100)", "and all 10 fields per category block"],
+          "example_json": {
+            "category_file": {
+              "status": "matched",
+              "source": { "company": "PT Astra International Tbk", "domain": "astra.co.id", "run_date": "2026-09-03 04:01 UTC", "runs_on_file": 1 },
+              "top_check": { "stated_category": "3D Printers", "stated_score": 34, "recomputed_category": "3D", "recomputed_score": 34, "consistent": true }
+            },
+            "hp_categories": [
+              {
+                "category": "3D",
+                "hp_play": "HP Multi Jet Fusion (3D)",
+                "primary": {
+                  "provider_category": "3D Printers",
+                  "score": 34,
+                  "stage": "Awareness",
+                  "topics_researched": ["product development", "industrial adoption"],
+                  "keywords_matched": ["jig", "SLA"],
+                  "has_signal": true,
+                  "trend_label": "Increasing",
+                  "trend": null,
+                  "quality_flags": []
+                },
+                "confirmed_max": 61
+              }
+            ],
+            "categories_with_signal": 1
+          }
+        }
+      ],
+
+      "stored_in": "MongoDB account_widgets",
+      "read_by": "GET /api/v1/accounts/{account_id}/widgets/intent_demand_signals",
+      "supports_features": ["Intent & Demand Signals"],
+
+      "if_missing": "The HP category cards have no primary score. The feature falls back to Bombora topics only, which support a category but never establish one.",
+      "watch_out_for": [
+        "Domain must normalize-match firmographics.Company Domain, or the WHOLE file is ignored for this account.",
+        "Intent Trend is NOT drawn as a trend. With one run and no prior score there is nothing to verify it against, so it is kept as the file's own words. Supplying a prior-window score would let it become a real trend.",
+        "Top HP Category is re-checked, not trusted. We recompute the highest-scoring category and show whether your stated top matches.",
+        "The terms 'sla' and 'identified as competitor of' are flagged as noisy and bar a category from becoming the account's primary one.",
+        "Several runs per domain is fine — the greatest Run Date wins. Keep it ISO so it sorts correctly."
+      ]
+    },
+
+    {
+      "file_you_upload": "any PDF — annual report, exchange filing, monthly market report",
+      "dataset_key": "compliance_filings",
+      "format": "PDF only, MULTI-FILE — a filing history is several documents",
+      "what_it_is": "The account's filed documents. THE ONLY source of a reported financial figure — every other file carries a band or a category.",
+
+      "produces_json": [
+        {
+          "json_document": "NONE — this file does not produce a widget",
+          "instead": "It is parsed into the retrieval corpus (a searchable, citable evidence index), not into an account_widgets document.",
+          "stored_in": "the shared vector index, with page-level citations",
+          "used_for": "Grounded answers and reported financial figures on the Executive Dashboard, where a claim can be traced to a page number."
+        }
+      ],
+
+      "stored_in": "Retrieval/vector index (not account_widgets). Index updates are QUEUED after upload, never run inline, because a build takes minutes.",
+      "read_by": "The Executive Dashboard corpus and grounded-answer paths",
+      "supports_features": ["Executive Dashboard — reported financial figures with citations"],
+
+      "if_missing": "No reported financial figure exists anywhere in the product. Revenue is only ever the band from firmographics.csv.",
+      "watch_out_for": [
+        "A REAL TEXT LAYER IS REQUIRED. Pages are parsed from word coordinates, so a scanned or photocopied page is dropped entirely. Send digitally generated PDFs.",
+        "A figure is only usable when metric + period + value + unit are all recoverable from the SAME page.",
+        "The unit must be printed on the page — a scale word (billion / miliar / juta) and a currency (IDR / Rp / USD) within 60 characters of each other. A page stating no unit yields ZERO figures, by design, because an unlabelled number cannot be cited. Keep the 'expressed in billions of Rupiah' sentence on EVERY page of tables, not just the first.",
+        "Figures bind by POSITION. The count of figures in a row must match the number of period columns, so merged cells or a footnote marker glued to a number unbinds the whole row.",
+        "Indonesian and bilingual passages are indexed but never made citable. English narrative is what becomes quotable."
+      ]
+    }
+  ],
+
+  "files_you_can_upload_but_that_do_nothing": {
+    "warning": "These 12 dataset_keys are accepted by the API and return HTTP 201, but NO code reads a single column from any of them. Uploading produces no JSON, no widget, and no change on screen.",
+    "how_to_confirm": "The upload response's `regenerated` array comes back EMPTY for these keys.",
+    "keys": [
+      { "dataset_key": "subsidiaries",           "file": "subsidiaries.csv",           "note": "not consumed" },
+      { "dataset_key": "funding",                "file": "funding.csv",                "note": "not consumed" },
+      { "dataset_key": "workforce_trends",       "file": "workforce_trends.csv",       "note": "deliberately excluded — holds role shares, not technologies" },
+      { "dataset_key": "company_ratings",        "file": "company_ratings.csv",        "note": "not consumed" },
+      { "dataset_key": "website_traffic",        "file": "website_traffic.csv",        "note": "not consumed" },
+      { "dataset_key": "social_media",           "file": "social_media.csv",           "note": "not consumed" },
+      { "dataset_key": "company",                "file": "company.csv",                "note": "not consumed" },
+      { "dataset_key": "extended_company",       "file": "extended_company.csv",       "note": "not consumed" },
+      { "dataset_key": "connections",            "file": "connections.csv",            "note": "not consumed" },
+      { "dataset_key": "subpages",               "file": "subpages.csv",               "note": "not consumed" },
+      { "dataset_key": "similar_companies",      "file": "similar_companies.csv",      "note": "not consumed" },
+      { "dataset_key": "news_events_additional", "file": "news_events_additional.csv", "note": "not consumed under this key; a file filed as category 'news_events' IS picked up" }
+    ],
+    "action": "Tell us which of these you actually intend to deliver. We will either build consumers or close the keys so an upload cannot silently do nothing. (Open question 5.8)"
+  },
+
+  "features_and_the_files_they_need": {
+    "note": "The reverse view. A feature produces NOTHING AT ALL if any file listed here is registered but unreadable — stored widgets are left untouched rather than overwritten with empty data.",
+    "features": [
+      { "feature": "Executive Dashboard",                  "needs_files": ["firmographics.csv", "company_hierarchy.csv", "job_openings.csv", "prospect_contacts.csv"], "plus_optional": ["compliance_filings PDFs — for reported financials"] },
+      { "feature": "Intent & Demand Signals",              "needs_files": ["hp_category_intent.csv", "intent_score.csv", "intent_topics.csv", "job_openings.csv", "technographics.csv", "webstack.csv"] },
+      { "feature": "Stakeholder Map",                      "needs_files": ["prospect_contacts.csv", "firmographics.csv", "technographics.csv", "intent_score.csv", "google_news.csv", "news_events.csv"] },
+      { "feature": "Technographic Map",                    "needs_files": ["technographics.csv", "technology_detections.csv", "webstack.csv"] },
+      { "feature": "Recent News Signals",                  "needs_files": ["google_news.csv", "news_events.csv"] },
+      { "feature": "Content Messaging",                    "needs_files": ["firmographics.csv", "technographics.csv", "intent_score.csv", "google_news.csv", "news_events.csv"] },
+      { "feature": "Solution Narrative / Opportunity Map", "needs_files": ["firmographics.csv", "technographics.csv", "intent_score.csv", "google_news.csv", "news_events.csv", "prospect_contacts.csv"] },
+      { "feature": "Objection Playbook",                   "needs_files": ["firmographics.csv", "prospect_contacts.csv", "technographics.csv"] },
+      { "feature": "Content Studio",                       "needs_files": ["prospect_contacts.csv", "job_openings.csv", "firmographics.csv"] },
+      { "feature": "Message Evaluator",                    "needs_files": ["firmographics.csv", "job_openings.csv", "prospect_contacts.csv"] },
+      { "feature": "Strategy Chat",                        "needs_files": ["all 10: company_hierarchy.csv", "firmographics.csv", "google_news.csv", "intent_score.csv", "job_openings.csv", "news_events.csv", "prospect_contacts.csv", "technographics.csv", "technology_detections.csv", "webstack.csv"] }
+    ]
+  },
+
+  "how_to_check_your_upload_worked": {
+    "why_this_matters": "Nothing validates your column names. A file with entirely wrong headers returns HTTP 201 Created and then produces empty widgets with no error anywhere. The upload response is your only feedback channel.",
+    "step_1_read_the_response": {
+      "example": {
+        "dataset_key": "firmographics",
+        "row_count": 1,
+        "status": "active",
+        "regenerated": ["executive_dashboard", "stakeholder_map", "content_messaging"],
+        "regeneration_failed": []
+      },
+      "checks": [
+        { "field": "row_count", "bad_sign": "0 or 1 on a file you expect to be large", "means": "the parse found no rows — check delimiter and quoting" },
+        { "field": "regenerated", "bad_sign": "empty array", "means": "no feature consumed this file. Expected only for the 12 unconsumed keys" },
+        { "field": "regeneration_failed", "bad_sign": "non-empty", "means": "the file stored but a feature could not rebuild. Previous widgets were left intact, not wiped" }
+      ]
+    },
+    "step_2_fetch_the_widget": {
+      "call": "GET /api/v1/accounts/{account_id}/widgets/{feature_key}",
+      "check": "status should be 'available'. 'empty' means the file produced no usable rows. 'pending' means an LLM widget has no API key configured — not a data problem."
+    },
+    "step_3_for_news_read_the_funnel": "news_signals_feed publishes raw_signal_count, gate_rejected_count and gate_rejection_summary, which names exactly why rows were dropped."
+  },
+
+  "the_six_things_that_fail_silently": [
+    { "n": 1, "cause": "A header name differs in case or has trailing whitespace",            "effect": "That column reads as blank; the widget shows N/A" },
+    { "n": 2, "cause": "firmographics.Company Domain missing or not normalized",             "effect": "BOTH intent widgets go unverified" },
+    { "n": 3, "cause": "intent_topics.Company Website does not match",                       "effect": "ALL Bombora topics discarded" },
+    { "n": 4, "cause": "hp_category_intent has no row matching the domain",                  "effect": "ALL HP category scores discarded — the primary intent signal" },
+    { "n": 5, "cause": "Non-ISO dates in job_openings first_seen_at / last_seen_at",         "effect": "Wrong first/last dates, no error" },
+    { "n": 6, "cause": "Day/month ambiguity in news dates",                                 "effect": "Wrong dates, and the 365-day gate then drops the signal" },
+    { "summary": "Failures 2, 3 and 4 are all ONE root cause — domain normalization — and together they account for the entire intent feature. If you check one thing, check that firmographics.Company Domain, intent_topics.Company Website and hp_category_intent.Domain all resolve to the identical bare host." }
+  ],
+
+  "companion_documents": {
+    "hp-input-contract.json": "Column-level detail: every column, alias chain, enum, delimiter, range and transform, plus 17 numbered edge cases.",
+    "HP-Input-Data-Contract.md": "The same contract in prose, for reading rather than parsing."
+  }
+}

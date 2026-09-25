@@ -11,17 +11,40 @@ upload API takes the opposite shape - one CSV per dataset_key, per account
 It writes, per account:
 
     220 account split csv/<ACCOUNT_SLUG>/
-        firmographics.csv
+        firmographics.csv          one CSV per dataset_key, uploadable as-is
         company_hierarchy.csv
         ...
+        compliance_filings/
+            _filings_index.csv     this account's rows from filings 1.csv
+                                   (titles, fiscal years, document URLs)
+        reference/                 tables we hold that have NO dataset_key yet:
+            explorium_hiring_events.csv, predictleads_products.csv, ...
+                                   split per account for reference, not uploaded
+        _account.json           identity from the client master list (territory
+                                name, country, global parent, account type)
         _manifest.json          what was written, from where, and how many rows
         _MISSING.txt            datasets that came out empty, and why
+        _READINESS.txt          per feature: which of its input datasets this
+                                account has, and which are missing
+
+and at the root:
+
+    _ACCOUNTS.csv       one row per account: identity, datasets present/missing,
+                        and whether every dataset any source supplies is present
+    _READINESS.csv      account x feature matrix (complete / partial / none)
+    _DATASET_USAGE.md   dataset -> the features that read it, and the reverse
+    _unassigned_filings.csv   filings rows that matched no single account
+    _RUN_SUMMARY.json / _CORRECTIONS.txt   as before
 
 Every dataset in DATASET_REGISTRY gets a file, including ones we have no source
 for (stakeholder-map style). Those are created with their header row where the
 schema is known, and left with zero data rows otherwise. The point is that the
 folder is a complete slot board: when data for a gap arrives later, it drops
 into a file that already exists under the right name.
+
+"Which feature uses this?" is answered from the backend's own dependency map
+(FEATURE_MAPPINGS.dependent_datasets in api/v1/feature_mapping.py), not from a
+copy kept here, so it cannot drift from what the upload endpoint regenerates.
 
 Nothing here uploads. Writing files and registering them are separate steps on
 purpose - see the note on placeholders below.
@@ -59,6 +82,8 @@ Requires pandas and openpyxl (both already in hp-backend/requirements.txt).
 from __future__ import annotations
 
 import argparse
+import csv
+import io
 import json
 import re
 import sys
@@ -84,6 +109,30 @@ GOOGLE_NEWS_FILE = SOURCE_DIR / "google_news_rss_data 1.xlsx"
 # registry has no key for it and the columns are identical.
 EXA_FILE = SOURCE_DIR / "exa_data.xlsx"
 PREDICTLEADS_FILE = SOURCE_DIR / "predictleads_combined_219_accounts.xlsx"
+
+# Inputs that live outside the vendor drop.
+#
+# The client's master list is the canonical account identity: Sales Territory
+# Name (which is what the client calls the account), country, global parent and
+# account type. The vendor workbooks only know a company name and a domain.
+MASTER_LIST_FILE = REPO_ROOT / "docs" / "APAC_Account_Parent_Child_Mapping.xlsx"
+# Index of the filings crawl: 505 documents for 187 companies, each with a
+# document_url. The PDFs themselves are on the crawler's machine (local_path),
+# so this is what we can attach per account today.
+FILINGS_INDEX_FILE = REPO_ROOT / "NewDocs" / "filings 1.csv"
+# The backend's dependency map, read (not copied) so readiness reflects what
+# the upload endpoint will actually regenerate.
+FEATURE_MAPPING_FILE = (REPO_ROOT / "hp-backend" / "src" / "app" / "api" / "v1"
+                        / "feature_mapping.py")
+# Accounts whose empty datasets may be filled from a benchmark seed. Astra's
+# PredictLeads data was a separate delivery (client answer E2), so the combined
+# workbook has no rows for astra.co.id; the seed the backend ships with is that
+# delivery. Only datasets that came out empty are filled, and each fill is
+# recorded in _CORRECTIONS.txt.
+SEED_FILL = {
+    "PT_ASTRA_INTERNATIONAL_TBK": REPO_ROOT / "hp-backend" / "seed_data" / "astra",
+}
+REFERENCE_DIR = "reference"
 
 # Written with a BOM because that is what the existing stored CSVs carry, and
 # the upload endpoint decodes with utf-8-sig either way.
@@ -123,14 +172,25 @@ DATASET_PLAN = {
     "intent_topics":        {"source": EXPLORIUM, "sheet": "10_Intent_Topics"},
     "intent_score":         {"source": EXPLORIUM, "sheet": "11_intent_score"},
     "prospect_contacts":    {"source": EXPLORIUM, "sheet": "14_Prospect_Contacts"},
-    "news_events":          {"source": EXPLORIUM, "sheet": "13_News_Events"},
+    # news_events is PredictLeads' news table, NOT Explorium's 13_News_Events.
+    # The extractor (services/extractors/recent_news_signals.py) reads
+    # summary / article_sentence / effective_date / found_at / category, which
+    # are PredictLeads columns; the Astra benchmark's news_events.csv carries
+    # the same columns; and Explorium's sheet (event_name, event_time, a JSON
+    # payload) has none of them, so under this key every one of its rows would
+    # be skipped as headline-less. An earlier version of this plan had the two
+    # sheets the other way round; _RUN_SUMMARY.json "mapping_notes" records it.
+    "news_events":          {"source": PREDICTLEADS, "sheet": "news_events"},
 
     # --- PredictLeads combined workbook, filtered by company_domain
     "company":               {"source": PREDICTLEADS, "sheet": "company"},
     "extended_company":      {"source": PREDICTLEADS, "sheet": "extended_company"},
     "job_openings":          {"source": PREDICTLEADS, "sheet": "job_openings"},
     "technology_detections": {"source": PREDICTLEADS, "sheet": "technology_detections"},
-    "news_events_additional": {"source": PREDICTLEADS, "sheet": "news_events"},
+    # Explorium's event log (event_name, event_time, JSON data). No extractor
+    # reads this key today - the input contract marks it not_consumed - so it
+    # is kept under its registry key only to keep the slot board complete.
+    "news_events_additional": {"source": EXPLORIUM, "sheet": "13_News_Events"},
     "connections":           {"source": PREDICTLEADS, "sheet": "connections"},
     "subpages":              {"source": PREDICTLEADS, "sheet": "subpages"},
     "similar_companies":     {"source": PREDICTLEADS, "sheet": "similar_companies"},
@@ -149,6 +209,47 @@ DATASET_PLAN = {
     # than a CSV - dropping filings into it is the whole workflow.
     "compliance_filings":   {"source": None, "note": "PDF filings - drop files into this folder",
                              "is_dir": True},
+}
+
+# --------------------------------------------------------------------------
+# Reference tables: data we hold per account that has no dataset_key yet
+# --------------------------------------------------------------------------
+# Written under <account>/reference/ and deliberately outside the upload plan:
+# the backend has no dataset_key for any of these, so an upload would be
+# rejected. They are split anyway so that "what do we have for this account"
+# has one answer, and so the table is already per-account on the day a feature
+# starts reading it. Filenames carry the vendor so provenance survives a copy.
+# A file is written only when it has rows; the manifest lists the rest.
+REFERENCE_PLAN = {
+    # Explorium sheets the registry does not model
+    "explorium_funding_rounds":  {"source": EXPLORIUM, "sheet": "3_Funding_Rounds"},
+    "explorium_advisors":        {"source": EXPLORIUM, "sheet": "3_Advisors"},
+    "explorium_investors":       {"source": EXPLORIUM, "sheet": "3_Investors"},
+    "explorium_tech_breakdown":  {"source": EXPLORIUM, "sheet": "5_Tech_Breakdown"},
+    # Explorium's own hiring signal: department-level hiring events, joins and
+    # role changes. 45 accounts have no PredictLeads job openings at all; this
+    # is the nearest thing we hold for them.
+    "explorium_hiring_events":   {"source": EXPLORIUM, "sheet": "12_Hiring_Events"},
+
+    # PredictLeads sheets the registry does not model
+    "predictleads_financing_events":    {"source": PREDICTLEADS, "sheet": "financing_events"},
+    "predictleads_products":            {"source": PREDICTLEADS, "sheet": "products"},
+    # Named in the client's C1 answer: filings = filings 1.csv plus these,
+    # merged on domain.
+    "predictleads_sec_filings":         {"source": PREDICTLEADS, "sheet": "sec_filings"},
+    "predictleads_github_repositories": {"source": PREDICTLEADS, "sheet": "github_repositories"},
+
+    # Vendor QA sheets, keyed by domain so they split per account: what the
+    # vendor could not collect, what it flagged for review, what it changed and
+    # where two of its deliveries disagreed. The client's E5 answer says the
+    # corrections log is a record, not a to-do list, so these are copied and
+    # never applied.
+    "predictleads_dataset_status":  {"source": PREDICTLEADS, "sheet": "dataset_status",
+                                     "key": "domain"},
+    "predictleads_review_records":  {"source": PREDICTLEADS, "sheet": "review_records"},
+    "predictleads_quality_changes": {"source": PREDICTLEADS, "sheet": "quality_changes"},
+    "predictleads_differences":     {"source": PREDICTLEADS,
+                                     "sheet": ["Data7 differences", "Data8 differences"]},
 }
 
 # Columns present in a source sheet that the existing stored CSVs dropped. We
@@ -311,22 +412,46 @@ class SourceData:
         self._google_news: pd.DataFrame | None = None
         self._hp_intent: pd.DataFrame | None = None
         self._hp_intent_header: list[list[str]] | None = None
+        self._master: dict | None = None
+        self._filings: pd.DataFrame | None = None
 
     # -- PredictLeads -----------------------------------------------------
-    def predictleads_sheet(self, sheet: str) -> pd.DataFrame | None:
-        if sheet not in self._predictleads:
+    def predictleads_sheet(self, sheet, key_column: str = "company_domain"
+                           ) -> pd.DataFrame | None:
+        """One sheet, or several stacked, keyed by domain.
+
+        `sheet` may be a list: the two "differences" sheets share a layout and
+        are more useful as one table with a column saying which delivery each
+        row came from. Most sheets key on company_domain; dataset_status keys
+        on domain, hence key_column.
+        """
+        names = [sheet] if isinstance(sheet, str) else list(sheet)
+        cache_key = "|".join(names)
+        if cache_key not in self._predictleads:
             if not PREDICTLEADS_FILE.exists():
-                self._predictleads[sheet] = None
+                self._predictleads[cache_key] = None
             else:
                 try:
-                    df = pd.read_excel(PREDICTLEADS_FILE, sheet_name=sheet)
-                    df["__domain"] = df.get("company_domain",
-                                            pd.Series([""] * len(df))).map(normalize_domain)
-                    self._predictleads[sheet] = df
+                    frames = []
+                    for name in names:
+                        frame = pd.read_excel(PREDICTLEADS_FILE, sheet_name=name)
+                        if len(names) > 1:
+                            frame.insert(0, "comparison", name)
+                        frames.append(frame)
+                    df = (pd.concat(frames, ignore_index=True, sort=False)
+                          if len(frames) > 1 else frames[0])
+                    # .copy() consolidates the block layout of very wide
+                    # sheets (review_records has 210 columns), which otherwise
+                    # makes the column add below emit a PerformanceWarning.
+                    df = df.copy()
+                    key = (df[key_column] if key_column in df.columns
+                           else pd.Series([""] * len(df)))
+                    df["__domain"] = key.map(normalize_domain)
+                    self._predictleads[cache_key] = df
                 except Exception as exc:
-                    print(f"  ! could not read predictleads sheet '{sheet}': {exc}")
-                    self._predictleads[sheet] = None
-        return self._predictleads[sheet]
+                    print(f"  ! could not read predictleads sheet '{cache_key}': {exc}")
+                    self._predictleads[cache_key] = None
+        return self._predictleads[cache_key]
 
     # -- Google News ------------------------------------------------------
     def google_news(self) -> pd.DataFrame | None:
@@ -394,6 +519,100 @@ class SourceData:
             return None, None
         return self._hp_intent, self._hp_intent_header
 
+    # -- Client master list ----------------------------------------------
+    def master_list(self) -> dict[str, dict] | None:
+        """Rows of the client's Master List, keyed by Sales Territory Name.
+
+        The sheet has 223 rows: 220 accounts plus three legend rows that
+        explain the Account Type vocabulary and carry no country code, which
+        is how they are told apart. The Parent-Child Groups and Recommended
+        Merges sheets are folded in by territory name.
+        """
+        if self._master is None:
+            if not MASTER_LIST_FILE.exists():
+                self._master = False
+                return None
+            try:
+                df = pd.read_excel(MASTER_LIST_FILE, sheet_name="Master List", dtype=str)
+            except Exception as exc:
+                print(f"  ! could not read master list: {exc}")
+                self._master = False
+                return None
+            df.columns = [str(c).strip() for c in df.columns]
+            rows: dict[str, dict] = {}
+            for _, r in df.iterrows():
+                cty = _clean(r.get("Cty"))
+                territory = _clean(r.get("Sales Territory Name"))
+                if not territory or not cty or len(cty) != 2:
+                    continue  # legend rows
+                rows[territory] = {
+                    "sales_territory_name": territory,
+                    "country": cty,
+                    "global_parent": _clean(r.get("Global Parent / Group")),
+                    "account_type": _clean(r.get("Account Type")),
+                    "merge_group_id": _clean(r.get("Merge Group ID")),
+                    "notes": _clean(r.get("Notes")),
+                    "parent_child_group": None,
+                    "parent_child_role": None,
+                    "parent_child_notes": None,
+                    "recommended_global_account_id": None,
+                }
+            for sheet, apply in (
+                ("Parent-Child Groups", lambda row, r: row.update(
+                    parent_child_group=_clean(r.iloc[0]),
+                    parent_child_role=_clean(r.iloc[3]),
+                    parent_child_notes=_clean(r.iloc[4]))),
+                ("Recommended Merges", lambda row, r: row.update(
+                    recommended_global_account_id=_clean(r.iloc[2]))),
+            ):
+                try:
+                    extra = pd.read_excel(MASTER_LIST_FILE, sheet_name=sheet, dtype=str)
+                except Exception:
+                    continue
+                member_col = 1 if sheet == "Parent-Child Groups" else 0
+                for _, r in extra.iterrows():
+                    member = _clean(r.iloc[member_col])
+                    if member in rows:
+                        apply(rows[member], r)
+            self._master = rows
+        return self._master if self._master is not False else None
+
+    # -- Filings index -----------------------------------------------------
+    def filings_index(self) -> pd.DataFrame | None:
+        """filings 1.csv as delivered: strings only, blanks kept blank.
+
+        Read with keep_default_na so that a blank cell is written back blank
+        and a literal "NA" stays "NA" - the file round-trips byte-for-byte
+        per account, which the idempotency check depends on.
+        """
+        if self._filings is None:
+            if not FILINGS_INDEX_FILE.exists():
+                self._filings = False
+                return None
+            try:
+                self._filings = pd.read_csv(FILINGS_INDEX_FILE, dtype=str,
+                                            keep_default_na=False,
+                                            encoding="utf-8-sig")
+            except Exception as exc:
+                print(f"  ! could not read filings index: {exc}")
+                self._filings = False
+        return self._filings if self._filings is not False else None
+
+
+def _clean(value) -> str | None:
+    """A cell as a stripped string, or None when it is blank or NaN."""
+    if value is None:
+        return None
+    if isinstance(value, float) and pd.isna(value):
+        return None
+    text = str(value).strip()
+    return text if text and text.lower() != "nan" else None
+
+
+def _territory_base(territory: str) -> str:
+    """'WESTPAC BANKING CORPORATION - AU' -> 'WESTPAC BANKING CORPORATION'."""
+    return re.sub(r"\s*-\s*[A-Z]{2}$", "", str(territory).strip())
+
 
 # --------------------------------------------------------------------------
 # Account discovery
@@ -406,6 +625,9 @@ class Account:
         self.domain = normalize_domain(domain)
         self.explorium_file = explorium_file
         self.name_key = normalize_name(name)
+        # The client's master-list row, attached by attach_master_list() once
+        # the full account list is known. None when the list has no row.
+        self.master: dict | None = None
 
         # Company name alone is not unique across the source set. Three
         # different Ministry of Defence workbooks (MY, VN, SG) and two Westpac
@@ -543,6 +765,185 @@ def _read_identity(path: Path) -> tuple[str, str]:
 
 
 # --------------------------------------------------------------------------
+# Account identity, filings index, feature dependencies
+# --------------------------------------------------------------------------
+
+# Filled once per run by assign_filings(); read per account afterwards.
+FILINGS_BY_SLUG: dict[str, pd.DataFrame] = {}
+UNASSIGNED_FILINGS: pd.DataFrame | None = None
+# Run-level facts that belong in _RUN_SUMMARY.json but are produced outside
+# write_run_summary(): master-list matching and filings assignment.
+RUN_STATS: dict = {}
+
+
+def attach_master_list(accounts: list[Account], sources: SourceData) -> dict:
+    """Give each account its row from the client master list.
+
+    Sales Territory Name is the vendor's company name plus a " - XX" country
+    suffix. 215 match on the name alone; the three Ministry of Defence and two
+    Westpac entities need the suffix, which is also what disambiguates their
+    folders. A loose name match is the last resort and only counts when it is
+    unique, because a wrong identity is worse than a missing one.
+    """
+    master = sources.master_list()
+    stats = {"master_rows": 0, "matched": 0, "unmatched_territories": [],
+             "accounts_without_master_row": []}
+    if master is None:
+        print("  ! master list not readable; _account.json carries vendor identity only")
+        return stats
+    stats["master_rows"] = len(master)
+    by_slug = {a.slug: a for a in accounts}
+    by_name_key: dict[str, list[Account]] = {}
+    for acct in accounts:
+        by_name_key.setdefault(acct.name_key, []).append(acct)
+
+    taken: dict[str, str] = {}
+    for territory, row in master.items():
+        base_slug = slugify(_territory_base(territory))
+        hit = next((c for c in (base_slug, f"{base_slug}_{row['country']}")
+                    if c in by_slug), None)
+        if hit is None:
+            loose = by_name_key.get(normalize_name(_territory_base(territory)), [])
+            if len(loose) == 1:
+                hit = loose[0].slug
+        if hit is None:
+            stats["unmatched_territories"].append(territory)
+            continue
+        if hit in taken:
+            print(f"  ! master list: '{territory}' and '{taken[hit]}' both resolve "
+                  f"to {hit}; keeping the first")
+            stats["unmatched_territories"].append(territory)
+            continue
+        by_slug[hit].master = row
+        taken[hit] = territory
+        stats["matched"] += 1
+    stats["accounts_without_master_row"] = sorted(
+        a.slug for a in accounts if a.master is None)
+    return stats
+
+
+def assign_filings(accounts: list[Account], sources: SourceData) -> dict:
+    """Attach each row of the filings index to one account, or to none.
+
+    Keys, in order: the row's sales_territory_name against the master list
+    (the crawl was driven from that list, so this is the intended link); then
+    the row's domain, when exactly one account has it; then a loose company
+    name match. A row whose territory and domain point at different accounts
+    is not guessed at - it goes to _unassigned_filings.csv with both
+    candidates named. Group-level entries ("Astra International Group",
+    "Mitsubishi Group (keiretsu)") match nothing and land there too.
+    """
+    global UNASSIGNED_FILINGS
+    df = sources.filings_index()
+    stats = {"rows": 0, "by_territory": 0, "by_domain": 0, "by_company_name": 0,
+             "unassigned": 0, "conflicts": []}
+    if df is None:
+        return stats
+    stats["rows"] = int(len(df))
+
+    terr2slug = {a.master["sales_territory_name"]: a.slug for a in accounts if a.master}
+    dom2slugs: dict[str, list[str]] = {}
+    name2slugs: dict[str, list[str]] = {}
+    for a in accounts:
+        if a.domain:
+            dom2slugs.setdefault(a.domain, []).append(a.slug)
+        name2slugs.setdefault(a.name_key, []).append(a.slug)
+
+    matched_by, target, reason = [], [], []
+    for _, row in df.iterrows():
+        territory = str(row.get("sales_territory_name", "") or "").strip()
+        domain = normalize_domain(row.get("domain", ""))
+        t_slug = terr2slug.get(territory)
+        d_hits = dom2slugs.get(domain, []) if domain else []
+        d_slug = d_hits[0] if len(d_hits) == 1 else None
+        n_hits = (name2slugs.get(normalize_name(_territory_base(territory)), [])
+                  or name2slugs.get(normalize_name(row.get("company", "")), []))
+        n_slug = n_hits[0] if len(n_hits) == 1 else None
+
+        if t_slug and d_slug and t_slug != d_slug:
+            why = (f"territory says {t_slug}, domain {domain} says {d_slug}; "
+                   f"not guessed - with the client for correction")
+            stats["conflicts"].append(
+                {"company": row.get("company", ""), "territory": territory,
+                 "domain": domain, "territory_account": t_slug,
+                 "domain_account": d_slug})
+            matched_by.append(""); target.append(""); reason.append(why)
+        elif t_slug:
+            matched_by.append("sales_territory_name"); target.append(t_slug); reason.append("")
+        elif d_slug:
+            matched_by.append("domain"); target.append(d_slug); reason.append("")
+        elif n_slug:
+            matched_by.append("company_name"); target.append(n_slug); reason.append("")
+        elif len(d_hits) > 1:
+            matched_by.append(""); target.append("")
+            reason.append(f"domain {domain} is shared by {', '.join(d_hits)} and the "
+                          f"territory names no account")
+        else:
+            matched_by.append(""); target.append("")
+            reason.append("no account matches the territory, domain or company name "
+                          "(group-level entry, or an entity outside the 220)")
+
+    df = df.copy()
+    df["matched_by"] = matched_by
+    df["__slug"] = target
+    df["__reason"] = reason
+    FILINGS_BY_SLUG.clear()
+    assigned = df[df["__slug"] != ""]
+    for slug, frame in assigned.groupby("__slug", sort=False):
+        FILINGS_BY_SLUG[slug] = (frame.drop(columns=["__slug", "__reason"])
+                                 .reset_index(drop=True))
+    unassigned = df[df["__slug"] == ""].drop(columns=["__slug", "matched_by"])
+    UNASSIGNED_FILINGS = (unassigned.rename(columns={"__reason": "reason"})
+                          .reset_index(drop=True))
+    for key, label in (("by_territory", "sales_territory_name"),
+                       ("by_domain", "domain"),
+                       ("by_company_name", "company_name")):
+        stats[key] = int((df["matched_by"] == label).sum())
+    stats["unassigned"] = int(len(unassigned))
+    return stats
+
+
+def load_feature_dependencies() -> dict[str, dict]:
+    """feature_key -> {display_name, dependent_datasets}, from the backend.
+
+    Imported when the backend package is importable (it is, from its venv);
+    otherwise parsed out of the file so the script still works from a bare
+    interpreter. Either way the source of truth is feature_mapping.py, which
+    is also what the upload endpoint regenerates from.
+    """
+    src_dir = FEATURE_MAPPING_FILE.parents[3]  # hp-backend/src
+    try:
+        if str(src_dir) not in sys.path:
+            sys.path.insert(0, str(src_dir))
+        from app.api.v1.feature_mapping import FEATURE_MAPPINGS  # type: ignore
+        return {
+            key: {"display_name": spec.get("display_name", key),
+                  "dependent_datasets": list(spec.get("dependent_datasets", []))}
+            for key, spec in FEATURE_MAPPINGS.items()
+        }
+    except Exception as exc:
+        print(f"  (feature_mapping import failed - {exc}; parsing the file instead)")
+
+    if not FEATURE_MAPPING_FILE.exists():
+        print("  ! feature_mapping.py not found; readiness will be skipped")
+        return {}
+    text = FEATURE_MAPPING_FILE.read_text()
+    deps: dict[str, dict] = {}
+    # Feature entries sit at four-space indent inside FEATURE_MAPPINGS; the
+    # nested mapped_fields dicts are deeper, so this split isolates features.
+    blocks = re.split(r'\n    "(\w+)":\s*\{', text)
+    for i in range(1, len(blocks) - 1, 2):
+        key, body = blocks[i], blocks[i + 1]
+        name = re.search(r'"display_name":\s*"([^"]+)"', body)
+        lst = re.search(r'"dependent_datasets":\s*\[(.*?)\]', body, re.S)
+        if not lst:
+            continue
+        deps[key] = {"display_name": name.group(1) if name else key,
+                     "dependent_datasets": re.findall(r'"(\w+)"', lst.group(1))}
+    return deps
+
+
+# --------------------------------------------------------------------------
 # Extraction
 # --------------------------------------------------------------------------
 
@@ -591,7 +992,9 @@ def extract_dataset(account: Account, dataset_key: str, spec: dict,
         return df, list(df.columns), ""
 
     if source == PREDICTLEADS:
-        df = sources.predictleads_sheet(spec["sheet"])
+        df = sources.predictleads_sheet(spec["sheet"], spec.get("key", "company_domain"))
+        label = (spec["sheet"] if isinstance(spec["sheet"], str)
+                 else " + ".join(spec["sheet"]))
         if df is None:
             return None, None, "predictleads workbook or sheet unavailable"
         if not account.domain:
@@ -599,7 +1002,7 @@ def extract_dataset(account: Account, dataset_key: str, spec: dict,
         subset = df[df["__domain"] == account.domain].drop(columns=["__domain"])
         if subset.empty:
             return None, [c for c in df.columns if c != "__domain"], \
-                f"no rows for {account.domain} in predictleads '{spec['sheet']}'"
+                f"no rows for {account.domain} in predictleads '{label}'"
         return subset, list(subset.columns), ""
 
     if source == GOOGLE_NEWS:
@@ -698,14 +1101,18 @@ def process_account(account: Account, sources: SourceData,
                 pdf_dir = out_dir / dataset_key
                 pdf_dir.mkdir(exist_ok=True)
                 readme = pdf_dir / "README.txt"
-                if not readme.exists():
-                    readme.write_text(
-                        "Drop this account's PDF filings here (annual reports,\n"
-                        "exchange filings, monthly market reports).\n\n"
-                        "Upload each one with dataset_key=compliance_filings.\n"
-                        "This dataset is multi-file: uploading a second PDF adds\n"
-                        "to the set rather than replacing the first.\n"
-                    )
+                readme.write_text(
+                    "Drop this account's PDF filings here (annual reports,\n"
+                    "exchange filings, monthly market reports).\n\n"
+                    "_filings_index.csv, when present, lists the documents the\n"
+                    "filings crawl found for this account: title, type, fiscal\n"
+                    "year and document_url. The PDFs themselves are not here -\n"
+                    "local_path points at the crawler's machine - so download\n"
+                    "from document_url or ask for the folder, then drop them in.\n\n"
+                    "Upload each one with dataset_key=compliance_filings.\n"
+                    "This dataset is multi-file: uploading a second PDF adds\n"
+                    "to the set rather than replacing the first.\n"
+                )
             manifest["datasets"][dataset_key] = {
                 "rows": 0, "source": None, "status": "awaiting_files",
                 "kind": "pdf_directory",
@@ -727,7 +1134,54 @@ def process_account(account: Account, sources: SourceData,
         if not rows:
             missing.append((dataset_key, reason or "no rows"))
 
+    # Datasets still empty that a benchmark seed can fill (Astra only, today).
+    seed_dir = SEED_FILL.get(account.slug)
+    if seed_dir is not None and seed_dir.exists():
+        for dataset_key, info in manifest["datasets"].items():
+            if info["rows"] or info.get("kind") == "pdf_directory":
+                continue
+            src = seed_dir / f"{dataset_key}.csv"
+            if not src.exists():
+                continue
+            rows = copy_seed_dataset(src, out_dir / f"{dataset_key}.csv",
+                                     dataset_key, dry_run)
+            if not rows:
+                continue
+            info.update({"rows": rows, "source": "seed", "sheet": None,
+                         "status": "ok", "reason": None,
+                         "seed_file": str(src.relative_to(REPO_ROOT))})
+            record_correction(
+                account.name, f"{dataset_key} source",
+                "no rows in the 220-account sources",
+                str(src.relative_to(REPO_ROOT)),
+                "filled from the Astra benchmark seed; the client's E2 answer "
+                "says Astra's PredictLeads data is a separate delivery, and the "
+                "seed is that delivery")
+        missing = [(k, r) for k, r in missing if manifest["datasets"][k]["rows"] == 0]
+
+    # Reference tables: split for completeness, never uploaded.
+    manifest["reference"] = {}
+    for key, spec in REFERENCE_PLAN.items():
+        df, _header, reason = extract_dataset(account, key, spec, sources)
+        rows = write_reference(out_dir, key, df, dry_run)
+        manifest["reference"][key] = {
+            "rows": rows,
+            "source": spec["source"],
+            "sheet": (spec["sheet"] if isinstance(spec["sheet"], str)
+                      else " + ".join(spec["sheet"])),
+            "status": "ok" if rows else "empty",
+            "reason": reason or None,
+            "file": f"{REFERENCE_DIR}/{key}.csv" if rows else None,
+        }
     if not dry_run:
+        write_reference_readme(out_dir)
+
+    manifest["filings_index"] = write_filings_index(out_dir, account.slug, dry_run)
+    manifest["account"] = account_identity(account)
+
+    if not dry_run:
+        (out_dir / "_account.json").write_text(
+            json.dumps(manifest["account"], indent=2, ensure_ascii=False) + "\n")
         (out_dir / "_manifest.json").write_text(json.dumps(manifest, indent=2))
         lines = [
             f"Datasets with no data for {account.name} ({account.domain or 'no domain'})",
@@ -739,10 +1193,393 @@ def process_account(account: Account, sources: SourceData,
             "",
         ]
         lines += [f"  {key:<26} {reason}" for key, reason in missing]
+        hiring = manifest["reference"].get("explorium_hiring_events", {}).get("rows", 0)
+        if manifest["datasets"].get("job_openings", {}).get("rows", 0) == 0 and hiring:
+            lines += [
+                "",
+                f"  note: job_openings is empty, but {REFERENCE_DIR}/explorium_hiring_events.csv",
+                f"        holds {hiring} Explorium hiring events for this account. No",
+                "        dataset_key reads them yet; they are the nearest hiring signal we hold.",
+            ]
+        filings_rows = manifest["filings_index"]["rows"]
+        if filings_rows:
+            lines += [
+                "",
+                f"  note: compliance_filings has no PDFs, but compliance_filings/_filings_index.csv",
+                f"        lists {filings_rows} document(s) found for this account, with URLs.",
+            ]
         (out_dir / "_MISSING.txt").write_text("\n".join(lines) + "\n")
 
     manifest["_missing"] = missing
     return manifest
+
+
+def copy_seed_dataset(src: Path, target: Path, dataset_key: str, dry_run: bool) -> int:
+    """Copy one benchmark CSV into an account folder, re-encoded to ENCODING.
+
+    Returns the data row count. The seed files were written by hand over
+    time and two encodings are in play (hp_category_intent is Windows-1252),
+    so the bytes are decoded rather than copied.
+    """
+    raw = src.read_bytes()
+    text = None
+    for encoding in ("utf-8-sig", "cp1252"):
+        try:
+            text = raw.decode(encoding)
+            break
+        except UnicodeDecodeError:
+            continue
+    if text is None:
+        return 0
+    try:
+        header = [0, 1] if dataset_key == "hp_category_intent" else 0
+        rows = len(pd.read_csv(io.StringIO(text), header=header, low_memory=False))
+    except Exception:
+        return 0
+    if rows and not dry_run:
+        target.write_text(text, encoding=ENCODING)
+    return rows
+
+
+def write_reference(out_dir: Path, key: str, df, dry_run: bool) -> int:
+    """One reference table. Written only when it has rows; a stale file from
+    an earlier run over different sources is removed, so the folder never
+    claims data the current sources do not hold."""
+    target = out_dir / REFERENCE_DIR / f"{key}.csv"
+    if df is None or df.empty:
+        if not dry_run and target.exists():
+            target.unlink()
+        return 0
+    if dry_run:
+        return len(df)
+    target.parent.mkdir(exist_ok=True)
+    df.to_csv(target, index=False, encoding=ENCODING)
+    return len(df)
+
+
+def write_reference_readme(out_dir: Path):
+    ref_dir = out_dir / REFERENCE_DIR
+    ref_dir.mkdir(exist_ok=True)
+    lines = [
+        "Tables we hold for this account that have NO dataset_key in the backend.",
+        "They are split here so the account folder is the one place to look for",
+        "everything we have, and so each table is already per-account on the day",
+        "a feature starts reading it. Nothing in this folder is uploaded: the",
+        "upload endpoint would reject a key it does not know.",
+        "",
+        "Only tables with rows are written. The full slot set is:",
+        "",
+    ]
+    for key, spec in REFERENCE_PLAN.items():
+        sheet = spec["sheet"] if isinstance(spec["sheet"], str) else " + ".join(spec["sheet"])
+        lines.append(f"  {key + '.csv':<40} {spec['source']} / {sheet}")
+    lines += [
+        "",
+        "See _manifest.json (\"reference\") for row counts and why a table is empty.",
+    ]
+    (ref_dir / "README.txt").write_text("\n".join(lines) + "\n")
+
+
+def write_filings_index(out_dir: Path, slug: str, dry_run: bool) -> dict:
+    """This account's rows from filings 1.csv, into compliance_filings/."""
+    frame = FILINGS_BY_SLUG.get(slug)
+    info = {"rows": 0, "documents_with_url": 0, "file": None,
+            "source": str(FILINGS_INDEX_FILE.relative_to(REPO_ROOT))}
+    target = out_dir / "compliance_filings" / "_filings_index.csv"
+    if frame is None or frame.empty:
+        if not dry_run and target.exists():
+            target.unlink()
+        return info
+    info["rows"] = int(len(frame))
+    if "document_url" in frame.columns:
+        info["documents_with_url"] = int(
+            frame["document_url"].astype(str).str.startswith("http").sum())
+    info["file"] = "compliance_filings/_filings_index.csv"
+    if not dry_run:
+        target.parent.mkdir(exist_ok=True)
+        frame.to_csv(target, index=False, encoding=ENCODING)
+    return info
+
+
+def account_identity(account: Account) -> dict:
+    """What an account is called, by us and by the client.
+
+    name_for_upload is the client's Sales Territory Name when we have it: it
+    is unique across the 220 (the vendor's company name is not - see the
+    Ministry of Defence and Westpac folders) and it is the name the client
+    will look for.
+    """
+    master = account.master or {}
+    return {
+        "account_slug": account.slug,
+        "vendor_company_name": account.name,
+        "domain": account.domain,
+        "name_for_upload": master.get("sales_territory_name") or account.name,
+        "master_list": account.master,
+    }
+
+
+# --------------------------------------------------------------------------
+# Readiness: which features each account can feed
+# --------------------------------------------------------------------------
+
+def compute_readiness(manifest: dict, deps: dict, nobody_has: set[str]) -> dict:
+    rows = {k: v.get("rows", 0) for k, v in manifest["datasets"].items()}
+    out = {}
+    for key, spec in deps.items():
+        wanted = spec["dependent_datasets"]
+        present = [d for d in wanted if rows.get(d, 0) > 0]
+        missing = [d for d in wanted if rows.get(d, 0) == 0]
+        status = "complete" if not missing else ("none" if not present else "partial")
+        out[key] = {
+            "display_name": spec["display_name"],
+            "status": status,
+            "present": present,
+            "missing": missing,
+            # True when the only gaps are datasets no account has at all, so
+            # this account is as complete as the sources allow.
+            "complete_on_available_data": all(d in nobody_has for d in missing),
+        }
+    return out
+
+
+def write_readiness(manifests: list[dict], deps: dict) -> set[str]:
+    """Per-account _READINESS.txt, and the readiness block in each manifest.
+
+    Runs after every account is split because "no account has this dataset"
+    is only known then. With --account the set is computed over the subset,
+    so read that flag with care on a partial run.
+    """
+    if not deps:
+        return set()
+    # "Nobody has it" means the 220-account sources supply nothing for it. A
+    # dataset filled from a benchmark seed does not count: Astra's seeded
+    # contacts must not make the other 219 accounts look specifically short
+    # of contacts when the gap is the contact file nobody has received.
+    nobody_has = {
+        key for key in DATASET_PLAN
+        if all(m["datasets"].get(key, {}).get("rows", 0) == 0
+               or m["datasets"][key].get("source") == "seed"
+               for m in manifests)
+    }
+    for manifest in manifests:
+        manifest["readiness"] = compute_readiness(manifest, deps, nobody_has)
+        manifest["datasets_nobody_has"] = sorted(nobody_has)
+        out_dir = OUTPUT_DIR / manifest["account_slug"]
+        on_disk = {k: v for k, v in manifest.items() if not k.startswith("_")}
+        (out_dir / "_manifest.json").write_text(json.dumps(on_disk, indent=2))
+        (out_dir / "_READINESS.txt").write_text(render_readiness(manifest, nobody_has))
+    return nobody_has
+
+
+def render_readiness(manifest: dict, nobody_has: set[str]) -> str:
+    master = (manifest.get("account") or {}).get("master_list") or {}
+    tables = manifest["datasets"]
+    have = [k for k, v in tables.items() if v.get("rows", 0) > 0]
+    missing = [k for k, v in tables.items() if v.get("rows", 0) == 0]
+    ref = manifest.get("reference", {})
+    ref_have = [k for k, v in ref.items() if v.get("rows", 0) > 0]
+    filings = manifest.get("filings_index", {})
+
+    def star(key):
+        return f"{key}*" if key in nobody_has else key
+
+    lines = [
+        f"Feature readiness for {manifest['account_name']} ({manifest['account_slug']})",
+        f"Territory:     {master.get('sales_territory_name') or '(no master-list row)'}",
+        f"Country:       {master.get('country') or '-'}    Domain: {manifest['domain'] or '-'}",
+        f"Global parent: {master.get('global_parent') or '-'}    "
+        f"Account type: {master.get('account_type') or '-'}",
+        "",
+        f"Datasets with rows: {len(have)} of {len(tables)}",
+        "Missing:            " + (", ".join(star(k) for k in missing) or "none"),
+        f"Reference tables:   {len(ref_have)} of {len(ref)} with rows"
+        + (f" ({', '.join(ref_have)})" if ref_have else ""),
+        f"Filings index:      {filings.get('rows', 0)} document(s), "
+        f"{filings.get('documents_with_url', 0)} with a URL; PDFs not yet in the folder",
+        "",
+        f"{'Feature':<36} {'Status':<9} Missing inputs",
+        "-" * 78,
+    ]
+    for key, r in manifest.get("readiness", {}).items():
+        miss = ", ".join(star(d) for d in r["missing"]) or "-"
+        lines.append(f"{key:<36} {r['status']:<9} {miss}")
+    lines += [
+        "",
+        "* = the 220-account sources hold this for no account (a benchmark seed",
+        "    does not count): a source gap, not something specific to this account.",
+        "    A feature whose only missing inputs are starred is as complete as the",
+        "    sources allow.",
+        "",
+        "complete = every dataset the feature declares is present",
+        "partial  = some are; the feature runs, and the parts fed by the missing",
+        "           datasets come out empty",
+        "none     = nothing it reads is present",
+        "Dependencies are read from FEATURE_MAPPINGS in",
+        "hp-backend/src/app/api/v1/feature_mapping.py, which is what the upload",
+        "endpoint regenerates from.",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def write_root_indexes(manifests: list[dict], deps: dict, nobody_has: set[str]):
+    """_ACCOUNTS.csv, _READINESS.csv, _DATASET_USAGE.md, _unassigned_filings.csv.
+
+    No timestamps inside any of these: the CSVs are fingerprinted by the
+    validator's idempotency check, and the point of the indexes is to be
+    diffable between runs.
+    """
+    features = list(deps)
+
+    # -- _ACCOUNTS.csv ------------------------------------------------------
+    fields = ["account_slug", "account_name", "sales_territory_name", "country",
+              "domain", "global_parent", "account_type", "merge_group_id",
+              "parent_child_group", "parent_child_role",
+              "recommended_global_account_id", "explorium_file",
+              "tables_with_rows", "tables_total", "missing_tables",
+              "reference_tables_with_rows", "filings_index_rows",
+              "features_complete", "features_partial", "features_none",
+              "complete_on_available_data"]
+    with open(OUTPUT_DIR / "_ACCOUNTS.csv", "w", newline="", encoding=ENCODING) as fh:
+        writer = csv.DictWriter(fh, fieldnames=fields)
+        writer.writeheader()
+        for m in manifests:
+            master = (m.get("account") or {}).get("master_list") or {}
+            tables = m["datasets"]
+            have = [k for k, v in tables.items() if v.get("rows", 0) > 0]
+            missing = [k for k, v in tables.items() if v.get("rows", 0) == 0]
+            readiness = m.get("readiness", {})
+            counts = {s: sum(1 for r in readiness.values() if r["status"] == s)
+                      for s in ("complete", "partial", "none")}
+            writer.writerow({
+                "account_slug": m["account_slug"],
+                "account_name": m["account_name"],
+                "sales_territory_name": master.get("sales_territory_name") or "",
+                "country": master.get("country") or "",
+                "domain": m["domain"] or "",
+                "global_parent": master.get("global_parent") or "",
+                "account_type": master.get("account_type") or "",
+                "merge_group_id": master.get("merge_group_id") or "",
+                "parent_child_group": master.get("parent_child_group") or "",
+                "parent_child_role": master.get("parent_child_role") or "",
+                "recommended_global_account_id":
+                    master.get("recommended_global_account_id") or "",
+                "explorium_file": m.get("explorium_file") or "",
+                "tables_with_rows": len(have),
+                "tables_total": len(tables),
+                "missing_tables": "; ".join(missing),
+                "reference_tables_with_rows": sum(
+                    1 for v in m.get("reference", {}).values() if v.get("rows", 0) > 0),
+                "filings_index_rows": m.get("filings_index", {}).get("rows", 0),
+                "features_complete": counts["complete"],
+                "features_partial": counts["partial"],
+                "features_none": counts["none"],
+                "complete_on_available_data":
+                    "yes" if all(k in nobody_has for k in missing) else "no",
+            })
+
+    # -- _READINESS.csv -----------------------------------------------------
+    with open(OUTPUT_DIR / "_READINESS.csv", "w", newline="", encoding=ENCODING) as fh:
+        writer = csv.writer(fh)
+        writer.writerow(["account_slug", "sales_territory_name"] + features)
+        for m in manifests:
+            master = (m.get("account") or {}).get("master_list") or {}
+            readiness = m.get("readiness", {})
+            writer.writerow(
+                [m["account_slug"], master.get("sales_territory_name") or ""]
+                + [readiness.get(f, {}).get("status", "") for f in features])
+
+    # -- _unassigned_filings.csv -------------------------------------------
+    if UNASSIGNED_FILINGS is not None:
+        UNASSIGNED_FILINGS.to_csv(OUTPUT_DIR / "_unassigned_filings.csv",
+                                  index=False, encoding=ENCODING)
+
+    # -- _DATASET_USAGE.md --------------------------------------------------
+    readers: dict[str, list[str]] = {}
+    for feature, spec in deps.items():
+        for dataset in spec["dependent_datasets"]:
+            readers.setdefault(dataset, []).append(feature)
+    total = len(manifests)
+
+    def have_count(section, key):
+        return sum(1 for m in manifests if m.get(section, {}).get(key, {}).get("rows", 0) > 0)
+
+    md = [
+        "# Dataset usage across the account split",
+        "",
+        f"{total} account folders. 'Read by' comes from FEATURE_MAPPINGS.dependent_datasets",
+        "in hp-backend/src/app/api/v1/feature_mapping.py: it is the list the upload",
+        "endpoint regenerates when that dataset is uploaded, so it is also the list of",
+        "features that will show something from it.",
+        "",
+        "## Uploadable datasets (one CSV per dataset_key at the top of each folder)",
+        "",
+        "| dataset_key | source | accounts with rows | read by |",
+        "|---|---|---|---|",
+    ]
+    for key, spec in DATASET_PLAN.items():
+        source = (f"{spec['source']} / {spec['sheet']}" if spec.get("source")
+                  else "no feed yet (PDFs)")
+        read_by = ", ".join(readers.get(key, [])) or "(no feature declares it)"
+        md.append(f"| {key} | {source} | {have_count('datasets', key)} / {total} | {read_by} |")
+    md += [
+        "",
+        "## Reference tables (reference/ in each folder; no dataset_key, not uploaded)",
+        "",
+        "| file | source | accounts with rows | read by |",
+        "|---|---|---|---|",
+    ]
+    for key, spec in REFERENCE_PLAN.items():
+        sheet = spec["sheet"] if isinstance(spec["sheet"], str) else " + ".join(spec["sheet"])
+        md.append(f"| {REFERENCE_DIR}/{key}.csv | {spec['source']} / {sheet} | "
+                  f"{have_count('reference', key)} / {total} | no feature yet |")
+    filings_accounts = sum(1 for m in manifests if m.get("filings_index", {}).get("rows", 0) > 0)
+    filings_rows = sum(m.get("filings_index", {}).get("rows", 0) for m in manifests)
+    md += [
+        "",
+        "## Filings index",
+        "",
+        f"compliance_filings/_filings_index.csv is present in {filings_accounts} / {total} "
+        f"folders ({filings_rows} documents). It is the crawl index, not the PDFs; the",
+        "compliance_filings dataset is fed only once PDFs are dropped in and uploaded.",
+        "Rows that matched no single account are in _unassigned_filings.csv.",
+        "",
+        "## Features and the datasets they read",
+        "",
+        "| feature | display name | inputs |",
+        "|---|---|---|",
+    ]
+    for feature, spec in deps.items():
+        md.append(f"| {feature} | {spec['display_name']} | "
+                  f"{', '.join(spec['dependent_datasets'])} |")
+    md += [
+        "",
+        "## Mapping note",
+        "",
+        "`news_events` holds PredictLeads' news table because that is the schema the",
+        "news extractor reads (summary, article_sentence, effective_date, found_at).",
+        "Explorium's `13_News_Events` event log goes to `news_events_additional`, which",
+        "no feature reads. Earlier runs of the split had these two the other way round.",
+        "",
+        "## Datasets the 220-account sources hold for no account",
+        "",
+        (", ".join(sorted(nobody_has)) or "none")
+        + " (a benchmark-seed fill does not count; see _CORRECTIONS.txt)",
+        "",
+        "## Reading an account folder",
+        "",
+        "- `<dataset_key>.csv` - upload these (only the ones with rows; see _MISSING.txt).",
+        "- `compliance_filings/` - drop PDFs here; `_filings_index.csv` says which exist.",
+        "- `reference/` - extra tables we hold; not uploaded.",
+        "- `_account.json` - identity from the client master list; `name_for_upload`",
+        "  is the Sales Territory Name, unique across the 220.",
+        "- `_manifest.json` - every table, its source, row count and why it is empty.",
+        "- `_READINESS.txt` - per feature, which inputs are present and missing.",
+        "",
+        "Root: `_ACCOUNTS.csv` (one row per account, with `complete_on_available_data`),",
+        "`_READINESS.csv` (account x feature), `_RUN_SUMMARY.json`, `_CORRECTIONS.txt`.",
+    ]
+    (OUTPUT_DIR / "_DATASET_USAGE.md").write_text("\n".join(md) + "\n")
 
 
 # --------------------------------------------------------------------------
@@ -751,11 +1588,17 @@ def process_account(account: Account, sources: SourceData,
 
 def print_upload_plan(manifest: dict):
     slug = manifest["account_slug"]
+    name = (manifest.get("account") or {}).get("name_for_upload") or manifest["account_name"]
     print(f"\nUpload plan for {manifest['account_name']} ({slug})")
-    print("  1. Create the account, then use the returned id below.\n")
+    print("  1. Create the account, then use the returned id below.")
+    if name != manifest["account_name"]:
+        print(f"     (named by the client's Sales Territory Name, which is unique across")
+        print(f"      the 220; the vendor name '{manifest['account_name']}' is not)\n")
+    else:
+        print()
     print('     curl -X POST "$BASE/api/v1/accounts" -H "Authorization: Bearer $HP_TOKEN" \\')
     print(f"          -H 'Content-Type: application/json' \\")
-    print(f"          -d '{{\"name\": \"{manifest['account_name']}\"}}'\n")
+    print(f"          -d '{{\"name\": \"{name}\"}}'\n")
     print("  2. Upload only the datasets that carry rows:\n")
 
     ready = [(k, v) for k, v in manifest["datasets"].items() if v["rows"] > 0]
@@ -825,6 +1668,13 @@ def write_run_summary(manifests: list[dict], sources: SourceData,
             reached |= frame["__name"].isin(known_names)
         unclaimed_rows[dataset_key] = int((~reached).sum())
 
+    reference_rows = {}
+    for key, spec in REFERENCE_PLAN.items():
+        if spec["source"] == PREDICTLEADS:
+            df = sources.predictleads_sheet(spec["sheet"], spec.get("key", "company_domain"))
+            if df is not None:
+                reference_rows[key] = len(df)
+
     summary = {
         "generated_at": datetime.now(UTC).isoformat(),
         "accounts": len(manifests),
@@ -834,6 +1684,17 @@ def write_run_summary(manifests: list[dict], sources: SourceData,
         "corrections": CORRECTIONS,
         "domain_aliases": DOMAIN_ALIASES,
         "account_domains": {m["account_slug"]: m["domain"] for m in manifests},
+        "master_list": RUN_STATS.get("master_list", {}),
+        "filings_index": RUN_STATS.get("filings_index", {}),
+        "reference_source_rows": reference_rows,
+        "datasets_nobody_has": manifests[0].get("datasets_nobody_has", []) if manifests else [],
+        # Slot assignments that changed from an earlier version of this plan,
+        # so a reader comparing two runs is not left guessing.
+        "mapping_notes": [
+            "news_events <- predictleads/news_events (the columns the extractor "
+            "reads); news_events_additional <- explorium/13_News_Events (read by "
+            "no feature). Earlier runs had these two swapped.",
+        ],
     }
     (OUTPUT_DIR / "_RUN_SUMMARY.json").write_text(json.dumps(summary, indent=2))
 
@@ -911,6 +1772,33 @@ def verify_output(manifests: list[dict]) -> int:
                       f"manifest says {info['rows']}, file has {len(frame)}")
                 problems += 1
 
+        # Reference tables and the filings index are held to the same
+        # standard: a row count the file does not have is a wrong answer to
+        # "what do we hold for this account", even if nothing uploads it.
+        extras = [(f"{REFERENCE_DIR}/{key}.csv", info.get("rows", 0))
+                  for key, info in manifest.get("reference", {}).items()]
+        filings = manifest.get("filings_index", {})
+        if filings.get("file"):
+            extras.append((filings["file"], filings.get("rows", 0)))
+        for rel, expected in extras:
+            if not expected:
+                continue
+            path = out_dir / rel
+            if not path.exists():
+                print(f"  MISSING FILE  {manifest['account_slug']}/{rel}")
+                problems += 1
+                continue
+            try:
+                frame = pd.read_csv(path, encoding=ENCODING, low_memory=False)
+            except Exception as exc:
+                print(f"  UNREADABLE    {manifest['account_slug']}/{rel}: {exc}")
+                problems += 1
+                continue
+            if len(frame) != expected:
+                print(f"  ROW MISMATCH  {manifest['account_slug']}/{rel}: "
+                      f"manifest says {expected}, file has {len(frame)}")
+                problems += 1
+
     print(f"  {'no problems found' if not problems else f'{problems} problem(s)'}")
     return problems
 
@@ -976,13 +1864,38 @@ def report_unclaimed_rows(accounts: list[Account], sources: SourceData):
 def print_report(manifests: list[dict]):
     keys = [k for k in DATASET_PLAN if not DATASET_PLAN[k].get("is_dir")]
     print(f"\nCoverage across {len(manifests)} accounts\n")
-    print(f"{'dataset':<26} {'accounts with rows':>18}  {'total rows':>12}")
-    print("-" * 60)
+    print(f"{'dataset':<34} {'accounts with rows':>18}  {'total rows':>12}")
+    print("-" * 68)
     for key in keys:
         have = sum(1 for m in manifests if m["datasets"].get(key, {}).get("rows", 0) > 0)
         total = sum(m["datasets"].get(key, {}).get("rows", 0) for m in manifests)
         flag = "" if have else "   <- no data anywhere"
-        print(f"{key:<26} {have:>18}  {total:>12,}{flag}")
+        print(f"{key:<34} {have:>18}  {total:>12,}{flag}")
+
+    print(f"\nReference tables (no dataset_key; not uploaded)\n")
+    print(f"{'table':<34} {'accounts with rows':>18}  {'total rows':>12}")
+    print("-" * 68)
+    for key in REFERENCE_PLAN:
+        have = sum(1 for m in manifests if m.get("reference", {}).get(key, {}).get("rows", 0) > 0)
+        total = sum(m.get("reference", {}).get(key, {}).get("rows", 0) for m in manifests)
+        flag = "" if have else "   <- no data anywhere"
+        print(f"{key:<34} {have:>18}  {total:>12,}{flag}")
+
+    have = sum(1 for m in manifests if m.get("filings_index", {}).get("rows", 0) > 0)
+    total = sum(m.get("filings_index", {}).get("rows", 0) for m in manifests)
+    print(f"\n{'filings index (documents)':<34} {have:>18}  {total:>12,}")
+
+    if manifests and manifests[0].get("readiness"):
+        features = list(manifests[0]["readiness"])
+        print(f"\nFeature readiness across {len(manifests)} accounts\n")
+        print(f"{'feature':<36} {'complete':>9} {'partial':>9} {'none':>6}  {'complete on available data':>27}")
+        print("-" * 92)
+        for feature in features:
+            statuses = [m["readiness"][feature]["status"] for m in manifests]
+            on_avail = sum(1 for m in manifests
+                           if m["readiness"][feature]["complete_on_available_data"])
+            print(f"{feature:<36} {statuses.count('complete'):>9} "
+                  f"{statuses.count('partial'):>9} {statuses.count('none'):>6}  {on_avail:>27}")
 
 
 def main():
@@ -1063,6 +1976,27 @@ def main():
                     f"{shared_domain} is shared with {primary}, which keeps the "
                     f"rows; no source field splits them by entity")
 
+    full_run = not args.account and not args.limit
+
+    RUN_STATS["master_list"] = attach_master_list(accounts, sources)
+    ms = RUN_STATS["master_list"]
+    print(f"Master list: {ms['matched']} of {ms['master_rows']} territories matched "
+          f"to an account folder")
+    if full_run and ms["unmatched_territories"]:
+        print(f"  ! unmatched territories: {', '.join(ms['unmatched_territories'][:8])}")
+    if ms["accounts_without_master_row"]:
+        print(f"  ! accounts with no master-list row: "
+              f"{', '.join(ms['accounts_without_master_row'][:8])}")
+
+    RUN_STATS["filings_index"] = assign_filings(accounts, sources)
+    fs = RUN_STATS["filings_index"]
+    print(f"Filings index: {fs['rows']} rows - {fs['by_territory']} by territory, "
+          f"{fs['by_domain']} by domain, {fs['by_company_name']} by company name, "
+          f"{fs['unassigned']} unassigned")
+
+    deps = load_feature_dependencies()
+    print(f"Feature dependencies: {len(deps)} features read from feature_mapping.py")
+
     if not args.dry_run:
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -1073,8 +2007,20 @@ def main():
         manifests.append(manifest)
         filled = sum(1 for v in manifest["datasets"].values() if v["rows"] > 0)
         total = len(manifest["datasets"])
+        ref_filled = sum(1 for v in manifest["reference"].values() if v["rows"] > 0)
+        filings = manifest["filings_index"]["rows"]
         print(f"  {marker}[{index}/{len(accounts)}] {account.slug:<44} "
-              f"{filled}/{total} datasets with data")
+              f"{filled}/{total} datasets, {ref_filled} reference tables, "
+              f"{filings} filings")
+
+    nobody_has: set[str] = set()
+    if not args.dry_run:
+        nobody_has = write_readiness(manifests, deps)
+        if full_run:
+            write_root_indexes(manifests, deps, nobody_has)
+        else:
+            print("  (root indexes _ACCOUNTS.csv / _READINESS.csv / _DATASET_USAGE.md "
+                  "are written only on a full run)")
 
     if args.report:
         print_report(manifests)
@@ -1089,8 +2035,12 @@ def main():
 
     if not args.dry_run:
         print(f"\nWrote {len(manifests)} account folders to {OUTPUT_DIR}")
-        print("Each holds _manifest.json (what came from where) and "
-              "_MISSING.txt (what is still empty).")
+        print("Each holds _manifest.json (what came from where), _MISSING.txt (what is "
+              "still empty),\n_READINESS.txt (which features it can feed) and "
+              "_account.json (client identity).")
+        if full_run:
+            print("Root: _ACCOUNTS.csv, _READINESS.csv, _DATASET_USAGE.md, "
+                  "_unassigned_filings.csv")
 
     if not args.dry_run:
         write_run_summary(manifests, sources, accounts)
