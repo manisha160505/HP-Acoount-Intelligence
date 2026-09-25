@@ -1032,6 +1032,8 @@ def generate_messaging_pillars(account_id: str, mode: str | None = None) -> dict
             lines.extend(line for line in cs.lines_for_hp_line(product)
                          if line not in lines)
         point = cs.allocate(db, lines, industry=corpus_industry,
+                            signals=cs.signals_for_opportunity(
+                                pillar.get("title"), pillar.get("challenge")),
                             taken=elsewhere, used_here=here)
         if point:
             pillar["hp_proof_point"] = point["text"]

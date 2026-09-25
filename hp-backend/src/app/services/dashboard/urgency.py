@@ -115,6 +115,15 @@ SCOPE_NOTE = (
 
 DRIVER_MAX = _CFG["driver_max"]
 
+# Client email, 16 Sep: "The overall Urgency Score should only be calculated
+# where at least 60 % of the weighted driver coverage is available."
+COVERAGE_MIN_PERCENT = 60.0
+COVERAGE_BASIS = (
+    "Weighted driver coverage: each driver's share of its own inputs that are "
+    "present, weighted by that driver's weight in the formula. A component "
+    "that is absent counts as uncovered; one that is present and scores zero "
+    "counts as covered, because it was measured.")
+
 # Job records are eligible only inside this window (PDF: "only records dated
 # within the latest 12 months are eligible for scoring"). The same window
 # governs news events in sections 2C and 3C.
@@ -961,11 +970,46 @@ def score(drivers: list, scored_on: date | None = None) -> dict:
     exact_total = _round_half_up(sum(weighted.values()), 2)
     total = _round_half_up(exact_total)
 
+    # Coverage gate, from the client's 16 Sep email: "The overall Urgency Score
+    # should only be calculated where at least 60 % of the weighted driver
+    # coverage is available."
+    #
+    # Coverage is measured on the INPUTS, not the points scored: a driver whose
+    # data is all present but genuinely weak is fully covered and scores low,
+    # which is a real finding. A driver missing half its inputs is only half
+    # measured, and the difference matters because the missing-input rule scores
+    # an absent component 0 - indistinguishable, without this, from a component
+    # that was measured and found to be zero.
+    covered_weight = 0.0
+    for driver in ordered:
+        terms = [t for t in (driver.get("terms") or []) if t.get("max_points")]
+        if not terms:
+            # A driver with no itemised terms is not an uncovered driver - it
+            # is one whose value arrived without a breakdown. Absence of an
+            # itemisation is not absence of data, and treating it as a gap
+            # withheld every score computed from driver values directly.
+            covered_weight += WEIGHTS[driver["key"]]
+            continue
+        total_pts = sum(t["max_points"] for t in terms)
+        have_pts = sum(t["max_points"] for t in terms if not t.get("missing_input"))
+        if total_pts:
+            covered_weight += WEIGHTS[driver["key"]] * (have_pts / total_pts)
+    coverage = _round_half_up(covered_weight * 100, 1)
+    publishable = coverage >= COVERAGE_MIN_PERCENT
+
     return {
-        "score": total,
+        "score": total if publishable else None,
+        "coverage_percent": coverage,
+        "coverage_minimum": COVERAGE_MIN_PERCENT,
+        "coverage_basis": COVERAGE_BASIS,
+        "available": publishable,
+        # False when too little of the account is measured to publish a number.
+        # The drivers below are still returned, so a reader can see what WAS
+        # measured rather than an empty panel.
+        "publishable": publishable,
+        "withheld_score": None if publishable else total,
         "max_score": DRIVER_MAX,
         "scored_on": scored_on.isoformat(),
-        "available": True,
         "drivers": ordered,
         "weighted_contributions": weighted,
         # The unrounded sum of the contributions above, published so a reader

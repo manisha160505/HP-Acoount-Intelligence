@@ -146,7 +146,10 @@ DEDUP_SIMILARITY = signal_scoring.DEDUP_SIMILARITY
 #      the model can actually meet.
 # 16 - and a shape to write it in: three named parts rather than a word count,
 #      which is what the first pass already had and the retry did not.
-SIGNAL_SCORING_PROMPT_VERSION = 16
+# 17 - the feeds' own Low/High relevance rating is no longer sent to the model
+#      (client, 23 Sep), the 2.0 publish floor is gone and the S/A/B/C letters
+#      are retired in favour of the 0-10 score.
+SIGNAL_SCORING_PROMPT_VERSION = 17
 
 # Recommendation Tuning Logic, Live Signals: "Minimum 70 words; maximum 100
 # words." Enforced through the existing angle guard and its one retry, so a
@@ -480,7 +483,16 @@ def _deterministic_dims(signal: dict, now: datetime,
     )
 
 
-def _tier(confidence: float) -> str:
+def _tier(confidence: float) -> str | None:
+    """The letter band, or None once the bands are emptied.
+
+    Kept as a function rather than deleted so the config still decides: a
+    deployment that wants the letters back restores `tier_thresholds` and they
+    return. With the list empty - which is the client's 25 Sep position - every
+    signal carries its 0-10 score and no letter.
+    """
+    if not TIER_THRESHOLDS:
+        return None
     for threshold, tier in TIER_THRESHOLDS:
         if confidence >= threshold:
             return tier
@@ -602,7 +614,10 @@ def score_news_signals(account_id: str, signals: list[dict], company_name: str) 
         roster.append(
             f'- id={s["signal_id"]} | date={s["event_date"]} | category={s["category"]}'
             f' | publisher={s["source_publisher"] or "unknown"}'
-            f' | source_confidence={s["source_confidence"] or "unknown"}'
+            # The feeds' own Low/High relevance rating is deliberately NOT
+            # sent. The client, 23 Sep: "pls do not use low/high confidence
+            # columns from those feeds". It stays on the row for provenance.
+            ""
             f' | headline={s["headline"][:180]}'
             f' | evidence={(s["evidence_sentence"] or s["headline"])[:300]}'
         )
@@ -1052,6 +1067,8 @@ def extract_recent_news_signals(account_id: str) -> list[dict]:
                 if not _lines:
                     continue
                 _point = cs.allocate(_db, _lines, industry=_industry,
+                                     signals=cs.signals_for_opportunity(
+                                         _sig.get("hp_play")),
                                      taken=_taken, used_here=_here)
                 if _point:
                     _sig["hp_proof_point"] = _point

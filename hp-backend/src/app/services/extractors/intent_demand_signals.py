@@ -53,6 +53,7 @@ from app.services.extractors.datasets import (
     requires_local_datasets,
 )
 from app.services.hp import case_studies as cs, evidence_tier, intent_topic_map as tm
+from app.services.hp.guardrails import tier_language_faults
 
 logger = logging.getLogger(__name__)
 
@@ -492,13 +493,17 @@ Rules, all mandatory:
    permitted_language for it.
    - "Opportunity": may say the combined evidence supports an HP-addressable
      opportunity and name a seller focus.
-   - "Conversation Starter": say it creates a relevant conversation or may
-     warrant discussion. Do NOT say the account needs, plans, is evaluating or
-     is replacing anything.
+   - "Conversation Starter": an HP offering here "MAY BE RELEVANT to this
+     opportunity". Never write "is relevant", "is a strong fit" or any wording
+     that settles it. Do NOT say the account needs, plans, is evaluating or is
+     replacing anything.
    - "Context Only": present it as seller context. Do NOT create an HP
      opportunity or recommend a product. A category whose stage reads "No
      Signal" is exactly this - say plainly that intent alone does not support
      prioritising it.
+   These are the client's own words, and the wording is checked: prose that
+   claims a higher rung than its category's evidence is discarded, so the
+   category ships with no So What at all.
 4. Each category is a SEPARATE seller conversation. Do not merge them, and do
    not let a strong category lend its weight to a weak one.
 5. Between 80 and 90 words. Plain prose, no bullet points, no headings.
@@ -884,8 +889,21 @@ def extract_intent_demand_signals(account_id: str) -> list[dict]:
             so_what = {}
         for entry in (summary.get("hp_categories") or []):
             text = so_what.get(entry.get("category"))
+            # The client's relevance ladder. A category resting on one pipeline
+            # may say an offering "may be relevant"; only two independent
+            # pipelines let it say "is relevant", and a Context Only category
+            # may not recommend at all. Prose that claims a higher rung than
+            # its own evidence is dropped rather than published.
+            tier_name = (entry.get("evidence_tier") or {}).get("tier")
+            over = tier_language_faults(text, tier_name) if text else []
+            if over:
+                logger.warning("intent: %s So What dropped - %s",
+                               entry.get("category"), over)
+                entry["so_what_withheld"] = over
+                text = None
             entry["so_what"] = text or None
             entry["so_what_word_count"] = len(text.split()) if text else None
+            entry["relevance_rung"] = evidence_tier.relevance_for(tier_name)
 
         # F9: a case study may strengthen "So What for HP", and nowhere else on
         # this widget. Intent picks near-last of all the surfaces, so a category
@@ -915,6 +933,8 @@ def extract_intent_demand_signals(account_id: str) -> list[dict]:
                 if not lines:
                     continue
                 point = cs.allocate(db, lines, industry=industry,
+                                    signals=cs.signals_for_opportunity(
+                                        entry.get("category"), entry.get("hp_play")),
                                     taken=taken, used_here=here)
                 if point:
                     entry["hp_proof_point"] = point

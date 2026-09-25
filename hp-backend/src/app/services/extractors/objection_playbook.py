@@ -25,6 +25,7 @@ from app.services.hp.guardrails import (
 
 logger = logging.getLogger(__name__)
 from app.services.extractors.datasets import (
+    account_display_name,
     read_dataset_records,
     requires_local_datasets,
 )
@@ -142,7 +143,11 @@ MAX_OBJECTIONS = 10
 
 # The spec's exact wording when no official HP proof point can be sourced.
 # No HP proof-point corpus is supplied to this system, so this is what shows.
-NO_PROOF_POINT = "No supporting HP proof point available"
+# Client ruling, 24 Sep: when there is nothing to show, leave the section out
+# and write nothing. Set to None rather than deleted, so the field still exists
+# for anything reading the payload and the wording returns by restoring the
+# string if the client changes position (the decision is still with Sahaj).
+NO_PROOF_POINT = None
 
 
 # Bump when the objection prompt changes so cached output is regenerated.
@@ -168,7 +173,10 @@ NO_PROOF_POINT = "No supporting HP proof point available"
 # 14 - the integration check reads the whole sentence. Parsing the verb's
 #      object let "integrate seamlessly with" and "integrating with it" carry
 #      an HP claim nothing approved, the second attributing it to HP material.
-OBJECTION_PROMPT_VERSION = 14
+# 15 - case studies are ranked use-case first (the client's 25 Sep keys), so
+#      the proof on an area card can change even when its evidence has not.
+#      The version moves with it or the cache serves the old card.
+OBJECTION_PROMPT_VERSION = 15
 
 # The dataset key used everywhere in evidence, prompts and UI. Never the Source A
 # sheet name - the application speaks in dataset keys.
@@ -687,6 +695,9 @@ def generate_objection_cards(account_id: str, areas: list[dict],
     for area in areas:
         point = cs.allocate(db, cs.lines_for_area(area["area"]),
                             industry=corpus_industry,
+                            # Key 1 of the client's ranking: the use case the
+                            # area is about, ahead of industry.
+                            signals=cs.signals_for_opportunity(area["area"]),
                             taken=elsewhere, used_here=here)
         proof_by_area[area["area"]] = point
         if point and point.get("study_id"):
@@ -1024,7 +1035,8 @@ def extract_objection_playbook(account_id: str) -> list[dict]:
     if firmo_records and len(firmo_records) > 0:
         f = firmo_records[0]
 
-        c_name = str(f.get("Company Name") or f.get("company_name") or f.get("Name") or "").strip()
+        # DEC-052: generated prose names the account the way the header does.
+        c_name = account_display_name(account_id, f)
         domain_val = str(f.get("Company Domain") or f.get("company_domain") or f.get("Domain") or f.get("Website") or f.get("website") or "").strip()
 
         city = str(f.get("City Name") or f.get("city_name") or "").strip()

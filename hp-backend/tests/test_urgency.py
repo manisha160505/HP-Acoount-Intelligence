@@ -352,13 +352,22 @@ def test_a_missing_input_scores_zero_only_in_its_own_component():
     assert driver["available"] is True
 
 
-def test_the_composite_always_computes():
-    """Under the new rule there is no such thing as a blocked score: a driver
-    with no data contributes 0 and the overall score still publishes."""
+def test_an_account_with_nothing_measured_publishes_no_score():
+    """The client's 16 Sep coverage gate: "The overall Urgency Score should only
+    be calculated where at least 60 % of the weighted driver coverage is
+    available."
+
+    An account with no drivers at all is 0 % covered. Publishing 0/100 there
+    would read as "this account is not urgent" when the truth is that nothing
+    was measured - the two are opposite findings and must not share a number.
+    The drivers are still returned, so what WAS measured stays visible.
+    """
     result = u.score([], SCORED_ON)
 
-    assert result["score"] == 0
-    assert result["available"] is True
+    assert result["coverage_percent"] == 0.0
+    assert result["publishable"] is False
+    assert result["score"] is None
+    assert result["available"] is False
     assert len(result["drivers"]) == 4
     assert result["missing_inputs"]
 
@@ -775,5 +784,35 @@ def test_a_score_with_a_missing_component_still_publishes():
     ]
     payload = u.score(drivers, SCORED_ON)
 
-    assert payload["score"] is not None
+    # The missing-input rule still governs how the components combine: each
+    # absent one scores 0 and is named, and the measured one is still computed.
     assert payload["missing_inputs"], "the components with no input must be named"
+    assert payload["weighted_contributions"]["workplace_os"] > 0
+
+    # But the 16 Sep coverage gate governs whether the OVERALL number is
+    # published, and three of four drivers empty is 20 % coverage. The total is
+    # kept on `withheld_score` rather than thrown away.
+    assert payload["coverage_percent"] == 20.0
+    assert payload["publishable"] is False
+    assert payload["score"] is None
+    assert payload["withheld_score"] is not None
+
+
+def test_one_missing_component_above_the_gate_still_publishes():
+    """The other side of the same rule, and the ordinary case.
+
+    Three drivers fully measured and one missing a single component is well
+    over 60 % covered, so the score publishes with the gap named - which is the
+    missing-input rule doing exactly what the client described.
+    """
+    drivers = [
+        u.workplace_os(["Microsoft Windows"], "10001-49999"),
+        u._driver("ai_workstation", 63.3, [], []),
+        u._driver("growth_expansion", 50, [], []),
+        u._driver("hp_solution_intent", 50.4, [], []),
+    ]
+    payload = u.score(drivers, SCORED_ON)
+
+    assert payload["coverage_percent"] >= u.COVERAGE_MIN_PERCENT
+    assert payload["publishable"] is True
+    assert payload["score"] is not None

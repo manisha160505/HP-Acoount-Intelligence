@@ -1560,6 +1560,7 @@ def generate_content_asset(account_id: str, persona_id: str, content_type: str,
         proof = cs.allocate(
             db, proof_lines,
             industry=cs.normalise_industry(ctx.get("industry") or ""),
+            signals=cs.signals_for_opportunity(topic, content_type),
             taken=cs.cited_above(db, account_id, cs.SURFACE_CONTENT),
             used_here={m for m in mine if m})
         if proof:

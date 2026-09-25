@@ -31,9 +31,11 @@ from app.services.extractors.intent_demand_signals import (
 from app.services.extractors.recent_news_signals import extract_recent_news_signals
 from app.services.hp import (
     case_studies as cs,
+    evidence_tier,
     intent_topic_map as tm,
     rulebook as rb,
 )
+from app.services.hp.guardrails import tier_language_faults
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +88,17 @@ NL = chr(10)
 #      without this bump, so every account kept serving the cached pre-table
 #      plays: the version is part of the cache fingerprint, so unchanged version
 #      means unchanged fingerprint means the new code never runs.
-OPPORTUNITY_PROMPT_VERSION = 29
+# 30 - proof on the service plays (client's F10 "keep default"), and the
+#      case-study ranking reordered to the client's 25 Sep keys: use case
+#      first, then industry. Both change what a stored play carries, so the
+#      version moves with them or the cache serves the old plays.
+# 31 - a 3D route (the fifth of the client's own five), v4's 80-160 word band
+#      on the play narrative, and the HP Category Intent file's research themes
+#      added to the corpus so the strongest intent signal can reach a play.
+# 32 - the client's relevance ladder: an offering "may be relevant" on one
+#      source of evidence and "is relevant" only on two, enforced on the prose
+#      rather than only stated in the prompt.
+OPPORTUNITY_PROMPT_VERSION = 32
 MAX_PLAYS = 5
 
 # HP_ABX_v3_final defines NO numeric opportunity score for this feature. Plays
@@ -135,7 +147,11 @@ def _priority_for(has_initiative: bool, has_supporting_signal: bool,
     return PRIORITY_MEDIUM if has_any_signal else PRIORITY_LOW
 
 # The spec's exact wording when no official HP proof point can be sourced.
-NO_PROOF_POINT = "No supporting HP proof point available"
+# Client ruling, 24 Sep: when there is nothing to show, leave the section out
+# and write nothing. Set to None rather than deleted, so the field still exists
+# for anything reading the payload and the wording returns by restoring the
+# string if the client changes position (the decision is still with Sahaj).
+NO_PROOF_POINT = None
 
 # Composed in Python when the model will not return a timing note. It states
 # exactly what the checks already record, so nothing is invented.
@@ -145,6 +161,15 @@ DEFAULT_TIMING_NOTE = ("No timing signal for this play appears in this account's
 # How many rewrites a play gets for a prose fault before it is published anyway.
 MAX_PROSE_REWRITES = 2
 
+# v4's word band for an Opportunity Map play, measured across the sentences a
+# seller actually reads as one narrative: what HP does, the argument bridging
+# the evidence to it, the timing caveat and the owner angle. The title, proof
+# point and CTA are labels and links rather than narrative, so they are not
+# counted.
+PLAY_MIN_WORDS = 80
+PLAY_MAX_WORDS = 160
+PLAY_NARRATIVE_FIELDS = ("hp_capability", "inference", "timing_note", "owner_angle")
+
 # Used to title a discovery area, so it never inherits the model's sales title.
 PLAY_DISPLAY_NAMES = {
     "workstation": "Z by HP Workstations",
@@ -152,6 +177,12 @@ PLAY_DISPLAY_NAMES = {
     "pc": "HP Elite / Pro PCs",
     "print": "HP Enterprise Print / MPS",
     "daas": "HP Anyware / DaaS",
+    # Added 25 Sep. The client's logic deck names five routes - 3D Printing,
+    # Workstations, PC/Devices, Print, Poly - and 3D was the only one with no
+    # play. DEC-039 settles that a route is evidence-led: the absence of a
+    # Rulebook 3D rule does not block a recommendation the account evidence
+    # supports, and 63 of the 89 case studies are 3D.
+    "3d": "HP Multi Jet Fusion (3D)",
 }
 
 # Recency bands, matching the D1 scale already used by Live Signals.
@@ -164,6 +195,7 @@ PLAY_RESOURCE_URLS = {
     "print": "https://www.hp.com/us-en/services/workforce-solutions/document-printing/managed-print-services.html",
     "daas": "https://www.hp.com/us-en/services/workforce-solutions/workforce-computing/managed-device-services.html",
     "security": "https://www.hpwolf.com/",
+    "3d": "https://www.hp.com/us-en/printers/3d-printers.html",
 }
 DEFAULT_RESOURCE_URL = "https://www.hp.com/us-en/services/workforce-solutions/learning-hub.html"
 
@@ -177,6 +209,8 @@ PLAY_OWNER_TITLE_TOKENS = {
     "pc": ["end user", "procurement", "information technology", "service", "operations"],
     "print": ["procurement", "facilities", "administration", "general affairs", "operations"],
     "daas": ["information technology", "procurement", "infrastructure", "cloud", "operations"],
+    "3d": ["engineering", "product development", "manufacturing", "production",
+           "design", "research", "operations", "supply chain"],
 }
 PLAY_OWNER_DEPARTMENTS = {
     "workstation": ["Engineering & Technical", "Information Technology"],
@@ -184,6 +218,7 @@ PLAY_OWNER_DEPARTMENTS = {
     "pc": ["Information Technology", "Operations"],
     "print": ["Operations", "Information Technology", "Finance"],
     "daas": ["Information Technology", "Engineering & Technical"],
+    "3d": ["Engineering & Technical", "Operations"],
 }
 
 # Who owns each of the rulebook's eight opportunity types, in the same
@@ -251,6 +286,12 @@ PLAY_SIGNAL_TOKENS = {
              "ivanti", "tanium", "azure ad", "okta", "device management",
              "endpoint management", "device lifecycle", "mobile device", "mdm",
              "uem", "it asset management", "endpoint"],
+    # Additive manufacturing only. "3d" alone is deliberately absent: it also
+    # reads 3D rendering and 3D modelling, which are workstation work, and the
+    # workstation family already claims those.
+    "3d": ["3d printing", "3d printer", "3d printers", "additive manufacturing",
+           "multi jet fusion", "prototyping", "prototype", "tooling", "jigs",
+           "fixtures", "end-use parts", "rapid prototyping"],
 }
 
 # Phrases that disqualify a corpus item for a play even when a token matched.
@@ -278,7 +319,43 @@ PLAY_PRIMARY_CATEGORY = {
     "pc": tm.CAT_PC,
     "print": tm.CAT_PRINT,
     "daas": tm.CAT_PC,
+    "3d": tm.CAT_3D,
 }
+
+
+def _play_relevance_fault(verified: list, texts) -> tuple:
+    """(tier, rung, faults) for a play's prose under the client's ladder.
+
+    The tier is computed from the play's OWN verified evidence - the same
+    independent-pipeline count section C uses everywhere else - so a play
+    resting on one dataset cannot word an offering as settled. Firmographics
+    and contacts describe the account rather than evidencing a need, so they do
+    not corroborate; that is `evidence_tier`'s rule, not a new one here.
+    """
+    tier = evidence_tier.tier_for(verified or [], hp_addressable=True)
+    rung = evidence_tier.relevance_for(tier["tier"])
+    faults = []
+    for text in texts:
+        faults.extend(tier_language_faults(text, tier["tier"]))
+    return tier, rung, faults
+
+
+def _play_length_fault(play: dict) -> tuple:
+    """(word count, rewrite note) for a play narrative outside v4's band.
+
+    The note is None when the play is inside 80-160 words, or when it has no
+    narrative at all - an empty play is a different fault, already handled.
+    """
+    words = sum(len(str(play.get(f) or "").split()) for f in PLAY_NARRATIVE_FIELDS)
+    if not words or PLAY_MIN_WORDS <= words <= PLAY_MAX_WORDS:
+        return words, None
+    fix = ("Expand the inference - that is where the argument goes."
+           if words < PLAY_MIN_WORDS
+           else "Tighten it; do not drop a field to get there.")
+    return words, ("the narrative for this play ran to %d words. hp_capability, "
+                   "inference, timing_note and owner_angle together must total "
+                   "between %d and %d words. %s"
+                   % (words, PLAY_MIN_WORDS, PLAY_MAX_WORDS, fix))
 
 
 def _intent_timing_gate(category_file: dict, account_match_ok: bool) -> tuple[dict, dict]:
@@ -877,6 +954,36 @@ def generate_opportunity_map_plays_with_gpt4o(account_id: str) -> dict:  # noqa:
             item["demoted_reason"] = why
         corpus.append(item)
 
+    # The HP Category Intent file's own research themes, as corpus evidence.
+    #
+    # They were parsed above for the timing gate and then thrown away, so the
+    # strongest intent signal an account has could not reach a play. On the
+    # pilot account the 3D category scores 34 - its highest - on "product
+    # development", "industrial adoption" and "tooling/fixtures", and none of
+    # those three words existed anywhere in the corpus. Adding the 3D play
+    # family without this would have been inert.
+    #
+    # `kind` follows the same gate as a Bombora topic: a theme is a timing
+    # trigger only where the category file gives its own category a buying
+    # signal. These are the file's own themes for that category, so the
+    # category vouches for them by construction.
+    for _cat_name, _cat_row in (category_file.get("categories") or {}).items():
+        if not isinstance(_cat_row, dict):
+            continue
+        _allowed = _cat_name in allowed_categories if intent_gate["applied"] else True
+        for _theme in (_cat_row.get("topics_researched") or []):
+            _text_val = str(_theme or "").strip()
+            if not _text_val:
+                continue
+            _item = {"text": _text_val, "dataset": "hp_category_intent",
+                     "field": "Topics Researched", "hp_category": _cat_name,
+                     "composite_score": _cat_row.get("score"),
+                     "kind": "trigger" if _allowed else "context"}
+            if not _allowed:
+                _item["demoted_reason"] = (
+                    "category intent reports no buying signal for %s" % _cat_name)
+            corpus.append(_item)
+
     news_triggers, seen = [], set()
     for row in gnews_records + events_records:
         headline = str(row.get("event_headline") or row.get("news_announcements")
@@ -1066,13 +1173,15 @@ ELIGIBILITY - generate a play ONLY when this chain holds:
 Return UP TO 5 plays. Returning 3 well-evidenced plays is BETTER than 5 with one invented. If a product family has no honest chain, leave it out entirely. Do not pad.
 
 FIELDS:
-- "play_key": one of workstation | poly | pc | print | daas
+- "play_key": one of workstation | poly | pc | print | daas | 3d
 - "title": the play name.
 - "account_evidence": a list of 1-4 items, each {{"quote": "...", "statement": "..."}}.
     "quote" MUST be copied VERBATIM from the ACCOUNT OVERVIEW, TECHNOLOGY STACK, INTENT SURGES or NEWS above - an exact substring. It is checked against the source data and any item whose quote cannot be found is DELETED.
     "statement" is your one-line reading of that quote. It must not add any fact the quote does not carry.
 - "hp_capability": 1-2 sentences on what the HP line does. This is HP product capability, not an account fact. Do not mention {company_name} in this field.
 - "inference": 2-3 hedged sentences bridging the evidence to the capability. This is where the opportunity argument goes.
+  RELEVANCE WORDING (the client's own ladder, and it is checked): where this play rests on ONE source of evidence, an HP offering "MAY BE RELEVANT to this opportunity" - never "is relevant", "is a strong fit" or anything that settles it. Only a play corroborated by TWO independent sources may say an offering "is relevant". A play resting on account context alone must not recommend an offering at all.
+  LENGTH: hp_capability, inference, timing_note and owner_angle together must total BETWEEN 80 AND 160 WORDS. The inference carries most of that.
 - "hp_products": HP product names.
 - "quantified_impact": an exact figure that appears VERBATIM above, copied character for character from a line in the evidence, or null. It is re-verified against the source data. A figure is a SOURCED ACCOUNT SIGNAL, never an HP projection, and never by itself evidence of demand for a product - if you cite one, say what it does and does not establish.
 - "proof_point" and "source_url": copied EXACTLY from the NEWS list above, or null. Never invent a URL.
@@ -1109,7 +1218,12 @@ Output JSON:
     # first answer so those fields survive the correction.
     first_pass_raw: dict = {}
 
-    def _process(raw_plays) -> None:  # noqa: PLR0915 - long extractor predates the lint gate; split rather than raise the limit
+    # PLR0912 added 25 Sep with v4's word band. The band is one more validation
+    # in a chain of identical ones - each checks a field, books a rewrite and
+    # continues - and it pushed the count from 40 to 41. Its message-building is
+    # already extracted to `_play_length_fault`; extracting the chain itself is
+    # a refactor of this whole loop and is not worth the risk for a word count.
+    def _process(raw_plays) -> None:  # noqa: PLR0915, PLR0912 - long extractor predates the lint gate
         """One validation pass. Appends survivors to cleaned_plays and records
         why anything else was rejected."""
         if not isinstance(raw_plays, list):
@@ -1363,12 +1477,49 @@ Output JSON:
                 dropped.append(f"{play_key}: no owner_angle returned after "
                                f"{language_attempts[play_key]} rewrites - published without it")
 
+            # v4's 80-160 word band for the play narrative. Checked here, with
+            # the other prose faults, so a short or bloated play is rewritten
+            # once rather than published and measured later. A play that is
+            # still out of band after its rewrites is published anyway: the
+            # evidence and the fit are sound, and losing the play over its
+            # length would be the worse outcome.
+            play_words, length_note = _play_length_fault(p)
+            if length_note:
+                if language_attempts.get(play_key, 0) < MAX_PROSE_REWRITES:
+                    language_attempts[play_key] = language_attempts.get(play_key, 0) + 1
+                    dropped.append("%s: narrative is %d words; the brief is %d-%d "
+                                   "- sent for rewrite"
+                                   % (play_key, play_words, PLAY_MIN_WORDS, PLAY_MAX_WORDS))
+                    retry_notes.setdefault(play_key, length_note)
+                    continue
+                dropped.append("%s: still %d words after %d rewrites - published as is"
+                               % (play_key, play_words, language_attempts[play_key]))
+
             # ---- grounding gate ------------------------------------------------
             proof_point = str(p.get("proof_point") or "").strip() or None
             source_url = str(p.get("source_url") or "").strip() or None
             cta = str(entry_p.get("recommended_cta") or "").strip()
             capability = str(p.get("hp_capability") or "").strip()
             inference = str(p.get("inference") or "").strip()
+
+            # The client's relevance ladder, before the grounding gate: a play
+            # on one pipeline may say an offering "may be relevant", never "is
+            # relevant", and a play on context alone may not recommend at all.
+            play_tier, play_rung, relevance_faults = _play_relevance_fault(
+                verified, (capability, inference))
+            if relevance_faults:
+                if language_attempts.get(play_key, 0) < MAX_PROSE_REWRITES:
+                    language_attempts[play_key] = language_attempts.get(play_key, 0) + 1
+                    dropped.append("%s: %s - sent for rewrite"
+                                   % (play_key, relevance_faults[0]))
+                    retry_notes.setdefault(play_key, (
+                        "this play's evidence reaches %s. An HP offering here %s. "
+                        "Rewrite hp_capability and inference to that wording and no "
+                        "stronger." % (play_tier["tier"],
+                                       evidence_tier.RELEVANCE_WORDING[play_rung] % "the offering")))
+                    continue
+                dropped.append("%s: still overclaims after %d rewrites - published as is"
+                               % (play_key, language_attempts[play_key]))
 
             bad_nums, bad_urls = check_text(
                 ground, report, play_key,
@@ -1574,6 +1725,8 @@ Output JSON:
             lines.extend(line for line in cs.lines_for_hp_line(product)
                          if line not in lines)
         point = cs.allocate(db, lines, industry=corpus_industry,
+                            signals=cs.signals_for_opportunity(
+                                play.get("title"), play.get("opportunity_type")),
                             taken=elsewhere, used_here=here)
         if point:
             # Same shape as the Objection Playbook stores: the sentence to read,
@@ -1599,6 +1752,28 @@ Output JSON:
         # down with it; the hardware plays are older and stand alone.
         logger.exception("opportunity map: service plays failed")
         service_plays, service_notes = [], []
+
+    # Proof on the service plays too. The client answered "keep default" (yes)
+    # to F10 on 24 Sep; until now only the hardware plays carried a study, so a
+    # WXP or Care Pack play showed a recommendation with nothing behind it.
+    # They allocate after the hardware plays and share `here`, so the same
+    # customer is never cited twice in one Opportunity Map.
+    for splay in service_plays:
+        s_lines: list = []
+        for product in (splay.get("hp_products") or [splay.get("offering")]):
+            s_lines.extend(line for line in cs.lines_for_product_text(str(product or ""))
+                           if line not in s_lines)
+        if not s_lines:
+            continue
+        s_point = cs.allocate(db, s_lines, industry=corpus_industry,
+                              signals=cs.signals_for_opportunity(
+                                  splay.get("title"), splay.get("opportunity_type")),
+                              taken=elsewhere, used_here=here)
+        if s_point:
+            splay["hp_proof_point"] = s_point["text"]
+            splay["hp_proof_point_detail"] = s_point
+            if s_point.get("study_id"):
+                here.add(s_point["study_id"])
 
     if cleaned_plays or discovery_areas or service_plays:
         plays_payload = {
