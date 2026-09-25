@@ -32,7 +32,10 @@ class TestTheThresholdSectionCSets:
         independent pipeline confirming the same opportunity.\""""
         out = et.tier_for(rows("technographics"))
         assert out["tier"] == et.CONVERSATION_STARTER
-        assert "creates a relevant conversation" in out["permitted_language"]
+        # The client's 25 Sep ladder replaced v4's example phrasing: one
+        # pipeline lets an offering "may be relevant", never "is relevant".
+        assert "may be relevant" in out["permitted_language"]
+        assert et.relevance_for(out["tier"]) == et.RELEVANCE_MAY
 
     def test_three_pipelines_are_still_an_opportunity(self):
         out = et.tier_for(rows("intent_score", "job_openings", "google_news"))

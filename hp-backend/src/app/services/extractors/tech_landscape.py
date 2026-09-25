@@ -969,6 +969,8 @@ def extract_tech_landscape(account_id: str) -> list[dict]:  # noqa: PLR0912, PLR
             if not _lines:
                 continue
             _point = cs.allocate(db, _lines, industry=_industry,
+                                 signals=cs.signals_for_opportunity(
+                                     _cat.get("category_name")),
                                  taken=_taken, used_here=_here)
             if _point:
                 _cat["hp_proof_point"] = _point

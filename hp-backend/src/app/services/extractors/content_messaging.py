@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 
 from app.database.mongodb import get_db
 from app.services.extractors.datasets import (
+    account_display_name,
     read_dataset_records,
     requires_local_datasets,
 )
@@ -59,7 +60,7 @@ def extract_content_messaging(account_id: str) -> list[dict]:
     if firmo_records and len(firmo_records) > 0:
         f = firmo_records[0]
 
-        c_name = str(f.get("Company Name") or f.get("company_name") or f.get("Name") or "").strip()
+        c_name = account_display_name(account_id, f)
         domain_val = str(f.get("Company Domain") or f.get("company_domain") or f.get("Domain") or f.get("Website") or f.get("website") or "").strip()
         desc_val = str(f.get("Business Description") or f.get("business_description") or "").strip()
 

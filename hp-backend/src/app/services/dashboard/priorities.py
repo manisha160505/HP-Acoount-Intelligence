@@ -526,6 +526,11 @@ def _proof_for(db, priority: dict, industry: str, taken: set, here: set):
 
     try:
         return cs.allocate(db, lines, industry=industry,
+                           # The priority's own title and theme say what the
+                           # opportunity is about; the paragraph says which HP
+                           # line it names. Key 1 needs the former.
+                           signals=cs.signals_for_opportunity(
+                               priority.get("title"), priority.get("theme")),
                            taken=taken, used_here=here)
     except Exception:
         logger.exception("executive_dashboard: proof allocation failed for %r",

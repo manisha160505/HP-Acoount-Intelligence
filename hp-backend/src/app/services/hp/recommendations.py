@@ -87,7 +87,11 @@ logger = logging.getLogger(__name__)
 #      published beside it.
 # 19 - section F: every card carries the nine-field structured record, with a
 #      stable id per material claim and per evidence row.
-RECOMMENDATION_PROMPT_VERSION = 19
+# 20 - the client's relevance ladder tightened tier_language_faults: below the
+#      Opportunity tier an offering "may be relevant" and never "is relevant",
+#      and Context Only may not recommend at all. The gate runs on this card's
+#      prose, so the version moves with it.
+RECOMMENDATION_PROMPT_VERSION = 20
 
 # Whether hardware facts come from the rulebook (C 02) or from the decks.
 #

@@ -4,6 +4,7 @@ from bson import ObjectId
 
 from app.database.mongodb import get_db
 from app.services.extractors.datasets import (
+    account_display_name,
     read_dataset_records,
     requires_local_datasets,
 )
@@ -202,7 +203,7 @@ def extract_message_evaluator(account_id: str) -> list[dict]:
     if firmo_records and len(firmo_records) > 0:
         f = firmo_records[0]
 
-        c_name = str(f.get("Company Name") or f.get("company_name") or f.get("Name") or "").strip()
+        c_name = account_display_name(account_id, f)
         domain_val = str(f.get("Company Domain") or f.get("company_domain") or f.get("Domain") or f.get("Website") or f.get("website") or "").strip()
 
         city = str(f.get("City Name") or f.get("city_name") or "").strip()

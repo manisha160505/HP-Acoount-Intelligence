@@ -142,3 +142,7 @@ project-documentation/
 # Internal delivery planning for the 220-account run. Working document, kept
 # local rather than pushed.
 DELIVERY_ROADMAP_220_2026-09-25.md
+
+# Internal rule book for the 220-account run: every client rule against what
+# the build actually does. Working document, kept local.
+HP_220_FINAL_RULE_BOOK_2026-09-25.md

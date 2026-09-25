@@ -27,6 +27,38 @@ def _find_file_path(rel_path: str) -> str | None:
     """Shared implementation - see datasets.py."""
     return find_file_path(rel_path)
 
+# Vendor wordings that mean "we have not finished matching this person".
+UNMATCHED_STATUS_WORDS = ("pending", "review", "unmatched", "not matched",
+                          "no match", "in progress")
+
+# Every column the two delivered contact shapes use for that status: the pilot
+# CSV says `apollo_match_status`, the Apollo workbook says `match_status`, and
+# the input contract calls it `Match Status`.
+MATCH_STATUS_COLUMNS = ("apollo_match_status", "match_status", "Match Status",
+                        "Match status", "match status")
+
+
+def _drop_unmatched_contacts(rows) -> tuple:
+    """(usable rows, number withheld) under v4 section A.
+
+    Only an explicit pending/review wording is withheld. A blank status is left
+    alone: it means the vendor recorded nothing, not that the match failed.
+    """
+    kept, withheld = [], 0
+    for row in rows or []:
+        status = ""
+        for column in MATCH_STATUS_COLUMNS:
+            value = str((row or {}).get(column) or "").strip().lower()
+            if value:
+                status = value
+                break
+        if status and any(word in status for word in UNMATCHED_STATUS_WORDS):
+            withheld += 1
+            continue
+        kept.append(row)
+    return kept, withheld
+
+
 def _read_dataset_records(account_id: str, dataset_key: str) -> list[dict]:
     """Rows for one dataset. Shared implementation - see datasets.py.
 
@@ -933,6 +965,23 @@ def extract_stakeholder_map(account_id: str) -> list[dict]:
     now = datetime.now(UTC)
 
     contact_records = _read_dataset_records(account_id, "prospect_contacts")
+
+    # v4 section A: "Blank contact fields or Pending/Review status means do not
+    # infer the missing role, authority or contact detail."
+    #
+    # A row the vendor has not finished matching cannot support a stakeholder
+    # card, because the card exists to state a role and a remit. It is dropped
+    # here with the count recorded, rather than filtered silently.
+    #
+    # A BLANK status is not Pending. On the pilot account 8 of 23 rows carry no
+    # status at all and are perfectly good contacts; treating blank as unmatched
+    # would throw away a third of them. Only the vendor's own "pending" and
+    # "review" wordings are excluded.
+    contact_records, withheld_contacts = _drop_unmatched_contacts(contact_records)
+    if withheld_contacts:
+        logger.info("stakeholder map: withheld %d contact row(s) marked "
+                    "pending or needs-review for %s",
+                    withheld_contacts, account_id)
 
     account_doc = None
     if ObjectId.is_valid(account_id):
