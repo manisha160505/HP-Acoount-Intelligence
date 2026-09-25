@@ -38,7 +38,8 @@ logger = logging.getLogger(__name__)
 # 2 - "what_it_means" is written to the tuning logic's 70-100 word band. Rule 6
 #     said "keep it to one sentence each" two lines under a request for two to
 #     three, and the shorter instruction won: the median card ran 30 words.
-MAP_NARRATIVE_PROMPT_VERSION = 2
+# 3 - the narrative names the account from the audit sheet (DEC-052).
+MAP_NARRATIVE_PROMPT_VERSION = 3
 
 # Recommendation Tuning Logic, Technographic Map: "What It Means for HP +
 # supported motion. Minimum 70 words; maximum 100 words."
