@@ -10,7 +10,12 @@ from app.services.extractors.datasets import (
     read_dataset_records,
     requires_local_datasets,
 )
-from app.services.hp import rulebook as rb, tech_confidence as tconf
+from app.services.hp import (
+    case_studies as cs,
+    integration_routes as ir,
+    rulebook as rb,
+    tech_confidence as tconf,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -939,6 +944,50 @@ def extract_tech_landscape(account_id: str) -> list[dict]:  # noqa: PLR0912, PLR
     # reader to assume the cards account for all 220.
     mapped_signal_count = sum(c["detected_signals_count"] for c in hp_categories)
 
+    # F9: a case study may strengthen "what it means for HP" on a category,
+    # and nowhere else on this widget. The Technographic Map picks last of all
+    # the surfaces, so a category carries proof only where nothing that needs
+    # it more has already taken the study.
+    try:
+        _taken = cs.cited_above(db, account_id, cs.SURFACE_TECHMAP)
+        _here: set = set()
+        # Industry comes from the account's own firmographics, the same
+        # source every other surface uses for the case-study industry match.
+        _firmo = (_read_dataset_records(account_id, "firmographics") or [{}])[0]
+        _industry = cs.normalise_industry(
+            _firmo.get("Linkedin Industry Category")
+            or _firmo.get("Naics Description") or "")
+        for _cat in hp_categories:
+            if not str(_cat.get("what_it_means") or "").strip():
+                continue
+            _lines: list = []
+            for _v in _cat.get("vendors") or []:
+                _prod = str(((_v.get("hp_play") or {}).get("product")) or "").strip()
+                for _ln in cs.lines_for_product_text(_prod):
+                    if _ln not in _lines:
+                        _lines.append(_ln)
+            if not _lines:
+                continue
+            _point = cs.allocate(db, _lines, industry=_industry,
+                                 taken=_taken, used_here=_here)
+            if _point:
+                _cat["hp_proof_point"] = _point
+                if _point.get("study_id"):
+                    _here.add(_point["study_id"])
+    except Exception:
+        logger.exception("tech landscape: proof allocation failed for %s", account_id)
+
+    # Integration routes, as context only. Built from the full detected list
+    # rather than the mapped cards, because a technology HP names as a target
+    # is worth pointing out even when it did not land in an HP category.
+    try:
+        _book = rb.load(get_db())
+        integration_lines = ir.routes_for(
+            full_tech_list, (_book or {}).get("rules") or [])
+    except Exception:
+        logger.exception("tech landscape: integration routes failed for %s", account_id)
+        integration_lines = []
+
     techno_map_payload = {
         "account_id": account_id,
         "feature_key": "tech_landscape",
@@ -960,6 +1009,12 @@ def extract_tech_landscape(account_id: str) -> list[dict]:  # noqa: PLR0912, PLR
             # say so rather than implying the account has exactly 7 categories.
             "categories_are_fixed_taxonomy": True,
             "categories": hp_categories,
+            # Client direction, 24 Sep: where a detected technology is one HP
+            # names as an integration target, say so as CONTEXT - "Intune
+            # detected; possible WXP integration route" - and never let it
+            # become a recommendation on its own. Technology presence shows
+            # compatibility, not need.
+            "integration_routes": integration_lines,
             # The category/vendor narrative inside `categories` is generated;
             # everything else in this widget is computed. Recorded so the
             # classification stays honest even though both live here.

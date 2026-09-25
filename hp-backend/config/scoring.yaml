@@ -142,7 +142,10 @@ live_signal:
     - [4.0, "B"]
     - [2.0, "C"]
   min_confidence_to_publish: 2.0
-  max_signals: 20
+  # 0 means no cap. The client removed the 20-signal limit on 23 Sep - "we
+  # should not keep the cap, pls use 12 month window" - so the 12-month
+  # ingestion window is now the only thing that bounds the feed.
+  max_signals: 0
   dedup_similarity: 0.85
 
 # ============================================================================

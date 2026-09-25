@@ -265,6 +265,42 @@ def lines_for_hp_line(hp_line: str) -> tuple:
     return HP_LINE_TO_LINES.get(_norm(hp_line), ())
 
 
+def lines_for_product_text(text: str) -> tuple:
+    """The canonical lines named anywhere in a piece of product text.
+
+    `lines_for_hp_line` is an exact lookup, so it answers only for names
+    spelled exactly as the map spells them. The features name their HP play in
+    their own words - "HP Multi Jet Fusion (3D)", "Poly Collaboration
+    Hardware", "HP Enterprise Printing & Managed Print Services" - and every
+    one of those missed. This runs the same token map that validates HP product
+    names everywhere else, then maps what it finds.
+    """
+    from app.services.extractors import grounding
+
+    lowered = str(text or "").lower()
+    if not lowered.strip():
+        return ()
+    out: list = []
+    for tokens, canonical in grounding.HP_LINE_TOKENS:
+        if not any(token in lowered for token in tokens):
+            continue
+        for line in lines_for_hp_line(canonical):
+            if line not in out:
+                out.append(line)
+
+    # Then the corpus's own vocabulary, which is what classified the studies in
+    # the first place. Without this, 3D is unreachable: `HP_LINE_TO_LINES` has
+    # no key for it, so "HP Multi Jet Fusion (3D)" mapped to nothing while 63 of
+    # the 89 studies sit on the 3D line. Using one table for both directions is
+    # also what keeps them from drifting apart.
+    for line, keywords in OFFERING_KEYWORDS:
+        if line in out:
+            continue
+        if any(keyword in lowered for keyword in keywords):
+            out.append(line)
+    return tuple(out)
+
+
 def lines_for_area(area: str) -> tuple:
     """The canonical lines an Objection Playbook area corresponds to."""
     return AREA_TO_LINES.get(_norm(area), ())
@@ -398,8 +434,24 @@ SURFACE_CONTENT = "content_generated_assets"
 # the Objection Playbook's five fixed areas cannot.
 SURFACE_EXEC = "exec_strategic_priorities"
 
+# The three signal surfaces the client added on 24 Sep: proof may strengthen an
+# existing recommendation in Live Signals' "Implication for HP", Intent's "So
+# What for HP" and the Technographic Map's "what it means for HP" - "nowhere
+# else", and "we are not trying to compulsorily include it".
+#
+# They pick AFTER the Executive Dashboard, and therefore last of all. Each one
+# strengthens a recommendation that already stands on its own evidence, so an
+# empty slot costs the reader nothing, while taking a study from the Objection
+# Playbook - where the card exists to carry proof - costs a great deal. The
+# Stakeholder Map is deliberately absent: it was asked for under item 30 and
+# then withdrawn ("Sahaj mentioned not right now").
+SURFACE_SIGNALS = "news_signals_feed"
+SURFACE_INTENT = "intent_category_summary"
+SURFACE_TECHMAP = "technographic_map"
+
 SURFACE_ORDER = (SURFACE_OBJECTIONS, SURFACE_OPPORTUNITIES,
-                 SURFACE_MESSAGING, SURFACE_CONTENT, SURFACE_EXEC)
+                 SURFACE_MESSAGING, SURFACE_CONTENT, SURFACE_EXEC,
+                 SURFACE_SIGNALS, SURFACE_INTENT, SURFACE_TECHMAP)
 
 # Where each surface keeps the records that carry a proof point. A path is
 # walked by `_walk` below; "[]" means "every item in this list".
@@ -409,6 +461,9 @@ SURFACE_PATHS = {
     SURFACE_MESSAGING: ("data", "pillars", "[]"),
     SURFACE_CONTENT: ("data", "assets", "[]", "generated"),
     SURFACE_EXEC: ("data", "priorities", "[]"),
+    SURFACE_SIGNALS: ("data", "signals", "[]"),
+    SURFACE_INTENT: ("data", "hp_categories", "[]"),
+    SURFACE_TECHMAP: ("data", "categories", "[]"),
 }
 
 
