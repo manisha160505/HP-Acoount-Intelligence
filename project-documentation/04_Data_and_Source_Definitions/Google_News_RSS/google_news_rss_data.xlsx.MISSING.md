@@ -3,7 +3,7 @@
 **NOT ON THIS MACHINE.**
 
 - Sender: Konika Thakur (BridgeAI)
-- Where it was sent: Konika's 31 Aug 2026 mail (not in this mailbox; see docs/mails (1).txt)
+- Where it was sent: Konika's 31 Aug 2026 mail (not in this mailbox; see 07_Internal_Generated/Email_Archive/mails (1).txt)
 - Date: 2026-08-31
 - Status: SUPERSEDED - NOT ON THIS MACHINE
 - Supersedes: -

@@ -1,6 +1,6 @@
 # HP 220-Account Intelligence — project documentation
 
-Single starting point for every document, decision, question and data definition on the project. Built 25 Sep 2026 from the local folders (`docs/`, `NewDocs/`, `220 account data /`, `~/Downloads`), the Gmail threads with BridgeAI, and the Drive/SharePoint links in those threads. Originals were copied, never edited; nothing was deleted.
+Single starting point for every document, decision, question and data definition on the project. Built 25 Sep 2026 from the local folders (the former `docs/` and `NewDocs/`, now deleted after consolidation here; `220 account data /`; `~/Downloads`), the Gmail threads with BridgeAI, and the Drive/SharePoint links in those threads. Originals were copied, never edited; nothing was deleted.
 
 ```
 Start here:
@@ -34,6 +34,6 @@ CLIENT DECISION · CLIENT DATA · CLIENT REFERENCE · INTERNAL IMPLEMENTATION DE
 
 ## Housekeeping
 - Files bigger than 6 MB and whole data folders are linked (`*.LINK.md`), not copied.
-- The repository's `.gitignore` ignores `*.docx *.xlsx *.pptx *.pdf *.csv` everywhere, so the client files in this tree stay uncommitted (as with `NewDocs/`); the Markdown indexes are committable.
+- The repository's `.gitignore` ignores `*.docx *.xlsx *.pptx *.pdf *.csv` everywhere, so the client files in this tree stay uncommitted; the Markdown indexes are committable.
 - To refresh the provenance register or the question registers after a new file or a client answer, edit and re-run the scripts in `00_INDEX/_build/` (see its README).
 - The Zscaler "ABM project call" thread and the Micron POC mail in the same mailbox are different engagements and are excluded.

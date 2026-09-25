@@ -5,11 +5,14 @@ for a target account; the backend extracts them into per-feature widgets that th
 dashboard renders. Eleven features are in scope — four have both a deterministic
 and an AI-inferred layer in production, the rest are deterministic-only.
 
-- **`HP-Account-Intelligence-Handover.docx`** — feature status and the
+- **`project-documentation/07_Internal_Generated/Rules_and_Handover/HP-Account-Intelligence-Handover.docx`** — feature status and the
   dataset → feature mapping.
-- **`HP-Account-Intelligence-Rules.docx`** — every rule, guardrail and scoring
+- **`project-documentation/02_Decision_Maker/HP-Account-Intelligence-Rules.docx`** — every rule, guardrail and scoring
   decision the four complete features enforce, anchored to the line of code that
   implements it. Read this before changing an extractor.
+
+All project documentation (client requirements, logic documents, decisions, questions, data definitions) is indexed under
+`project-documentation/` — start at `project-documentation/README.md`. The former `docs/` and `NewDocs/` folders were consolidated there on 25 Sep 2026.
 
 ---
 

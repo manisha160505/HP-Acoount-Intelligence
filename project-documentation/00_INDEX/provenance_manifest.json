@@ -24,7 +24,7 @@
    "01_Client_Provided/Requirements/HP_ABX_v3_final.docx",
    "02_Decision_Maker/HP_ABX_v3_final.docx"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/docs/HP_ABX_v3_final.docx"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/01_Client_Provided/Requirements/HP_ABX_v3_final.docx"
  },
  {
   "id": "C02",
@@ -51,7 +51,7 @@
    "01_Client_Provided/Requirements/HP_220_Account_Platform_additional data (1).docx",
    "02_Decision_Maker/HP_220_Account_Platform_additional data (1).docx"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/docs/HP_220_Account_Platform_additional data (1).docx"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/01_Client_Provided/Requirements/HP_220_Account_Platform_additional data (1).docx"
  },
  {
   "id": "C03",
@@ -80,7 +80,7 @@
    "02_Decision_Maker/APAC_Account_Parent_Child_Mapping.xlsx",
    "04_Data_and_Source_Definitions/Account_List/APAC_Account_Parent_Child_Mapping.xlsx"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/docs/APAC_Account_Parent_Child_Mapping.xlsx"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/01_Client_Provided/Requirements/APAC_Account_Parent_Child_Mapping.xlsx"
  },
  {
   "id": "C04",
@@ -89,12 +89,12 @@
   "dest": "01_Client_Provided/Requirements",
   "origin": "CLIENT",
   "sender": "Konika Thakur (BridgeAI)",
-  "channel": "Konika Thakur's mail of 31 Aug 2026 23:41 IST to Manil/Palash/Sahaj/Dhruvi (not in this mailbox; text preserved in docs/mails (1).txt; attachments: 11-Features-Sourcing-Reference-Anonymized.docx, Source A.xlsx, Source B.xlsx, google_news_rss_data.xlsx)",
+  "channel": "Konika Thakur's mail of 31 Aug 2026 23:41 IST to Manil/Palash/Sahaj/Dhruvi (not in this mailbox; text preserved in 07_Internal_Generated/Email_Archive/mails (1).txt; attachments: 11-Features-Sourcing-Reference-Anonymized.docx, Source A.xlsx, Source B.xlsx, google_news_rss_data.xlsx)",
   "date": "2026-08-31",
   "version": "anonymized",
   "status": "REFERENCE",
   "used_for": "Which vendor/source feeds each of the 11 features (Explorium, PredictLeads, Bombora, Apollo, Exa, Google News RSS...).",
-  "notes": "Provenance confirmed from the pasted mail text in docs/mails (1).txt. Explicitly a REVIEW draft: \"Could you both please review it and let us know if anything needs to be adjusted? Once aligned, we can use this as the reference going forward.\" No alignment reply is on record.",
+  "notes": "Provenance confirmed from the pasted mail text in 07_Internal_Generated/Email_Archive/mails (1).txt. Explicitly a REVIEW draft: \"Could you both please review it and let us know if anything needs to be adjusted? Once aligned, we can use this as the reference going forward.\" No alignment reply is on record.",
   "supersedes": "",
   "superseded_by": "",
   "also": [],
@@ -104,7 +104,7 @@
   "copied": [
    "01_Client_Provided/Requirements/11-Features-Sourcing-Reference-Anonymized (1).docx"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/docs/11-Features-Sourcing-Reference-Anonymized (1).docx"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/01_Client_Provided/Requirements/11-Features-Sourcing-Reference-Anonymized (1).docx"
  },
  {
   "id": "C42a",
@@ -113,11 +113,11 @@
   "dest": "04_Data_and_Source_Definitions/PredictLeads/seed_Astra",
   "origin": "CLIENT DATA",
   "sender": "Konika Thakur (BridgeAI)",
-  "channel": "Konika's 31 Aug 2026 mail (not in this mailbox; see docs/mails (1).txt)",
+  "channel": "Konika's 31 Aug 2026 mail (not in this mailbox; see 07_Internal_Generated/Email_Archive/mails (1).txt)",
   "date": "2026-08-31",
   "status": "SUPERSEDED - NOT ON THIS MACHINE",
   "superseded_by": "C22b predictleads_combined_219_accounts.xlsx",
-  "used_for": "Hiring / job-openings + news_events + technology_detections seed for Astra. Only docs/job_openings.csv survives locally.",
+  "used_for": "Hiring / job-openings + news_events + technology_detections seed for Astra. Only job_openings.csv (now 04_Data_and_Source_Definitions/PredictLeads/seed_Astra/) survives locally.",
   "notes": "Never reached this machine; .gitignore names it.",
   "supersedes": "",
   "also": [],
@@ -137,7 +137,7 @@
   "dest": "04_Data_and_Source_Definitions/Google_News_RSS",
   "origin": "CLIENT DATA",
   "sender": "Konika Thakur (BridgeAI)",
-  "channel": "Konika's 31 Aug 2026 mail (not in this mailbox; see docs/mails (1).txt)",
+  "channel": "Konika's 31 Aug 2026 mail (not in this mailbox; see 07_Internal_Generated/Email_Archive/mails (1).txt)",
   "date": "2026-08-31",
   "status": "SUPERSEDED - NOT ON THIS MACHINE",
   "superseded_by": "C22d google_news_rss_data 1.xlsx (220 accounts, 18 Sep)",
@@ -230,7 +230,7 @@
    "01_Client_Provided/Logic_and_Scoring/HP_220_Account_Combined_Product_Services_and_Solutions_Rulebook.docx",
    "02_Decision_Maker/HP_220_Account_Combined_Product_Services_and_Solutions_Rulebook.docx"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/NewDocs/HP_220_Account_Combined_Product_Services_and_Solutions_Rulebook.docx"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/01_Client_Provided/Logic_and_Scoring/HP_220_Account_Combined_Product_Services_and_Solutions_Rulebook.docx"
  },
  {
   "id": "C17",
@@ -281,7 +281,7 @@
    "01_Client_Provided/Logic_and_Scoring/HP_Live_Signal_Scoring_Logic.docx",
    "02_Decision_Maker/HP_Live_Signal_Scoring_Logic.docx"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/NewDocs/HP_Live_Signal_Scoring_Logic.docx"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/01_Client_Provided/Logic_and_Scoring/HP_Live_Signal_Scoring_Logic.docx"
  },
  {
   "id": "C21",
@@ -308,7 +308,7 @@
    "01_Client_Provided/Logic_and_Scoring/HP_Tech_Landscape_Confidence_Scoring_Logic_FINAL.docx",
    "02_Decision_Maker/HP_Tech_Landscape_Confidence_Scoring_Logic_FINAL.docx"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/NewDocs/HP_Tech_Landscape_Confidence_Scoring_Logic_FINAL.docx"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/01_Client_Provided/Logic_and_Scoring/HP_Tech_Landscape_Confidence_Scoring_Logic_FINAL.docx"
  },
  {
   "id": "C26",
@@ -335,7 +335,7 @@
    "01_Client_Provided/Logic_and_Scoring/new file explanation 220 acc.xlsx",
    "02_Decision_Maker/new file explanation 220 acc.xlsx"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/NewDocs/new file explanation 220 acc.xlsx"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/01_Client_Provided/Logic_and_Scoring/new file explanation 220 acc.xlsx"
  },
  {
   "id": "C28",
@@ -439,7 +439,7 @@
    "02_Decision_Maker/clarifying opens_1  Dhruvi.docx",
    "05_Questions_and_Clarifications/Source_Documents/clarifying opens_1  Dhruvi.docx"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/NewDocs/clarifying opens_1  Dhruvi.docx"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/01_Client_Provided/Client_Answers/clarifying opens_1  Dhruvi.docx"
  },
  {
   "id": "C36",
@@ -468,7 +468,7 @@
    "02_Decision_Maker/clarifying opens_2.docx",
    "05_Questions_and_Clarifications/Source_Documents/clarifying opens_2.docx"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/NewDocs/clarifying opens_2.docx"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/01_Client_Provided/Client_Answers/clarifying opens_2.docx"
  },
  {
   "id": "C37",
@@ -540,7 +540,7 @@
   "copied": [
    "08_Reference_Material/HP_Services_and_Solutions/HP Care Pack Services Definitions.pdf"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/NewDocs/HP Care Pack Services Definitions.pdf"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/08_Reference_Material/HP_Services_and_Solutions/HP Care Pack Services Definitions.pdf"
  },
  {
   "id": "C12",
@@ -564,7 +564,7 @@
   "copied": [
    "08_Reference_Material/HP_Services_and_Solutions/HP Q426 Services and solutions final.xlsx"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/NewDocs/HP Q426 Services and solutions final.xlsx"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/08_Reference_Material/HP_Services_and_Solutions/HP Q426 Services and solutions final.xlsx"
  },
  {
   "id": "C13",
@@ -588,7 +588,7 @@
   "copied": [
    "08_Reference_Material/HP_Services_and_Solutions/_SUPERSEDED/Wolf Security Portfolio.pptx"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/NewDocs/Wolf Security Portfolio.pptx"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/08_Reference_Material/HP_Services_and_Solutions/_SUPERSEDED/Wolf Security Portfolio.pptx"
  },
  {
   "id": "C14",
@@ -612,7 +612,7 @@
   "copied": [
    "08_Reference_Material/HP_Services_and_Solutions/_SUPERSEDED/HP IQ for Enterprise.pptx"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/NewDocs/HP IQ for Enterprise.pptx"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/08_Reference_Material/HP_Services_and_Solutions/_SUPERSEDED/HP IQ for Enterprise.pptx"
  },
  {
   "id": "C16",
@@ -636,7 +636,7 @@
   "copied": [
    "08_Reference_Material/HP_Services_and_Solutions/_SUPERSEDED/Copy of HP Lifecycle as of June 2026_Filtered.xlsx"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/NewDocs/Copy of HP Lifecycle as of June 2026_Filtered.xlsx"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/08_Reference_Material/HP_Services_and_Solutions/_SUPERSEDED/Copy of HP Lifecycle as of June 2026_Filtered.xlsx"
  },
  {
   "id": "C23",
@@ -804,7 +804,7 @@
   "copied": [
    "04_Data_and_Source_Definitions/HP_Intent/seed_3Sep/hp_intent_results(Intent Data (Wide)).csv"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/docs/hp_intent_results(Intent Data (Wide)).csv"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/04_Data_and_Source_Definitions/HP_Intent/seed_3Sep/hp_intent_results(Intent Data (Wide)).csv"
  },
  {
   "id": "C39b",
@@ -828,7 +828,7 @@
   "copied": [
    "04_Data_and_Source_Definitions/HP_Intent/seed_3Sep/hp_intent_results.pdf"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/docs/hp_intent_results.pdf"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/04_Data_and_Source_Definitions/HP_Intent/seed_3Sep/hp_intent_results.pdf"
  },
  {
   "id": "C39c",
@@ -852,7 +852,7 @@
   "copied": [
    "04_Data_and_Source_Definitions/Contacts_Apollo/apollo_data.pdf"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/docs/apollo_data.pdf"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/04_Data_and_Source_Definitions/Contacts_Apollo/apollo_data.pdf"
  },
  {
   "id": "C39d",
@@ -874,9 +874,9 @@
   "md5": "f8ce52d67e5380c23e38d3ed0fe5e17e",
   "mtime": "2026-09-14 12:25",
   "copied": [
-   "08_Reference_Material/Astra_Seed_Account/2025-Astra-Annual-Report.pdf.LINK.md"
+   "08_Reference_Material/Astra_Seed_Account/2025-Astra-Annual-Report.pdf"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/docs/2025-Astra-Annual-Report.pdf"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/08_Reference_Material/Astra_Seed_Account/2025-Astra-Annual-Report.pdf"
  },
  {
   "id": "C39d",
@@ -898,9 +898,9 @@
   "md5": "f1dc09eab3805b1e818d260043e7823f",
   "mtime": "2026-09-14 12:25",
   "copied": [
-   "08_Reference_Material/Astra_Seed_Account/Astra-Annual-Report-2024.pdf.LINK.md"
+   "08_Reference_Material/Astra_Seed_Account/Astra-Annual-Report-2024.pdf"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/docs/Astra-Annual-Report-2024.pdf"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/08_Reference_Material/Astra_Seed_Account/Astra-Annual-Report-2024.pdf"
  },
  {
   "id": "C39e",
@@ -924,7 +924,7 @@
   "copied": [
    "08_Reference_Material/Astra_Seed_Account/Car Market Jan'26 - Wholesales.pdf"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/docs/Car Market Jan'26 - Wholesales.pdf"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/08_Reference_Material/Astra_Seed_Account/Car Market Jan'26 - Wholesales.pdf"
  },
  {
   "id": "C39e",
@@ -948,7 +948,7 @@
   "copied": [
    "08_Reference_Material/Astra_Seed_Account/Car Market Feb'26 - Wholesales.pdf"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/docs/Car Market Feb'26 - Wholesales.pdf"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/08_Reference_Material/Astra_Seed_Account/Car Market Feb'26 - Wholesales.pdf"
  },
  {
   "id": "C39e",
@@ -972,7 +972,7 @@
   "copied": [
    "08_Reference_Material/Astra_Seed_Account/Car Market Mar'26 - Wholesales.pdf"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/docs/Car Market Mar'26 - Wholesales.pdf"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/08_Reference_Material/Astra_Seed_Account/Car Market Mar'26 - Wholesales.pdf"
  },
  {
   "id": "C39e",
@@ -996,7 +996,7 @@
   "copied": [
    "08_Reference_Material/Astra_Seed_Account/Car Market Apr'26 - Wholesales.pdf"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/docs/Car Market Apr'26 - Wholesales.pdf"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/08_Reference_Material/Astra_Seed_Account/Car Market Apr'26 - Wholesales.pdf"
  },
  {
   "id": "C39e",
@@ -1020,7 +1020,7 @@
   "copied": [
    "08_Reference_Material/Astra_Seed_Account/Car Market May'26 - Wholesales.pdf"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/docs/Car Market May'26 - Wholesales.pdf"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/08_Reference_Material/Astra_Seed_Account/Car Market May'26 - Wholesales.pdf"
  },
  {
   "id": "C39e",
@@ -1044,7 +1044,7 @@
   "copied": [
    "08_Reference_Material/Astra_Seed_Account/Car Market Jun'26 - Wholesales.pdf"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/docs/Car Market Jun'26 - Wholesales.pdf"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/08_Reference_Material/Astra_Seed_Account/Car Market Jun'26 - Wholesales.pdf"
  },
  {
   "id": "C39e",
@@ -1068,7 +1068,7 @@
   "copied": [
    "08_Reference_Material/Astra_Seed_Account/Car Market Jul'26 - Wholesales.pdf"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/docs/Car Market Jul'26 - Wholesales.pdf"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/08_Reference_Material/Astra_Seed_Account/Car Market Jul'26 - Wholesales.pdf"
  },
  {
   "id": "C40",
@@ -1077,7 +1077,7 @@
   "dest": "04_Data_and_Source_Definitions/Explorium/seed_Astra",
   "origin": "CLIENT DATA",
   "sender": "Konika Thakur (BridgeAI)",
-  "channel": "Konika's 31 Aug 2026 mail (not in this mailbox) - see docs/mails (1).txt paste",
+  "channel": "Konika's 31 Aug 2026 mail (not in this mailbox) - see 07_Internal_Generated/Email_Archive/mails (1).txt paste",
   "date": "2026-08-31",
   "version": "Astra single-account Explorium export",
   "status": "SUPERSEDED (as production input)",
@@ -1092,7 +1092,7 @@
   "copied": [
    "04_Data_and_Source_Definitions/Explorium/seed_Astra/Source A.xlsx"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/docs/Source A.xlsx"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/04_Data_and_Source_Definitions/Explorium/seed_Astra/Source A.xlsx"
  },
  {
   "id": "C41a",
@@ -1116,7 +1116,7 @@
   "copied": [
    "04_Data_and_Source_Definitions/Explorium/seed_Astra/firmographics.csv"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/docs/firmographics.csv"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/04_Data_and_Source_Definitions/Explorium/seed_Astra/firmographics.csv"
  },
  {
   "id": "C41b",
@@ -1140,7 +1140,7 @@
   "copied": [
    "04_Data_and_Source_Definitions/PredictLeads/seed_Astra/job_openings.csv"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/docs/job_openings.csv"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/04_Data_and_Source_Definitions/PredictLeads/seed_Astra/job_openings.csv"
  },
  {
   "id": "C22a",
@@ -1308,7 +1308,7 @@
   "copied": [
    "04_Data_and_Source_Definitions/Filings/filings 1.csv"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/NewDocs/filings 1.csv"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/04_Data_and_Source_Definitions/Filings/filings 1.csv"
  },
  {
   "id": "C38",
@@ -1380,12 +1380,12 @@
   "copied": [
    "04_Data_and_Source_Definitions/Case_Studies/hp_case_studies_final.csv"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/NewDocs/hp_case_studies_final.csv"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/04_Data_and_Source_Definitions/Case_Studies/hp_case_studies_final.csv"
  },
  {
   "id": "C06",
   "name": "BPS Portfolio Sell-In Deck FY26.pptx",
-  "src": "/Users/yogeshyadav/Desktop/HP/docs/drive-download-20260912T033240Z-1-001/BPS Portfolio Sell-In Deck FY26.pptx",
+  "src": "/Users/yogeshyadav/Desktop/HP/project-documentation/08_Reference_Material/HP_Product_Decks/BPS Portfolio Sell-In Deck FY26.pptx",
   "dest": "08_Reference_Material/HP_Product_Decks",
   "origin": "CLIENT REFERENCE (HP via BridgeAI)",
   "sender": "Dhruvi Patel (BridgeAI)",
@@ -1402,14 +1402,14 @@
   "md5": "6648bcc474cdede3dd0d93043a0ca34c",
   "mtime": "2026-09-14 12:25",
   "copied": [
-   "08_Reference_Material/HP_Product_Decks/BPS Portfolio Sell-In Deck FY26.pptx.LINK.md"
+   "08_Reference_Material/HP_Product_Decks/BPS Portfolio Sell-In Deck FY26.pptx"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/docs/drive-download-20260912T033240Z-1-001/BPS Portfolio Sell-In Deck FY26.pptx"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/08_Reference_Material/HP_Product_Decks/BPS Portfolio Sell-In Deck FY26.pptx"
  },
  {
   "id": "C06",
   "name": "Competitive Playbook - EliteBook X G1i vs Lenovo ThinkPad X1 Carbon.pptx",
-  "src": "/Users/yogeshyadav/Desktop/HP/docs/drive-download-20260912T033240Z-1-001/Competitive Playbook - EliteBook X G1i vs Lenovo ThinkPad X1 Carbon.pptx",
+  "src": "/Users/yogeshyadav/Desktop/HP/project-documentation/08_Reference_Material/HP_Product_Decks/Competitive Playbook - EliteBook X G1i vs Lenovo ThinkPad X1 Carbon.pptx",
   "dest": "08_Reference_Material/HP_Product_Decks",
   "origin": "CLIENT REFERENCE (HP via BridgeAI)",
   "sender": "Dhruvi Patel (BridgeAI)",
@@ -1426,14 +1426,14 @@
   "md5": "eae0f37de5639f879e57c67a0eb88054",
   "mtime": "2026-09-14 12:25",
   "copied": [
-   "08_Reference_Material/HP_Product_Decks/Competitive Playbook - EliteBook X G1i vs Lenovo ThinkPad X1 Carbon.pptx.LINK.md"
+   "08_Reference_Material/HP_Product_Decks/Competitive Playbook - EliteBook X G1i vs Lenovo ThinkPad X1 Carbon.pptx"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/docs/drive-download-20260912T033240Z-1-001/Competitive Playbook - EliteBook X G1i vs Lenovo ThinkPad X1 Carbon.pptx"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/08_Reference_Material/HP_Product_Decks/Competitive Playbook - EliteBook X G1i vs Lenovo ThinkPad X1 Carbon.pptx"
  },
  {
   "id": "C06",
   "name": "HP 200 G2 Series Single Slides.pptx",
-  "src": "/Users/yogeshyadav/Desktop/HP/docs/drive-download-20260912T033240Z-1-001/HP 200 G2 Series Single Slides.pptx",
+  "src": "/Users/yogeshyadav/Desktop/HP/project-documentation/08_Reference_Material/HP_Product_Decks/HP 200 G2 Series Single Slides.pptx",
   "dest": "08_Reference_Material/HP_Product_Decks",
   "origin": "CLIENT REFERENCE (HP via BridgeAI)",
   "sender": "Dhruvi Patel (BridgeAI)",
@@ -1450,14 +1450,14 @@
   "md5": "217d3b8d853288a515e3dec94761adc8",
   "mtime": "2026-09-14 12:25",
   "copied": [
-   "08_Reference_Material/HP_Product_Decks/HP 200 G2 Series Single Slides.pptx.LINK.md"
+   "08_Reference_Material/HP_Product_Decks/HP 200 G2 Series Single Slides.pptx"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/docs/drive-download-20260912T033240Z-1-001/HP 200 G2 Series Single Slides.pptx"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/08_Reference_Material/HP_Product_Decks/HP 200 G2 Series Single Slides.pptx"
  },
  {
   "id": "C06",
   "name": "HP EliteBook 6 G2 Series Single Slides.pptx",
-  "src": "/Users/yogeshyadav/Desktop/HP/docs/drive-download-20260912T033240Z-1-001/HP EliteBook 6 G2 Series Single Slides.pptx",
+  "src": "/Users/yogeshyadav/Desktop/HP/project-documentation/08_Reference_Material/HP_Product_Decks/HP EliteBook 6 G2 Series Single Slides.pptx",
   "dest": "08_Reference_Material/HP_Product_Decks",
   "origin": "CLIENT REFERENCE (HP via BridgeAI)",
   "sender": "Dhruvi Patel (BridgeAI)",
@@ -1474,14 +1474,14 @@
   "md5": "c58765ed197fa277ecc178f375e97648",
   "mtime": "2026-09-14 12:25",
   "copied": [
-   "08_Reference_Material/HP_Product_Decks/HP EliteBook 6 G2 Series Single Slides.pptx.LINK.md"
+   "08_Reference_Material/HP_Product_Decks/HP EliteBook 6 G2 Series Single Slides.pptx"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/docs/drive-download-20260912T033240Z-1-001/HP EliteBook 6 G2 Series Single Slides.pptx"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/08_Reference_Material/HP_Product_Decks/HP EliteBook 6 G2 Series Single Slides.pptx"
  },
  {
   "id": "C06",
   "name": "HP EliteBook 8 G2 Next Gen Series Single Slide.pptx",
-  "src": "/Users/yogeshyadav/Desktop/HP/docs/drive-download-20260912T033240Z-1-001/HP EliteBook 8 G2 Next Gen Series Single Slide.pptx",
+  "src": "/Users/yogeshyadav/Desktop/HP/project-documentation/08_Reference_Material/HP_Product_Decks/HP EliteBook 8 G2 Next Gen Series Single Slide.pptx",
   "dest": "08_Reference_Material/HP_Product_Decks",
   "origin": "CLIENT REFERENCE (HP via BridgeAI)",
   "sender": "Dhruvi Patel (BridgeAI)",
@@ -1498,14 +1498,14 @@
   "md5": "5f659938c6d09f7646f1a066845f08de",
   "mtime": "2026-09-14 12:25",
   "copied": [
-   "08_Reference_Material/HP_Product_Decks/HP EliteBook 8 G2 Next Gen Series Single Slide.pptx.LINK.md"
+   "08_Reference_Material/HP_Product_Decks/HP EliteBook 8 G2 Next Gen Series Single Slide.pptx"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/docs/drive-download-20260912T033240Z-1-001/HP EliteBook 8 G2 Next Gen Series Single Slide.pptx"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/08_Reference_Material/HP_Product_Decks/HP EliteBook 8 G2 Next Gen Series Single Slide.pptx"
  },
  {
   "id": "C06",
   "name": "HP EliteBook Ultra G1i Customer Presentation.pptx",
-  "src": "/Users/yogeshyadav/Desktop/HP/docs/drive-download-20260912T033240Z-1-001/HP EliteBook Ultra G1i Customer Presentation.pptx",
+  "src": "/Users/yogeshyadav/Desktop/HP/project-documentation/08_Reference_Material/HP_Product_Decks/HP EliteBook Ultra G1i Customer Presentation.pptx",
   "dest": "08_Reference_Material/HP_Product_Decks",
   "origin": "CLIENT REFERENCE (HP via BridgeAI)",
   "sender": "Dhruvi Patel (BridgeAI)",
@@ -1522,14 +1522,14 @@
   "md5": "5a87015a274b266cd036851755f00279",
   "mtime": "2026-09-14 12:25",
   "copied": [
-   "08_Reference_Material/HP_Product_Decks/HP EliteBook Ultra G1i Customer Presentation.pptx.LINK.md"
+   "08_Reference_Material/HP_Product_Decks/HP EliteBook Ultra G1i Customer Presentation.pptx"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/docs/drive-download-20260912T033240Z-1-001/HP EliteBook Ultra G1i Customer Presentation.pptx"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/08_Reference_Material/HP_Product_Decks/HP EliteBook Ultra G1i Customer Presentation.pptx"
  },
  {
   "id": "C06",
   "name": "HP EliteBook Ultra G1q8_G1q Single Slide.pptx",
-  "src": "/Users/yogeshyadav/Desktop/HP/docs/drive-download-20260912T033240Z-1-001/HP EliteBook Ultra G1q8_G1q Single Slide.pptx",
+  "src": "/Users/yogeshyadav/Desktop/HP/project-documentation/08_Reference_Material/HP_Product_Decks/HP EliteBook Ultra G1q8_G1q Single Slide.pptx",
   "dest": "08_Reference_Material/HP_Product_Decks",
   "origin": "CLIENT REFERENCE (HP via BridgeAI)",
   "sender": "Dhruvi Patel (BridgeAI)",
@@ -1546,14 +1546,14 @@
   "md5": "cf95b0f626b6d710042fb3f6e2cab69f",
   "mtime": "2026-09-14 12:25",
   "copied": [
-   "08_Reference_Material/HP_Product_Decks/HP EliteBook Ultra G1q8_G1q Single Slide.pptx.LINK.md"
+   "08_Reference_Material/HP_Product_Decks/HP EliteBook Ultra G1q8_G1q Single Slide.pptx"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/docs/drive-download-20260912T033240Z-1-001/HP EliteBook Ultra G1q8_G1q Single Slide.pptx"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/08_Reference_Material/HP_Product_Decks/HP EliteBook Ultra G1q8_G1q Single Slide.pptx"
  },
  {
   "id": "C06",
   "name": "HP ProBook 4 G2 Series Single Slides.pptx",
-  "src": "/Users/yogeshyadav/Desktop/HP/docs/drive-download-20260912T033240Z-1-001/HP ProBook 4 G2 Series Single Slides.pptx",
+  "src": "/Users/yogeshyadav/Desktop/HP/project-documentation/08_Reference_Material/HP_Product_Decks/HP ProBook 4 G2 Series Single Slides.pptx",
   "dest": "08_Reference_Material/HP_Product_Decks",
   "origin": "CLIENT REFERENCE (HP via BridgeAI)",
   "sender": "Dhruvi Patel (BridgeAI)",
@@ -1570,14 +1570,14 @@
   "md5": "1cc3011ac9a7effac1d7f1d9b657e52b",
   "mtime": "2026-09-14 12:25",
   "copied": [
-   "08_Reference_Material/HP_Product_Decks/HP ProBook 4 G2 Series Single Slides.pptx.LINK.md"
+   "08_Reference_Material/HP_Product_Decks/HP ProBook 4 G2 Series Single Slides.pptx"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/docs/drive-download-20260912T033240Z-1-001/HP ProBook 4 G2 Series Single Slides.pptx"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/08_Reference_Material/HP_Product_Decks/HP ProBook 4 G2 Series Single Slides.pptx"
  },
  {
   "id": "C06",
   "name": "One Page - EliteBook 6 G1a NGAIPC.pptx",
-  "src": "/Users/yogeshyadav/Desktop/HP/docs/drive-download-20260912T033240Z-1-001/One Page - EliteBook 6 G1a NGAIPC.pptx",
+  "src": "/Users/yogeshyadav/Desktop/HP/project-documentation/08_Reference_Material/HP_Product_Decks/One Page - EliteBook 6 G1a NGAIPC.pptx",
   "dest": "08_Reference_Material/HP_Product_Decks",
   "origin": "CLIENT REFERENCE (HP via BridgeAI)",
   "sender": "Dhruvi Patel (BridgeAI)",
@@ -1596,12 +1596,12 @@
   "copied": [
    "08_Reference_Material/HP_Product_Decks/One Page - EliteBook 6 G1a NGAIPC.pptx"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/docs/drive-download-20260912T033240Z-1-001/One Page - EliteBook 6 G1a NGAIPC.pptx"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/08_Reference_Material/HP_Product_Decks/One Page - EliteBook 6 G1a NGAIPC.pptx"
  },
  {
   "id": "C06",
   "name": "One Page - EliteBook 8 G1i NGAIPC.pptx",
-  "src": "/Users/yogeshyadav/Desktop/HP/docs/drive-download-20260912T033240Z-1-001/One Page - EliteBook 8 G1i NGAIPC.pptx",
+  "src": "/Users/yogeshyadav/Desktop/HP/project-documentation/08_Reference_Material/HP_Product_Decks/One Page - EliteBook 8 G1i NGAIPC.pptx",
   "dest": "08_Reference_Material/HP_Product_Decks",
   "origin": "CLIENT REFERENCE (HP via BridgeAI)",
   "sender": "Dhruvi Patel (BridgeAI)",
@@ -1620,7 +1620,7 @@
   "copied": [
    "08_Reference_Material/HP_Product_Decks/One Page - EliteBook 8 G1i NGAIPC.pptx"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/docs/drive-download-20260912T033240Z-1-001/One Page - EliteBook 8 G1i NGAIPC.pptx"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/08_Reference_Material/HP_Product_Decks/One Page - EliteBook 8 G1i NGAIPC.pptx"
  },
  {
   "id": "C07",
@@ -1642,9 +1642,9 @@
   "md5": "9f751ec3f6cac18a3be1b3569c01475e",
   "mtime": "2026-09-14 12:25",
   "copied": [
-   "08_Reference_Material/HP_Product_Decks/HP EliteDesk 8 and ProDesk 4 Mini G1i Desktop AI PC Full Customer Presentation.pptx.LINK.md"
+   "08_Reference_Material/HP_Product_Decks/HP EliteDesk 8 and ProDesk 4 Mini G1i Desktop AI PC Full Customer Presentation.pptx"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/docs/HP EliteDesk 8 and ProDesk 4 Mini G1i Desktop AI PC Full Customer Presentation.pptx"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/08_Reference_Material/HP_Product_Decks/HP EliteDesk 8 and ProDesk 4 Mini G1i Desktop AI PC Full Customer Presentation.pptx"
  },
  {
   "id": "C05",
@@ -1682,7 +1682,7 @@
   "version": "1",
   "status": "INTERNAL - UNDER CLIENT REVIEW (no feedback received as of 25 Sep)",
   "used_for": "Every rule, guardrail and scoring decision the four then-complete features enforce, anchored to code. Any rule not in here is undisclosed to the client.",
-  "notes": "Identical to docs/HP-Account-Intelligence-Rules (1).docx.",
+  "notes": "The docs/ copy \"HP-Account-Intelligence-Rules (1).docx\" was byte-identical.",
   "also": [
    "07_Internal_Generated/Rules_and_Handover"
   ],
@@ -1704,7 +1704,7 @@
   "dest": "07_Internal_Generated/Rules_and_Handover",
   "origin": "INTERNAL (delivery team)",
   "sender": "delivery team",
-  "channel": "local (docs/), referenced by repo README",
+  "channel": "local (formerly docs/), referenced by repo README",
   "date": "2026-09-14",
   "status": "INTERNAL",
   "used_for": "Feature status (4 complete / 7 deterministic-only at the time) and dataset -> feature map. Reference account Astra.",
@@ -1719,7 +1719,7 @@
   "copied": [
    "07_Internal_Generated/Rules_and_Handover/HP-Account-Intelligence-Handover.docx"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/docs/HP-Account-Intelligence-Handover.docx"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/07_Internal_Generated/Rules_and_Handover/HP-Account-Intelligence-Handover.docx"
  },
  {
   "id": "I03",
@@ -1743,7 +1743,7 @@
   "copied": [
    "07_Internal_Generated/Analysis/Evidence-Score-Data-Availability-Answers.md"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/docs/Evidence-Score-Data-Availability-Answers.md"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/07_Internal_Generated/Analysis/Evidence-Score-Data-Availability-Answers.md"
  },
  {
   "id": "I04a",
@@ -1767,7 +1767,7 @@
   "copied": [
    "07_Internal_Generated/Analysis/HP-Input-Data-Contract.md"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/docs/HP-Input-Data-Contract.md"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/07_Internal_Generated/Analysis/HP-Input-Data-Contract.md"
  },
  {
   "id": "I04b",
@@ -1791,7 +1791,7 @@
   "copied": [
    "07_Internal_Generated/Analysis/hp-input-contract.json"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/docs/hp-input-contract.json"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/07_Internal_Generated/Analysis/hp-input-contract.json"
  },
  {
   "id": "I04c",
@@ -1815,7 +1815,7 @@
   "copied": [
    "07_Internal_Generated/Analysis/hp-file-to-json-map.json"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/docs/hp-file-to-json-map.json"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/07_Internal_Generated/Analysis/hp-file-to-json-map.json"
  },
  {
   "id": "I05",
@@ -1839,7 +1839,7 @@
   "copied": [
    "07_Internal_Generated/Meeting_Notes/2026-09-14-feature-walkthrough.md"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/docs/meeting-notes/2026-09-14-feature-walkthrough.md"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/07_Internal_Generated/Meeting_Notes/2026-09-14-feature-walkthrough.md"
  },
  {
   "id": "I06",
@@ -1866,7 +1866,7 @@
    "07_Internal_Generated/QA/QA-Report-Response_2026-09-16.md",
    "05_Questions_and_Clarifications/Source_Documents/QA-Report-Response_2026-09-16.md"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/docs/qa/QA-Report-Response_2026-09-16.md"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/07_Internal_Generated/QA/QA-Report-Response_2026-09-16.md"
  },
  {
   "id": "I06",
@@ -1890,7 +1890,7 @@
   "copied": [
    "07_Internal_Generated/QA/QA-Report-Response_2026-09-16.pdf"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/docs/qa/QA-Report-Response_2026-09-16.pdf"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/07_Internal_Generated/QA/QA-Report-Response_2026-09-16.pdf"
  },
  {
   "id": "I06",
@@ -1917,7 +1917,7 @@
    "07_Internal_Generated/QA/QA-Discussion-Points_2026-09-16.md",
    "05_Questions_and_Clarifications/Source_Documents/QA-Discussion-Points_2026-09-16.md"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/docs/qa/QA-Discussion-Points_2026-09-16.md"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/07_Internal_Generated/QA/QA-Discussion-Points_2026-09-16.md"
  },
  {
   "id": "I06",
@@ -1941,7 +1941,7 @@
   "copied": [
    "07_Internal_Generated/QA/QA-Discussion-Points_2026-09-16.pdf"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/docs/qa/QA-Discussion-Points_2026-09-16.pdf"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/07_Internal_Generated/QA/QA-Discussion-Points_2026-09-16.pdf"
  },
  {
   "id": "I07",
@@ -1965,7 +1965,7 @@
   "copied": [
    "07_Internal_Generated/Engineering/api-envelope.md"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/docs/api-envelope.md"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/07_Internal_Generated/Engineering/api-envelope.md"
  },
  {
   "id": "I07",
@@ -1989,7 +1989,7 @@
   "copied": [
    "07_Internal_Generated/Engineering/api-errors.md"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/docs/api-errors.md"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/07_Internal_Generated/Engineering/api-errors.md"
  },
  {
   "id": "I07",
@@ -2013,7 +2013,7 @@
   "copied": [
    "07_Internal_Generated/Engineering/linting.md"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/docs/linting.md"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/07_Internal_Generated/Engineering/linting.md"
  },
  {
   "id": "I07",
@@ -2037,7 +2037,7 @@
   "copied": [
    "07_Internal_Generated/Engineering/observability.md"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/docs/observability.md"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/07_Internal_Generated/Engineering/observability.md"
  },
  {
   "id": "I07",
@@ -2061,7 +2061,7 @@
   "copied": [
    "07_Internal_Generated/Engineering/observability-backlog.md"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/docs/observability-backlog.md"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/07_Internal_Generated/Engineering/observability-backlog.md"
  },
  {
   "id": "I07",
@@ -2085,12 +2085,12 @@
   "copied": [
    "07_Internal_Generated/Engineering/branch-protection.md"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/docs/branch-protection.md"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/07_Internal_Generated/Engineering/branch-protection.md"
  },
  {
   "id": "I08",
   "name": "mails (1).txt",
-  "src": "/Users/yogeshyadav/Desktop/HP/docs/mails (1).txt",
+  "src": "/Users/yogeshyadav/Desktop/HP/07_Internal_Generated/Email_Archive/mails (1).txt",
   "dest": "07_Internal_Generated/Email_Archive",
   "origin": "INTERNAL (paste of client mails)",
   "sender": "Palash Chatterjee (pasted from his mailbox)",
@@ -2109,7 +2109,7 @@
   "copied": [
    "07_Internal_Generated/Email_Archive/mails (1).txt"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/docs/mails (1).txt"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/07_Internal_Generated/Email_Archive/mails (1).txt"
  },
  {
   "id": "I09",
@@ -2136,7 +2136,7 @@
    "07_Internal_Generated/Question_Trackers/220-Account-Data-Questions-For-Client.md",
    "05_Questions_and_Clarifications/Source_Documents/220-Account-Data-Questions-For-Client.md"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/NewDocs/220-Account-Data-Questions-For-Client.md"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/07_Internal_Generated/Question_Trackers/220-Account-Data-Questions-For-Client.md"
  },
  {
   "id": "I10",
@@ -2163,7 +2163,7 @@
    "07_Internal_Generated/Question_Trackers/220-Open-Decisions-List.md",
    "05_Questions_and_Clarifications/Source_Documents/220-Open-Decisions-List.md"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/NewDocs/220-Open-Decisions-List.md"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/07_Internal_Generated/Question_Trackers/220-Open-Decisions-List.md"
  },
  {
   "id": "I11",
@@ -2187,7 +2187,7 @@
   "copied": [
    "07_Internal_Generated/Question_Trackers/220-Open-Items-and-Clarifications.md"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/NewDocs/220-Open-Items-and-Clarifications.md"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/07_Internal_Generated/Question_Trackers/220-Open-Items-and-Clarifications.md"
  },
  {
   "id": "I12",
@@ -2211,7 +2211,7 @@
   "copied": [
    "07_Internal_Generated/Question_Trackers/220-Open-Questions-Tracker.md"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/NewDocs/220-Open-Questions-Tracker.md"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/07_Internal_Generated/Question_Trackers/220-Open-Questions-Tracker.md"
  },
  {
   "id": "I13",
@@ -2235,7 +2235,7 @@
   "copied": [
    "07_Internal_Generated/Email_Drafts/BridgeAI-email-draft-2026-09-24.md"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/NewDocs/BridgeAI-email-draft-2026-09-24.md"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/07_Internal_Generated/Email_Drafts/BridgeAI-email-draft-2026-09-24.md"
  },
  {
   "id": "I14",
@@ -2262,7 +2262,7 @@
    "07_Internal_Generated/Client_Facing_Round3/clarifying_opens_3_CLARIFICATIONS.docx",
    "05_Questions_and_Clarifications/Source_Documents/clarifying_opens_3_CLARIFICATIONS.docx"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/NewDocs/clarifying_opens_3_CLARIFICATIONS.docx"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/07_Internal_Generated/Client_Facing_Round3/clarifying_opens_3_CLARIFICATIONS.docx"
  },
  {
   "id": "I14",
@@ -2289,7 +2289,7 @@
    "07_Internal_Generated/Client_Facing_Round3/clarifying_opens_3_CLARIFICATIONS_v2.docx",
    "05_Questions_and_Clarifications/Source_Documents/clarifying_opens_3_CLARIFICATIONS_v2.docx"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/NewDocs/clarifying_opens_3_CLARIFICATIONS_v2.docx"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/07_Internal_Generated/Client_Facing_Round3/clarifying_opens_3_CLARIFICATIONS_v2.docx"
  },
  {
   "id": "I14",
@@ -2313,7 +2313,7 @@
   "copied": [
    "07_Internal_Generated/Client_Facing_Round3/clarifying_opens_3_OPEN.docx"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/NewDocs/clarifying_opens_3_OPEN.docx"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/07_Internal_Generated/Client_Facing_Round3/clarifying_opens_3_OPEN.docx"
  },
  {
   "id": "I14",
@@ -2340,7 +2340,7 @@
    "07_Internal_Generated/Client_Facing_Round3/clarifying_opens_3_OPEN_v2.docx",
    "05_Questions_and_Clarifications/Source_Documents/clarifying_opens_3_OPEN_v2.docx"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/NewDocs/clarifying_opens_3_OPEN_v2.docx"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/07_Internal_Generated/Client_Facing_Round3/clarifying_opens_3_OPEN_v2.docx"
  },
  {
   "id": "I14",
@@ -2364,7 +2364,7 @@
   "copied": [
    "07_Internal_Generated/Client_Facing_Round3/clarifying_opens_3_UNRESOLVED.docx"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/NewDocs/clarifying_opens_3_UNRESOLVED.docx"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/07_Internal_Generated/Client_Facing_Round3/clarifying_opens_3_UNRESOLVED.docx"
  },
  {
   "id": "I14",
@@ -2391,7 +2391,7 @@
    "07_Internal_Generated/Client_Facing_Round3/clarifying_opens_3_UNRESOLVED_v2.docx",
    "05_Questions_and_Clarifications/Source_Documents/clarifying_opens_3_UNRESOLVED_v2.docx"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/NewDocs/clarifying_opens_3_UNRESOLVED_v2.docx"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/07_Internal_Generated/Client_Facing_Round3/clarifying_opens_3_UNRESOLVED_v2.docx"
  },
  {
   "id": "I15",
@@ -2415,7 +2415,7 @@
   "copied": [
    "07_Internal_Generated/Meeting_Notes/HP-220-Account-Data-Review-Agenda.docx"
   ],
-  "local_path": "/Users/yogeshyadav/Desktop/HP/NewDocs/HP-220-Account-Data-Review-Agenda.docx"
+  "local_path": "/Users/yogeshyadav/Desktop/HP/project-documentation/07_Internal_Generated/Meeting_Notes/HP-220-Account-Data-Review-Agenda.docx"
  },
  {
   "id": "I16",
@@ -2625,9 +2625,9 @@
   "notes": "",
   "also": [],
   "version": "",
-  "size": 5570,
-  "md5": "279a554c2b98000b62ed371ef2ac6f4d",
-  "mtime": "2026-09-11 14:09",
+  "size": 5951,
+  "md5": "324653062eb62262dd6a79eb9c7fdf20",
+  "mtime": "2026-09-25 11:39",
   "copied": [
    "07_Internal_Generated/Engineering/README.md"
   ],

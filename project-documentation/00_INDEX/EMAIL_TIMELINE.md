@@ -15,7 +15,7 @@ Threads searched (all HP-related threads in the mailbox after 1 Aug 2026):
 | ABM project call | `1a09425d8faa4e98` | 12 – 14 Sep | **Zscaler ABM engagement, not HP.** Excluded from this documentation set. |
 | Micron / POC Discussion | `1a04c22adfc5f19e` | 29 Aug | Education-intelligence POC, not HP. Excluded. |
 
-Messages before 8 Sep exist only as quoted/forwarded text (Yogesh was added to the thread on 8 Sep) and as the paste in `07_Internal_Generated/Email_Archive/mails (1).txt`. Konika's 31 Aug mail is **only** in that paste.
+Messages before 8 Sep exist only as quoted/forwarded text (Yogesh was added to the thread on 8 Sep) and as the paste in `07_Internal_Generated/Email_Archive/mails (1).txt` (formerly docs/). Konika's 31 Aug mail is **only** in that paste.
 
 ## Chronology
 

@@ -40,16 +40,16 @@ add(id='C03', name='APAC_Account_Parent_Child_Mapping.xlsx', src=ROOT/'docs/APAC
     used_for='Scope: the 220 accounts (sheet "Master List", column B "Sales Territory Name"), parent/child groups and recommended merges. Used by the 220-account split and every per-account run.',
     also=['02_Decision_Maker','04_Data_and_Source_Definitions/Account_List'])
 add(id='C04', name='11-Features-Sourcing-Reference-Anonymized.docx', src=ROOT/'docs/11-Features-Sourcing-Reference-Anonymized (1).docx', dest='01_Client_Provided/Requirements',
-    origin='CLIENT', sender='Konika Thakur (BridgeAI)', channel="Konika Thakur's mail of 31 Aug 2026 23:41 IST to Manil/Palash/Sahaj/Dhruvi (not in this mailbox; text preserved in docs/mails (1).txt; attachments: 11-Features-Sourcing-Reference-Anonymized.docx, Source A.xlsx, Source B.xlsx, google_news_rss_data.xlsx)",
+    origin='CLIENT', sender='Konika Thakur (BridgeAI)', channel="Konika Thakur's mail of 31 Aug 2026 23:41 IST to Manil/Palash/Sahaj/Dhruvi (not in this mailbox; text preserved in 07_Internal_Generated/Email_Archive/mails (1).txt; attachments: 11-Features-Sourcing-Reference-Anonymized.docx, Source A.xlsx, Source B.xlsx, google_news_rss_data.xlsx)",
     date='2026-08-31', version='anonymized', status='REFERENCE',
     used_for='Which vendor/source feeds each of the 11 features (Explorium, PredictLeads, Bombora, Apollo, Exa, Google News RSS...).',
-    notes='Provenance confirmed from the pasted mail text in docs/mails (1).txt. Explicitly a REVIEW draft: "Could you both please review it and let us know if anything needs to be adjusted? Once aligned, we can use this as the reference going forward." No alignment reply is on record.')
+    notes='Provenance confirmed from the pasted mail text in 07_Internal_Generated/Email_Archive/mails (1).txt. Explicitly a REVIEW draft: "Could you both please review it and let us know if anything needs to be adjusted? Once aligned, we can use this as the reference going forward." No alignment reply is on record.')
 
 add(id='C42a', name='Source B.xlsx (31 Aug, Astra seed - PredictLeads export)', src=None, dest='04_Data_and_Source_Definitions/PredictLeads/seed_Astra', origin='CLIENT DATA', sender='Konika Thakur (BridgeAI)',
-    channel="Konika's 31 Aug 2026 mail (not in this mailbox; see docs/mails (1).txt)", date='2026-08-31', status='SUPERSEDED - NOT ON THIS MACHINE', superseded_by='C22b predictleads_combined_219_accounts.xlsx',
-    used_for='Hiring / job-openings + news_events + technology_detections seed for Astra. Only docs/job_openings.csv survives locally.', notes='Never reached this machine; .gitignore names it.')
+    channel="Konika's 31 Aug 2026 mail (not in this mailbox; see 07_Internal_Generated/Email_Archive/mails (1).txt)", date='2026-08-31', status='SUPERSEDED - NOT ON THIS MACHINE', superseded_by='C22b predictleads_combined_219_accounts.xlsx',
+    used_for='Hiring / job-openings + news_events + technology_detections seed for Astra. Only job_openings.csv (now 04_Data_and_Source_Definitions/PredictLeads/seed_Astra/) survives locally.', notes='Never reached this machine; .gitignore names it.')
 add(id='C42b', name='google_news_rss_data.xlsx (31 Aug, Astra seed)', src=None, dest='04_Data_and_Source_Definitions/Google_News_RSS', origin='CLIENT DATA', sender='Konika Thakur (BridgeAI)',
-    channel="Konika's 31 Aug 2026 mail (not in this mailbox; see docs/mails (1).txt)", date='2026-08-31', status='SUPERSEDED - NOT ON THIS MACHINE', superseded_by='C22d google_news_rss_data 1.xlsx (220 accounts, 18 Sep)',
+    channel="Konika's 31 Aug 2026 mail (not in this mailbox; see 07_Internal_Generated/Email_Archive/mails (1).txt)", date='2026-08-31', status='SUPERSEDED - NOT ON THIS MACHINE', superseded_by='C22d google_news_rss_data 1.xlsx (220 accounts, 18 Sep)',
     used_for='Google News RSS seed for Astra.', notes='Never reached this machine; .gitignore names it.')
 
 # ---------------- CLIENT: logic and scoring ----------------
@@ -165,7 +165,7 @@ for nm in ["Car Market Jan'26 - Wholesales.pdf","Car Market Feb'26 - Wholesales.
     add(id='C39e', name=nm, src=ROOT/'docs'/nm, dest='08_Reference_Material/Astra_Seed_Account', origin='CLIENT DATA', sender='Konika Thakur (BridgeAI)', channel=SP, date='2026-09-03',
         status='REFERENCE', used_for='Monthly Indonesian car-market wholesale reports (Astra seed context).')
 add(id='C40', name='Source A.xlsx', src=ROOT/'docs/Source A.xlsx', dest='04_Data_and_Source_Definitions/Explorium/seed_Astra', origin='CLIENT DATA', sender='Konika Thakur (BridgeAI)',
-    channel="Konika's 31 Aug 2026 mail (not in this mailbox) - see docs/mails (1).txt paste", date='2026-08-31', version='Astra single-account Explorium export',
+    channel="Konika's 31 Aug 2026 mail (not in this mailbox) - see 07_Internal_Generated/Email_Archive/mails (1).txt paste", date='2026-08-31', version='Astra single-account Explorium export',
     status='SUPERSEDED (as production input)', superseded_by='C22 explorium_clean_220 (220 workbooks, same sheet layout)', used_for='Explorium export for the Astra seed: 1_Firmographics ... 14_Prospect_Contacts (18 sheets). Defines the Explorium sheet layout the input contract was built on.',
     notes='Still the Astra seed used by the local backend.')
 add(id='C41a', name='firmographics.csv', src=ROOT/'docs/firmographics.csv', dest='04_Data_and_Source_Definitions/Explorium/seed_Astra', origin='CLIENT DATA (derived)', sender='Konika Thakur (BridgeAI) / extracted by delivery team',
@@ -199,7 +199,9 @@ add(id='C20', name='hp_case_studies_final.csv', src=ROOT/'NewDocs/hp_case_studie
 
 # ---------------- CLIENT: HP product decks (Drive) ----------------
 DECKS = ROOT/'docs/drive-download-20260912T033240Z-1-001'
+if not DECKS.exists(): DECKS = OUT/'08_Reference_Material/HP_Product_Decks'
 for p in sorted(DECKS.glob('*.pptx')):
+    if p.name.startswith('HP EliteDesk 8'): continue  # Desktop deck, listed separately as C07
     add(id='C06', name=p.name, src=p, dest='08_Reference_Material/HP_Product_Decks', origin='CLIENT REFERENCE (HP via BridgeAI)', sender='Dhruvi Patel (BridgeAI)',
         channel='Google Drive "Notebook" folder 1gbneD6Rri5ae2ml9Lq09PtM32Ba-z9jO (24 Aug 2026 mail); downloaded 12 Sep 2026 as drive-download-20260912T033240Z-1-001.zip', date='2026-08-24',
         status='REFERENCE', used_for='HP Notebook product decks for RAG / recommendations per the additional-data doc rules (C02). Preferred HP product source when a deck rule matches.')
@@ -213,8 +215,8 @@ add(id='C05', name='hp-sea-abm-dev-main.zip (HP Sea Limited ABM POC codebase)', 
 # ---------------- INTERNAL ----------------
 add(id='I01', name='HP-Account-Intelligence-Rules.docx', src=DL/'HP-Account-Intelligence-Rules.docx', dest='02_Decision_Maker', origin='INTERNAL (delivery team)', sender='Manisha Parwani -> client', channel=SKIP+', 10 Sep 2026 11:16 UTC (requested by Sahaj; Dhruvi: "we\'ll review ... and share our feedback")',
     date='2026-09-10', version='1', status='INTERNAL - UNDER CLIENT REVIEW (no feedback received as of 25 Sep)', used_for='Every rule, guardrail and scoring decision the four then-complete features enforce, anchored to code. Any rule not in here is undisclosed to the client.',
-    notes='Identical to docs/HP-Account-Intelligence-Rules (1).docx.', also=['07_Internal_Generated/Rules_and_Handover'])
-add(id='I02', name='HP-Account-Intelligence-Handover.docx', src=ROOT/'docs/HP-Account-Intelligence-Handover.docx', dest='07_Internal_Generated/Rules_and_Handover', origin='INTERNAL (delivery team)', sender='delivery team', channel='local (docs/), referenced by repo README', date='2026-09-14',
+    notes='The docs/ copy "HP-Account-Intelligence-Rules (1).docx" was byte-identical.', also=['07_Internal_Generated/Rules_and_Handover'])
+add(id='I02', name='HP-Account-Intelligence-Handover.docx', src=ROOT/'docs/HP-Account-Intelligence-Handover.docx', dest='07_Internal_Generated/Rules_and_Handover', origin='INTERNAL (delivery team)', sender='delivery team', channel='local (formerly docs/), referenced by repo README', date='2026-09-14',
     status='INTERNAL', used_for='Feature status (4 complete / 7 deterministic-only at the time) and dataset -> feature map. Reference account Astra.', notes='Status is a snapshot; superseded by later progress mails (all features complete except Strategy Chat by 14 Sep).')
 add(id='I03', name='Evidence-Score-Data-Availability-Answers.md', src=ROOT/'docs/Evidence-Score-Data-Availability-Answers.md', dest='07_Internal_Generated/Analysis', origin='INTERNAL', sender='delivery team', channel='git (first commit 2026-09-15)', date='2026-09-15', status='INTERNAL', used_for='Answers on what data exists for evidence scoring.')
 add(id='I04a', name='HP-Input-Data-Contract.md', src=ROOT/'docs/HP-Input-Data-Contract.md', dest='07_Internal_Generated/Analysis', origin='INTERNAL', sender='delivery team', channel='git (2026-09-16, last 2026-09-24)', date='2026-09-24', status='INTERNAL (living spec)', used_for='Input contract: every dataset key, columns, transforms, known defects, which widget each column becomes.')
@@ -227,7 +229,7 @@ for nm in ['QA-Report-Response_2026-09-16.md','QA-Report-Response_2026-09-16.pdf
         also=['05_Questions_and_Clarifications/Source_Documents'] if nm.endswith('.md') else [])
 for nm in ['api-envelope.md','api-errors.md','linting.md','observability.md','observability-backlog.md','branch-protection.md']:
     add(id='I07', name=nm, src=ROOT/'docs'/nm, dest='07_Internal_Generated/Engineering', origin='INTERNAL', sender='delivery team', channel='git (2026-09-16)', date='2026-09-16', status='INTERNAL (engineering)', used_for='Engineering conventions; no business-rule content.')
-add(id='I08', name='mails (1).txt', src=ROOT/'docs/mails (1).txt', dest='07_Internal_Generated/Email_Archive', origin='INTERNAL (paste of client mails)', sender='Palash Chatterjee (pasted from his mailbox)', channel='local paste, ~3 Sep 2026 ("12 days ago" relative to 22 Aug)', date='2026-09-03',
+add(id='I08', name='mails (1).txt', src=ROOT/'07_Internal_Generated/Email_Archive/mails (1).txt', dest='07_Internal_Generated/Email_Archive', origin='INTERNAL (paste of client mails)', sender='Palash Chatterjee (pasted from his mailbox)', channel='local paste, ~3 Sep 2026 ("12 days ago" relative to 22 Aug)', date='2026-09-03',
     status='REFERENCE', used_for='Plain-text copy of the 22 Aug - 3 Sep client mails (Dhruvi 22 Aug, 24 Aug, 31 Aug; Konika 3 Sep). Only local record of the pre-9 Sep thread.')
 add(id='I09', name='220-Account-Data-Questions-For-Client.md', src=ROOT/'NewDocs/220-Account-Data-Questions-For-Client.md', dest='07_Internal_Generated/Question_Trackers', origin='INTERNAL', sender='Yogesh Yadav -> client', channel=MAIN+', 23 Sep 2026 18:56 UTC', date='2026-09-23',
     status='INTERNAL - SENT TO CLIENT (answered by C35)', used_for='10 data discrepancies found in the 220-account drop.', also=['05_Questions_and_Clarifications/Source_Documents'])
@@ -272,12 +274,20 @@ def main():
         dests=[e['dest']]+e['also']
         info={'size':None,'md5':None,'mtime':None,'copied':[], 'local_path':None}
         src=e['src']
+        # docs/ and NewDocs/ were deleted on 25 Sep 2026 (user request) after every file was
+        # verified as copied or moved into this tree; fall back to the in-tree copy.
+        if src and not Path(src).exists():
+            for d in dests:
+                cand=OUT/d/Path(src).name
+                if cand.exists(): src=cand; break
         if src and Path(src).exists():
             src=Path(src); st=src.stat(); info['size']=st.st_size; info['mtime']=datetime.datetime.fromtimestamp(st.st_mtime).strftime('%Y-%m-%d %H:%M'); info['local_path']=str(src)
             if src.is_file(): info['md5']=md5(src)
             for d in dests:
                 dd=OUT/d; dd.mkdir(parents=True, exist_ok=True)
                 target=dd/src.name
+                if src.is_file() and target.exists() and src.resolve()==target.resolve():
+                    info['copied'].append(str(target.relative_to(OUT))); continue
                 if src.is_file() and st.st_size<=COPY_LIMIT:
                     if not target.exists() or target.stat().st_size!=st.st_size: shutil.copy2(src, target)
                     info['copied'].append(str(target.relative_to(OUT)))
@@ -295,7 +305,7 @@ def main():
     (OUT/'00_INDEX').mkdir(exist_ok=True)
     json.dump(rows, open(OUT/'00_INDEX/provenance_manifest.json','w'), indent=1)
     # PROVENANCE_REGISTER.md
-    L=['# Provenance Register', '', 'One block per important file: where it came from, where it lives now, which version it is, and what replaced it. Generated by the documentation build on 2026-09-25 from the Gmail threads, the local folders and ~/Downloads. IDs are stable and are referenced from MASTER_DOCUMENT_INDEX.md and DECISION_LOG.md.', '',
+    L=['# Provenance Register', '', '**Consolidation note (25 Sep 2026):** after every file was verified as copied (md5-identical) or moved into this tree, the original `docs/` and `NewDocs/` folders were deleted at the user\'s request. "Original local path" therefore names the file\'s location inside this tree for anything that used to live there; files under `220 account data /` and `~/Downloads` were left in place.', '', 'One block per important file: where it came from, where it lives now, which version it is, and what replaced it. Generated by the documentation build on 2026-09-25 from the Gmail threads, the local folders and ~/Downloads. IDs are stable and are referenced from MASTER_DOCUMENT_INDEX.md and DECISION_LOG.md.', '',
        '- **CLIENT** = authored/sent by BridgeAI (Dhruvi Patel, Konika Thakur, Sahaj Khunteta). **CLIENT DATA** = vendor exports the client delivered. **INTERNAL** = written by the delivery team. **GENERATED** = produced by a tool.',
        '- "NOT ON THIS MACHINE" = the email/Drive record proves the file exists but no local copy was found anywhere under the home directory; a `.MISSING.md` placeholder sits where the file should go.', '']
     for r in rows:

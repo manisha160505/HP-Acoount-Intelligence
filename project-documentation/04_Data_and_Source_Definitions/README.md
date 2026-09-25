@@ -1,6 +1,6 @@
 # Data and source definitions
 
-One folder per source. Each README states what the dataset contains, who provided it, where it came from, which accounts it covers, which features use it, known gaps, data-quality issues and whether it is authoritative or supporting. Small files are copied here; files above 6 MB are linked (`*.LINK.md` gives the local path and md5) — the originals stay in `220 account data /`, `docs/` and `NewDocs/`.
+One folder per source. Each README states what the dataset contains, who provided it, where it came from, which accounts it covers, which features use it, known gaps, data-quality issues and whether it is authoritative or supporting. Small files are copied here; files above 6 MB are linked (`*.LINK.md` gives the local path and md5) — the originals of the linked files stay in `220 account data /`; everything that was in `docs/` and `NewDocs/` now lives only here.
 
 | Folder | Source | Role |
 |---|---|---|

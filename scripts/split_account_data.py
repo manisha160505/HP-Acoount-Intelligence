@@ -115,11 +115,13 @@ PREDICTLEADS_FILE = SOURCE_DIR / "predictleads_combined_219_accounts.xlsx"
 # The client's master list is the canonical account identity: Sales Territory
 # Name (which is what the client calls the account), country, global parent and
 # account type. The vendor workbooks only know a company name and a domain.
-MASTER_LIST_FILE = REPO_ROOT / "docs" / "APAC_Account_Parent_Child_Mapping.xlsx"
+MASTER_LIST_FILE = (REPO_ROOT / "project-documentation" / "04_Data_and_Source_Definitions"
+                    / "Account_List" / "APAC_Account_Parent_Child_Mapping.xlsx")
 # Index of the filings crawl: 505 documents for 187 companies, each with a
 # document_url. The PDFs themselves are on the crawler's machine (local_path),
 # so this is what we can attach per account today.
-FILINGS_INDEX_FILE = REPO_ROOT / "NewDocs" / "filings 1.csv"
+FILINGS_INDEX_FILE = (REPO_ROOT / "project-documentation" / "04_Data_and_Source_Definitions"
+                      / "Filings" / "filings 1.csv")
 # The backend's dependency map, read (not copied) so readiness reflects what
 # the upload endpoint will actually regenerate.
 FEATURE_MAPPING_FILE = (REPO_ROOT / "hp-backend" / "src" / "app" / "api" / "v1"
