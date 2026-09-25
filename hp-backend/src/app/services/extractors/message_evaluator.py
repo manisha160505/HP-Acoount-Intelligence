@@ -170,7 +170,7 @@ def extract_message_evaluator(account_id: str) -> list[dict]:
     company_name = account_doc.get("name", "Target Account") if account_doc else "Target Account"
 
     if firmo_records and len(firmo_records) > 0:
-        f_name = str(firmo_records[0].get("Company Name") or firmo_records[0].get("company_name") or "").strip()
+        f_name = account_display_name(account_id, firmo_records[0])
         if f_name:
             company_name = f_name
 

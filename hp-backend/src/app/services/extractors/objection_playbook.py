@@ -176,7 +176,8 @@ NO_PROOF_POINT = None
 # 15 - case studies are ranked use-case first (the client's 25 Sep keys), so
 #      the proof on an area card can change even when its evidence has not.
 #      The version moves with it or the cache serves the old card.
-OBJECTION_PROMPT_VERSION = 15
+# 16 - generated prose names the account from the audit sheet (DEC-052).
+OBJECTION_PROMPT_VERSION = 16
 
 # The dataset key used everywhere in evidence, prompts and UI. Never the Source A
 # sheet name - the application speaks in dataset keys.
