@@ -125,3 +125,9 @@ NewDocs/*
 # the per-account CSVs; the validator and its baseline stay local.
 scripts/split_baseline.json
 scripts/validate_split_data.py
+
+# Local zip snapshots. Archive.zip is the 220-account data (160MB) and
+# project-documentation.zip is a copy of the already-tracked docs folder
+# (624MB, includes the ignored client files). Never committed.
+Archive.zip
+project-documentation.zip

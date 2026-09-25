@@ -21,18 +21,22 @@ Background material (decks, PDFs, POCs)? → 08_Reference_Material/
 ```
 
 ## Status values
+
 CURRENT · APPROVED · SUPERSEDED · OPEN · UNRESOLVED · PARTIALLY RESOLVED · REFERENCE · INTERNAL · NOT ON THIS MACHINE (listed in MISSING_FILES.md, with a `.MISSING.md` placeholder in the folder where the file belongs).
 
 ## Classification of statements
+
 CLIENT DECISION · CLIENT DATA · CLIENT REFERENCE · INTERNAL IMPLEMENTATION DECISION · INTERNAL ASSUMPTION · OPEN QUESTION. Internal assumptions are never presented as client rules; where the two disagree the conflict register records both.
 
 ## The source of truth going forward
+
 1. **Client answers** (`02_Decision_Maker/clarifying opens_2.docx`, `clarifying opens_1  Dhruvi.docx`) and the dated email decisions in `DECISION_LOG.md` override the older client documents on the same point.
 2. **Client logic documents** — Recommendation Tuning Logic FINAL v4, Urgency Score Updated Final, Live Signal Scoring Logic, Tech Landscape Confidence FINAL, the Rulebook (FINAL 23 Sep — not yet on this machine; v1 17 Sep is the local copy).
 3. **HP_ABX_v3_final** for everything the above do not cover.
 4. **HP-Account-Intelligence-Rules.docx** is INTERNAL and under client review; it does not outrank any of the above.
 
 ## Housekeeping
+
 - Files bigger than 6 MB and whole data folders are linked (`*.LINK.md`), not copied.
 - The repository's `.gitignore` ignores `*.docx *.xlsx *.pptx *.pdf *.csv` everywhere, so the client files in this tree stay uncommitted; the Markdown indexes are committable.
 - To refresh the provenance register or the question registers after a new file or a client answer, edit and re-run the scripts in `00_INDEX/_build/` (see its README).
