@@ -132,10 +132,12 @@ Numbers and quotes come from the plain-text extractions of the documents; the de
 ### I-02 · Public Bank domain
 - Decisions List / Open-Items / UNRESOLVED_v2 A4: domain **held**. · `_CORRECTIONS.txt` (split, 25 Sep 05:16 UTC): "derived: publicbankgroup.com" from the Website column. · Client: pbebank.com.
 - **Resolved 25 Sep:** audit sheet says pbebank.com and accepts the Lao-named rows (DEC-055). The split must be changed to pbebank.com. · **Needs confirmation:** NO.
+- **Applied 25 Sep (split rerun):** `split_account_data.py` reads the audit sheet; Public Bank's domain is pbebank.com and it now holds the 274 PredictLeads rows that were unclaimed (38 news, 47 tech detections, 100 connections, 82 subpages, 5 similar companies, 1 company, 1 extended_company). **CLOSED.**
 
 ### I-03 · Alias direction
 - Decisions List D5: "PredictLeads domain is canonical" (posco.com, shell.com.ph …). · Split: rewrites posco.com → posco-inc.com and shell.com.ph → pilipinas.shell.com.ph, labelled "explicit approved alias" (toward Explorium).
 - **Resolved 25 Sep:** audit sheet Master Domain = posco.com and shell.com.ph (DEC-055); the split's rewrites must be reversed. · **Needs confirmation:** NO (engineering fix).
+- **Applied 25 Sep (split rerun):** aliases now point from the vendor domain toward the audit's column D (posco-inc.com → posco.com, pilipinas.shell.com.ph → shell.com.ph, publicbankgroup.com → pbebank.com; Shiseido and Stanley unchanged). 219/219 split domains equal the audit sheet. **CLOSED.**
 
 ### I-04 · Jabil Inc. SEC 10-Q rows
 - Decisions List / Open-Items / Tracker: Singapore only. · OPEN_v2 C5 (sent): attach to **both** Jabil accounts as keyed, labelled as the parent's filings, if no answer.

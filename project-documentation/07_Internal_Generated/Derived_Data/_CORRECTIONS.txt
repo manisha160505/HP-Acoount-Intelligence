@@ -1,5 +1,5 @@
 Values this run derived rather than copied from source
-Generated 2026-09-25T05:23:33.342080+00:00
+Generated 2026-09-25T08:27:37.183793+00:00
 
 Each line is a place the script did not take the source at face value.
 If a line here is wrong, the output is wrong.
@@ -7,7 +7,7 @@ If a line here is wrong, the output is wrong.
 PUBLIC BANK BHD
   Company Domain:
     source:  nan
-    derived: publicbankgroup.com
+    derived: pbebank.com
     reason:  blank in firmographics, recovered from the Website column
 
 WESTPAC BANKING CORPORATION
@@ -46,29 +46,35 @@ WESTPAC BANKING CORPORATION
     derived: WESTPAC_BANKING_CORPORATION_NZ
     reason:  2 workbooks share this company name; disambiguated so they do not overwrite each other
 
-posco-inc.com
+posco.com
   source domain:
-    source:  posco.com
-    derived: posco-inc.com
-    reason:  explicit approved alias: the combined workbooks key this account under a different domain than its Explorium workbook
+    source:  posco-inc.com
+    derived: posco.com
+    reason:  explicit approved alias: a source workbook keys this account under a different domain than the client domain audit
 
-pilipinas.shell.com.ph
+shell.com.ph
   source domain:
-    source:  shell.com.ph
-    derived: pilipinas.shell.com.ph
-    reason:  explicit approved alias: the combined workbooks key this account under a different domain than its Explorium workbook
+    source:  pilipinas.shell.com.ph
+    derived: shell.com.ph
+    reason:  explicit approved alias: a source workbook keys this account under a different domain than the client domain audit
 
 corp.shiseido.com
   source domain:
     source:  shiseido.co.jp
     derived: corp.shiseido.com
-    reason:  explicit approved alias: the combined workbooks key this account under a different domain than its Explorium workbook
+    reason:  explicit approved alias: a source workbook keys this account under a different domain than the client domain audit
 
 stanley.co.jp
   source domain:
     source:  stanley-electric.com
     derived: stanley.co.jp
-    reason:  explicit approved alias: the combined workbooks key this account under a different domain than its Explorium workbook
+    reason:  explicit approved alias: a source workbook keys this account under a different domain than the client domain audit
+
+pbebank.com
+  source domain:
+    source:  publicbankgroup.com
+    derived: pbebank.com
+    reason:  explicit approved alias: a source workbook keys this account under a different domain than the client domain audit
 
 JABIL_CIRCUIT_SINGAPORE_PTE_LTD
   domain-keyed datasets:

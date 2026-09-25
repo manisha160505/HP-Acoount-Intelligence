@@ -117,6 +117,14 @@ PREDICTLEADS_FILE = SOURCE_DIR / "predictleads_combined_219_accounts.xlsx"
 # account type. The vendor workbooks only know a company name and a domain.
 MASTER_LIST_FILE = (REPO_ROOT / "project-documentation" / "04_Data_and_Source_Definitions"
                     / "Account_List" / "APAC_Account_Parent_Child_Mapping.xlsx")
+# The client's domain audit (DEC-052, 25 Sep): column D "Master Domain" is the
+# canonical domain per account and the primary key for data mapping; column B
+# is the name shown on the dashboard. 219 rows - Astra is absent because its
+# data is the separate seed delivery. Only the "219 Account Audit" sheet is
+# read; "Problems Only" and "Summary" are derived views of it.
+DOMAIN_AUDIT_FILE = (REPO_ROOT / "project-documentation" / "04_Data_and_Source_Definitions"
+                     / "Account_List" / "PredictLeads_219_Account_Domain_Audit.xlsx")
+DOMAIN_AUDIT_SHEET = "219 Account Audit"
 # Index of the filings crawl: 505 documents for 187 companies, each with a
 # document_url. The PDFs themselves are on the crawler's machine (local_path),
 # so this is what we can attach per account today.
@@ -271,16 +279,21 @@ LEGACY_DROPPED_COLUMNS = {
 # "Posco International" into Posco Group, and those are different entities.
 # Each line below was checked against both workbooks individually.
 #
-#   <domain as it appears in a combined workbook>: <the account's domain>
+# The target of every alias is the account's canonical domain from the
+# client's domain audit (DEC-052), so aliases point from whatever a vendor
+# used toward that sheet's column D - never the other way round.
+#
+#   <domain as it appears in a source workbook>: <the account's domain>
 DOMAIN_ALIASES = {
-    "posco.com":            "posco-inc.com",        # Posco Group (KR)
-    "shell.com.ph":         "pilipinas.shell.com.ph",  # Pilipinas Shell (PH)
-    "shiseido.co.jp":       "corp.shiseido.com",    # Shiseido Company, Limited
-    "stanley-electric.com": "stanley.co.jp",        # Stanley Electric Co., Ltd.
-    # pbebank.com is deliberately NOT mapped: PredictLeads labels it "Public
-    # Bank Lao Limited", a separate entity from Public Bank Bhd (MY), whose
-    # workbook has no domain at all. Folding them would attribute one
-    # country's hiring and technology to another's account.
+    "posco-inc.com":          "posco.com",          # Posco Group (KR), Explorium
+    "pilipinas.shell.com.ph": "shell.com.ph",       # Pilipinas Shell (PH), Explorium
+    "shiseido.co.jp":         "corp.shiseido.com",  # Shiseido Company, Limited
+    "stanley-electric.com":   "stanley.co.jp",      # Stanley Electric Co., Ltd.
+    # Public Bank Bhd's Explorium workbook has a blank Company Domain; the
+    # Website fallback gives publicbankgroup.com. The audit names pbebank.com,
+    # and the client accepted the PredictLeads rows there that are labelled
+    # "Public Bank Lao Limited" (a wholly-owned subsidiary) - DEC-052.
+    "publicbankgroup.com":    "pbebank.com",        # Public Bank Bhd (MY)
 }
 
 
@@ -415,6 +428,7 @@ class SourceData:
         self._hp_intent: pd.DataFrame | None = None
         self._hp_intent_header: list[list[str]] | None = None
         self._master: dict | None = None
+        self._audit: dict | None = None
         self._filings: pd.DataFrame | None = None
 
     # -- PredictLeads -----------------------------------------------------
@@ -579,6 +593,43 @@ class SourceData:
             self._master = rows
         return self._master if self._master is not False else None
 
+    # -- Client domain audit ---------------------------------------------
+    def domain_audit(self) -> dict[str, dict] | None:
+        """Rows of the 219-account domain audit, keyed by territory name.
+
+        Column B ("Master Company") is written the same way as the master
+        list's Sales Territory Name - "NAME - XX" - so the two join on it
+        directly. Whitespace is collapsed on both sides of that join.
+        """
+        if self._audit is None:
+            if not DOMAIN_AUDIT_FILE.exists():
+                self._audit = False
+                return None
+            try:
+                df = pd.read_excel(DOMAIN_AUDIT_FILE, sheet_name=DOMAIN_AUDIT_SHEET,
+                                   dtype=str)
+            except Exception as exc:
+                print(f"  ! could not read domain audit: {exc}")
+                self._audit = False
+                return None
+            df.columns = [str(c).strip() for c in df.columns]
+            rows: dict[str, dict] = {}
+            for _, r in df.iterrows():
+                company = _clean(r.get("Master Company"))
+                if not company:
+                    continue
+                rows[_territory_key(company)] = {
+                    "master_company": company,
+                    "country": _clean(r.get("Country")),
+                    "master_domain": normalize_domain(r.get("Master Domain")),
+                    "predictleads_company": _clean(r.get("PredictLeads Company")),
+                    "predictleads_domain": normalize_domain(r.get("PredictLeads Domain")),
+                    "domain_check": _clean(r.get("Domain Check")),
+                    "considerations": _clean(r.get("considerations to keep in mind")),
+                }
+            self._audit = rows
+        return self._audit if self._audit is not False else None
+
     # -- Filings index -----------------------------------------------------
     def filings_index(self) -> pd.DataFrame | None:
         """filings 1.csv as delivered: strings only, blanks kept blank.
@@ -611,6 +662,11 @@ def _clean(value) -> str | None:
     return text if text and text.lower() != "nan" else None
 
 
+def _territory_key(territory: str) -> str:
+    """Join key for territory names: upper case, single spaces."""
+    return " ".join(str(territory).upper().split())
+
+
 def _territory_base(territory: str) -> str:
     """'WESTPAC BANKING CORPORATION - AU' -> 'WESTPAC BANKING CORPORATION'."""
     return re.sub(r"\s*-\s*[A-Z]{2}$", "", str(territory).strip())
@@ -630,6 +686,9 @@ class Account:
         # The client's master-list row, attached by attach_master_list() once
         # the full account list is known. None when the list has no row.
         self.master: dict | None = None
+        # The client's domain-audit row, attached by attach_domain_audit().
+        # None for Astra, which the audit leaves out.
+        self.audit: dict | None = None
 
         # Company name alone is not unique across the source set. Three
         # different Ministry of Defence workbooks (MY, VN, SG) and two Westpac
@@ -821,6 +880,46 @@ def attach_master_list(accounts: list[Account], sources: SourceData) -> dict:
         stats["matched"] += 1
     stats["accounts_without_master_row"] = sorted(
         a.slug for a in accounts if a.master is None)
+    return stats
+
+
+def attach_domain_audit(accounts: list[Account], sources: SourceData) -> dict:
+    """Give each account its domain-audit row and make its domain the audit's.
+
+    Joined on the master list's territory name, so this runs after
+    attach_master_list(). DOMAIN_ALIASES is expected to have already brought
+    every vendor domain to the audit's column D; an account whose domain still
+    differs is overridden here and reported, because its vendor rows may still
+    sit under the old domain until an alias is added.
+    """
+    audit = sources.domain_audit()
+    stats = {"audit_rows": 0, "matched": 0, "domain_overrides": [],
+             "accounts_without_audit_row": [], "unmatched_audit_rows": []}
+    if audit is None:
+        print("  ! domain audit not readable; domains come from the vendor workbooks")
+        return stats
+    stats["audit_rows"] = len(audit)
+    used = set()
+    for acct in accounts:
+        territory = (acct.master or {}).get("sales_territory_name")
+        row = audit.get(_territory_key(territory)) if territory else None
+        if row is None:
+            stats["accounts_without_audit_row"].append(acct.slug)
+            continue
+        acct.audit = row
+        used.add(_territory_key(territory))
+        stats["matched"] += 1
+        canonical = row["master_domain"]
+        if canonical and acct.domain != canonical:
+            record_correction(
+                acct.slug, "domain", acct.domain, canonical,
+                "client domain audit (DEC-052) names a different canonical "
+                "domain; rows keyed under the old domain need an alias")
+            stats["domain_overrides"].append(
+                f"{acct.slug}: {acct.domain or '(blank)'} -> {canonical}")
+            acct.domain = canonical
+    stats["unmatched_audit_rows"] = sorted(
+        row["master_company"] for key, row in audit.items() if key not in used)
     return stats
 
 
@@ -1318,6 +1417,7 @@ def account_identity(account: Account) -> dict:
         "domain": account.domain,
         "name_for_upload": master.get("sales_territory_name") or account.name,
         "master_list": account.master,
+        "domain_audit": account.audit,
     }
 
 
@@ -1437,7 +1537,10 @@ def write_root_indexes(manifests: list[dict], deps: dict, nobody_has: set[str]):
     fields = ["account_slug", "account_name", "sales_territory_name", "country",
               "domain", "global_parent", "account_type", "merge_group_id",
               "parent_child_group", "parent_child_role",
-              "recommended_global_account_id", "explorium_file",
+              "recommended_global_account_id",
+              "audit_master_company", "audit_master_domain",
+              "audit_predictleads_company", "audit_predictleads_domain",
+              "audit_domain_check", "audit_considerations", "explorium_file",
               "tables_with_rows", "tables_total", "missing_tables",
               "reference_tables_with_rows", "filings_index_rows",
               "features_complete", "features_partial", "features_none",
@@ -1447,6 +1550,7 @@ def write_root_indexes(manifests: list[dict], deps: dict, nobody_has: set[str]):
         writer.writeheader()
         for m in manifests:
             master = (m.get("account") or {}).get("master_list") or {}
+            audit = (m.get("account") or {}).get("domain_audit") or {}
             tables = m["datasets"]
             have = [k for k, v in tables.items() if v.get("rows", 0) > 0]
             missing = [k for k, v in tables.items() if v.get("rows", 0) == 0]
@@ -1466,6 +1570,12 @@ def write_root_indexes(manifests: list[dict], deps: dict, nobody_has: set[str]):
                 "parent_child_role": master.get("parent_child_role") or "",
                 "recommended_global_account_id":
                     master.get("recommended_global_account_id") or "",
+                "audit_master_company": audit.get("master_company") or "",
+                "audit_master_domain": audit.get("master_domain") or "",
+                "audit_predictleads_company": audit.get("predictleads_company") or "",
+                "audit_predictleads_domain": audit.get("predictleads_domain") or "",
+                "audit_domain_check": audit.get("domain_check") or "",
+                "audit_considerations": audit.get("considerations") or "",
                 "explorium_file": m.get("explorium_file") or "",
                 "tables_with_rows": len(have),
                 "tables_total": len(tables),
@@ -1687,6 +1797,7 @@ def write_run_summary(manifests: list[dict], sources: SourceData,
         "domain_aliases": DOMAIN_ALIASES,
         "account_domains": {m["account_slug"]: m["domain"] for m in manifests},
         "master_list": RUN_STATS.get("master_list", {}),
+        "domain_audit": RUN_STATS.get("domain_audit", {}),
         "filings_index": RUN_STATS.get("filings_index", {}),
         "reference_source_rows": reference_rows,
         "datasets_nobody_has": manifests[0].get("datasets_nobody_has", []) if manifests else [],
@@ -1947,6 +2058,32 @@ def main():
     if args.limit:
         accounts = accounts[: args.limit]
 
+    full_run = not args.account and not args.limit
+
+    RUN_STATS["master_list"] = attach_master_list(accounts, sources)
+    ms = RUN_STATS["master_list"]
+    print(f"Master list: {ms['matched']} of {ms['master_rows']} territories matched "
+          f"to an account folder")
+    if full_run and ms["unmatched_territories"]:
+        print(f"  ! unmatched territories: {', '.join(ms['unmatched_territories'][:8])}")
+    if ms["accounts_without_master_row"]:
+        print(f"  ! accounts with no master-list row: "
+              f"{', '.join(ms['accounts_without_master_row'][:8])}")
+
+    # Before the alias and shared-domain checks below: the audit can change
+    # an account's domain, and those checks must see the final one.
+    RUN_STATS["domain_audit"] = attach_domain_audit(accounts, sources)
+    da = RUN_STATS["domain_audit"]
+    print(f"Domain audit: {da['matched']} of {da['audit_rows']} rows matched "
+          f"to an account")
+    if da["accounts_without_audit_row"]:
+        print(f"  accounts with no audit row: "
+              f"{', '.join(da['accounts_without_audit_row'][:8])}")
+    if full_run and da["unmatched_audit_rows"]:
+        print(f"  ! unmatched audit rows: {', '.join(da['unmatched_audit_rows'][:8])}")
+    for line in da["domain_overrides"]:
+        print(f"  ! domain overridden by audit, add an alias for the old one: {line}")
+
     # Aliases are applied inside normalize_domain, which runs per row across
     # every source; recording them there would produce tens of thousands of
     # identical lines. One line per alias that actually matched an account is
@@ -1956,8 +2093,8 @@ def main():
         if account_domain in account_domains:
             record_correction(
                 account_domain, "source domain", source_domain, account_domain,
-                "explicit approved alias: the combined workbooks key this "
-                "account under a different domain than its Explorium workbook")
+                "explicit approved alias: a source workbook keys this account "
+                "under a different domain than the client domain audit")
 
     # A primary that does not exist would silently withhold rows from the
     # secondary and give them to nobody, so the mapping is checked against the
@@ -1977,18 +2114,6 @@ def main():
                     "none",
                     f"{shared_domain} is shared with {primary}, which keeps the "
                     f"rows; no source field splits them by entity")
-
-    full_run = not args.account and not args.limit
-
-    RUN_STATS["master_list"] = attach_master_list(accounts, sources)
-    ms = RUN_STATS["master_list"]
-    print(f"Master list: {ms['matched']} of {ms['master_rows']} territories matched "
-          f"to an account folder")
-    if full_run and ms["unmatched_territories"]:
-        print(f"  ! unmatched territories: {', '.join(ms['unmatched_territories'][:8])}")
-    if ms["accounts_without_master_row"]:
-        print(f"  ! accounts with no master-list row: "
-              f"{', '.join(ms['accounts_without_master_row'][:8])}")
 
     RUN_STATS["filings_index"] = assign_filings(accounts, sources)
     fs = RUN_STATS["filings_index"]

@@ -9,6 +9,6 @@
 - Blank domains: Westpac = westpac.com.au; Public Bank = pbebank.com (RESOLVED 25 Sep by the audit sheet).
 - Hierarchy: Explorium Company Hierarchy sheet; blank parent ignored; nothing shown when absent.
 
-**INTERNAL ASSUMPTIONS in the 25 Sep split** (`07_Internal_Generated/Derived_Data/_CORRECTIONS.txt`): Public Bank derived as publicbankgroup.com (conflicts with "held"); two aliases rewritten toward Explorium domains (direction conflicts with "PredictLeads canonical"); Jabil SG / MUFG Bangkok get no domain-keyed rows; Astra datasets incl. contacts filled from the seed. See CONFLICT_REGISTER I-02, I-03, I-09.
+**INTERNAL ASSUMPTIONS in the 25 Sep split** (`07_Internal_Generated/Derived_Data/_CORRECTIONS.txt`): domains taken from the audit sheet since the 25 Sep rerun (Public Bank = pbebank.com; aliases point toward the audit's domains; I-02 and I-03 closed); Jabil SG / MUFG Bangkok get no domain-keyed rows; Astra datasets incl. contacts filled from the seed. See CONFLICT_REGISTER I-02, I-03, I-09.
 
 **OPEN:** Name + Country columns on every PredictLeads row (D3, "will give that"). Resolved 25 Sep: canonical domains (D1), Public Bank (D4/D6).

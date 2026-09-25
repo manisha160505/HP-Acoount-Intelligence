@@ -106,7 +106,7 @@
 - **Client answer:** opens_1 answer 3: "pls look at below two domains: pbebank.com, westpac.com.au"; "Please populate Company Domain in the next delivery -> noted".
 - **Date answered:** 2026-09-25
 - **Status:** **RESOLVED**
-- **Does the answer fully resolve it?** Westpac AU = westpac.com.au, Westpac NZ = westpac.co.nz, Public Bank = pbebank.com per the 25 Sep audit sheet, where the PredictLeads row "Public Bank Lao Limited" is marked "OK" and the email says "domain is matching irrespective of their names". This overrides our UNRESOLVED A4 concern (the client has decided the Lao rows belong to the account). The split derived publicbankgroup.com and must change.
+- **Does the answer fully resolve it?** Westpac AU = westpac.com.au, Westpac NZ = westpac.co.nz, Public Bank = pbebank.com per the 25 Sep audit sheet, where the PredictLeads row "Public Bank Lao Limited" is marked "OK" and the email says "domain is matching irrespective of their names". This overrides our UNRESOLVED A4 concern (the client has decided the Lao rows belong to the account). Applied in the split on 25 Sep (pbebank.com).
 - **Implementation impact:** Public Bank PredictLeads rows are used under pbebank.com.
 
 ### D5 · Vendor domain mismatches (Posco, Pilipinas Shell, Shiseido, Stanley Electric)
@@ -117,7 +117,7 @@
 - **Client answer:** opens_1 answer 4: canonical domains are the PredictLeads ones; four overrides: Posco Group → posco.com, Pilipinas Shell → shell.com.ph, Shiseido → corp.shiseido.com, Stanley Electric → stanley.co.jp; vendors are fetched by Company Name + Country, so differing domains do not mean a wrong company; "where domain matching is ambiguous, use Company Name + Country as the fallback".
 - **Date answered:** 2026-09-24
 - **Status:** **RESOLVED**
-- **Does the answer fully resolve it?** Yes. Note the split rewrites two aliases toward the Explorium domains (internal conflict I-03) — engineering must align with the client direction.
+- **Does the answer fully resolve it?** Yes. Note the split rewrites two aliases toward the Explorium domains (internal conflict I-03); aligned on 25 Sep, the aliases now point toward the audit sheet's domains.
 - **Implementation impact:** Domain joins for those accounts; the alias table.
 
 ### D6 · pbebank.com: Public Bank Bhd or Public Bank Lao?

@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-09-25T05:23:33.342080+00:00",
+  "generated_at": "2026-09-25T08:27:37.183793+00:00",
   "accounts": 220,
   "source_rows": {
     "news_events": 14289,
@@ -14,14 +14,14 @@
     "google_news": 17134
   },
   "unclaimed_rows": {
-    "news_events": 38,
-    "company": 1,
-    "extended_company": 1,
+    "news_events": 0,
+    "company": 0,
+    "extended_company": 0,
     "job_openings": 0,
-    "technology_detections": 47,
-    "connections": 100,
-    "subpages": 82,
-    "similar_companies": 5,
+    "technology_detections": 0,
+    "connections": 0,
+    "subpages": 0,
+    "similar_companies": 0,
     "hp_category_intent": 0,
     "google_news": 0
   },
@@ -31,7 +31,7 @@
       "account": "PUBLIC BANK BHD",
       "field": "Company Domain",
       "source": "nan",
-      "derived": "publicbankgroup.com",
+      "derived": "pbebank.com",
       "reason": "blank in firmographics, recovered from the Website column"
     },
     {
@@ -77,32 +77,39 @@
       "reason": "2 workbooks share this company name; disambiguated so they do not overwrite each other"
     },
     {
-      "account": "posco-inc.com",
+      "account": "posco.com",
       "field": "source domain",
-      "source": "posco.com",
-      "derived": "posco-inc.com",
-      "reason": "explicit approved alias: the combined workbooks key this account under a different domain than its Explorium workbook"
+      "source": "posco-inc.com",
+      "derived": "posco.com",
+      "reason": "explicit approved alias: a source workbook keys this account under a different domain than the client domain audit"
     },
     {
-      "account": "pilipinas.shell.com.ph",
+      "account": "shell.com.ph",
       "field": "source domain",
-      "source": "shell.com.ph",
-      "derived": "pilipinas.shell.com.ph",
-      "reason": "explicit approved alias: the combined workbooks key this account under a different domain than its Explorium workbook"
+      "source": "pilipinas.shell.com.ph",
+      "derived": "shell.com.ph",
+      "reason": "explicit approved alias: a source workbook keys this account under a different domain than the client domain audit"
     },
     {
       "account": "corp.shiseido.com",
       "field": "source domain",
       "source": "shiseido.co.jp",
       "derived": "corp.shiseido.com",
-      "reason": "explicit approved alias: the combined workbooks key this account under a different domain than its Explorium workbook"
+      "reason": "explicit approved alias: a source workbook keys this account under a different domain than the client domain audit"
     },
     {
       "account": "stanley.co.jp",
       "field": "source domain",
       "source": "stanley-electric.com",
       "derived": "stanley.co.jp",
-      "reason": "explicit approved alias: the combined workbooks key this account under a different domain than its Explorium workbook"
+      "reason": "explicit approved alias: a source workbook keys this account under a different domain than the client domain audit"
+    },
+    {
+      "account": "pbebank.com",
+      "field": "source domain",
+      "source": "publicbankgroup.com",
+      "derived": "pbebank.com",
+      "reason": "explicit approved alias: a source workbook keys this account under a different domain than the client domain audit"
     },
     {
       "account": "JABIL_CIRCUIT_SINGAPORE_PTE_LTD",
@@ -148,10 +155,11 @@
     }
   ],
   "domain_aliases": {
-    "posco.com": "posco-inc.com",
-    "shell.com.ph": "pilipinas.shell.com.ph",
+    "posco-inc.com": "posco.com",
+    "pilipinas.shell.com.ph": "shell.com.ph",
     "shiseido.co.jp": "corp.shiseido.com",
-    "stanley-electric.com": "stanley.co.jp"
+    "stanley-electric.com": "stanley.co.jp",
+    "publicbankgroup.com": "pbebank.com"
   },
   "account_domains": {
     "ACCENTURE_INC": "accenture.com",
@@ -304,9 +312,9 @@
     "PERTAMINA_PERSERO_PT": "pertamina.com",
     "PETROLIAM_NASIONAL_BERHAD": "petronas.com",
     "PHILIPPINE_NATIONAL_POLICE": "pnp.gov.ph",
-    "PILIPINAS_SHELL_PETROLEUM_CORPORATION": "pilipinas.shell.com.ph",
+    "PILIPINAS_SHELL_PETROLEUM_CORPORATION": "shell.com.ph",
     "PIONEER_CORPORATION": "global.pioneer",
-    "POSCO_GROUP": "posco-inc.com",
+    "POSCO_GROUP": "posco.com",
     "PRICEWATERHOUSECOOPERS": "pwc.co.nz",
     "PTT_GLOBAL_CHEMICAL_PUBLIC_COMPANY_LIMITED": "pttgcgroup.com",
     "PTT_PUBLIC_COMPANY_LIMITED": "pttplc.com",
@@ -318,7 +326,7 @@
     "PT_BANK_RAKYAT_INDONESIA_PERSERO": "bri.co.id",
     "PT_PERUSAHAAN_LISTRIK_NEGARA_PERSERO": "pln.co.id",
     "PT_TIARA_MARGA_TRAKINDO_CATEGORY1_PARTIAL": "trakindo.co.id",
-    "PUBLIC_BANK_BHD": "publicbankgroup.com",
+    "PUBLIC_BANK_BHD": "pbebank.com",
     "QANTAS_AIRWAYS": "qantas.com",
     "RAMSAY_HEALTH_CARE": "ramsayhealth.com",
     "RENESAS_ELECTRONICS_CORPORATION": "renesas.com",
@@ -380,6 +388,15 @@
     "matched": 220,
     "unmatched_territories": [],
     "accounts_without_master_row": []
+  },
+  "domain_audit": {
+    "audit_rows": 219,
+    "matched": 219,
+    "domain_overrides": [],
+    "accounts_without_audit_row": [
+      "PT_ASTRA_INTERNATIONAL_TBK"
+    ],
+    "unmatched_audit_rows": []
   },
   "filings_index": {
     "rows": 505,
