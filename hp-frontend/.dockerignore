@@ -1,0 +1,6 @@
+# .env.local points NEXT_PUBLIC_API_URL at a laptop backend; if it reached
+# `next build` it would be inlined into the production bundle.
+.env*
+node_modules/
+.next/
+tsconfig.tsbuildinfo

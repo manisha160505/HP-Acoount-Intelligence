@@ -1,0 +1,51 @@
+# Single-VM production stack: backend + frontend behind Caddy (HTTPS).
+#
+#     docker compose -f docker-compose.prod.yml up -d --build
+#
+# Configuration comes from the gitignored .env next to this file (copy
+# deploy/env.prod.example). Compose reads it both for ${SITE_ADDRESS} below and,
+# through env_file, as the backend's environment. MongoDB is Atlas, not a
+# container here: the retrieval layer needs Atlas Vector Search.
+
+services:
+  backend:
+    build: ./hp-backend
+    env_file:
+      - .env
+    volumes:
+      # Uploaded account files. Mongo stores paths relative to /app, so this
+      # directory is the only copy of every upload - it is on the VM disk,
+      # which the daily snapshot schedule backs up.
+      - ./hp-backend/data:/app/data
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./hp-frontend
+      dockerfile: Dockerfile.prod
+      args:
+        NEXT_PUBLIC_API_URL: https://${SITE_ADDRESS}
+    restart: unless-stopped
+    depends_on:
+      - backend
+
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+    depends_on:
+      - backend
+      - frontend
+
+volumes:
+  caddy_data:
+  caddy_config:

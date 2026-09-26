@@ -1,0 +1,21 @@
+# One public address, two containers. The frontend calls
+# ${NEXT_PUBLIC_API_URL}/api/v1, so API traffic arrives on the same origin and
+# no CORS is involved. Caddy obtains and renews the HTTPS certificate itself.
+
+{$SITE_ADDRESS} {
+	handle /api/* {
+		# -1 flushes every write, so Strategy Chat's SSE stream is not buffered.
+		reverse_proxy backend:8000 {
+			flush_interval -1
+		}
+	}
+
+	handle /health {
+		reverse_proxy backend:8000
+	}
+
+	handle {
+		encode gzip
+		reverse_proxy frontend:3000
+	}
+}
