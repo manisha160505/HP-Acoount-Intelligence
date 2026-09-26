@@ -6,6 +6,7 @@ from bson import ObjectId
 
 from app.config import scoring as _scoring
 from app.database.mongodb import get_db
+from app.observability import pipeline
 from app.services.extractors.datasets import (
     account_display_name,
     read_dataset_records,
@@ -454,6 +455,7 @@ def _score_card_confidence(categories: list, intent_scores: dict) -> dict:
 @requires_local_datasets(
     "technographics", "technology_detections", "webstack",
 )
+@pipeline.feature("tech_landscape")
 def extract_tech_landscape(account_id: str) -> list[dict]:  # noqa: PLR0912, PLR0915 - branch-heavy extractor predates the lint gate
     db = get_db()
     now = datetime.now(UTC)
@@ -475,6 +477,11 @@ def extract_tech_landscape(account_id: str) -> list[dict]:  # noqa: PLR0912, PLR
     techno_records = _read_dataset_records(account_id, "technographics")
     detection_records = _read_dataset_records(account_id, "technology_detections")
     webstack_records = _read_dataset_records(account_id, "webstack")
+
+    pipeline.step("datasets", "", firmographics=len(firmo_records or []),
+                  technographics=len(techno_records or []),
+                  detections=len(detection_records or []),
+                  webstack=len(webstack_records or []))
 
     results = []
 
@@ -918,6 +925,8 @@ def extract_tech_landscape(account_id: str) -> list[dict]:  # noqa: PLR0912, PLR
         logger.info("tech landscape: %d card(s) suppressed for %s - no HP "
                     "rulebook rule supports the detected technology",
                     len(confidence_report["suppressed"]), account_id)
+        pipeline.guardrail(len(confidence_report["suppressed"]),
+                           "no rulebook rule supports the detected technology")
 
     strategic_read_text = narrative_report.get("strategic_read")
 
@@ -935,6 +944,10 @@ def extract_tech_landscape(account_id: str) -> list[dict]:  # noqa: PLR0912, PLR
     ])
     mapped_count = len([c for c in hp_categories if c["is_opportunity"]])
     whitespace_cat_count = len([c for c in hp_categories if c["whitespace_count"] > 0])
+
+    pipeline.step("categories", "", detected_tech=detected_tech_count,
+                  categories=len(hp_categories), hp_mapped=hp_line_categories,
+                  opportunity=mapped_count, whitespace=whitespace_cat_count)
 
     # The header total and the per-category counts answer different questions:
     # `detected_tech_count` is every entry in the technographics export, while

@@ -73,6 +73,7 @@ import re
 from datetime import UTC, date, datetime
 
 from app.config import scoring as _scoring
+from app.observability import pipeline
 from app.services.hp import intent_topic_map
 
 logger = logging.getLogger(__name__)
@@ -996,6 +997,11 @@ def score(drivers: list, scored_on: date | None = None) -> dict:
             covered_weight += WEIGHTS[driver["key"]] * (have_pts / total_pts)
     coverage = _round_half_up(covered_weight * 100, 1)
     publishable = coverage >= COVERAGE_MIN_PERCENT
+
+    pipeline.step("urgency", "%s  coverage %.1f%% (minimum %.1f%%)"
+                  % ("%d/%d" % (total, DRIVER_MAX) if publishable
+                     else "WITHHELD - too little of the account is measured",
+                     coverage, COVERAGE_MIN_PERCENT))
 
     return {
         "score": total if publishable else None,

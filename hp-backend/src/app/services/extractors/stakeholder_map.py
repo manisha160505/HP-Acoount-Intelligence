@@ -9,6 +9,7 @@ from bson import ObjectId
 
 from app.core.llm import generate_gpt4o_json_completion
 from app.database.mongodb import get_db
+from app.observability import pipeline
 from app.services.extractors import grounding
 from app.services.extractors.datasets import (
     find_file_path,
@@ -707,6 +708,7 @@ def generate_stakeholder_talking_points(account_id: str, contacts: list[dict],
     # Cached: reuse while the contacts AND the account evidence are unchanged.
     if (existing and existing.get("status") == "available"
             and existing.get("data", {}).get("contacts_fingerprint") == fingerprint):
+        pipeline.cache_hit("stakeholder_talking_points")
         return existing
 
     # Grounding corpus: every cell of the datasets this feature is allowed to
@@ -930,6 +932,7 @@ CRITICAL RULES:
     else:
         # Generation failed. Preserve the last valid result if one exists.
         if existing and existing.get("status") == "available":
+            pipeline.cache_hit("stakeholder_talking_points", "kept - this run produced nothing to replace it")
             return existing
         payload = {
             "account_id": account_id,
@@ -960,6 +963,7 @@ CRITICAL RULES:
 @requires_local_datasets(
     "firmographics", "google_news", "intent_score", "news_events", "prospect_contacts", "technographics",
 )
+@pipeline.feature("stakeholder_map")
 def extract_stakeholder_map(account_id: str) -> list[dict]:
     db = get_db()
     now = datetime.now(UTC)
@@ -978,6 +982,8 @@ def extract_stakeholder_map(account_id: str) -> list[dict]:
     # would throw away a third of them. Only the vendor's own "pending" and
     # "review" wordings are excluded.
     contact_records, withheld_contacts = _drop_unmatched_contacts(contact_records)
+    pipeline.step("contacts", "", usable=len(contact_records),
+                  withheld_pending_review=withheld_contacts)
     if withheld_contacts:
         logger.info("stakeholder map: withheld %d contact row(s) marked "
                     "pending or needs-review for %s",

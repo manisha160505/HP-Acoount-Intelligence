@@ -8,6 +8,7 @@ from bson import ObjectId
 
 from app.core.llm import generate_gpt4o_json_completion
 from app.database.mongodb import get_db
+from app.observability import pipeline
 from app.services.extractors.datasets import (
     account_display_name,
     account_domain,
@@ -868,6 +869,14 @@ def generate_opportunity_map_plays_with_gpt4o(account_id: str) -> dict:  # noqa:
     category_file = _parse_category_file(
         read_dataset_rows(account_id, "hp_category_intent"), domain)
     topics_meta_records = _read_dataset_records(account_id, "intent_topics")
+
+    pipeline.step("datasets", "", firmographics=len(firmo_records or []),
+                  technographics=len(techno_records or []),
+                  intent=len(intent_records or []),
+                  intent_topics=len(topics_meta_records or []),
+                  hp_category_intent=len((category_file or {}).get("categories") or {}),
+                  news=len(gnews_records or []) + len(events_records or []))
+
     account_match, _observation = _match_provider_account(topics_meta_records, domain)
     # A mismatch means the export belongs to another company. The intent widget
     # already drops those topics; this feature reads the raw rows, so the same
@@ -1049,6 +1058,7 @@ def generate_opportunity_map_plays_with_gpt4o(account_id: str) -> dict:  # noqa:
         "account_id": account_id, "widget_key": "opportunity_narrative_plays"})
     if (existing and existing.get("status") == "available"
             and existing.get("data", {}).get("evidence_fingerprint") == fingerprint):
+        pipeline.cache_hit("opportunity_narrative_plays")
         return existing
 
     # ---- which plays the evidence can actually support -----------------------
@@ -1599,6 +1609,7 @@ Output JSON:
         # Always report why a play did not survive - the failure path returns the
         # previous document, which would otherwise discard these reasons.
         logger.warning("opportunity map: dropped %d item(s): %s", len(dropped), dropped)
+        pipeline.guardrail(len(dropped), "see the WARNING lines above")
 
     llm_res = generate_gpt4o_json_completion(system_prompt, user_prompt)
     _process((llm_res or {}).get("opportunity_plays") if isinstance(llm_res, dict) else None)
@@ -1700,6 +1711,8 @@ Output JSON:
         dropped.append(f'{play["play_key"]}: fails the HP-fit check - moved to '
                        f'discovery areas, sales narrative removed')
     cleaned_plays = opportunities
+    pipeline.step("plays", "%d opportunity, %d discovery area(s)"
+                  % (len(opportunities), len(discovery_areas)))
 
     # One HP case study per play, attached in Python after the split so that a
     # play demoted to a discovery area never spends one.
@@ -1814,6 +1827,7 @@ Output JSON:
         }
     else:
         if existing and existing.get("status") == "available":
+            pipeline.cache_hit("opportunity_narrative_plays", "kept - this run produced nothing to replace it")
             return existing
         plays_payload = {
             "account_id": account_id,
@@ -1846,6 +1860,7 @@ Output JSON:
 @requires_local_datasets(
     "firmographics", "google_news", "intent_score", "news_events", "prospect_contacts", "technographics",
 )
+@pipeline.feature("solution_narrative_opportunity_map")
 def extract_solution_narrative_opportunity_map(account_id: str) -> list[dict]:
     db = get_db()
     now = datetime.now(UTC)

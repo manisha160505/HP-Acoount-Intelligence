@@ -10,6 +10,7 @@ from bson import ObjectId
 
 from app.core.llm import generate_gpt4o_json_completion
 from app.database.mongodb import get_db
+from app.observability import pipeline
 from app.services.extractors import signal_scoring
 from app.services.extractors.datasets import (
     find_file_path,
@@ -600,6 +601,7 @@ def score_news_signals(account_id: str, signals: list[dict], company_name: str) 
     })
     if (existing and existing.get("status") == "available"
             and existing.get("data", {}).get("signals_fingerprint") == fingerprint):
+        pipeline.cache_hit("news_relevance_summary")
         return existing
 
     # Grounding corpus: the two news datasets this feature reads.
@@ -949,6 +951,7 @@ Output JSON:
         }
     else:
         if existing and existing.get("status") == "available":
+            pipeline.cache_hit("news_relevance_summary", "kept - this run produced nothing to replace it")
             return existing
         payload = {
             "account_id": account_id,
@@ -980,6 +983,7 @@ Output JSON:
 @requires_local_datasets(
     "google_news", "news_events",
 )
+@pipeline.feature("recent_news_signals")
 def extract_recent_news_signals(account_id: str) -> list[dict]:
     db = get_db()
     now = datetime.now(UTC)
@@ -995,6 +999,14 @@ def extract_recent_news_signals(account_id: str) -> list[dict]:
     raw = _normalize_signals(gnews, events)
     passed, rejected = _apply_gate(raw, now)
     deduped = _dedupe(passed)
+
+    pipeline.step("datasets", "", google_news=len(gnews or []),
+                  news_events=len(events or []), normalised=len(raw))
+    pipeline.step("gate", "%d of %d passed, %d deduped away"
+                  % (len(passed), len(raw), len(passed) - len(deduped)))
+    for reason, n in Counter(r.get("gate_reject_reason") or "unspecified"
+                             for r in rejected).most_common():
+        pipeline.step("rejected", "%3d  %s" % (n, reason))
 
     # 1. Widget: news_relevance_summary (inferred) - scored first so the feed can
     #    rank by it. Cached; no model call on an unchanged signal set.

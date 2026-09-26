@@ -26,6 +26,7 @@ from datetime import UTC, datetime
 
 from app.core.llm import generate_gpt4o_json_completion
 from app.database.mongodb import get_db
+from app.observability import pipeline
 from app.services.extractors.datasets import account_data_as_of
 from app.services.extractors.grounding import (
     GroundingReport,
@@ -681,6 +682,7 @@ def generate_hp_recommendations(account_id: str) -> dict | None:
     fingerprint = _fingerprint(evidence, rule_ids, kversion + "|" + rversion)
     if (existing and existing.get("status") == "available"
             and (existing.get("data") or {}).get("fingerprint") == fingerprint):
+        pipeline.cache_hit("technographic_hp_recommendations")
         return existing
 
     # ---- assemble candidates: Python decides everything here ----------------
@@ -749,6 +751,7 @@ def generate_hp_recommendations(account_id: str) -> dict | None:
 
     if not candidates and not part_b_cards:
         if existing and existing.get("status") == "available":
+            pipeline.cache_hit("technographic_hp_recommendations", "kept - this run produced nothing to replace it")
             return existing
         return _pending(account_id, now, kversion,
                         "No HP deck-usage rule matched this account's verified evidence, "

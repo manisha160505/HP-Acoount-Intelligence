@@ -48,6 +48,8 @@ point and the rest will correctly carry none.
 
 import logging
 
+from app.observability import pipeline
+
 logger = logging.getLogger(__name__)
 
 COLLECTION = "hp_case_studies"
@@ -668,18 +670,30 @@ def allocate(db, lines, industry: str = "", signals=None,
                   if str(study.get("headline") or "").strip()
                   and _study_identity(study) not in mine]
     if not candidates:
-        return None
+        return _reported(None)
 
     bar = _quality_tier(candidates[0], industry)
     for study in candidates:
         if _quality_tier(study, industry) < bar:
             break           # ranked by tier, so nothing below here clears it
         if _study_identity(study) not in spoken:
-            return as_proof_point(study)
+            return _reported(as_proof_point(study))
 
     # Everything good enough is cited on another surface. Repeat the best of
     # them rather than drop to a weaker study or leave the card empty.
-    return as_proof_point(candidates[0])
+    return _reported(as_proof_point(candidates[0]))
+
+
+def _reported(point: dict | None) -> dict | None:
+    """Tally one proof slot for the pipeline log, then hand the point back.
+
+    Every surface that cites a study comes through `allocate`, so counting here
+    rather than at nine call sites is what makes "6 of 6 slots filled, and by
+    which customers" visible on a feature's DONE line without each extractor
+    keeping its own counter.
+    """
+    pipeline.proof_allocated(customer=str((point or {}).get("customer") or ""))
+    return point
 
 
 def proof_point_for(db, lines, industry: str = "", signals=None) -> dict | None:

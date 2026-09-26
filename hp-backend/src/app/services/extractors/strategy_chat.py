@@ -35,6 +35,7 @@ from datetime import UTC, datetime
 from bson import ObjectId
 
 from app.database.mongodb import get_db
+from app.observability import pipeline
 
 MAX_SNAPSHOT_TOPICS = 5
 MAX_SNAPSHOT_VENDORS = 15
@@ -62,6 +63,7 @@ def _widget(db, account_id: str, widget_key: str) -> dict:
     return found.get("data") or {}
 
 
+@pipeline.feature("strategy_chat")
 def extract_strategy_chat(account_id: str) -> list[dict]:
     """Build the two Strategy Chat widgets from the other features' outputs."""
     db = get_db()
@@ -73,6 +75,14 @@ def extract_strategy_chat(account_id: str) -> list[dict]:
     techmap = _widget(db, account_id, "technographic_map")
     intent = _widget(db, account_id, "intent_topics_table")
     signals = _widget(db, account_id, "news_signals_feed")
+
+    # This feature reads the other features' finished widgets rather than any
+    # dataset, so what matters is which of them exist yet.
+    pipeline.step("sources", "", **{
+        name: ("yes" if w else "MISSING") for name, w in (
+            ("exec_summary", summary), ("contacts", contacts),
+            ("plays", plays), ("techmap", techmap),
+            ("intent", intent), ("signals", signals))})
     priorities = _widget(db, account_id, "exec_strategic_priorities")
 
     account = None

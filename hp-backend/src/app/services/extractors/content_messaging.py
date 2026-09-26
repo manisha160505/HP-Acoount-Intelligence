@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 
 from app.database.mongodb import get_db
+from app.observability import pipeline
 from app.services.extractors.datasets import (
     account_display_name,
     read_dataset_records,
@@ -42,6 +43,7 @@ def _read_dataset_records(account_id: str, dataset_key: str) -> list[dict]:
 @requires_local_datasets(
     "firmographics", "google_news", "intent_score", "news_events", "technographics",
 )
+@pipeline.feature("content_messaging")
 def extract_content_messaging(account_id: str) -> list[dict]:
     db = get_db()
     now = datetime.now(UTC)
@@ -52,6 +54,11 @@ def extract_content_messaging(account_id: str) -> list[dict]:
     intent_score_records = _read_dataset_records(account_id, "intent_score")
     gnews_records = _read_dataset_records(account_id, "google_news")
     events_records = _read_dataset_records(account_id, "news_events")
+
+    pipeline.step("datasets", "", firmographics=len(firmo_records),
+                  technographics=len(techno_records),
+                  intent=len(intent_score_records),
+                  news=len(gnews_records) + len(events_records))
 
     results = []
 

@@ -3,6 +3,7 @@ import logging
 from datetime import UTC, datetime
 
 from app.database.mongodb import get_db
+from app.observability import pipeline
 from app.services.extractors.datasets import (
     account_display_name,
     find_file_path,
@@ -73,6 +74,7 @@ def _cross_feature_counts(db, account_id: str) -> dict:
 @requires_local_datasets(
     "company_hierarchy", "firmographics", "job_openings", "prospect_contacts",
 )
+@pipeline.feature("executive_dashboard")
 def extract_executive_dashboard(account_id: str) -> list[dict]:
     db = get_db()
     now = datetime.now(UTC)
@@ -81,6 +83,10 @@ def extract_executive_dashboard(account_id: str) -> list[dict]:
     hier_rows = _read_dataset_csv(account_id, "company_hierarchy")
     job_rows = _read_dataset_csv(account_id, "job_openings")
     contact_rows = _read_dataset_csv(account_id, "prospect_contacts")
+
+    pipeline.step("datasets", "", firmographics=len(firmo_rows),
+                  hierarchy=len(hier_rows), jobs=len(job_rows),
+                  contacts=len(contact_rows))
 
     results = []
 

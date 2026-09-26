@@ -30,7 +30,11 @@ import traceback
 from datetime import UTC, datetime
 from typing import Any
 
-from app.observability.context import get_request_id
+from app.observability.context import (
+    get_account,
+    get_feature,
+    get_request_id,
+)
 
 # Attributes LogRecord always carries. Anything on a record that is not in this
 # set was attached by the caller via `extra=` and belongs in the JSON output -
@@ -87,6 +91,16 @@ class JsonFormatter(logging.Formatter):
         request_id = get_request_id()
         if request_id:
             payload["request_id"] = request_id
+
+        # The pipeline's own scope. Emitted as fields rather than folded into
+        # the message so a log store can filter a 220-account build down to one
+        # account, or one feature across every account.
+        account = get_account()
+        if account:
+            payload["account"] = account
+        feature = get_feature()
+        if feature:
+            payload["feature"] = feature
 
         # Correlate a log line with its span in Cloud Trace. Imported lazily so
         # that logging keeps working when OpenTelemetry is not installed.
@@ -152,6 +166,19 @@ class PlainFormatter(logging.Formatter):
         if request_id:
             base = f"{record.levelname:<8} [{record.name}] ({request_id[:8]}) {record.getMessage()}"
 
+        # A pipeline run has no request id - it is driven from a script - so
+        # the account is what makes a line traceable when several accounts run
+        # one after another. The logger name is dropped from these lines: the
+        # feature already says which part of the system is speaking, and the
+        # module path pushes the message off the right of the terminal.
+        account = get_account()
+        if account:
+            where = f"[{account}]"
+            feature = get_feature()
+            if feature:
+                where = f"{where} {feature}"
+            base = f"{record.levelname:<8} {where} {record.getMessage()}"
+
         # Surface the request-completion fields inline; without them the
         # plain format would hide the status and latency the JSON one shows.
         status = getattr(record, "status_code", None)
@@ -212,11 +239,49 @@ def configure_logging(
     # heartbeat, httpx a line per outbound call.
     # "httpx2" as well as "httpx": the vendored client some installs ship
     # under registers its logger under that name and is just as chatty.
-    for noisy in ("pymongo", "httpx", "httpx2", "httpcore", "urllib3",
-                  "openai._base_client"):
-        logging.getLogger(noisy).setLevel(
-            max(logging.WARNING, logging.getLogger().level)
-        )
+    # "lightrag": several hundred lines per index build - one per entity and
+    # one per relation upserted - which buries the pipeline's own output. The
+    # progress a reader needs is emitted by `retrieval/ingest.py` instead, one
+    # line per document. Warnings and errors from the library still come
+    # through.
+    quieten_noisy_loggers()
+
+
+# Chatty at INFO and none of it actionable: pymongo logs every server
+# heartbeat, httpx a line per outbound call.
+# "httpx2" as well as "httpx": the vendored client some installs ship under
+# registers its logger under that name and is just as chatty.
+# "lightrag": several hundred lines per index build - one per entity and one
+# per relation upserted - which buries the pipeline's own output. The progress
+# a reader needs is emitted by `retrieval/ingest.py` instead, one line per
+# document. Warnings and errors from the library still come through.
+NOISY_LOGGERS = ("pymongo", "httpx", "httpx2", "httpcore", "urllib3",
+                 "openai._base_client", "lightrag", "nano_vectordb")
+
+
+def quieten_noisy_loggers() -> None:
+    """Hold the libraries above at WARNING, whenever they arrive.
+
+    Called from `configure_logging`, and again by the retrieval layer once a
+    LightRAG handle is open. The second call is not belt and braces: LightRAG
+    installs its own handler and sets its own level when a handle is first
+    created, which is long after startup, and it names child loggers that carry
+    their own explicit level - so a level set on the parent at startup does not
+    reach them. Without this the terminal takes several hundred "Upserting
+    relation VDB" lines per index build.
+    """
+    floor = max(logging.WARNING, logging.getLogger().level)
+    names = set(NOISY_LOGGERS)
+    names.update(name for name in list(logging.Logger.manager.loggerDict)
+                 if any(name.startswith(prefix + ".") for prefix in NOISY_LOGGERS))
+    for name in names:
+        noisy = logging.getLogger(name)
+        noisy.setLevel(floor)
+        # Its own handler would print below `floor` regardless of the level
+        # above, and in its own format - which is how "INFO: Query nodes: ..."
+        # arrives unprefixed in the middle of a run.
+        noisy.handlers.clear()
+        noisy.propagate = True
 
 
 def log_level_from_env(default: str = "INFO") -> str:

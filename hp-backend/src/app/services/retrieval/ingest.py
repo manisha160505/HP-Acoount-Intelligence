@@ -41,6 +41,7 @@ import logging
 import time
 
 from app.database.mongodb import get_db
+from app.observability import pipeline
 from app.services.retrieval import client, corpus, evidence, index_state, registry
 
 logger = logging.getLogger(__name__)
@@ -149,10 +150,17 @@ async def update_index(account_id: str, index: str, full: bool = False,
                 logger.warning("retrieval: could not remove %s - %s", doc_id, exc)
                 applied["failed"].append(doc_id)
 
+        # The library's own logging is suppressed (see observability/logging.py):
+        # it emits several hundred lines per build, one per entity and relation
+        # upserted, which buries everything else. One line per document is the
+        # progress a reader actually needs.
+        pipeline.step("index", "%s  %d document(s) to extract" % (index, len(targets)))
+
         for i, doc in enumerate(targets, 1):
             if progress:
                 progress(i, len(targets), doc.unit_key)
             is_change = doc.doc_id in delta["changed"]
+            doc_started = time.monotonic()
             try:
                 await _ingest_document(rag, doc, replace=(is_change or full))
                 evidence.replace_document_evidence(
@@ -166,10 +174,15 @@ async def update_index(account_id: str, index: str, full: bool = False,
                 index_state.record_document(account_id, index, doc.doc_id,
                                             fingerprints[doc.doc_id])
                 applied["changed" if is_change else "added"].append(doc.doc_id)
+                pipeline.step("doc", "%-34s %-9s %d/%d  %.1fs" % (
+                    doc.unit_key, "changed" if is_change else "added",
+                    i, len(targets), time.monotonic() - doc_started))
             except BaseException as exc:
                 # One bad document does not abandon the rest. Its fingerprint is
                 # deliberately NOT recorded, so the next run retries it.
                 logger.exception("retrieval: %s failed to index", doc.doc_id)
+                pipeline.step("doc", "%-34s FAILED    %d/%d" % (
+                    doc.unit_key, i, len(targets)))
                 applied["failed"].append(doc.doc_id)
                 if full:
                     raise
