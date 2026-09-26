@@ -7,6 +7,7 @@ from bson import ObjectId
 from app.config import scoring as _scoring
 from app.database.mongodb import get_db
 from app.services.extractors.datasets import (
+    account_display_name,
     read_dataset_records,
     requires_local_datasets,
 )
@@ -467,7 +468,7 @@ def extract_tech_landscape(account_id: str) -> list[dict]:  # noqa: PLR0912, PLR
     # Try firmographics for exact company_name if present
     firmo_records = _read_dataset_records(account_id, "firmographics")
     if firmo_records and len(firmo_records) > 0:
-        f_name = str(firmo_records[0].get("Company Name") or firmo_records[0].get("company_name") or "").strip()
+        f_name = account_display_name(account_id, firmo_records[0])
         if f_name:
             account_name = f_name
 

@@ -13,6 +13,7 @@ from bson import ObjectId
 
 from app.core.llm import generate_gpt4o_json_completion
 from app.database.mongodb import get_db
+from app.services.extractors.datasets import account_display_name
 from app.services.extractors.grounding import (
     HP_PRODUCT_LINES,
     GroundingReport,
@@ -503,13 +504,15 @@ def _firmo_industry(f: dict) -> str:
     return str(f.get("Industry Classification") or f.get("industry") or "").strip()
 
 
-def _account_evidence(firmo_records: list[dict]) -> tuple[str, list[tuple[str, str]]]:
+def _account_evidence(firmo_records: list[dict],
+                      account_id: str = "") -> tuple[str, list[tuple[str, str]]]:
     """Spec row 3: Business Description and industry fields from firmographics.
     Returns (company_name, [(name, text), ...]). Nothing else is account evidence."""
     if not firmo_records:
         return "", []
     f = firmo_records[0]
-    name = str(f.get("Company Name") or f.get("company_name") or f.get("Name") or "").strip()
+    # DEC-052: the audit sheet name, not the vendor's name for the domain.
+    name = account_display_name(account_id, f)
     desc = str(f.get("Business Description") or f.get("business_description") or "").strip()
     industry = _firmo_industry(f)
     items = []
@@ -1172,7 +1175,7 @@ def _build_generation_context(db, account_id: str, persona_id: str, content_type
     if not persona:
         raise ValueError(f"Unknown persona_id '{persona_id}' for this account")
 
-    company_name, account_items = _account_evidence(firmo_records)
+    company_name, account_items = _account_evidence(firmo_records, account_id)
     if not company_name:
         account_doc = db["accounts"].find_one({"_id": ObjectId(account_id)}) if ObjectId.is_valid(account_id) else None
         company_name = (account_doc or {}).get("name") or "Target Account"
@@ -1687,7 +1690,7 @@ def extract_content_studio(account_id: str) -> list[dict]:
     if firmo_records and len(firmo_records) > 0:
         f = firmo_records[0]
 
-        c_name = str(f.get("Company Name") or f.get("company_name") or f.get("Name") or "").strip()
+        c_name = account_display_name(account_id, f)
         domain_val = str(f.get("Company Domain") or f.get("company_domain") or f.get("Domain") or f.get("Website") or f.get("website") or "").strip()
         desc_val = str(f.get("Business Description") or f.get("business_description") or "").strip()
 

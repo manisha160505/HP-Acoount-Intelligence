@@ -9,6 +9,7 @@ from bson import ObjectId
 from app.core.llm import generate_gpt4o_json_completion
 from app.database.mongodb import get_db
 from app.services.extractors.datasets import (
+    account_display_name,
     account_domain,
     find_file_path,
     read_dataset_records,
@@ -98,7 +99,8 @@ NL = chr(10)
 # 32 - the client's relevance ladder: an offering "may be relevant" on one
 #      source of evidence and "is relevant" only on two, enforced on the prose
 #      rather than only stated in the prompt.
-OPPORTUNITY_PROMPT_VERSION = 32
+# 33 - generated prose names the account from the audit sheet (DEC-052).
+OPPORTUNITY_PROMPT_VERSION = 33
 MAX_PLAYS = 5
 
 # HP_ABX_v3_final defines NO numeric opportunity score for this feature. Plays
@@ -887,7 +889,7 @@ def generate_opportunity_map_plays_with_gpt4o(account_id: str) -> dict:  # noqa:
     industry_val = employees_val = revenue_val = "N/A"
     if firmo_records:
         f = firmo_records[0]
-        c_name = str(f.get("Company Name") or f.get("Name") or "").strip()
+        c_name = account_display_name(account_id, f)
         if c_name:
             company_name = c_name
         bus_desc = str(f.get("Business Description") or "").strip()
