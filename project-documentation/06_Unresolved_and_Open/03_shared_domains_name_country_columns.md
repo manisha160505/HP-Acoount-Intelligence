@@ -12,13 +12,13 @@ Shared domains jabil.com and mufg.jp: which entity owns the rows.
 - (D3) opens_1 answer 2: id "not possible currently"; one account each "no"; "Please take Company Name + Country into consideration along with the domain … Open: We will provide additional columns Company Name + Country in the mentioned sheets." opens_2 item 3: "ALREADY RESOLVED IN CLARIFYING_OPENS_1 DOC".
 
 ## What is still unclear
-Nothing about the rule; the data that makes the rule executable has not arrived.
+How to attribute rows that name both entities. Applied in the split on 25 Sep with our default (both). Note the vendor attributes most shared-domain rows to the second entity: after the split Jabil SG holds 200 job / 104 technology / 100 news rows against Jabil MY 100 / 4 / 0, and the MUFG Bangkok branch 114 / 100 / 101 against MUFG Japan 14 / 0 / 1.
 
 ## Why it matters
-Until the columns are populated on every row the interim split gives Jabil SG and the Bangkok branch almost no data.
+114 of the 314 shared-domain job rows are dual-entity; attaching them to one entity would be a guess.
 
 ## What we need from the client
-input_company_name and input_country_code populated on every row of job_openings, technology_detections, news_events, connections, subpages and sec_filings.
+One line: dual-entity rows go to both accounts (our default, matching the Jabil 10-Q ruling DEC-054f) or to neither.
 
 ## Current status
 PARTIALLY RESOLVED. Last movement: 2026-09-25. Tracked in `05_Questions_and_Clarifications/Open/OPEN_QUESTIONS.md` and, where already sent, in `07_Internal_Generated/Client_Facing_Round3/`.

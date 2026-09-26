@@ -17,7 +17,7 @@ prospect_contacts (named persona) or job_openings (proxy); the seller's draft me
 - D8 contacts
 
 ## Known data gaps
-- Contacts 0/220; readiness "none" for 44 accounts in the split (no job rows either)
+- Contacts 192/220 (Apollo, 26 Sep; 28 accounts none); readiness "none" for 18 accounts in the 26 Sep split
 
 ## Code touched
 - `hp-backend/src/app/services/extractors/message_evaluator.py`

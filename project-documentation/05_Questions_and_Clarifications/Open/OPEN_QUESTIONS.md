@@ -1,6 +1,7 @@
-# Open and unresolved questions (22)
+# Open and unresolved questions (18)
 
-> **25 Sep 05:50 UTC:** the client answered all 25 round-3 open items in the annotated `clarifying_opens_3_OPEN_v2_provided.docx` (C44); those answers are ingested below. The CLARIFICATIONS (7) and UNRESOLVED_v2 (2) documents have not been answered yet.
+> **26 Sep 03:26 UTC:** Dhruvi answered the six items of our 25 Sep 14:30 UTC email §5 inline: contact file delivered (D8, C49), ANZ Holdings NZ / CIMB / CIMB Niaga filing URLs (E25-4), Bank Mandiri rows belong to Mandiri (E25-5), risk logic approved (D37), GCP project ID to be explained (D42), hiring flexibility (D22). F12 was answered 25 Sep 09:36 UTC (D48) and F11 recorded as settled (D47).
+> **25 Sep 05:50 UTC:** the client answered all 25 round-3 open items in the annotated `clarifying_opens_3_OPEN_v2_provided.docx` (C44). The CLARIFICATIONS (7) and UNRESOLVED_v2 (2) answers arrived 25 Sep 12:02 UTC as attachments that are not yet on this machine, so they are not ingested here.
 > Status values: RESOLVED = client answer settles it. PARTIALLY RESOLVED = answered, but a delivery, confirmation or sub-question is still outstanding (each has a file in `06_Unresolved_and_Open/`). OPEN = no answer. UNRESOLVED = answered, but the answer does not settle the point.
 > IDs: D1–D43 = the 43 items of 220-Open-Decisions-List.md as numbered in clarifying opens_2.docx; D44–D53 = items added 24 Sep after the list went out; E18-x / E23-x = email Q&A of 18 and 23 Sep; QA16-x = the 16 Sep QA discussion points.
 
@@ -8,13 +9,9 @@
 
 | Id | Question | Feature | Status | Answered | Fully resolved? |
 |---|---|---|---|---|---|
-| D8 | Contact file for the 220 accounts | Stakeholder Map, Opportunity Map, Objection Playbook, Content Studio, Message Evaluator (BLOCKER) | OPEN | 2026-09-25 | No. |
 | D25 | Vendor-flagged doubtful rows (9) | Hiring and technographic signals | OPEN | 2026-09-24 | No. |
 | D35 | Confidence tiers T0-T3 | Every signal; case-study file | OPEN | 2026-09-24 | No. |
-| D37 | Technographic Map Low/Medium/High risk logic | Technographic Map | OPEN | 2026-09-25 | Labels yes; approval of the logic still with Sahaj. |
-| D42 | GCP access, project id, region | Environment | OPEN | 2026-09-25 | No. |
-| D47 | Evidence-tier gate on proof (only once an Opportunity is established by two pipelines) | Proof placement | OPEN | 2026-09-25 | No — the client did not understand the question. |
-| D48 | APJ region preference as the second sort key for proof | Proof ranking | OPEN | 2026-09-25 | No. |
+| D42 | GCP access, project id, region | Environment | OPEN | 2026-09-26 | No. The client asks what we mean by project ID. She says the region was "already solved in… |
 | E23-3 | "Contextual — no direct HP line" relationship tag | Technographic Map | OPEN | 2026-09-23 | No (by omission). |
 | QA16-1 | Objection Playbook wording "Could be raised by" vs QA check "Likely raised by" (OP-03/OP-07) | Objection Playbook | OPEN | 2026-09-16 | No. |
 | QA16-2 | "Counter Question" box reported missing (OP-06) — rendered in capitals | Objection Playbook | OPEN | 2026-09-16 | No. |
@@ -32,18 +29,6 @@
 | TESTS22 | Client UI test observations of 22 Sep (tests on current HP 220.docx) | UI | OPEN | 2026-09-22 | No. |
 
 ## Detail
-
-### D8 · Contact file for the 220 accounts
-
-- **Feature / topic:** Stakeholder Map, Opportunity Map, Objection Playbook, Content Studio, Message Evaluator (BLOCKER)
-- **Original question:** Data question 1 (23 Sep), item 8, 24 Sep email §3, round 3 B2. Contacts sheet empty in all 220 workbooks; Apollo_All_Contacts named in v4 not received.
-- **Original source:** see `00_INDEX/EMAIL_TIMELINE.md`; documents in `05_Questions_and_Clarifications/Source_Documents/`
-- **Client answer:** opens_1: "Ans 1) Contact Data open". opens_2 section B: "->OPEN". Round 3 B2 (25 Sep): "-> open: will give that". Per B3 there will be ONE file: "as of now we go with whatever we have, you will get one file".
-- **Date answered:** 2026-09-25
-- **Status:** **OPEN**
-- **Does the answer fully resolve it?** No.
-- **Implementation impact:** None of the five features can be generated for any account; once the file lands all five must be built and re-tested.
-- **Unresolved-issue file:** `06_Unresolved_and_Open/05_contact_file_missing.md`
 
 ### D25 · Vendor-flagged doubtful rows (9)
 
@@ -69,53 +54,17 @@
 - **Implementation impact:** confidence_tier field required by v4 on every signal; build maps to High/Medium/Low.
 - **Unresolved-issue file:** `06_Unresolved_and_Open/17_confidence_tiers_T0_T3.md`
 
-### D37 · Technographic Map Low/Medium/High risk logic
-
-- **Feature / topic:** Technographic Map
-- **Original question:** 23 Sep (Dhruvi asked us); item 37; logic sent 23 Sep as a screenshot and in words in round 3 F7.
-- **Original source:** see `00_INDEX/EMAIL_TIMELINE.md`; documents in `05_Questions_and_Clarifications/Source_Documents/`
-- **Client answer:** 23 Sep: "Please retain the Low Risk / Medium Risk / High Risk labels … what logic is currently being used"; opens_2: "open" and forwarded to Sahaj; round 3 F7 (25 Sep): "OPEN; already escalated to Sahaj".
-- **Date answered:** 2026-09-25
-- **Status:** **OPEN**
-- **Does the answer fully resolve it?** Labels yes; approval of the logic still with Sahaj.
-- **Implementation impact:** technographic_map risk column.
-- **Unresolved-issue file:** `06_Unresolved_and_Open/18_tech_map_risk_labels.md`
-
 ### D42 · GCP access, project id, region
 
 - **Feature / topic:** Environment
 - **Original question:** 15 Sep action item; 24 Sep email §4; item 42; round 3 H1; access request doc sent 23 Sep via WhatsApp.
 - **Original source:** see `00_INDEX/EMAIL_TIMELINE.md`; documents in `05_Questions_and_Clarifications/Source_Documents/`
-- **Client answer:** "-> open"; "RESOLVED: Already followed up with sahaj" (on the follow-up action only); round 3 H1 (25 Sep): "Open: escalated to sahaj".
-- **Date answered:** 2026-09-25
+- **Client answer:** "-> open"; "RESOLVED: Already followed up with sahaj" (on the follow-up action only); round 3 H1 (25 Sep): "Open: escalated to sahaj". 26 Sep 03:26 UTC: "can you please elaborate on project ID and region? I think region part is already solved in one of the opens which I shared yesterday."
+- **Date answered:** 2026-09-26
 - **Status:** **OPEN**
-- **Does the answer fully resolve it?** No.
+- **Does the answer fully resolve it?** No. The client asks what we mean by project ID. She says the region was "already solved in one of the opens", but no readable document answers the GCP region (OPEN_v2 H1: "Open: escalated to sahaj"); she may mean the F12 APJ/APAC case-study region answered on 25 Sep. Unread candidate: the 25 Sep 12:02 UTC attachments.
 - **Implementation impact:** The current environment cannot hold 220 accounts; a few hours of redeploy/load once granted.
 - **Unresolved-issue file:** `06_Unresolved_and_Open/22_gcp_access.md`
-
-### D47 · Evidence-tier gate on proof (only once an Opportunity is established by two pipelines)
-
-- **Feature / topic:** Proof placement
-- **Original question:** Round 3 F11 (item 47). Default: apply it.
-- **Original source:** see `00_INDEX/EMAIL_TIMELINE.md`; documents in `05_Questions_and_Clarifications/Source_Documents/`
-- **Client answer:** "clarification needed pls"
-- **Date answered:** 2026-09-25
-- **Status:** **OPEN**
-- **Does the answer fully resolve it?** No — the client did not understand the question.
-- **Implementation impact:** Whether thin accounts show proof on objection cards.
-- **Unresolved-issue file:** `06_Unresolved_and_Open/27_evidence_tier_gate_and_region_preference.md`
-
-### D48 · APJ region preference as the second sort key for proof
-
-- **Feature / topic:** Proof ranking
-- **Original question:** Round 3 F12 (item 48). Default: yes.
-- **Original source:** see `00_INDEX/EMAIL_TIMELINE.md`; documents in `05_Questions_and_Clarifications/Source_Documents/`
-- **Client answer:** "clarification needed pls"
-- **Date answered:** 2026-09-25
-- **Status:** **OPEN**
-- **Does the answer fully resolve it?** No.
-- **Implementation impact:** Order of case studies when several match.
-- **Unresolved-issue file:** `06_Unresolved_and_Open/27_evidence_tier_gate_and_region_preference.md`
 
 ### E23-3 · "Contextual — no direct HP line" relationship tag
 

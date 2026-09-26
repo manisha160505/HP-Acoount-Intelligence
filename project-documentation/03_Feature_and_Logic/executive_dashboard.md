@@ -22,12 +22,12 @@ Firmographics + hierarchy (Explorium 1_Firmographics, 2_Company_Hierarchy); fili
 - D27 blank job status meaning (drives 30% weight)
 - D41 as-of date
 - C-07/C-08 urgency arithmetic and band gaps
-- S-05 3-5 years of financials come only from filings — extraction of figures from PDFs not yet built (compliance_filings 0/220 in the split)
+- S-05 3-5 years of financials come only from filings — extraction of figures from PDFs not yet built (PDFs placed for 137 accounts by fetch_filings.py on 26 Sep; not yet ingested)
 
 ## Known data gaps
 - compliance_filings: index only; PDFs not local; 31 accounts have no public filings
 - Hierarchy sheet present for 165/220
-- Contacts 0/220 (top-stakeholder tile)
+- Contacts 192/220 (Apollo, 26 Sep; 28 accounts none) (top-stakeholder tile)
 - Job openings missing for 45 accounts (hiring velocity; urgency driver 3)
 - One firmographics row per account → no growth comparison (Expansion proxy)
 

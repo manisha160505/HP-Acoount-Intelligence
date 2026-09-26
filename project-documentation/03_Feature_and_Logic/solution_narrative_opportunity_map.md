@@ -26,7 +26,7 @@ firmographics (business outcome), technographics, intent_score, google_news + ne
 - C-09 what computes the Priority label
 
 ## Known data gaps
-- Contacts 0/220 (persona side)
+- Contacts 192/220 (Apollo, 26 Sep; 28 accounts none) (persona side)
 - Filings PDFs not ingested
 - Rulebook FINAL (Print rules) not on this machine
 

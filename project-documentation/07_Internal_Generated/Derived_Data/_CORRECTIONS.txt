@@ -1,5 +1,5 @@
 Values this run derived rather than copied from source
-Generated 2026-09-25T08:27:37.183793+00:00
+Generated 2026-09-26T04:42:29.660544+00:00
 
 Each line is a place the script did not take the source at face value.
 If a line here is wrong, the output is wrong.
@@ -46,6 +46,12 @@ WESTPAC BANKING CORPORATION
     derived: WESTPAC_BANKING_CORPORATION_NZ
     reason:  2 workbooks share this company name; disambiguated so they do not overwrite each other
 
+education.nsw.gov.au
+  hp_category_intent row:
+    source:  hp_intent_results 2.xlsx: Unavailable
+    derived: NSW_Education_Public_Intent.xlsx: PCs 80/100
+    reason:  separate client delivery for this account (C33); its scores are public-source estimates, not measured buyer intent
+
 posco.com
   source domain:
     source:  posco-inc.com
@@ -76,23 +82,353 @@ pbebank.com
     derived: pbebank.com
     reason:  explicit approved alias: a source workbook keys this account under a different domain than the client domain audit
 
+JABIL_CIRCUIT_SDN_BHD
+  predictleads datasets:
+    source:  rows for jabil.com
+    derived: rows naming this account's territory (incl. rows naming both entities)
+    reason:  company_name on every PredictLeads row since 25 Sep (C48, D3); dual-entity rows go to both
+
 JABIL_CIRCUIT_SINGAPORE_PTE_LTD
-  domain-keyed datasets:
+  news and intent datasets:
     source:  rows for jabil.com
     derived: none
-    reason:  jabil.com is shared with JABIL_CIRCUIT_SDN_BHD, which keeps the rows; no source field splits them by entity
+    reason:  jabil.com is shared with JABIL_CIRCUIT_SDN_BHD, which keeps the rows; no field in those sources splits them by entity
+
+JABIL_CIRCUIT_SINGAPORE_PTE_LTD
+  predictleads datasets:
+    source:  rows for jabil.com
+    derived: rows naming this account's territory (incl. rows naming both entities)
+    reason:  company_name on every PredictLeads row since 25 Sep (C48, D3); dual-entity rows go to both
+
+MITSUBISHI_UFJ_FINANCIAL_GROUP_INC
+  predictleads datasets:
+    source:  rows for mufg.jp
+    derived: rows naming this account's territory (incl. rows naming both entities)
+    reason:  company_name on every PredictLeads row since 25 Sep (C48, D3); dual-entity rows go to both
 
 THE_BANK_OF_TOKYO_MITSUBISHI_LIMITED_BANGKOK_BRANCH
-  domain-keyed datasets:
+  news and intent datasets:
     source:  rows for mufg.jp
     derived: none
-    reason:  mufg.jp is shared with MITSUBISHI_UFJ_FINANCIAL_GROUP_INC, which keeps the rows; no source field splits them by entity
+    reason:  mufg.jp is shared with MITSUBISHI_UFJ_FINANCIAL_GROUP_INC, which keeps the rows; no field in those sources splits them by entity
+
+THE_BANK_OF_TOKYO_MITSUBISHI_LIMITED_BANGKOK_BRANCH
+  predictleads datasets:
+    source:  rows for mufg.jp
+    derived: rows naming this account's territory (incl. rows naming both entities)
+    reason:  company_name on every PredictLeads row since 25 Sep (C48, D3); dual-entity rows go to both
+
+PT_BANK_MANDIRI_PERSERO
+  filings row:
+    source:  PT Bank Mandiri (Persero) Tbk under PT BANK CENTRAL ASIA TBK - ID
+    derived: PT_BANK_MANDIRI_PERSERO
+    reason:  Dhruvi 26 Sep 03:26 UTC: 'those redirect to Bank Mandiri, hence consider Bank Mandiri' (the territory column wrongly says BCA)
+
+PT_BANK_MANDIRI_PERSERO
+  filings row:
+    source:  PT Bank Mandiri (Persero) Tbk under PT BANK CENTRAL ASIA TBK - ID
+    derived: PT_BANK_MANDIRI_PERSERO
+    reason:  Dhruvi 26 Sep 03:26 UTC: 'those redirect to Bank Mandiri, hence consider Bank Mandiri' (the territory column wrongly says BCA)
+
+AUSTRALIA POST
+  prospect_contacts review_flags:
+    source:  2 of 20 Apollo rows
+    derived: flagged, kept
+    reason:  email_names_someone_else x1; name_looks_like_a_team_not_a_person x1
+
+DEPT OF HEALTH - NSW
+  prospect_contacts review_flags:
+    source:  2 of 18 Apollo rows
+    derived: flagged, kept
+    reason:  email_domain_not_the_company x2
+
+NATIONAL AUSTRALIA BANK
+  prospect_contacts review_flags:
+    source:  1 of 23 Apollo rows
+    derived: flagged, kept
+    reason:  email_domain_not_the_company x1
+
+QANTAS AIRWAYS
+  prospect_contacts review_flags:
+    source:  1 of 19 Apollo rows
+    derived: flagged, kept
+    reason:  email_domain_not_the_company x1
+
+WOOLWORTHS GROUP LIMITED
+  prospect_contacts review_flags:
+    source:  1 of 24 Apollo rows
+    derived: flagged, kept
+    reason:  email_domain_not_the_company x1
+
+KALBE FARMA GROUP
+  prospect_contacts review_flags:
+    source:  2 of 14 Apollo rows
+    derived: flagged, kept
+    reason:  email_domain_not_the_company x2
+
+PT BANK CENTRAL ASIA TBK
+  prospect_contacts review_flags:
+    source:  1 of 14 Apollo rows
+    derived: flagged, kept
+    reason:  email_domain_not_the_company x1
+
+PT BANK MANDIRI (PERSERO)
+  prospect_contacts review_flags:
+    source:  1 of 19 Apollo rows
+    derived: flagged, kept
+    reason:  email_domain_not_the_company x1
+
+PT BANK RAKYAT INDONESIA (PERSERO)
+  prospect_contacts review_flags:
+    source:  1 of 14 Apollo rows
+    derived: flagged, kept
+    reason:  email_domain_not_the_company x1
+
+FEDERAL INTERNATIONAL FINANCE, PT
+  prospect_contacts review_flags:
+    source:  1 of 7 Apollo rows
+    derived: flagged, kept
+    reason:  email_domain_not_the_company x1
+
+SINAR MAS GROUP
+  prospect_contacts review_flags:
+    source:  1 of 6 Apollo rows
+    derived: flagged, kept
+    reason:  email_domain_not_the_company x1
+
+DAIWA SECURITIES GROUP INC.
+  prospect_contacts review_flags:
+    source:  2 of 2 Apollo rows
+    derived: flagged, kept
+    reason:  email_domain_not_the_company x2
+
+HITACHI, LTD.
+  prospect_contacts review_flags:
+    source:  2 of 20 Apollo rows
+    derived: flagged, kept
+    reason:  email_domain_not_the_company x2
+
+LIXIL GROUP CORPORATION
+  prospect_contacts review_flags:
+    source:  1 of 16 Apollo rows
+    derived: flagged, kept
+    reason:  email_domain_not_the_company x1
+
+MARUBENI CORPORATION
+  prospect_contacts review_flags:
+    source:  1 of 10 Apollo rows
+    derived: flagged, kept
+    reason:  email_domain_not_the_company x1
+
+MITSUBISHI CHEMICAL HOLDINGS CORPORATION
+  prospect_contacts review_flags:
+    source:  1 of 10 Apollo rows
+    derived: flagged, kept
+    reason:  email_domain_not_the_company x1
+
+MITSUBISHI UFJ FINANCIAL GROUP, INC.
+  prospect_contacts review_flags:
+    source:  23 of 25 Apollo rows
+    derived: flagged, kept
+    reason:  same_person_listed_under_sister_account x23; email_domain_not_the_company x1
+
+NIPPON STEEL CORPORATION
+  prospect_contacts review_flags:
+    source:  1 of 5 Apollo rows
+    derived: flagged, kept
+    reason:  email_domain_not_the_company x1
+
+NIDEC CORPORATION
+  prospect_contacts review_flags:
+    source:  2 of 17 Apollo rows
+    derived: flagged, kept
+    reason:  email_domain_not_the_company x2
+
+ORIX CORPORATION
+  prospect_contacts review_flags:
+    source:  1 of 8 Apollo rows
+    derived: flagged, kept
+    reason:  email_domain_not_the_company x1
+
+OLYMPUS CORPORATION
+  prospect_contacts review_flags:
+    source:  2 of 20 Apollo rows
+    derived: flagged, kept
+    reason:  email_domain_not_the_company x2
+
+SUMITOMO ELECTRIC INDUSTRIES, LTD.
+  prospect_contacts review_flags:
+    source:  1 of 6 Apollo rows
+    derived: flagged, kept
+    reason:  email_domain_not_the_company x1
+
+SUZUKI MOTOR CORPORATION
+  prospect_contacts review_flags:
+    source:  1 of 3 Apollo rows
+    derived: flagged, kept
+    reason:  email_domain_not_the_company x1
+
+YAMAHA MOTOR CO., LTD.
+  prospect_contacts review_flags:
+    source:  1 of 11 Apollo rows
+    derived: flagged, kept
+    reason:  email_domain_not_the_company x1
+
+TOKIO MARINE HOLDINGS, INC.
+  prospect_contacts review_flags:
+    source:  2 of 5 Apollo rows
+    derived: flagged, kept
+    reason:  email_domain_not_the_company x2
+
+NISSAN MOTOR CO LTD
+  prospect_contacts review_flags:
+    source:  6 of 23 Apollo rows
+    derived: flagged, kept
+    reason:  email_domain_not_the_company x6
+
+HANWHA GROUP
+  prospect_contacts review_flags:
+    source:  1 of 7 Apollo rows
+    derived: flagged, kept
+    reason:  email_names_someone_else x1
+
+HYOSUNG GROUP
+  prospect_contacts review_flags:
+    source:  1 of 7 Apollo rows
+    derived: flagged, kept
+    reason:  email_names_someone_else x1
+
+JABIL CIRCUIT SDN BHD
+  prospect_contacts review_flags:
+    source:  20 of 22 Apollo rows
+    derived: flagged, kept
+    reason:  same_person_listed_under_sister_account x20
+
+KUMPULAN WANG SIMPANAN PEKERJA
+  prospect_contacts review_flags:
+    source:  2 of 10 Apollo rows
+    derived: flagged, kept
+    reason:  email_domain_not_the_company x2
+
+PETROLIAM NASIONAL BERHAD
+  prospect_contacts review_flags:
+    source:  1 of 19 Apollo rows
+    derived: flagged, kept
+    reason:  email_domain_not_the_company x1
+
+UNITED OVERSEAS BANK (MALAYSIA) BHD
+  prospect_contacts review_flags:
+    source:  22 of 22 Apollo rows
+    derived: flagged, kept
+    reason:  same_person_listed_under_sister_account x22
+
+BANK ISLAM MALAYSIA BERHAD
+  prospect_contacts review_flags:
+    source:  2 of 10 Apollo rows
+    derived: flagged, kept
+    reason:  email_names_someone_else x2; email_domain_not_the_company x1
+
+BECA CARTER HOLLINGS & FERNER LTD
+  prospect_contacts review_flags:
+    source:  1 of 14 Apollo rows
+    derived: flagged, kept
+    reason:  not_matched x1
+
+FLETCHER BUILDING HOLDINGS LIMITED
+  prospect_contacts review_flags:
+    source:  1 of 15 Apollo rows
+    derived: flagged, kept
+    reason:  email_domain_not_the_company x1
+
+MINISTRY OF SOCIAL DEVELOPMENT
+  prospect_contacts review_flags:
+    source:  1 of 11 Apollo rows
+    derived: flagged, kept
+    reason:  phone_lookup_needs_review x1
+
+TE WHATU ORA HEALTH NEW ZEALAND
+  prospect_contacts review_flags:
+    source:  2 of 16 Apollo rows
+    derived: flagged, kept
+    reason:  phone_lookup_needs_review x1; email_domain_not_the_company x1
+
+BANCO DE ORO UNIBANK, INC. (BDO)
+  prospect_contacts review_flags:
+    source:  1 of 13 Apollo rows
+    derived: flagged, kept
+    reason:  email_domain_not_the_company x1
+
+METROPOLITAN BANK & TRUST COMY
+  prospect_contacts review_flags:
+    source:  1 of 11 Apollo rows
+    derived: flagged, kept
+    reason:  email_domain_not_the_company x1
+
+OPTUM GLOBAL SOLUTIONS (PHILIPPINES), INC
+  prospect_contacts review_flags:
+    source:  2 of 23 Apollo rows
+    derived: flagged, kept
+    reason:  email_domain_not_the_company x2
+
+JABIL CIRCUIT (SINGAPORE) PTE LTD
+  prospect_contacts review_flags:
+    source:  20 of 22 Apollo rows
+    derived: flagged, kept
+    reason:  same_person_listed_under_sister_account x20
+
+MINISTRY OF HEALTH
+  prospect_contacts review_flags:
+    source:  3 of 5 Apollo rows
+    derived: flagged, kept
+    reason:  email_domain_not_the_company x2; phone_lookup_needs_review x1
+
+UNITED OVERSEAS BANK LIMITED (UOB)
+  prospect_contacts review_flags:
+    source:  22 of 22 Apollo rows
+    derived: flagged, kept
+    reason:  same_person_listed_under_sister_account x22
+
+LOTUS S STORES THAILAND COMPANY LIMITED
+  prospect_contacts review_flags:
+    source:  1 of 9 Apollo rows
+    derived: flagged, kept
+    reason:  email_domain_not_the_company x1
+
+THE BANK OF TOKYO-MITSUBISHI LIMITED (BANGKOK BRANCH)
+  prospect_contacts review_flags:
+    source:  24 of 25 Apollo rows
+    derived: flagged, kept
+    reason:  same_person_listed_under_sister_account x23; email_domain_not_the_company x2
+
+SIAM COMMERCIAL BANK PUBLIC CO LTD
+  prospect_contacts review_flags:
+    source:  1 of 16 Apollo rows
+    derived: flagged, kept
+    reason:  email_names_someone_else x1
+
+TMB BANK THANACHART PUBLIC COMPANY LIMITED
+  prospect_contacts review_flags:
+    source:  1 of 10 Apollo rows
+    derived: flagged, kept
+    reason:  email_domain_not_the_company x1
+
+VIETNAM PROSPERITY JOINT STOCK COMMERCIAL BANK
+  prospect_contacts review_flags:
+    source:  2 of 14 Apollo rows
+    derived: flagged, kept
+    reason:  phone_lookup_needs_review x2
+
+VIETTEL CORPORATION
+  prospect_contacts review_flags:
+    source:  1 of 1 Apollo rows
+    derived: flagged, kept
+    reason:  email_domain_not_the_company x1
 
 PT ASTRA INTERNATIONAL TBK
   prospect_contacts source:
-    source:  no rows in the 220-account sources
+    source:  13 rows from apollo
     derived: hp-backend/seed_data/astra/prospect_contacts.csv
-    reason:  filled from the Astra benchmark seed; the client's E2 answer says Astra's PredictLeads data is a separate delivery, and the seed is that delivery
+    reason:  seed kept live (SEED_PREFERRED); the apollo rows are in reference/apollo_prospect_contacts.csv pending a decision
 
 PT ASTRA INTERNATIONAL TBK
   news_events source:
@@ -113,6 +449,6 @@ PT ASTRA INTERNATIONAL TBK
     reason:  filled from the Astra benchmark seed; the client's E2 answer says Astra's PredictLeads data is a separate delivery, and the seed is that delivery
 
 google_news (all accounts)
-  356 rows dropped as duplicates when the RSS and
+  30 rows dropped as duplicates when the RSS and
   Exa feeds were merged, matched on domain + headline + date.
 

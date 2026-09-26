@@ -71,7 +71,7 @@ After the re-keys and aliases below, 186 accounts will hold at least one indexed
 | VPBank rows under "VIETNAM POST CORPORATION" → VIETNAM_PROSPERITY_JOINT_STOCK_COMMERCIAL_BANK | pending C1 answer (in the 12:02 attachment) | same, once confirmed |
 | Jabil Inc. 10-Q rows on both Jabil accounts; Hyundai DART rows on HKMC Group | DEC-054f | already the case; add a test so it stays so |
 | Name variants: "BDO Unibank, Inc." → BANCO_DE_ORO_UNIBANK_INC_BDO; "United Overseas Bank Limited - SG" → UNITED_OVERSEAS_BANK_LIMITED_UOB; "Singapore Airlines Limited" → SINGAPORE_AIRLINES; "Spark New Zealand Limited" → SPARK_NEW_ZEALAND; "Bank Rakyat Indonesia (BRI)" → PT_BANK_RAKYAT_INDONESIA_PERSERO; "NIPPON EXPRESS HOLDINGS, INC." → NIPPON_EXPRESS_CO_LTD; "Bank Mandiri" (blank territory) → PT_BANK_MANDIRI_PERSERO | our proposal, needs Yogesh's approval | alias table |
-| "PT Bank Mandiri (Persero) Tbk" rows carrying a Bank Central Asia territory | conflict | keep unassigned until the client confirms which bank the documents belong to |
+| "PT Bank Mandiri (Persero) Tbk" rows carrying a Bank Central Asia territory | client, 26 Sep (DEC-058e) | **done:** filed under PT_BANK_MANDIRI_PERSERO via FILINGS_CLIENT_RULINGS |
 | Group-level entries (Mitsubishi keiretsu, Astra International Group, UOB Group, CIMB Group, Aboitiz, Universal Robina) | no matching account | stay unassigned, listed in `_unassigned_filings.csv` |
 | Shared domains (jabil.com, mufg.jp) | DEC-025 "where the domain is same … use company name and country" | territory name decides; already implemented |
 | PredictLeads `sec_filings` | DEC-025/026 | attach by domain, then name + country for jabil.com and mufg.jp; give it a dataset slot (`sec_filings_text`) or fold into `compliance_filings` after Route C |
@@ -96,8 +96,8 @@ The client's rule is "last 12 months". The index has `period_end` on only 223 ro
 ## 8. Still open with the client
 
 1. **C1 — Agribank and VPBank**, and the 184 / 186 / 192 count reconciliation: answered in the 25 Sep 12:02 UTC attachments, which must be downloaded from Gmail and read.
-2. **ANZ Holdings NZ, CIMB Group Holdings, CIMB Niaga** have no rows in the file and are not on the 31-name list: ask whether they were crawled.
-3. **Bank Mandiri vs Bank Central Asia** on two rows: which bank do the documents belong to.
+2. ~~ANZ Holdings NZ, CIMB Group Holdings, CIMB Niaga~~ — **answered 26 Sep 03:26 UTC** with six URLs, now `Filings/filings_client_supplement_2026-09-26.csv` (DEC-058d). All six placed (CIMB Niaga downloaded by hand, via Filings/pdfs/_manual/).
+3. ~~Bank Mandiri vs Bank Central Asia~~ — **answered 26 Sep**: Bank Mandiri (DEC-058e); applied as FILINGS_CLIENT_RULINGS in the split. Both PDFs downloaded by hand and placed; sha256 matches the index.
 4. **Products sheet feature list** exists only in the 23 Sep screenshot (attached again on 25 Sep as `Screenshot 2026-09-23 at 5.23.22 PM.png`): download and transcribe.
 
 ---

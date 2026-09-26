@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-09-25T08:27:37.183793+00:00",
+  "generated_at": "2026-09-26T04:42:29.660544+00:00",
   "accounts": 220,
   "source_rows": {
     "news_events": 14289,
@@ -11,7 +11,7 @@
     "subpages": 15163,
     "similar_companies": 1010,
     "hp_category_intent": 220,
-    "google_news": 17134
+    "google_news": 5786
   },
   "unclaimed_rows": {
     "news_events": 0,
@@ -25,7 +25,41 @@
     "hp_category_intent": 0,
     "google_news": 0
   },
-  "news_dedup_dropped": 356,
+  "news_dedup_dropped": 30,
+  "news_window": {
+    "days": 365,
+    "from": "2025-09-26",
+    "to": "2026-09-26",
+    "feeds": {
+      "exa": {
+        "file": "exa_data (3)_2025-2026.xlsx",
+        "rows": 3726,
+        "undated": 0,
+        "older": 804,
+        "future": 1,
+        "kept": 2921
+      },
+      "google_news_rss": {
+        "file": "google_news_rss_data 2 (2)_2025-2026.xlsx",
+        "rows": 4159,
+        "undated": 0,
+        "older": 1294,
+        "future": 0,
+        "kept": 2865
+      }
+    }
+  },
+  "shared_domain_extra_rows": {
+    "news_events": 1,
+    "job_openings": 114,
+    "technology_detections": 4,
+    "connections": 2,
+    "subpages": 7
+  },
+  "entity_split_domains": [
+    "jabil.com",
+    "mufg.jp"
+  ],
   "corrections": [
     {
       "account": "PUBLIC BANK BHD",
@@ -77,6 +111,13 @@
       "reason": "2 workbooks share this company name; disambiguated so they do not overwrite each other"
     },
     {
+      "account": "education.nsw.gov.au",
+      "field": "hp_category_intent row",
+      "source": "hp_intent_results 2.xlsx: Unavailable",
+      "derived": "NSW_Education_Public_Intent.xlsx: PCs 80/100",
+      "reason": "separate client delivery for this account (C33); its scores are public-source estimates, not measured buyer intent"
+    },
+    {
       "account": "posco.com",
       "field": "source domain",
       "source": "posco-inc.com",
@@ -112,25 +153,410 @@
       "reason": "explicit approved alias: a source workbook keys this account under a different domain than the client domain audit"
     },
     {
+      "account": "JABIL_CIRCUIT_SDN_BHD",
+      "field": "predictleads datasets",
+      "source": "rows for jabil.com",
+      "derived": "rows naming this account's territory (incl. rows naming both entities)",
+      "reason": "company_name on every PredictLeads row since 25 Sep (C48, D3); dual-entity rows go to both"
+    },
+    {
       "account": "JABIL_CIRCUIT_SINGAPORE_PTE_LTD",
-      "field": "domain-keyed datasets",
+      "field": "news and intent datasets",
       "source": "rows for jabil.com",
       "derived": "none",
-      "reason": "jabil.com is shared with JABIL_CIRCUIT_SDN_BHD, which keeps the rows; no source field splits them by entity"
+      "reason": "jabil.com is shared with JABIL_CIRCUIT_SDN_BHD, which keeps the rows; no field in those sources splits them by entity"
+    },
+    {
+      "account": "JABIL_CIRCUIT_SINGAPORE_PTE_LTD",
+      "field": "predictleads datasets",
+      "source": "rows for jabil.com",
+      "derived": "rows naming this account's territory (incl. rows naming both entities)",
+      "reason": "company_name on every PredictLeads row since 25 Sep (C48, D3); dual-entity rows go to both"
+    },
+    {
+      "account": "MITSUBISHI_UFJ_FINANCIAL_GROUP_INC",
+      "field": "predictleads datasets",
+      "source": "rows for mufg.jp",
+      "derived": "rows naming this account's territory (incl. rows naming both entities)",
+      "reason": "company_name on every PredictLeads row since 25 Sep (C48, D3); dual-entity rows go to both"
     },
     {
       "account": "THE_BANK_OF_TOKYO_MITSUBISHI_LIMITED_BANGKOK_BRANCH",
-      "field": "domain-keyed datasets",
+      "field": "news and intent datasets",
       "source": "rows for mufg.jp",
       "derived": "none",
-      "reason": "mufg.jp is shared with MITSUBISHI_UFJ_FINANCIAL_GROUP_INC, which keeps the rows; no source field splits them by entity"
+      "reason": "mufg.jp is shared with MITSUBISHI_UFJ_FINANCIAL_GROUP_INC, which keeps the rows; no field in those sources splits them by entity"
+    },
+    {
+      "account": "THE_BANK_OF_TOKYO_MITSUBISHI_LIMITED_BANGKOK_BRANCH",
+      "field": "predictleads datasets",
+      "source": "rows for mufg.jp",
+      "derived": "rows naming this account's territory (incl. rows naming both entities)",
+      "reason": "company_name on every PredictLeads row since 25 Sep (C48, D3); dual-entity rows go to both"
+    },
+    {
+      "account": "PT_BANK_MANDIRI_PERSERO",
+      "field": "filings row",
+      "source": "PT Bank Mandiri (Persero) Tbk under PT BANK CENTRAL ASIA TBK - ID",
+      "derived": "PT_BANK_MANDIRI_PERSERO",
+      "reason": "Dhruvi 26 Sep 03:26 UTC: 'those redirect to Bank Mandiri, hence consider Bank Mandiri' (the territory column wrongly says BCA)"
+    },
+    {
+      "account": "PT_BANK_MANDIRI_PERSERO",
+      "field": "filings row",
+      "source": "PT Bank Mandiri (Persero) Tbk under PT BANK CENTRAL ASIA TBK - ID",
+      "derived": "PT_BANK_MANDIRI_PERSERO",
+      "reason": "Dhruvi 26 Sep 03:26 UTC: 'those redirect to Bank Mandiri, hence consider Bank Mandiri' (the territory column wrongly says BCA)"
+    },
+    {
+      "account": "AUSTRALIA POST",
+      "field": "prospect_contacts review_flags",
+      "source": "2 of 20 Apollo rows",
+      "derived": "flagged, kept",
+      "reason": "email_names_someone_else x1; name_looks_like_a_team_not_a_person x1"
+    },
+    {
+      "account": "DEPT OF HEALTH - NSW",
+      "field": "prospect_contacts review_flags",
+      "source": "2 of 18 Apollo rows",
+      "derived": "flagged, kept",
+      "reason": "email_domain_not_the_company x2"
+    },
+    {
+      "account": "NATIONAL AUSTRALIA BANK",
+      "field": "prospect_contacts review_flags",
+      "source": "1 of 23 Apollo rows",
+      "derived": "flagged, kept",
+      "reason": "email_domain_not_the_company x1"
+    },
+    {
+      "account": "QANTAS AIRWAYS",
+      "field": "prospect_contacts review_flags",
+      "source": "1 of 19 Apollo rows",
+      "derived": "flagged, kept",
+      "reason": "email_domain_not_the_company x1"
+    },
+    {
+      "account": "WOOLWORTHS GROUP LIMITED",
+      "field": "prospect_contacts review_flags",
+      "source": "1 of 24 Apollo rows",
+      "derived": "flagged, kept",
+      "reason": "email_domain_not_the_company x1"
+    },
+    {
+      "account": "KALBE FARMA GROUP",
+      "field": "prospect_contacts review_flags",
+      "source": "2 of 14 Apollo rows",
+      "derived": "flagged, kept",
+      "reason": "email_domain_not_the_company x2"
+    },
+    {
+      "account": "PT BANK CENTRAL ASIA TBK",
+      "field": "prospect_contacts review_flags",
+      "source": "1 of 14 Apollo rows",
+      "derived": "flagged, kept",
+      "reason": "email_domain_not_the_company x1"
+    },
+    {
+      "account": "PT BANK MANDIRI (PERSERO)",
+      "field": "prospect_contacts review_flags",
+      "source": "1 of 19 Apollo rows",
+      "derived": "flagged, kept",
+      "reason": "email_domain_not_the_company x1"
+    },
+    {
+      "account": "PT BANK RAKYAT INDONESIA (PERSERO)",
+      "field": "prospect_contacts review_flags",
+      "source": "1 of 14 Apollo rows",
+      "derived": "flagged, kept",
+      "reason": "email_domain_not_the_company x1"
+    },
+    {
+      "account": "FEDERAL INTERNATIONAL FINANCE, PT",
+      "field": "prospect_contacts review_flags",
+      "source": "1 of 7 Apollo rows",
+      "derived": "flagged, kept",
+      "reason": "email_domain_not_the_company x1"
+    },
+    {
+      "account": "SINAR MAS GROUP",
+      "field": "prospect_contacts review_flags",
+      "source": "1 of 6 Apollo rows",
+      "derived": "flagged, kept",
+      "reason": "email_domain_not_the_company x1"
+    },
+    {
+      "account": "DAIWA SECURITIES GROUP INC.",
+      "field": "prospect_contacts review_flags",
+      "source": "2 of 2 Apollo rows",
+      "derived": "flagged, kept",
+      "reason": "email_domain_not_the_company x2"
+    },
+    {
+      "account": "HITACHI, LTD.",
+      "field": "prospect_contacts review_flags",
+      "source": "2 of 20 Apollo rows",
+      "derived": "flagged, kept",
+      "reason": "email_domain_not_the_company x2"
+    },
+    {
+      "account": "LIXIL GROUP CORPORATION",
+      "field": "prospect_contacts review_flags",
+      "source": "1 of 16 Apollo rows",
+      "derived": "flagged, kept",
+      "reason": "email_domain_not_the_company x1"
+    },
+    {
+      "account": "MARUBENI CORPORATION",
+      "field": "prospect_contacts review_flags",
+      "source": "1 of 10 Apollo rows",
+      "derived": "flagged, kept",
+      "reason": "email_domain_not_the_company x1"
+    },
+    {
+      "account": "MITSUBISHI CHEMICAL HOLDINGS CORPORATION",
+      "field": "prospect_contacts review_flags",
+      "source": "1 of 10 Apollo rows",
+      "derived": "flagged, kept",
+      "reason": "email_domain_not_the_company x1"
+    },
+    {
+      "account": "MITSUBISHI UFJ FINANCIAL GROUP, INC.",
+      "field": "prospect_contacts review_flags",
+      "source": "23 of 25 Apollo rows",
+      "derived": "flagged, kept",
+      "reason": "same_person_listed_under_sister_account x23; email_domain_not_the_company x1"
+    },
+    {
+      "account": "NIPPON STEEL CORPORATION",
+      "field": "prospect_contacts review_flags",
+      "source": "1 of 5 Apollo rows",
+      "derived": "flagged, kept",
+      "reason": "email_domain_not_the_company x1"
+    },
+    {
+      "account": "NIDEC CORPORATION",
+      "field": "prospect_contacts review_flags",
+      "source": "2 of 17 Apollo rows",
+      "derived": "flagged, kept",
+      "reason": "email_domain_not_the_company x2"
+    },
+    {
+      "account": "ORIX CORPORATION",
+      "field": "prospect_contacts review_flags",
+      "source": "1 of 8 Apollo rows",
+      "derived": "flagged, kept",
+      "reason": "email_domain_not_the_company x1"
+    },
+    {
+      "account": "OLYMPUS CORPORATION",
+      "field": "prospect_contacts review_flags",
+      "source": "2 of 20 Apollo rows",
+      "derived": "flagged, kept",
+      "reason": "email_domain_not_the_company x2"
+    },
+    {
+      "account": "SUMITOMO ELECTRIC INDUSTRIES, LTD.",
+      "field": "prospect_contacts review_flags",
+      "source": "1 of 6 Apollo rows",
+      "derived": "flagged, kept",
+      "reason": "email_domain_not_the_company x1"
+    },
+    {
+      "account": "SUZUKI MOTOR CORPORATION",
+      "field": "prospect_contacts review_flags",
+      "source": "1 of 3 Apollo rows",
+      "derived": "flagged, kept",
+      "reason": "email_domain_not_the_company x1"
+    },
+    {
+      "account": "YAMAHA MOTOR CO., LTD.",
+      "field": "prospect_contacts review_flags",
+      "source": "1 of 11 Apollo rows",
+      "derived": "flagged, kept",
+      "reason": "email_domain_not_the_company x1"
+    },
+    {
+      "account": "TOKIO MARINE HOLDINGS, INC.",
+      "field": "prospect_contacts review_flags",
+      "source": "2 of 5 Apollo rows",
+      "derived": "flagged, kept",
+      "reason": "email_domain_not_the_company x2"
+    },
+    {
+      "account": "NISSAN MOTOR CO LTD",
+      "field": "prospect_contacts review_flags",
+      "source": "6 of 23 Apollo rows",
+      "derived": "flagged, kept",
+      "reason": "email_domain_not_the_company x6"
+    },
+    {
+      "account": "HANWHA GROUP",
+      "field": "prospect_contacts review_flags",
+      "source": "1 of 7 Apollo rows",
+      "derived": "flagged, kept",
+      "reason": "email_names_someone_else x1"
+    },
+    {
+      "account": "HYOSUNG GROUP",
+      "field": "prospect_contacts review_flags",
+      "source": "1 of 7 Apollo rows",
+      "derived": "flagged, kept",
+      "reason": "email_names_someone_else x1"
+    },
+    {
+      "account": "JABIL CIRCUIT SDN BHD",
+      "field": "prospect_contacts review_flags",
+      "source": "20 of 22 Apollo rows",
+      "derived": "flagged, kept",
+      "reason": "same_person_listed_under_sister_account x20"
+    },
+    {
+      "account": "KUMPULAN WANG SIMPANAN PEKERJA",
+      "field": "prospect_contacts review_flags",
+      "source": "2 of 10 Apollo rows",
+      "derived": "flagged, kept",
+      "reason": "email_domain_not_the_company x2"
+    },
+    {
+      "account": "PETROLIAM NASIONAL BERHAD",
+      "field": "prospect_contacts review_flags",
+      "source": "1 of 19 Apollo rows",
+      "derived": "flagged, kept",
+      "reason": "email_domain_not_the_company x1"
+    },
+    {
+      "account": "UNITED OVERSEAS BANK (MALAYSIA) BHD",
+      "field": "prospect_contacts review_flags",
+      "source": "22 of 22 Apollo rows",
+      "derived": "flagged, kept",
+      "reason": "same_person_listed_under_sister_account x22"
+    },
+    {
+      "account": "BANK ISLAM MALAYSIA BERHAD",
+      "field": "prospect_contacts review_flags",
+      "source": "2 of 10 Apollo rows",
+      "derived": "flagged, kept",
+      "reason": "email_names_someone_else x2; email_domain_not_the_company x1"
+    },
+    {
+      "account": "BECA CARTER HOLLINGS & FERNER LTD",
+      "field": "prospect_contacts review_flags",
+      "source": "1 of 14 Apollo rows",
+      "derived": "flagged, kept",
+      "reason": "not_matched x1"
+    },
+    {
+      "account": "FLETCHER BUILDING HOLDINGS LIMITED",
+      "field": "prospect_contacts review_flags",
+      "source": "1 of 15 Apollo rows",
+      "derived": "flagged, kept",
+      "reason": "email_domain_not_the_company x1"
+    },
+    {
+      "account": "MINISTRY OF SOCIAL DEVELOPMENT",
+      "field": "prospect_contacts review_flags",
+      "source": "1 of 11 Apollo rows",
+      "derived": "flagged, kept",
+      "reason": "phone_lookup_needs_review x1"
+    },
+    {
+      "account": "TE WHATU ORA HEALTH NEW ZEALAND",
+      "field": "prospect_contacts review_flags",
+      "source": "2 of 16 Apollo rows",
+      "derived": "flagged, kept",
+      "reason": "phone_lookup_needs_review x1; email_domain_not_the_company x1"
+    },
+    {
+      "account": "BANCO DE ORO UNIBANK, INC. (BDO)",
+      "field": "prospect_contacts review_flags",
+      "source": "1 of 13 Apollo rows",
+      "derived": "flagged, kept",
+      "reason": "email_domain_not_the_company x1"
+    },
+    {
+      "account": "METROPOLITAN BANK & TRUST COMY",
+      "field": "prospect_contacts review_flags",
+      "source": "1 of 11 Apollo rows",
+      "derived": "flagged, kept",
+      "reason": "email_domain_not_the_company x1"
+    },
+    {
+      "account": "OPTUM GLOBAL SOLUTIONS (PHILIPPINES), INC",
+      "field": "prospect_contacts review_flags",
+      "source": "2 of 23 Apollo rows",
+      "derived": "flagged, kept",
+      "reason": "email_domain_not_the_company x2"
+    },
+    {
+      "account": "JABIL CIRCUIT (SINGAPORE) PTE LTD",
+      "field": "prospect_contacts review_flags",
+      "source": "20 of 22 Apollo rows",
+      "derived": "flagged, kept",
+      "reason": "same_person_listed_under_sister_account x20"
+    },
+    {
+      "account": "MINISTRY OF HEALTH",
+      "field": "prospect_contacts review_flags",
+      "source": "3 of 5 Apollo rows",
+      "derived": "flagged, kept",
+      "reason": "email_domain_not_the_company x2; phone_lookup_needs_review x1"
+    },
+    {
+      "account": "UNITED OVERSEAS BANK LIMITED (UOB)",
+      "field": "prospect_contacts review_flags",
+      "source": "22 of 22 Apollo rows",
+      "derived": "flagged, kept",
+      "reason": "same_person_listed_under_sister_account x22"
+    },
+    {
+      "account": "LOTUS S STORES THAILAND COMPANY LIMITED",
+      "field": "prospect_contacts review_flags",
+      "source": "1 of 9 Apollo rows",
+      "derived": "flagged, kept",
+      "reason": "email_domain_not_the_company x1"
+    },
+    {
+      "account": "THE BANK OF TOKYO-MITSUBISHI LIMITED (BANGKOK BRANCH)",
+      "field": "prospect_contacts review_flags",
+      "source": "24 of 25 Apollo rows",
+      "derived": "flagged, kept",
+      "reason": "same_person_listed_under_sister_account x23; email_domain_not_the_company x2"
+    },
+    {
+      "account": "SIAM COMMERCIAL BANK PUBLIC CO LTD",
+      "field": "prospect_contacts review_flags",
+      "source": "1 of 16 Apollo rows",
+      "derived": "flagged, kept",
+      "reason": "email_names_someone_else x1"
+    },
+    {
+      "account": "TMB BANK THANACHART PUBLIC COMPANY LIMITED",
+      "field": "prospect_contacts review_flags",
+      "source": "1 of 10 Apollo rows",
+      "derived": "flagged, kept",
+      "reason": "email_domain_not_the_company x1"
+    },
+    {
+      "account": "VIETNAM PROSPERITY JOINT STOCK COMMERCIAL BANK",
+      "field": "prospect_contacts review_flags",
+      "source": "2 of 14 Apollo rows",
+      "derived": "flagged, kept",
+      "reason": "phone_lookup_needs_review x2"
+    },
+    {
+      "account": "VIETTEL CORPORATION",
+      "field": "prospect_contacts review_flags",
+      "source": "1 of 1 Apollo rows",
+      "derived": "flagged, kept",
+      "reason": "email_domain_not_the_company x1"
     },
     {
       "account": "PT ASTRA INTERNATIONAL TBK",
       "field": "prospect_contacts source",
-      "source": "no rows in the 220-account sources",
+      "source": "13 rows from apollo",
       "derived": "hp-backend/seed_data/astra/prospect_contacts.csv",
-      "reason": "filled from the Astra benchmark seed; the client's E2 answer says Astra's PredictLeads data is a separate delivery, and the seed is that delivery"
+      "reason": "seed kept live (SEED_PREFERRED); the apollo rows are in reference/apollo_prospect_contacts.csv pending a decision"
     },
     {
       "account": "PT ASTRA INTERNATIONAL TBK",
@@ -399,26 +825,60 @@
     "unmatched_audit_rows": []
   },
   "filings_index": {
-    "rows": 505,
-    "by_territory": 437,
+    "rows": 511,
+    "by_client_ruling": 2,
+    "by_territory": 443,
     "by_domain": 8,
     "by_company_name": 31,
-    "unassigned": 29,
-    "conflicts": [
-      {
-        "company": "PT Bank Mandiri (Persero) Tbk",
-        "territory": "PT BANK CENTRAL ASIA TBK - ID",
-        "domain": "bankmandiri.co.id",
-        "territory_account": "PT_BANK_CENTRAL_ASIA_TBK",
-        "domain_account": "PT_BANK_MANDIRI_PERSERO"
-      },
-      {
-        "company": "PT Bank Mandiri (Persero) Tbk",
-        "territory": "PT BANK CENTRAL ASIA TBK - ID",
-        "domain": "bankmandiri.co.id",
-        "territory_account": "PT_BANK_CENTRAL_ASIA_TBK",
-        "domain_account": "PT_BANK_MANDIRI_PERSERO"
-      }
+    "unassigned": 27,
+    "conflicts": []
+  },
+  "apollo_contacts": {
+    "rows": 2296,
+    "by_territory": 2275,
+    "by_name_and_country": 21,
+    "by_domain": 0,
+    "unassigned": [],
+    "domain_disagreements": [],
+    "accounts_with_contacts": 192,
+    "flags": {
+      "same_person_listed_under_sister_account": 130,
+      "email_domain_not_the_company": 54,
+      "email_names_someone_else": 6,
+      "phone_lookup_needs_review": 5,
+      "name_looks_like_a_team_not_a_person": 1,
+      "not_matched": 1
+    },
+    "emails_withheld": 6,
+    "accounts_without_contacts": [
+      "AIR_NEW_ZEALAND_LIMITED",
+      "ANZ_HOLDINGS_NEW_ZEALAND_LIMITED",
+      "CENTRAL_JAPAN_RAILWAY_COMPANY",
+      "COLES_GROUP",
+      "COUPANG_KOREA",
+      "HANJIN_GROUP",
+      "IAG_NZ_HOLDINGS_LIMITED",
+      "JAPAN_POST_HOLDINGS_CO_LTD",
+      "JFE_HOLDINGS_INC",
+      "KANSAI_ELECTRIC_POWER_COMPANY",
+      "KAWASAKI_HEAVY_INDUSTRIES_LTD",
+      "LOTTE_GROUP",
+      "MAZDA_MOTOR_CORPORATION",
+      "MEIJI_HOLDINGS_CO_LTD",
+      "MINISTRY_OF_DEFENCE_MY",
+      "MINISTRY_OF_DEFENCE_VN",
+      "MINISTRY_OF_DEFENSE",
+      "MINISTRY_OF_FINANCE",
+      "NATIONAL_INTELLIGENCE_SERVICE",
+      "NIPPON_EXPRESS_CO_LTD",
+      "NTT_INC",
+      "PILIPINAS_SHELL_PETROLEUM_CORPORATION",
+      "PIONEER_CORPORATION",
+      "PUBLIC_BANK_BHD",
+      "TOYOTA_GROUP",
+      "T_D_HOLDINGS_INC",
+      "VIETNAM_POST_CORPORATION",
+      "YAMATO_HOLDINGS_CO_LTD"
     ]
   },
   "reference_source_rows": {
@@ -432,8 +892,7 @@
     "predictleads_differences": 246
   },
   "datasets_nobody_has": [
-    "compliance_filings",
-    "prospect_contacts"
+    "compliance_filings"
   ],
   "mapping_notes": [
     "news_events <- predictleads/news_events (the columns the extractor reads); news_events_additional <- explorium/13_News_Events (read by no feature). Earlier runs had these two swapped."

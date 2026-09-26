@@ -659,7 +659,7 @@ One block per important file: where it came from, where it lives now, which vers
 | Original local path | /Users/yogeshyadav/Desktop/HP/project-documentation/04_Data_and_Source_Definitions/Contacts_Apollo/apollo_data.pdf |
 | In this structure | `04_Data_and_Source_Definitions/Contacts_Apollo/apollo_data.pdf` |
 | Size / md5 | 230.7 KB / f91267b0f0d8a3e3d0b2acb8f13560bb |
-| Used for | Contacts + phone numbers for the Astra seed account. Only a PDF print exists locally; the xlsx is on SharePoint. The 220-account contact file (Apollo_All_Contacts) has NOT been received as of 25 Sep. |
+| Used for | Contacts + phone numbers for the Astra seed account. Only a PDF print exists locally; the xlsx is on SharePoint. The 220-account contact file arrived 26 Sep (C49). |
 | Notes | Local file is apollo_data.pdf. |
 
 ## C39d — 2025-Astra-Annual-Report.pdf
@@ -894,11 +894,11 @@ One block per important file: where it came from, where it lives now, which vers
 | Email / channel | Google Drive folder 1eZvNHHKo_WZyoYWJbPB_FHZl04vLiw25 (Dhruvi, 18 Sep 2026 05:51 UTC, Gmail thread "HP Account Based Intelligence (220 accounts)" (id 1a082bca2581fea0)) - hiring data added 18 Sep 13:32 UTC |
 | Date | 2026-09-18 |
 | Version | - |
-| Status | **CURRENT** |
+| Status | **SUPERSEDED** |
 | Supersedes | - |
-| Superseded by | - |
-| Original local path | /Users/yogeshyadav/Desktop/HP/220 account data /predictleads_combined_219_accounts.xlsx |
-| In this structure | `04_Data_and_Source_Definitions/PredictLeads/predictleads_combined_219_accounts.xlsx.LINK.md` |
+| Superseded by | C48 predictleads_combined_219_accounts_company_country.xlsm (25 Sep) |
+| Original local path | /Users/yogeshyadav/Desktop/HP/220 account data /_superseded_2026-09-25/predictleads_combined_219_accounts.xlsx |
+| In this structure | `04_Data_and_Source_Definitions/PredictLeads/_SUPERSEDED/predictleads_combined_219_accounts.xlsx.LINK.md` |
 | Size / md5 | 30388.7 KB / 85f8d2958e3f771ae79d121aa3145875 |
 | Used for | company, extended_company, job_openings, technology_detections, news_events, financing_events, connections, subpages, products, similar_companies, sec_filings + QA sheets. Client 23 Sep: use sec_filings and products; ignore the rest of the new sheets. |
 
@@ -911,11 +911,11 @@ One block per important file: where it came from, where it lives now, which vers
 | Email / channel | Google Drive folder 1eZvNHHKo_WZyoYWJbPB_FHZl04vLiw25 (Dhruvi, 18 Sep 2026 05:51 UTC, Gmail thread "HP Account Based Intelligence (220 accounts)" (id 1a082bca2581fea0)) |
 | Date | 2026-09-18 |
 | Version | - |
-| Status | **CURRENT** |
+| Status | **SUPERSEDED** |
 | Supersedes | - |
-| Superseded by | - |
-| Original local path | /Users/yogeshyadav/Desktop/HP/220 account data /exa_data.xlsx |
-| In this structure | `04_Data_and_Source_Definitions/Exa/exa_data.xlsx.LINK.md` |
+| Superseded by | C46 exa_data (3)_2025-2026.xlsx (25 Sep) |
+| Original local path | /Users/yogeshyadav/Desktop/HP/220 account data /_superseded_2026-09-25/exa_data.xlsx |
+| In this structure | `04_Data_and_Source_Definitions/Exa/_SUPERSEDED/exa_data.xlsx.LINK.md` |
 | Size / md5 | 29751.2 KB / b0e43da1c8b359f219d90e6bc0cf9f3e |
 | Used for | Exa.ai news feed (9,221 rows, 14 cols, same schema as Google News RSS). Merged with RSS for Live Signals. |
 
@@ -928,13 +928,103 @@ One block per important file: where it came from, where it lives now, which vers
 | Email / channel | Google Drive folder 1eZvNHHKo_WZyoYWJbPB_FHZl04vLiw25 (Dhruvi, 18 Sep 2026 05:51 UTC, Gmail thread "HP Account Based Intelligence (220 accounts)" (id 1a082bca2581fea0)) |
 | Date | 2026-09-18 |
 | Version | - |
-| Status | **CURRENT** |
+| Status | **SUPERSEDED** |
 | Supersedes | google_news_rss_data.xlsx (31 Aug, Astra only - not on this machine) |
-| Superseded by | - |
-| Original local path | /Users/yogeshyadav/Desktop/HP/220 account data /google_news_rss_data 1.xlsx |
-| In this structure | `04_Data_and_Source_Definitions/Google_News_RSS/google_news_rss_data 1.xlsx` |
+| Superseded by | C47 google_news_rss_data 2 (2)_2025-2026.xlsx (25 Sep) |
+| Original local path | /Users/yogeshyadav/Desktop/HP/220 account data /_superseded_2026-09-25/google_news_rss_data 1.xlsx |
+| In this structure | `04_Data_and_Source_Definitions/Google_News_RSS/_SUPERSEDED/google_news_rss_data 1.xlsx` |
 | Size / md5 | 2294.0 KB / d51239708522a68a821d062978d26e4e |
 | Used for | Google News RSS feed (7,913 rows). Merged with Exa for Live Signals. |
+
+## C46 — exa_data (3)_2025-2026.xlsx
+
+| Field | Value |
+|---|---|
+| Origin | CLIENT DATA |
+| Received from | Dhruvi Patel (BridgeAI) |
+| Email / channel | Google Drive folder 1eZvNHHKo_WZyoYWJbPB_FHZl04vLiw25 (Dhruvi, 25 Sep 2026 12:34 UTC, Gmail thread "HP Account Based Intelligence (220 accounts)" (id 1a082bca2581fea0)) |
+| Date | 2026-09-25 |
+| Version | - |
+| Status | **CURRENT** |
+| Supersedes | C22c exa_data.xlsx (18 Sep) |
+| Superseded by | - |
+| Original local path | /Users/yogeshyadav/Desktop/HP/220 account data /exa_data (3)_2025-2026.xlsx |
+| In this structure | `04_Data_and_Source_Definitions/Exa/exa_data (3)_2025-2026.xlsx.LINK.md` |
+| Size / md5 | 10592.0 KB / 629d8423bbcdb13129384c677acea147 |
+| Used for | Exa.ai news feed, event_date re-crawled: 3,726 rows, all dated, 215 accounts, 2025-01-01 to 2026-10-19. Merged with RSS for Live Signals. Client: last 12 months only. |
+| Notes | 2,929 rows (215 accounts) fall in the 12 months to 25 Sep 2026; 796 are older and 1 is future-dated (2026-10-19). The file itself is cut at 2025-01-01, so the 12-month window still has to be applied on ingest. |
+
+## C47 — google_news_rss_data 2 (2)_2025-2026.xlsx
+
+| Field | Value |
+|---|---|
+| Origin | CLIENT DATA |
+| Received from | Dhruvi Patel (BridgeAI) |
+| Email / channel | Google Drive folder 1eZvNHHKo_WZyoYWJbPB_FHZl04vLiw25 (Dhruvi, 25 Sep 2026 12:34 UTC, Gmail thread "HP Account Based Intelligence (220 accounts)" (id 1a082bca2581fea0)) |
+| Date | 2026-09-25 |
+| Version | - |
+| Status | **CURRENT** |
+| Supersedes | C22d google_news_rss_data 1.xlsx (18 Sep) |
+| Superseded by | - |
+| Original local path | /Users/yogeshyadav/Desktop/HP/220 account data /google_news_rss_data 2 (2)_2025-2026.xlsx |
+| In this structure | `04_Data_and_Source_Definitions/Google_News_RSS/google_news_rss_data 2 (2)_2025-2026.xlsx` |
+| Size / md5 | 1251.2 KB / 38ea13ec54e981a25eb41b9cfb0eb44a |
+| Used for | Google News RSS feed, event_date populated: 4,159 rows, all dated, 94 accounts, 2025-01-01 to 2026-09-17. Merged with Exa for Live Signals. Client: last 12 months only. |
+| Notes | 2,876 rows (93 accounts) fall in the 12 months to 25 Sep 2026; 1,283 are older. Coverage is 94 accounts against 99 in the 18 Sep file. |
+
+## C48 — predictleads_combined_219_accounts_company_country.xlsm
+
+| Field | Value |
+|---|---|
+| Origin | CLIENT DATA |
+| Received from | Dhruvi Patel (BridgeAI) |
+| Email / channel | Google Drive folder 1eZvNHHKo_WZyoYWJbPB_FHZl04vLiw25 (Dhruvi, 25 Sep 2026 12:34 UTC, Gmail thread "HP Account Based Intelligence (220 accounts)" (id 1a082bca2581fea0)) |
+| Date | 2026-09-25 |
+| Version | - |
+| Status | **CURRENT** |
+| Supersedes | C22b predictleads_combined_219_accounts.xlsx (18 Sep) |
+| Superseded by | - |
+| Original local path | /Users/yogeshyadav/Desktop/HP/220 account data /predictleads_combined_219_accounts_company_country.xlsm |
+| In this structure | `04_Data_and_Source_Definitions/PredictLeads/predictleads_combined_219_accounts_company_country.xlsm.LINK.md` |
+| Size / md5 | 30223.9 KB / b72347e04ff351363b7f405880e4afeb |
+| Used for | Same 19 sheets and row counts as C22b, with company_name and account_country_code added to every sheet (D3). Client: the job openings here are the final hiring dataset for now; vendors are being asked for the remaining 43 accounts. |
+| Notes | Macro-enabled workbook (.xlsm); read with openpyxl/pandas as usual. On shared domains some rows name both entities ("JABIL CIRCUIT SDN BHD - MY; JABIL CIRCUIT (SINGAPORE) PTE LTD - SG", country "MY; SG"; likewise MUFG JP; TH), so those rows still need a rule. |
+
+## C49 — Apollo_All_Contacts (1).xlsx
+
+| Field | Value |
+|---|---|
+| Origin | CLIENT DATA |
+| Received from | Dhruvi Patel (BridgeAI) |
+| Email / channel | Google Drive folder 1eZvNHHKo_WZyoYWJbPB_FHZl04vLiw25 (Dhruvi, announced 26 Sep 2026 03:26 UTC, Gmail thread "HP Account Based Intelligence (220 accounts)" (id 1a082bca2581fea0)) |
+| Date | 2026-09-26 |
+| Version | - |
+| Status | **CURRENT** |
+| Supersedes | C39c apollo_data.xlsx (Astra seed, 3 Sep) as the contact source for the 220 |
+| Superseded by | - |
+| Original local path | /Users/yogeshyadav/Desktop/HP/220 account data /Apollo_All_Contacts (1).xlsx |
+| In this structure | `04_Data_and_Source_Definitions/Contacts_Apollo/Apollo_All_Contacts (1).xlsx` |
+| Size / md5 | 442.7 KB / 16c26d6391ae2ebbdea7e4381a3e35df |
+| Used for | The one contact file for all 220 accounts (D8). Sheets: Contacts (2,296 rows, header on row 5), Pending and review (5), Companies (220, coverage per company). 192 accounts have contacts, 28 none. Feeds prospect_contacts: Stakeholder Map, Opportunity Map, Objection Playbook, Content Studio, Message Evaluator. |
+| Notes | Client: "we are pulling data and will comeback with few more details if we can". Contains personal emails and mobile numbers - gitignored like all data. Mapping rules and review flags: DECISION_LOG INT-11; 04_Data_and_Source_Definitions/Contacts_Apollo/README.md. |
+
+## C50 — filings_client_supplement_2026-09-26.csv
+
+| Field | Value |
+|---|---|
+| Origin | CLIENT DATA (URLs) transcribed by delivery team |
+| Received from | Dhruvi Patel (BridgeAI) |
+| Email / channel | Gmail thread "HP Account Based Intelligence (220 accounts)" (id 1a082bca2581fea0), 26 Sep 2026 03:26 UTC (URLs in the email body) |
+| Date | 2026-09-26 |
+| Version | - |
+| Status | **CURRENT** |
+| Supersedes | - |
+| Superseded by | - |
+| Original local path | /Users/yogeshyadav/Desktop/HP/project-documentation/04_Data_and_Source_Definitions/Filings/filings_client_supplement_2026-09-26.csv |
+| In this structure | `04_Data_and_Source_Definitions/Filings/filings_client_supplement_2026-09-26.csv` |
+| Size / md5 | 3.8 KB / 1c4cc882f13bdb40575bd01aa53895bb |
+| Used for | Six filing documents the crawl missed: ANZ Holdings NZ (3 disclosure statements), CIMB Group Holdings (integrated annual report + financial statements 2025), CIMB Niaga (annual report 2025). Same columns as filings 1.csv, row_id S26-1..6; read after it by split_account_data.py and fetch_filings.py. |
+| Notes | Periods read from each document's cover page on 26 Sep, except CIMB Niaga (browser challenge; period from the file name). No source_page_url was given, so none is recorded. |
 
 ## C22e — hp_intent_results 2.xlsx
 
@@ -953,7 +1043,7 @@ One block per important file: where it came from, where it lives now, which vers
 | Size / md5 | 84.9 KB / 26d138838cc356158a89f9a8127ec827 |
 | Used for | HP category intent (PCs, Workstations, Poly, Printers, 3D Printers) per account; primary intent signal per Konika 3 Sep. 173 of 220 populated. |
 
-## C33 — NSW_Education_Public_intent (Drive)
+## C33 — NSW_Education_Public_Intent.xlsx
 
 | Field | Value |
 |---|---|
@@ -962,14 +1052,14 @@ One block per important file: where it came from, where it lives now, which vers
 | Email / channel | Google Drive folder 1eZvNHHKo_WZyoYWJbPB_FHZl04vLiw25 (Dhruvi, 18 Sep 2026 05:51 UTC, Gmail thread "HP Account Based Intelligence (220 accounts)" (id 1a082bca2581fea0)) - added 23 Sep 2026 05:53 UTC |
 | Date | 2026-09-23 |
 | Version | - |
-| Status | **CURRENT - NOT ON THIS MACHINE** |
+| Status | **CURRENT** |
 | Supersedes | - |
 | Superseded by | - |
-| Original local path | none found |
-| In this structure | `04_Data_and_Source_Definitions/HP_Intent/NSW_Education_Public_intent.MISSING.md` |
-| Size / md5 | - / - |
-| Used for | Intent data for DEPARTMENT OF EDUCATION - NSW, AU (education.nsw.gov.au), missing from the 18 Sep intent file. |
-| Notes | Drive connector has no scope; download by hand. |
+| Original local path | /Users/yogeshyadav/Desktop/HP/220 account data /NSW_Education_Public_Intent.xlsx |
+| In this structure | `04_Data_and_Source_Definitions/HP_Intent/NSW_Education_Public_Intent.xlsx` |
+| Size / md5 | 19.6 KB / 01bf7a8ba095fffd9a2d262b6b37655c |
+| Used for | Intent data for DEPARTMENT OF EDUCATION - NSW, AU (education.nsw.gov.au), missing from the 18 Sep intent file. Same 55-column wide layout as hp_intent_results 2.xlsx; one row (PCs 80/100, top category). The split replaces that domain's "Unavailable" row with it. |
+| Notes | Downloaded by hand 25 Sep 2026. Sheets: "Intent report" (band row 1, field row 2, data row 3) and "Evidence and method". PUBLIC-SOURCE ESTIMATES dated 19 Sep 2026: "Scores measure evidence strength, not observed buyer research or purchase probability." Trend, research volume and intent dates are N/A by design. |
 
 ## C19 — filings 1.csv
 
@@ -1585,7 +1675,7 @@ One block per important file: where it came from, where it lives now, which vers
 | Superseded by | - |
 | Original local path | /Users/yogeshyadav/Desktop/HP/project-documentation/07_Internal_Generated/Question_Trackers/220-Open-Decisions-List.md |
 | In this structure | `07_Internal_Generated/Question_Trackers/220-Open-Decisions-List.md`, `05_Questions_and_Clarifications/Source_Documents/220-Open-Decisions-List.md` |
-| Size / md5 | 31.7 KB / b476fd21d23fcb97c056d74c07fce552 |
+| Size / md5 | 31.9 KB / a5f0b8f5dbfd2dc1d740a83f0deeac6e |
 | Used for | 43 open decisions and data questions before the 220-account run, each with a proposed default. |
 
 ## I11 — 220-Open-Items-and-Clarifications.md
@@ -1857,7 +1947,7 @@ One block per important file: where it came from, where it lives now, which vers
 | Superseded by | - |
 | Original local path | /Users/yogeshyadav/Desktop/HP/220 account split csv/_RUN_SUMMARY.json |
 | In this structure | `07_Internal_Generated/Derived_Data/_RUN_SUMMARY.json` |
-| Size / md5 | 17.9 KB / 752130b8f90ffd810412bbba5e967490 |
+| Size / md5 | 33.6 KB / ad23c31af8bc3522cdb72467371a155f |
 | Used for | Row counts, unclaimed rows, news de-dup count, corrections applied when splitting the vendor files into 220 per-account folders. |
 
 ## I20b — _CORRECTIONS.txt (220-account split)
@@ -1874,7 +1964,7 @@ One block per important file: where it came from, where it lives now, which vers
 | Superseded by | - |
 | Original local path | /Users/yogeshyadav/Desktop/HP/220 account split csv/_CORRECTIONS.txt |
 | In this structure | `07_Internal_Generated/Derived_Data/_CORRECTIONS.txt` |
-| Size / md5 | 4.3 KB / 8233c0320c20e6211816725128c9050c |
+| Size / md5 | 14.7 KB / e43317c804b7235c19802e85df999d06 |
 | Used for | Every value the split derived instead of copying (blank domains, duplicate-name folders). INTERNAL ASSUMPTIONS live here. |
 
 ## I20c — split_baseline.json

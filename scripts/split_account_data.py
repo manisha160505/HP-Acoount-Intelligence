@@ -102,13 +102,46 @@ OUTPUT_DIR = REPO_ROOT / "220 account split csv"
 
 EXPLORIUM_DIR = SOURCE_DIR / "explorium_clean_220"
 HP_INTENT_FILE = SOURCE_DIR / "hp_intent_results 2.xlsx"
-GOOGLE_NEWS_FILE = SOURCE_DIR / "google_news_rss_data 1.xlsx"
+# Intent rows delivered after the main workbook, in its exact 55-column wide
+# layout, each replacing that domain's row in it. NSW Department of Education
+# was "Unavailable" in the 18 Sep file; the client sent this separately (Drive,
+# 23 Sep, C33). Its scores are public-source estimates ("Scores measure
+# evidence strength, not observed buyer research"), which its own band labels
+# say; the replacement is logged in _CORRECTIONS.txt so that is not lost.
+#   (path, sheet, category-band header row, first data row)
+HP_INTENT_SUPPLEMENTS = [
+    (SOURCE_DIR / "NSW_Education_Public_Intent.xlsx", "Intent report", 1, 3),
+]
+# The 25 Sep re-drop (C46-C48). Dhruvi: "Please use only this file going
+# forward" for both news feeds, and the PredictLeads file with company name and
+# country "populated across all sheets" is "the latest version". The 18 Sep
+# files are kept in _superseded_2026-09-25/ and are not read.
+GOOGLE_NEWS_FILE = SOURCE_DIR / "google_news_rss_data 2 (2)_2025-2026.xlsx"
 # Same schema as the google news export, but far wider coverage: 215 domains
-# against 99, so 119 accounts have news here and nowhere else. Merged into the
+# against 94, so most accounts have news here and nowhere else. Merged into the
 # google_news dataset rather than given its own dataset_key, because the
 # registry has no key for it and the columns are identical.
-EXA_FILE = SOURCE_DIR / "exa_data.xlsx"
-PREDICTLEADS_FILE = SOURCE_DIR / "predictleads_combined_219_accounts.xlsx"
+EXA_FILE = SOURCE_DIR / "exa_data (3)_2025-2026.xlsx"
+PREDICTLEADS_FILE = SOURCE_DIR / "predictleads_combined_219_accounts_company_country.xlsm"
+# The one contact file for all 220 accounts (Dhruvi, 26 Sep 03:26 UTC: "Apollo_
+# all_contacts(1) uploaded in the google drive folder … we are pulling data and
+# will comeback with few more details"). Sheet "Contacts" has a four-line title
+# block above its header row. Keyed by Company Name + Country Code, which is
+# the master list's Sales Territory Name less its " - XX" suffix.
+APOLLO_FILE = SOURCE_DIR / "Apollo_All_Contacts (1).xlsx"
+APOLLO_SHEET = "Contacts"
+APOLLO_HEADER_ROW = 4
+
+# The client's news window, 25 Sep: "considering the last 12 months of data
+# only". Both files start at 2025-01-01, so the window is still applied here,
+# counted back from the day of the run. A row dated after the run is dropped
+# too: Exa carries one dated 2026-10-19, which would sort above every real item.
+NEWS_WINDOW_DAYS = 365
+
+# Inputs without which the split would still "succeed" and silently write
+# empty datasets. Checked up front in main().
+REQUIRED_SOURCE_FILES = (HP_INTENT_FILE, GOOGLE_NEWS_FILE, EXA_FILE, PREDICTLEADS_FILE,
+                         APOLLO_FILE)
 
 # Inputs that live outside the vendor drop.
 #
@@ -130,6 +163,23 @@ DOMAIN_AUDIT_SHEET = "219 Account Audit"
 # so this is what we can attach per account today.
 FILINGS_INDEX_FILE = (REPO_ROOT / "project-documentation" / "04_Data_and_Source_Definitions"
                       / "Filings" / "filings 1.csv")
+# Rows the client supplied after the crawl, in filings 1.csv's exact columns,
+# appended to it on read. row_id "S26-n" marks them. The 26 Sep file holds the
+# URLs Dhruvi sent for ANZ Holdings NZ, CIMB Group Holdings and CIMB Niaga,
+# which the crawl never covered.
+FILINGS_SUPPLEMENT_FILES = [
+    FILINGS_INDEX_FILE.parent / "filings_client_supplement_2026-09-26.csv",
+]
+# Client rulings that settle a filings row whose territory and domain disagree.
+# Checked before the conflict rule in assign_filings(), so a ruled row is filed
+# where the client said and not parked in _unassigned_filings.csv.
+#   (company, sales_territory_name) -> (account slug, authority)
+FILINGS_CLIENT_RULINGS = {
+    ("PT Bank Mandiri (Persero) Tbk", "PT BANK CENTRAL ASIA TBK - ID"): (
+        "PT_BANK_MANDIRI_PERSERO",
+        "Dhruvi 26 Sep 03:26 UTC: 'those redirect to Bank Mandiri, hence consider "
+        "Bank Mandiri' (the territory column wrongly says BCA)"),
+}
 # The backend's dependency map, read (not copied) so readiness reflects what
 # the upload endpoint will actually regenerate.
 FEATURE_MAPPING_FILE = (REPO_ROOT / "hp-backend" / "src" / "app" / "api" / "v1"
@@ -141,6 +191,15 @@ FEATURE_MAPPING_FILE = (REPO_ROOT / "hp-backend" / "src" / "app" / "api" / "v1"
 # recorded in _CORRECTIONS.txt.
 SEED_FILL = {
     "PT_ASTRA_INTERNATIONAL_TBK": REPO_ROOT / "hp-backend" / "seed_data" / "astra",
+}
+# Datasets where the seed wins even when the 220-account sources have rows.
+# Astra's live Stakeholder Map runs on the pilot's 23 contacts; the 26 Sep
+# Apollo file has 13 different people for Astra and none of the 23. Replacing
+# the demo account's whole stakeholder list is Yogesh's call, not the split's,
+# so the seed stays live and the Apollo rows are kept beside it under
+# reference/apollo_prospect_contacts.csv until that is decided.
+SEED_PREFERRED = {
+    "PT_ASTRA_INTERNATIONAL_TBK": {"prospect_contacts"},
 }
 REFERENCE_DIR = "reference"
 
@@ -163,6 +222,7 @@ ENCODING = "utf-8-sig"
 # source=None means we have no feed for it yet. Those are the deliberate gaps.
 
 EXPLORIUM = "explorium"
+APOLLO = "apollo"
 PREDICTLEADS = "predictleads"
 HP_INTENT = "hp_intent"
 GOOGLE_NEWS = "google_news"
@@ -181,7 +241,11 @@ DATASET_PLAN = {
     "social_media":         {"source": EXPLORIUM, "sheet": "9_Social_Media"},
     "intent_topics":        {"source": EXPLORIUM, "sheet": "10_Intent_Topics"},
     "intent_score":         {"source": EXPLORIUM, "sheet": "11_intent_score"},
-    "prospect_contacts":    {"source": EXPLORIUM, "sheet": "14_Prospect_Contacts"},
+    # Apollo since 26 Sep; Explorium's 14_Prospect_Contacts (empty on all 220)
+    # stays as the fallback for an account Apollo has no rows for.
+    "prospect_contacts":    {"source": APOLLO, "sheet": APOLLO_SHEET,
+                             "fallback": {"source": EXPLORIUM,
+                                          "sheet": "14_Prospect_Contacts"}},
     # news_events is PredictLeads' news table, NOT Explorium's 13_News_Events.
     # The extractor (services/extractors/recent_news_signals.py) reads
     # summary / article_sentence / effective_date / found_at / category, which
@@ -308,17 +372,28 @@ def apply_domain_alias(domain: str) -> str:
 # every row into both accounts - which inflates the totals and, worse, tells a
 # seller that Singapore is hiring for roles that are actually in Malaysia.
 #
-# Neither vendor gives us a field that splits those rows by entity, so there is
-# no honest way to divide them. The rows go to the primary account listed here
-# and the secondary account gets none, which is the conservative reading: an
-# account with no data reads as "no data", whereas an account with another
-# entity's data reads as fact.
+# The news feeds and the intent file give us no field that splits those rows by
+# entity, so there is no honest way to divide them. Their rows go to the
+# primary account listed here and the secondary account gets none, which is
+# the conservative reading: an account with no data reads as "no data",
+# whereas an account with another entity's data reads as fact.
 #
 #   <shared domain>: <slug of the account that keeps the rows>
 SHARED_DOMAIN_PRIMARY = {
     "jabil.com": "JABIL_CIRCUIT_SDN_BHD",
     "mufg.jp": "MITSUBISHI_UFJ_FINANCIAL_GROUP_INC",
 }
+
+# PredictLeads is the exception since 25 Sep (C48, D3): every sheet now carries
+# `company_name`, and its values are the client's Sales Territory Names exactly
+# (all 219 match). The client's rule is "take Company Name + Country into
+# consideration along with the domain", so on a shared domain each row goes to
+# the account(s) it names. Some rows name both entities, "; "-separated
+# ("JABIL CIRCUIT SDN BHD - MY; JABIL CIRCUIT (SINGAPORE) PTE LTD - SG"): the
+# vendor attributes them to both, and they go to both, as the client ruled for
+# the Jabil 10-Q (DEC-054f). Set to False to give those rows to neither.
+PREDICTLEADS_ENTITY_COLUMN = "company_name"
+DUAL_ENTITY_ROWS_TO_BOTH = True
 
 
 # Every value this script derives rather than copies is appended here, so the
@@ -463,6 +538,8 @@ class SourceData:
                     key = (df[key_column] if key_column in df.columns
                            else pd.Series([""] * len(df)))
                     df["__domain"] = key.map(normalize_domain)
+                    if PREDICTLEADS_ENTITY_COLUMN in df.columns:
+                        df["__entities"] = df[PREDICTLEADS_ENTITY_COLUMN].map(_entity_names)
                     self._predictleads[cache_key] = df
                 except Exception as exc:
                     print(f"  ! could not read predictleads sheet '{cache_key}': {exc}")
@@ -475,20 +552,43 @@ class SourceData:
 
         The RSS export and the Exa export carry the same columns but different
         coverage, so they are stacked rather than chosen between. Duplicates
-        are dropped on (domain, headline, date): the 96 domains in both feeds
-        would otherwise contribute the same story twice.
+        are dropped on (domain, headline, date): the domains in both feeds
+        would otherwise contribute the same story twice. Exa is stacked first
+        so it is the row kept - the client, 25 Sep: "consider exa news" where
+        the two disagree (DEC-054a).
+
+        Only rows inside the client's 12-month window are kept (see
+        NEWS_WINDOW_DAYS); what the window removed is in RUN_STATS.
         """
         if self._google_news is None:
             frames = []
+            window_end = pd.Timestamp(datetime.now(UTC).date(), tz="UTC") + pd.Timedelta(days=1)
+            window_start = window_end - pd.Timedelta(days=NEWS_WINDOW_DAYS + 1)
+            window = {"days": NEWS_WINDOW_DAYS,
+                      "from": str(window_start.date()),
+                      "to": str((window_end - pd.Timedelta(days=1)).date()),
+                      "feeds": {}}
             for path, sheet, label in (
-                (GOOGLE_NEWS_FILE, "google_news_rss_data", "google_news_rss"),
                 (EXA_FILE, "exa_data", "exa"),
+                (GOOGLE_NEWS_FILE, "google_news_rss_data", "google_news_rss"),
             ):
                 if not path.exists():
                     continue
                 df = pd.read_excel(path, sheet_name=sheet)
+                dates = pd.to_datetime(df["event_date"], errors="coerce", utc=True)
+                undated = dates.isna()
+                older = dates < window_start
+                future = dates >= window_end
+                window["feeds"][label] = {
+                    "file": path.name, "rows": len(df),
+                    "undated": int(undated.sum()), "older": int(older.sum()),
+                    "future": int(future.sum()),
+                    "kept": int((~(undated | older | future)).sum()),
+                }
+                df = df[~(undated | older | future)].copy()
                 df["__feed"] = label
                 frames.append(df)
+            RUN_STATS["news_window"] = window
 
             if not frames:
                 self._google_news = False
@@ -530,10 +630,58 @@ class SourceData:
                 # Column 1 is Domain, column 0 is Company - per the header row.
                 body["__domain"] = body[1].map(normalize_domain)
                 body["__name"] = body[0].map(normalize_name)
+                body = self._apply_intent_supplements(raw, body)
                 self._hp_intent = body
         if self._hp_intent is False:
             return None, None
         return self._hp_intent, self._hp_intent_header
+
+    @staticmethod
+    def _apply_intent_supplements(raw: pd.DataFrame, body: pd.DataFrame) -> pd.DataFrame:
+        """Replace a domain's intent row with a separately delivered one.
+
+        A supplement is accepted only if its category bands sit in the same
+        columns as the main workbook's; anything else would put a Poly score
+        under PCs, so it stops the run rather than being read loosely.
+        """
+        main_bands = {i: str(v).split("(")[0].strip().lower()
+                      for i, v in enumerate(raw.iloc[0].tolist()) if i > 4 and pd.notna(v)}
+        for path, sheet, band_row, first_row in HP_INTENT_SUPPLEMENTS:
+            if not path.exists():
+                print(f"  ! intent supplement not found, main row kept: {path.name}")
+                continue
+            sup = pd.read_excel(path, sheet_name=sheet, header=None)
+            bands = {i: str(v).split("(")[0].strip().lower()
+                     for i, v in enumerate(sup.iloc[band_row].tolist())
+                     if i > 4 and pd.notna(v)}
+            if sup.shape[1] != raw.shape[1] or bands != main_bands:
+                sys.exit(f"intent supplement {path.name}: category columns do not "
+                         f"line up with {HP_INTENT_FILE.name}; not merged")
+            rows = sup.iloc[first_row:].dropna(how="all").reset_index(drop=True)
+            # Run Date in the main file's own format ("2026-09-17 09:20 UTC");
+            # the supplement stores an Excel datetime.
+            rows[2] = rows[2].map(lambda v: pd.Timestamp(v).strftime("%Y-%m-%d %H:%M UTC")
+                                  if pd.notna(v) and not isinstance(v, str) else v)
+            rows["__domain"] = rows[1].map(normalize_domain)
+            rows["__name"] = rows[0].map(normalize_name)
+            for _, row in rows.iterrows():
+                domain = row["__domain"]
+                replaced = body[body["__domain"] == domain]
+                before = (str(replaced.iloc[0][3]) if not replaced.empty
+                          else "no row")
+                record_correction(
+                    domain, "hp_category_intent row", f"{HP_INTENT_FILE.name}: {before}",
+                    f"{path.name}: {row[3]} {row[4]}/100",
+                    "separate client delivery for this account (C33); its scores are "
+                    "public-source estimates, not measured buyer intent")
+                # The main row's company name is kept: it is the territory
+                # name the account is matched on, and the supplement's is not.
+                if not replaced.empty:
+                    row[0] = replaced.iloc[0][0]
+                    row["__name"] = replaced.iloc[0]["__name"]
+                body = pd.concat([body[body["__domain"] != domain],
+                                  row.to_frame().T], ignore_index=True)
+        return body
 
     # -- Client master list ----------------------------------------------
     def master_list(self) -> dict[str, dict] | None:
@@ -631,6 +779,18 @@ class SourceData:
         return self._audit if self._audit is not False else None
 
     # -- Filings index -----------------------------------------------------
+    def apollo_contacts(self) -> pd.DataFrame | None:
+        """The Apollo Contacts sheet as delivered, every cell a string."""
+        if getattr(self, "_apollo", None) is None:
+            try:
+                self._apollo = pd.read_excel(APOLLO_FILE, sheet_name=APOLLO_SHEET,
+                                             header=APOLLO_HEADER_ROW, dtype=str)
+                self._apollo = self._apollo.dropna(how="all")
+            except Exception as exc:
+                print(f"  ! could not read Apollo contacts: {exc}")
+                self._apollo = False
+        return self._apollo if self._apollo is not False else None
+
     def filings_index(self) -> pd.DataFrame | None:
         """filings 1.csv as delivered: strings only, blanks kept blank.
 
@@ -643,9 +803,17 @@ class SourceData:
                 self._filings = False
                 return None
             try:
-                self._filings = pd.read_csv(FILINGS_INDEX_FILE, dtype=str,
-                                            keep_default_na=False,
-                                            encoding="utf-8-sig")
+                frames = [pd.read_csv(path, dtype=str, keep_default_na=False,
+                                      encoding="utf-8-sig")
+                          for path in [FILINGS_INDEX_FILE, *FILINGS_SUPPLEMENT_FILES]
+                          if path.exists()]
+                # A supplement must be in the index's own columns, or its rows
+                # would be written into _filings_index.csv misaligned.
+                for extra in frames[1:]:
+                    if list(extra.columns) != list(frames[0].columns):
+                        raise ValueError("a filings supplement does not have "
+                                         "filings 1.csv's columns")
+                self._filings = pd.concat(frames, ignore_index=True)
             except Exception as exc:
                 print(f"  ! could not read filings index: {exc}")
                 self._filings = False
@@ -936,8 +1104,8 @@ def assign_filings(accounts: list[Account], sources: SourceData) -> dict:
     """
     global UNASSIGNED_FILINGS
     df = sources.filings_index()
-    stats = {"rows": 0, "by_territory": 0, "by_domain": 0, "by_company_name": 0,
-             "unassigned": 0, "conflicts": []}
+    stats = {"rows": 0, "by_client_ruling": 0, "by_territory": 0, "by_domain": 0,
+             "by_company_name": 0, "unassigned": 0, "conflicts": []}
     if df is None:
         return stats
     stats["rows"] = int(len(df))
@@ -961,7 +1129,13 @@ def assign_filings(accounts: list[Account], sources: SourceData) -> dict:
                   or name2slugs.get(normalize_name(row.get("company", "")), []))
         n_slug = n_hits[0] if len(n_hits) == 1 else None
 
-        if t_slug and d_slug and t_slug != d_slug:
+        ruling = FILINGS_CLIENT_RULINGS.get((str(row.get("company", "")).strip(), territory))
+        if ruling:
+            matched_by.append("client_ruling"); target.append(ruling[0]); reason.append("")
+            record_correction(ruling[0], "filings row",
+                              f"{row.get('company', '')} under {territory}",
+                              ruling[0], ruling[1])
+        elif t_slug and d_slug and t_slug != d_slug:
             why = (f"territory says {t_slug}, domain {domain} says {d_slug}; "
                    f"not guessed - with the client for correction")
             stats["conflicts"].append(
@@ -996,11 +1170,299 @@ def assign_filings(accounts: list[Account], sources: SourceData) -> dict:
     unassigned = df[df["__slug"] == ""].drop(columns=["__slug", "matched_by"])
     UNASSIGNED_FILINGS = (unassigned.rename(columns={"__reason": "reason"})
                           .reset_index(drop=True))
-    for key, label in (("by_territory", "sales_territory_name"),
+    for key, label in (("by_client_ruling", "client_ruling"),
+                       ("by_territory", "sales_territory_name"),
                        ("by_domain", "domain"),
                        ("by_company_name", "company_name")):
         stats[key] = int((df["matched_by"] == label).sum())
     stats["unassigned"] = int(len(unassigned))
+    return stats
+
+
+# --------------------------------------------------------------------------
+# Apollo contacts -> prospect_contacts
+# --------------------------------------------------------------------------
+# The Stakeholder Map reads prospect_contacts in Explorium's column layout, with
+# Apollo's own fields under apollo_* (the shape of the Astra seed, where the
+# pilot Apollo rows were first merged). Only what the Apollo row states is
+# filled. Two things the pilot merge did are deliberately NOT repeated:
+#   - buying_committee_personas: Apollo has no persona; "Requested Role" is the
+#     role we asked the vendor to find, not the person's role, so it is kept
+#     as apollo_requested_role and never promoted.
+#   - Email Status "valid": Apollo's "Verified Work Email" carries only
+#     Email Confidence "provided"; the ZeroBounce / Cleanlist verification
+#     columns are empty on every row. Status is left blank.
+# The contact's own location is not in the file (Country Code is the
+# company's), so Prospect country_name stays blank as well.
+PROSPECT_CONTACT_COLUMNS = [
+    "Company Name", "Company Domain", "Business ID", "Prospect prospect_id",
+    "Prospect professional_email_hashed", "Prospect first_name", "Prospect last_name",
+    "Prospect full_name", "Prospect country_name", "Prospect region_name", "Prospect city",
+    "Prospect linkedin", "Prospect experience", "Prospect skills", "Prospect interests",
+    "Prospect company_name", "Prospect company_website", "Prospect company_linkedin",
+    "Prospect job_department", "Prospect job_department_array",
+    "Prospect job_department_main", "Prospect job_seniority_level",
+    "Prospect job_level_array", "Prospect job_level_main", "Prospect job_title",
+    "Prospect business_id", "Prospect linkedin_url_array",
+    "Prospect buying_committee_personas", "Contact emails", "Contact professions_email",
+    "Contact professional_email_status", "Contact phone_numbers", "Contact mobile_phone",
+    "Email", "Email Status", "Mobile Phone", "Emails", "Phone Numbers", "data_source",
+    "apollo_requested_contact", "apollo_matched_contact", "apollo_match_status",
+    "apollo_match_rate", "apollo_personal_email", "apollo_personal_email_confidence",
+    "apollo_email_confidence", "apollo_phone_confidence", "apollo_reports_to_org_chart",
+    # beyond the seed's columns: the rest of the Apollo row, and our review flags
+    "apollo_id", "apollo_seed_id", "apollo_country_code", "apollo_requested_role",
+    "apollo_title", "apollo_seniority", "apollo_department",
+    "apollo_verified_work_email", "apollo_verified_work_email_as_delivered",
+    "apollo_direct_mobile_phone", "apollo_linkedin_url",
+    "apollo_zerobounce_email_status", "apollo_phone_job_status", "apollo_review_reason",
+    "review_flags",
+]
+APOLLO_DATA_SOURCE = f"Apollo ({APOLLO_FILE.name} / {APOLLO_SHEET})"
+
+# Words that mark a "matched contact" as a team or channel rather than a person
+# ("Internal Channels" came back for a Chief Digital Officer request).
+NON_PERSON_WORDS = {"internal", "channels", "channel", "team", "department", "office",
+                    "services", "admin", "support", "desk", "helpdesk", "centre",
+                    "center", "unit", "communications", "info", "enquiries"}
+# Labels too generic to say two domains belong to the same organisation.
+_GENERIC_LABELS = {"www", "com", "co", "net", "org", "gov", "edu", "ac", "or", "go",
+                   "au", "nz", "sg", "my", "jp", "kr", "th", "vn", "id", "ph", "hk",
+                   "in", "cn", "group", "corp", "team", "mail"}
+
+APOLLO_BY_SLUG: dict[str, pd.DataFrame] = {}
+
+
+def _letters(text: str) -> str:
+    return re.sub(r"[^a-z]", "", unicodedata.normalize("NFKD", str(text))
+                  .encode("ascii", "ignore").decode().lower())
+
+
+def _email_names_someone_else(name: str, email: str) -> bool:
+    """True when nothing of the contact's name is in the email's local part.
+
+    Passes: a name part inside the local part (rameshm@, jsy@ for Joy Sy,
+    cassie.casner@ for Cassandra Lee-Casner), a local chunk that starts a name
+    part (sus@ for Sussie, vijay@ for Vijaykumar), or initials only (fp@ for
+    Faizal P). Fails: louise.wardley@ on "Peter Meehan", mazni@ on "Mohd Sabri".
+    """
+    tokens = [_letters(t) for t in re.split(r"[\s\-'.]+", str(name))]
+    tokens = [t for t in tokens if t]
+    chunks = [_letters(c) for c in re.split(r"[^A-Za-z]+", email.split("@")[0])]
+    chunks = [c for c in chunks if c]
+    local = "".join(chunks)
+    if not local or not tokens:
+        return False
+    if any(len(t) >= 2 and t in local for t in tokens):
+        return False
+    if any(len(c) >= 3 and t.startswith(c) for c in chunks for t in tokens):
+        return False
+    initials = {t[0] for t in tokens}
+    if all(len(c) <= 3 and set(c) <= initials for c in chunks):
+        return False
+    return True
+
+
+def _domain_labels(domain: str) -> set[str]:
+    return {l for l in domain.lower().split(".") if l and l not in _GENERIC_LABELS}
+
+
+def apollo_review_flags(row: dict, company_domains: set[str]) -> list[str]:
+    """Why a contact row should be looked at before a seller relies on it.
+
+    company_domains: the account's domain, Apollo's Website Domain, and any
+    email domain three or more of the account's contacts share (cba.com.au at
+    Commonwealth Bank, woolworths.com.au at Woolworths Group) - a domain most
+    of a company's staff use is that company's, whatever the website says.
+
+    Flags are recorded, not acted on, except email_names_someone_else, where
+    the email is withheld from every column the Stakeholder Map reads (see
+    apollo_to_prospect); the delivered value stays in
+    apollo_verified_work_email_as_delivered.
+    """
+    flags = []
+    row = {k: _clean(v) or "" for k, v in row.items()}
+    name = row.get("Matched Contact", "")
+    email = row.get("Verified Work Email", "")
+    if row.get("Match Status", "").lower() != "matched":
+        flags.append("not_matched")
+    if set(_letters(w) for w in name.split()) & NON_PERSON_WORDS:
+        flags.append("name_looks_like_a_team_not_a_person")
+    if email and _email_names_someone_else(name, email):
+        flags.append("email_names_someone_else")
+    if email:
+        email_domain = email.split("@")[-1].lower()
+        company = (company_domains | {normalize_domain(row.get("Website Domain"))}) - {""}
+        if not any(email_domain == d or email_domain.endswith("." + d) for d in company):
+            if not any(_domain_labels(email_domain) & _domain_labels(d) for d in company):
+                flags.append("email_domain_not_the_company")
+    if row.get("Phone Job Status", "").lower() not in ("", "result retrieved"):
+        flags.append("phone_lookup_needs_review")
+    return flags
+
+
+def apollo_to_prospect(row: dict, company_domains: set[str], sister: bool) -> dict:
+    """One Apollo row in the prospect_contacts layout."""
+    def v(key):
+        value = _clean(row.get(key))
+        return value or ""
+
+    flags = apollo_review_flags(row, company_domains)
+    if sister:
+        flags.append("same_person_listed_under_sister_account")
+    name = v("Matched Contact")
+    first, _, last = name.partition(" ")
+    email = "" if "email_names_someone_else" in flags else v("Verified Work Email")
+    phone = v("Direct Mobile Phone")
+    linkedin = v("Linkedin Url")
+    return {
+        "Company Name": v("Company Name"),
+        "Company Domain": v("Website Domain"),
+        "Prospect prospect_id": v("Apollo Id"),
+        "Prospect first_name": first,
+        "Prospect last_name": last,
+        "Prospect full_name": name,
+        "Prospect linkedin": linkedin,
+        "Prospect company_name": v("Company Name"),
+        "Prospect company_website": v("Website Domain"),
+        "Prospect job_department": v("Department"),
+        "Prospect job_department_array": json.dumps([v("Department")]) if v("Department") else "",
+        "Prospect job_department_main": v("Department"),
+        "Prospect job_seniority_level": v("Seniority"),
+        "Prospect job_level_array": json.dumps([v("Seniority")]) if v("Seniority") else "",
+        "Prospect job_level_main": v("Seniority"),
+        "Prospect job_title": v("Title"),
+        "Prospect linkedin_url_array": json.dumps([linkedin]) if linkedin else "",
+        "Contact emails": json.dumps([{"address": email}]) if email else "",
+        "Contact professions_email": email,
+        "Contact phone_numbers": json.dumps([{"number": phone}]) if phone else "",
+        "Contact mobile_phone": phone,
+        "Email": email,
+        "Mobile Phone": phone,
+        "Emails": email,
+        "Phone Numbers": phone,
+        "data_source": APOLLO_DATA_SOURCE,
+        "apollo_requested_contact": v("Requested Contact"),
+        "apollo_matched_contact": name,
+        "apollo_match_status": v("Match Status"),
+        "apollo_match_rate": v("Match Rate Per Requested Contact"),
+        "apollo_personal_email": v("Personal Email"),
+        "apollo_personal_email_confidence": v("Personal Email Confidence"),
+        "apollo_email_confidence": v("Email Confidence"),
+        "apollo_phone_confidence": v("Phone Confidence"),
+        "apollo_reports_to_org_chart": v("Reports To Org Chart"),
+        "apollo_id": v("Apollo Id"),
+        "apollo_seed_id": v("Seed Id"),
+        "apollo_country_code": v("Country Code"),
+        "apollo_requested_role": v("Requested Role"),
+        "apollo_title": v("Title"),
+        "apollo_seniority": v("Seniority"),
+        "apollo_department": v("Department"),
+        # The Stakeholder Map falls back to apollo_verified_work_email when
+        # the display columns are blank, so a withheld email must be blank
+        # here too; the delivered value is kept under a column nothing reads.
+        "apollo_verified_work_email": email,
+        "apollo_verified_work_email_as_delivered": v("Verified Work Email"),
+        "apollo_direct_mobile_phone": phone,
+        "apollo_linkedin_url": linkedin,
+        "apollo_zerobounce_email_status": v("Zerobounce Email Status"),
+        "apollo_phone_job_status": v("Phone Job Status"),
+        "apollo_review_reason": v("Review Reason"),
+        "review_flags": "; ".join(flags),
+    }
+
+
+def assign_apollo_contacts(accounts: list[Account], sources: SourceData) -> dict:
+    """Attach each Apollo contact row to one account, or report it.
+
+    Keys, in order: Company Name + " - " + Country Code against the master
+    list's Sales Territory Name; then the bare name where the territory has
+    no suffix (Bunnings) and the master country agrees; then the domain when
+    exactly one account has it. The row's domain is checked against the
+    account's either way, and a disagreement is reported, not overridden.
+    """
+    APOLLO_BY_SLUG.clear()
+    df = sources.apollo_contacts()
+    stats = {"rows": 0, "by_territory": 0, "by_name_and_country": 0, "by_domain": 0,
+             "unassigned": [], "domain_disagreements": [], "accounts_with_contacts": 0,
+             "flags": {}, "emails_withheld": 0}
+    if df is None:
+        return stats
+    stats["rows"] = int(len(df))
+
+    by_territory = {_territory_key(a.master["sales_territory_name"]): a
+                    for a in accounts if a.master}
+    by_domain: dict[str, list[Account]] = {}
+    for a in accounts:
+        if a.domain:
+            by_domain.setdefault(a.domain, []).append(a)
+
+    # A person the vendor filed under both sister entities (same Apollo Id on
+    # Jabil MY and SG, MUFG JP and Bangkok, UOB SG and MY) stays on both, as
+    # delivered - the same rule as PredictLeads' dual-entity rows - and is
+    # flagged so a seller knows the contact is shared.
+    id_accounts: dict[str, set[str]] = {}
+    placed: list[tuple[Account, dict]] = []
+    for row in df.to_dict("records"):
+        name, cc = _clean(row.get("Company Name")) or "", _clean(row.get("Country Code")) or ""
+        domain = normalize_domain(row.get("Website Domain"))
+        acct = by_territory.get(_territory_key(f"{name} - {cc}"))
+        how = "by_territory"
+        if acct is None:
+            acct = by_territory.get(_territory_key(name))
+            how = "by_name_and_country"
+            if acct is not None and (acct.master or {}).get("country") not in ("", None, cc):
+                acct = None
+        if acct is None and len(by_domain.get(domain, [])) == 1:
+            acct, how = by_domain[domain][0], "by_domain"
+        if acct is None:
+            stats["unassigned"].append(f"{name} - {cc} ({domain})")
+            continue
+        stats[how] += 1
+        if domain and acct.domain and domain != acct.domain:
+            stats["domain_disagreements"].append(
+                f"{acct.slug}: Apollo {domain} vs account {acct.domain}")
+        placed.append((acct, row))
+        if _clean(row.get("Apollo Id")):
+            id_accounts.setdefault(row["Apollo Id"], set()).add(acct.slug)
+
+    email_domains: dict[str, dict[str, int]] = {}
+    for acct, row in placed:
+        email = _clean(row.get("Verified Work Email"))
+        if email and "@" in email:
+            counts = email_domains.setdefault(acct.slug, {})
+            d = email.split("@")[-1].lower()
+            counts[d] = counts.get(d, 0) + 1
+
+    grouped: dict[str, list[dict]] = {}
+    slug_to_account = {a.slug: a for a in accounts}
+    for acct, row in placed:
+        sister = len(id_accounts.get(row.get("Apollo Id"), ())) > 1
+        company_domains = {acct.domain} | {
+            d for d, n in email_domains.get(acct.slug, {}).items() if n >= 3}
+        grouped.setdefault(acct.slug, []).append(
+            apollo_to_prospect(row, company_domains, sister))
+    for slug, rows in grouped.items():
+        frame = pd.DataFrame(rows).reindex(columns=PROSPECT_CONTACT_COLUMNS).fillna("")
+        APOLLO_BY_SLUG[slug] = frame
+        flagged = frame[frame["review_flags"] != ""]
+        if len(flagged):
+            record_correction(
+                slug_to_account[slug].name, "prospect_contacts review_flags",
+                f"{len(flagged)} of {len(frame)} Apollo rows", "flagged, kept",
+                "; ".join(f"{k} x{n}" for k, n in
+                          pd.Series("; ".join(flagged["review_flags"]).split("; "))
+                          .value_counts().items()))
+    all_rows = pd.concat(APOLLO_BY_SLUG.values()) if APOLLO_BY_SLUG else pd.DataFrame()
+    if len(all_rows):
+        stats["flags"] = {k: int(n) for k, n in
+                          pd.Series([f for fl in all_rows["review_flags"] if fl
+                                     for f in fl.split("; ")]).value_counts().items()}
+        stats["emails_withheld"] = int(all_rows["review_flags"]
+                                       .str.contains("email_names_someone_else").sum())
+    stats["accounts_with_contacts"] = len(APOLLO_BY_SLUG)
+    stats["accounts_without_contacts"] = sorted(
+        a.slug for a in accounts if a.slug not in APOLLO_BY_SLUG)
     return stats
 
 
@@ -1048,6 +1510,44 @@ def load_feature_dependencies() -> dict[str, dict]:
 # Extraction
 # --------------------------------------------------------------------------
 
+def _entity_names(value) -> frozenset:
+    """The territory names a PredictLeads row is attributed to."""
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return frozenset()
+    return frozenset(normalize_name(part) for part in str(value).split(";")
+                     if part.strip())
+
+
+def _splits_by_entity(sources: SourceData, spec: dict) -> bool:
+    """True when this PredictLeads sheet carries the per-row entity names."""
+    df = sources.predictleads_sheet(spec["sheet"], spec.get("key", "company_domain"))
+    return df is not None and "__entities" in df.columns
+
+
+def _entity_match(names: frozenset, account: Account) -> bool:
+    """Whether a row naming `names` belongs to this account."""
+    territory = normalize_name((account.master or {}).get("sales_territory_name") or "")
+    if not territory or territory not in names:
+        return False
+    return len(names) == 1 or DUAL_ENTITY_ROWS_TO_BOTH
+
+
+def _shared_domain_fanout(frame: pd.DataFrame, accounts: list[Account]) -> tuple[int, int]:
+    """(extra copies written, rows written nowhere) on the shared domains."""
+    extra = unassigned = 0
+    for domain in SHARED_DOMAIN_PRIMARY:
+        holders = [a for a in accounts if a.domain == domain]
+        if not holders:
+            continue
+        for names in frame.loc[frame["__domain"] == domain, "__entities"]:
+            reached = sum(1 for a in holders if _entity_match(names, a))
+            if reached == 0:
+                unassigned += 1
+            else:
+                extra += reached - 1
+    return extra, unassigned
+
+
 def extract_dataset(account: Account, dataset_key: str, spec: dict,
                     sources: SourceData) -> tuple[pd.DataFrame | None, list | None, str]:
     """Rows for one dataset of one account.
@@ -1061,15 +1561,30 @@ def extract_dataset(account: Account, dataset_key: str, spec: dict,
     if source is None:
         return None, None, spec.get("note", "no source feed for this dataset yet")
 
-    # A domain shared with another account yields rows to the primary only.
+    # A domain shared with another account yields rows to the primary only,
+    # except in PredictLeads, whose rows name their entity (split below).
     # Checked before any filtering so every domain-keyed source is covered by
     # one rule rather than three.
     if source in (PREDICTLEADS, GOOGLE_NEWS, HP_INTENT):
         primary = SHARED_DOMAIN_PRIMARY.get(account.domain)
-        if primary and primary != account.slug:
+        if primary and primary != account.slug and not (
+                source == PREDICTLEADS and _splits_by_entity(sources, spec)):
             return None, None, (
                 f"{account.domain} is shared with {primary}, which keeps these "
                 f"rows; no field in the source splits them by entity")
+
+    if source == APOLLO:
+        frame = APOLLO_BY_SLUG.get(account.slug)
+        if frame is not None and len(frame):
+            return frame, list(frame.columns), ""
+        fallback = spec.get("fallback")
+        if fallback:
+            df, header, reason = extract_dataset(account, dataset_key, fallback, sources)
+            if df is not None:
+                return df, header, reason
+        return None, PROSPECT_CONTACT_COLUMNS, (
+            f"no contacts for this account in {APOLLO_FILE.name} "
+            f"(Explorium's sheet is empty too)")
 
     if source == EXPLORIUM:
         if account.explorium_file is None:
@@ -1100,11 +1615,16 @@ def extract_dataset(account: Account, dataset_key: str, spec: dict,
             return None, None, "predictleads workbook or sheet unavailable"
         if not account.domain:
             return None, list(df.columns), "no domain for this account, cannot filter"
-        subset = df[df["__domain"] == account.domain].drop(columns=["__domain"])
+        subset = df[df["__domain"] == account.domain]
+        if account.domain in SHARED_DOMAIN_PRIMARY and _splits_by_entity(sources, spec):
+            subset = subset[subset["__entities"].map(
+                lambda names: _entity_match(names, account))]
+        subset = subset.drop(columns=[c for c in ("__domain", "__entities")
+                                      if c in subset.columns])
+        cols = [c for c in df.columns if c not in ("__domain", "__entities")]
         if subset.empty:
-            return None, [c for c in df.columns if c != "__domain"], \
-                f"no rows for {account.domain} in predictleads '{label}'"
-        return subset, list(subset.columns), ""
+            return None, cols, f"no rows for {account.domain} in predictleads '{label}'"
+        return subset, cols, ""
 
     if source == GOOGLE_NEWS:
         df = sources.google_news()
@@ -1237,13 +1757,33 @@ def process_account(account: Account, sources: SourceData,
 
     # Datasets still empty that a benchmark seed can fill (Astra only, today).
     seed_dir = SEED_FILL.get(account.slug)
+    preferred = SEED_PREFERRED.get(account.slug, set())
     if seed_dir is not None and seed_dir.exists():
         for dataset_key, info in manifest["datasets"].items():
-            if info["rows"] or info.get("kind") == "pdf_directory":
+            if info.get("kind") == "pdf_directory":
+                continue
+            if info["rows"] and dataset_key not in preferred:
                 continue
             src = seed_dir / f"{dataset_key}.csv"
             if not src.exists():
                 continue
+            displaced = bool(info["rows"])
+            if displaced:
+                # Keep what the 220-account sources gave, beside the seed.
+                ref_key = f"{info['source']}_{dataset_key}"
+                if not dry_run:
+                    kept = pd.read_csv(out_dir / f"{dataset_key}.csv", dtype=str,
+                                       keep_default_na=False, encoding=ENCODING)
+                    write_reference(out_dir, ref_key, kept, dry_run)
+                manifest.setdefault("seed_preferred", {})[dataset_key] = {
+                    "displaced_rows": info["rows"], "displaced_source": info["source"],
+                    "kept_at": f"{REFERENCE_DIR}/{ref_key}.csv"}
+                record_correction(
+                    account.name, f"{dataset_key} source",
+                    f"{info['rows']} rows from {info['source']}",
+                    str(src.relative_to(REPO_ROOT)),
+                    f"seed kept live (SEED_PREFERRED); the {info['source']} rows "
+                    f"are in {REFERENCE_DIR}/{ref_key}.csv pending a decision")
             rows = copy_seed_dataset(src, out_dir / f"{dataset_key}.csv",
                                      dataset_key, dry_run)
             if not rows:
@@ -1251,6 +1791,8 @@ def process_account(account: Account, sources: SourceData,
             info.update({"rows": rows, "source": "seed", "sheet": None,
                          "status": "ok", "reason": None,
                          "seed_file": str(src.relative_to(REPO_ROOT))})
+            if displaced:
+                continue
             record_correction(
                 account.name, f"{dataset_key} source",
                 "no rows in the 220-account sources",
@@ -1385,7 +1927,9 @@ def write_filings_index(out_dir: Path, slug: str, dry_run: bool) -> dict:
     """This account's rows from filings 1.csv, into compliance_filings/."""
     frame = FILINGS_BY_SLUG.get(slug)
     info = {"rows": 0, "documents_with_url": 0, "file": None,
-            "source": str(FILINGS_INDEX_FILE.relative_to(REPO_ROOT))}
+            "source": " + ".join(str(p.relative_to(REPO_ROOT)) for p in
+                                 [FILINGS_INDEX_FILE, *FILINGS_SUPPLEMENT_FILES]
+                                 if p.exists())}
     target = out_dir / "compliance_filings" / "_filings_index.csv"
     if frame is None or frame.empty:
         if not dry_run and target.exists():
@@ -1760,6 +2304,7 @@ def write_run_summary(manifests: list[dict], sources: SourceData,
     known_domains = {a.domain for a in accounts if a.domain}
     known_names = {a.name_key for a in accounts if a.name_key}
     unclaimed_rows = {}
+    shared_domain_extra_rows = {}
     for dataset_key, spec in DATASET_PLAN.items():
         frame, by_name = None, False
         if spec.get("source") == PREDICTLEADS:
@@ -1778,7 +2323,17 @@ def write_run_summary(manifests: list[dict], sources: SourceData,
             # domain is unknown may still reach an account. Counting it as
             # unclaimed here would double-subtract it from the reconciliation.
             reached |= frame["__name"].isin(known_names)
-        unclaimed_rows[dataset_key] = int((~reached).sum())
+        unclaimed = int((~reached).sum())
+        if spec.get("source") == PREDICTLEADS and "__entities" in frame.columns:
+            # On a shared domain a row reaches as many accounts as it names:
+            # a dual-entity row is written twice, and a row naming neither
+            # holder is written nowhere. Both are counted so the validator's
+            # reconciliation still balances.
+            extra, unassigned = _shared_domain_fanout(frame, accounts)
+            if extra:
+                shared_domain_extra_rows[dataset_key] = extra
+            unclaimed += unassigned
+        unclaimed_rows[dataset_key] = unclaimed
 
     reference_rows = {}
     for key, spec in REFERENCE_PLAN.items():
@@ -1793,12 +2348,18 @@ def write_run_summary(manifests: list[dict], sources: SourceData,
         "source_rows": source_rows,
         "unclaimed_rows": unclaimed_rows,
         "news_dedup_dropped": getattr(sources, "_dedup_dropped", 0),
+        "news_window": RUN_STATS.get("news_window", {}),
+        # Rows written to more than one account because they name both
+        # entities of a shared domain (DUAL_ENTITY_ROWS_TO_BOTH).
+        "shared_domain_extra_rows": shared_domain_extra_rows,
+        "entity_split_domains": sorted(SHARED_DOMAIN_PRIMARY),
         "corrections": CORRECTIONS,
         "domain_aliases": DOMAIN_ALIASES,
         "account_domains": {m["account_slug"]: m["domain"] for m in manifests},
         "master_list": RUN_STATS.get("master_list", {}),
         "domain_audit": RUN_STATS.get("domain_audit", {}),
         "filings_index": RUN_STATS.get("filings_index", {}),
+        "apollo_contacts": RUN_STATS.get("apollo_contacts", {}),
         "reference_source_rows": reference_rows,
         "datasets_nobody_has": manifests[0].get("datasets_nobody_has", []) if manifests else [],
         # Slot assignments that changed from an earlier version of this plan,
@@ -2033,12 +2594,22 @@ def main():
 
     if not SOURCE_DIR.exists():
         sys.exit(f"source folder not found: {SOURCE_DIR}")
+    # A missing workbook would otherwise read as "no rows" for every account.
+    missing = [p.name for p in REQUIRED_SOURCE_FILES if not p.exists()]
+    if missing:
+        sys.exit(f"source file(s) not found in {SOURCE_DIR}: {', '.join(missing)}")
 
     for warning in check_registry_drift():
         print(f"WARNING: {warning}")
 
     print(f"Reading sources from {SOURCE_DIR}")
     sources = SourceData(match_legacy=args.match_legacy)
+    sources.google_news()
+    nw = RUN_STATS["news_window"]
+    print(f"News window: {nw['from']} to {nw['to']} ({nw['days']} days)")
+    for label, f in nw["feeds"].items():
+        print(f"  {label}: {f['kept']:,} of {f['rows']:,} kept - {f['older']:,} older, "
+              f"{f['future']:,} future-dated, {f['undated']:,} undated")
 
     accounts = discover_accounts(sources)
     print(f"Found {len(accounts)} accounts in the source data")
@@ -2110,16 +2681,30 @@ def main():
         for slug in holders:
             if slug != primary:
                 record_correction(
-                    slug, "domain-keyed datasets", f"rows for {shared_domain}",
+                    slug, "news and intent datasets", f"rows for {shared_domain}",
                     "none",
                     f"{shared_domain} is shared with {primary}, which keeps the "
-                    f"rows; no source field splits them by entity")
+                    f"rows; no field in those sources splits them by entity")
+            record_correction(
+                slug, "predictleads datasets", f"rows for {shared_domain}",
+                "rows naming this account's territory"
+                + (" (incl. rows naming both entities)" if DUAL_ENTITY_ROWS_TO_BOTH else ""),
+                f"company_name on every PredictLeads row since 25 Sep (C48, D3); "
+                f"dual-entity rows go to {'both' if DUAL_ENTITY_ROWS_TO_BOTH else 'neither'}")
 
     RUN_STATS["filings_index"] = assign_filings(accounts, sources)
     fs = RUN_STATS["filings_index"]
-    print(f"Filings index: {fs['rows']} rows - {fs['by_territory']} by territory, "
+    print(f"Filings index: {fs['rows']} rows - {fs['by_client_ruling']} by client ruling, "
+          f"{fs['by_territory']} by territory, "
           f"{fs['by_domain']} by domain, {fs['by_company_name']} by company name, "
           f"{fs['unassigned']} unassigned")
+
+    RUN_STATS["apollo_contacts"] = assign_apollo_contacts(accounts, sources)
+    ac = RUN_STATS["apollo_contacts"]
+    print(f"Apollo contacts: {ac['rows']} rows -> {ac['accounts_with_contacts']} accounts "
+          f"({ac['by_territory']} by territory, {ac['by_name_and_country']} by name + "
+          f"country, {ac['by_domain']} by domain), {len(ac['unassigned'])} unassigned, "
+          f"{ac['emails_withheld']} emails withheld; flags {ac['flags']}")
 
     deps = load_feature_dependencies()
     print(f"Feature dependencies: {len(deps)} features read from feature_mapping.py")

@@ -39,7 +39,7 @@ Stakeholder Map  (stakeholder_map)
 ├── Decision / logic ..... C01 F3 (20–30, score weights) · C28 v4 row (How to Open + HP Play Focus, 40–100 words, no score) · DEC-007 role coverage
 ├── Supporting reference . 04/Contacts_Apollo/README.md · CONFLICT X-05, S-01
 ├── Open questions ....... D8 contact file (BLOCKER) · D9 one file or two · D10 empty state · QA16-6/7/8
-├── Known data gaps ...... 0/220 contacts · no employment-status column anywhere
+├── Known data gaps ...... contacts for 192/220 (Apollo, 26 Sep; 28 none) · no employment-status column anywhere
 └── Code impact .......... extractors/stakeholder_map.py compute_stakeholder_score() · widgets stakeholder_*
 ```
 ```

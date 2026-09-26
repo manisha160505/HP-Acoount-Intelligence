@@ -1,6 +1,7 @@
-# Answered questions (52)
+# Answered questions (58)
 
-> **25 Sep 05:50 UTC:** the client answered all 25 round-3 open items in the annotated `clarifying_opens_3_OPEN_v2_provided.docx` (C44); those answers are ingested below. The CLARIFICATIONS (7) and UNRESOLVED_v2 (2) documents have not been answered yet.
+> **26 Sep 03:26 UTC:** Dhruvi answered the six items of our 25 Sep 14:30 UTC email §5 inline: contact file delivered (D8, C49), ANZ Holdings NZ / CIMB / CIMB Niaga filing URLs (E25-4), Bank Mandiri rows belong to Mandiri (E25-5), risk logic approved (D37), GCP project ID to be explained (D42), hiring flexibility (D22). F12 was answered 25 Sep 09:36 UTC (D48) and F11 recorded as settled (D47).
+> **25 Sep 05:50 UTC:** the client answered all 25 round-3 open items in the annotated `clarifying_opens_3_OPEN_v2_provided.docx` (C44). The CLARIFICATIONS (7) and UNRESOLVED_v2 (2) answers arrived 25 Sep 12:02 UTC as attachments that are not yet on this machine, so they are not ingested here.
 > Status values: RESOLVED = client answer settles it. PARTIALLY RESOLVED = answered, but a delivery, confirmation or sub-question is still outstanding (each has a file in `06_Unresolved_and_Open/`). OPEN = no answer. UNRESOLVED = answered, but the answer does not settle the point.
 > IDs: D1–D43 = the 43 items of 220-Open-Decisions-List.md as numbered in clarifying opens_2.docx; D44–D53 = items added 24 Sep after the list went out; E18-x / E23-x = email Q&A of 18 and 23 Sep; QA16-x = the 16 Sep QA discussion points.
 
@@ -10,11 +11,12 @@
 |---|---|---|---|---|---|
 | D1 | Canonical account list with one domain each | Identity / every join | RESOLVED | 2026-09-25 | Yes. The file (sheet "219 Account Audit", 219 rows, Astra absent because its data is the s… |
 | D2 | Entity scope: APAC entity or global parent | Firmographics, hierarchy, Executive Dashboard | PARTIALLY RESOLVED | 2026-09-24 | Partly — a bare "RESOLVED" against a question that offered a default; taken as default acc… |
-| D3 | Shared domains jabil.com and mufg.jp: which entity owns the rows | Hiring, tech detections, news, connections for 4 accounts | PARTIALLY RESOLVED | 2026-09-25 | Rule yes, data no. Round 3 A3 (25 Sep): "-> open: will give that". The audit sheet keeps j… |
+| D3 | Shared domains jabil.com and mufg.jp: which entity owns the rows | Hiring, tech detections, news, connections for 4 accounts | PARTIALLY RESOLVED | 2026-09-25 | Rule yes; data delivered 25 Sep 12:34 UTC (C48, predictleads_combined_219_accounts_company… |
 | D4 | Blank domains: Public Bank and Westpac | All datasets for two accounts | RESOLVED | 2026-09-25 | Westpac AU = westpac.com.au, Westpac NZ = westpac.co.nz, Public Bank = pbebank.com per the… |
 | D5 | Vendor domain mismatches (Posco, Pilipinas Shell, Shiseido, Stanley Electric) | Hiring, news, tech detections for 4 accounts | RESOLVED | 2026-09-24 | Yes. Note the split rewrites two aliases toward the Explorium domains (internal conflict I… |
 | D6 | pbebank.com: Public Bank Bhd or Public Bank Lao? | One account | RESOLVED | 2026-09-25 | Yes, by the 25 Sep audit sheet: PUBLIC BANK BHD - MY = pbebank.com, PredictLeads "Public B… |
 | D7 | Hierarchy: 55 accounts without a sheet; blank parent | Executive Dashboard, firmographics | RESOLVED | 2026-09-23 | Yes. |
+| D8 | Contact file for the 220 accounts | Stakeholder Map, Opportunity Map, Objection Playbook, Content Studio, Message Evaluator (BLOCKER) | PARTIALLY RESOLVED | 2026-09-26 | Delivered: Apollo_All_Contacts (1).xlsx (C49), 2,296 contacts for 192 of 220 accounts, key… |
 | D9 | Role coverage: ~30 buying-committee roles, then 5-8 more | Contacts | RESOLVED | 2026-09-25 | Yes — one file, built once. |
 | D10 | Stakeholder Map with zero contacts: message or hidden | UI for every account until contacts arrive | RESOLVED | 2026-09-25 | Yes — default overturned: leave the space empty, no message. |
 | D11 | Which filings source is authoritative; count; accounts without filings | Executive Dashboard financials/priorities, Strategy Chat, Opportunity Map, Content Messaging, Live Signals | PARTIALLY RESOLVED | 2026-09-25 | Method yes. Round 3 C5 (25 Sep) placed the two rows: Jabil Inc. 10-Q rows → "yes you can f… |
@@ -23,12 +25,12 @@
 | D14 | Three accounts with a wrong filings mapping | Filings | RESOLVED | 2026-09-25 | Yes for the three accounts (we re-key the rows ourselves to those domains; no corrected fi… |
 | D15 | Stock Exchange data of 3 Sep superseded? | Filings | RESOLVED | 2026-09-24 | Yes (filings 1.csv + PDFs replace it). |
 | D16 | News precedence when Exa and Google News RSS disagree | Live Signals | RESOLVED | 2026-09-25 | Round 3 D1 (25 Sep): "Resolved: to disagreement; consider exa news" — when the two feeds d… |
-| D17 | Undated Exa rows (5,120 of 9,221) and three 1970-01-01 rows | Live Signals, urgency, every time-based signal | PARTIALLY RESOLVED | 2026-09-25 | Rule yes; re-crawl not received — round 3 D2 (25 Sep): "OPEN; we will send shortly". Exa i… |
+| D17 | Undated Exa rows (5,120 of 9,221) and three 1970-01-01 rows | Live Signals, urgency, every time-based signal | PARTIALLY RESOLVED | 2026-09-25 | Delivered 25 Sep 12:34 UTC: exa_data (3)_2025-2026.xlsx (C46, 3,726 rows) and google_news_… |
 | D18 | Exa as its own dataset key and on-screen label | Source labels on news cards | PARTIALLY RESOLVED | 2026-09-25 | In practice yes via G2 (publisher name on news cards, vendor names never shown; an exa key… |
 | D19 | 12-month news window and 20-signal cap | Live Signals volume | RESOLVED | 2026-09-24 | Yes — default overturned: no cap. |
 | D20 | Low-confidence news rows | Live Signals ranking | RESOLVED | 2026-09-24 | Yes. |
 | D21 | Corrupted Thai text and raw HTML in Exa | News cards | RESOLVED | 2026-09-24 | Yes (HTML stripped by us; corrupted cells shown as delivered). |
-| D22 | Coverage gaps: intent 173/220, jobs 175/220, technographics 207/220 | Intent & Demand, hiring, Technographic Map, urgency | PARTIALLY RESOLVED | 2026-09-25 | Rule yes; the job rows for the 45 accounts have not arrived — round 3 E1 (25 Sep): "OPEN; … |
+| D22 | Coverage gaps: intent 173/220, jobs 175/220, technographics 207/220 | Intent & Demand, hiring, Technographic Map, urgency | PARTIALLY RESOLVED | 2026-09-25 | 25 Sep 12:34 UTC: "The job-opening data currently available in the PredictLeads file shoul… |
 | D23 | 219 vs 220: which account is absent from PredictLeads | PredictLeads | PARTIALLY RESOLVED | 2026-09-24 | Mostly; round 3 CLARIFICATIONS_v2 E2 asks whether the 31 Aug seed extract is the same form… |
 | D24 | Duplicate record ids inside PredictLeads | Technology counts, news counts | RESOLVED | 2026-09-24 | Yes as an instruction (do not key on ids); round 3 E3 records duplicates as cleared. |
 | D26 | 490 logged corrections: applied or to-do? | Hiring and tech dates | RESOLVED | 2026-09-24 | Yes, by inspection (internal finding stated to the client). |
@@ -41,6 +43,7 @@
 | D33 | 3D printing route without Rulebook rules | Recommendations | RESOLVED | 2026-09-24 | Yes — default overturned; evidence-led. |
 | D34 | One recommendation or five routes | Opportunity Map ordering | PARTIALLY RESOLVED | 2026-09-24 | Cleared on our side; silence default; not confirmed. |
 | D36 | Live Signal S/A/B/C tiers and minimum publish score | Live Signals | RESOLVED | 2026-09-24 | Yes — no tiers, no minimum; score /10 shown. |
+| D37 | Technographic Map Low/Medium/High risk logic | Technographic Map | RESOLVED | 2026-09-26 | Yes. The logic we sent (round 3 F7) is approved - Dhruvi says so, citing her CLARIFICATION… |
 | D38 | Service rules that need inputs the data lacks (seat count, WXP tier, print volumes, lifecycle dates) | Care Pack / WXP / Poly / Print rules; lifecycle check | PARTIALLY RESOLVED | 2026-09-24 | Pending items skipped and employee range used — yes. The specific employee-range threshold… |
 | D39 | Empty-state behaviour for any missing dataset | Every widget | RESOLVED | 2026-09-25 | Yes for now — default overturned: leave the section out, nothing on screen; may be revisit… |
 | D40 | Source label set on screen | Every source chip | RESOLVED | 2026-09-25 | Yes for now — our label set applies (publisher name on news cards, no vendor names); may b… |
@@ -49,6 +52,8 @@
 | D44 | Proof method for the four features with no v4 row (Objection Playbook, Content Studio, Strategy Chat, Message Evaluator) | Proof placement | RESOLVED | 2026-09-25 | Yes, as built, under the four-case rule (which we should confirm back as our reading). |
 | D45 | Case-study proof on the signal features (Live Signals, Intent & Demand, Stakeholder Map, Technographic Map): now or after? | Proof placement | RESOLVED | 2026-09-25 | Yes: include now, in exactly those slots; Stakeholder Map NOT for now (reverses opens_2 #3… |
 | D46 | Proof on service plays in the Opportunity Map | Opportunity Map | RESOLVED | 2026-09-25 | Yes. |
+| D47 | Evidence-tier gate on proof (only once an Opportunity is established by two pipelines) | Proof placement | RESOLVED | 2026-09-25 | Yes, as option A (the round-4 default): an HP offering is named and proof attached at the … |
+| D48 | APJ region preference as the second sort key for proof | Proof ranking | RESOLVED | 2026-09-25 | Yes: use case → industry → APJ/APAC → stated outcome → T0 before T2; region inferred from … |
 | D50 | Product-line mapping for case studies: keyword table now, Rulebook offering ids after | Proof matching | RESOLVED | 2026-09-25 | Yes — default overturned: no Rulebook-id mapping later either; use-case matching only. |
 | D29a | Integration route detected on its own shown as a context line? | Recommendations | RESOLVED | 2026-09-25 | Yes, with a wording change: drop the phrase "no need evidenced". |
 | D29b | Conditions the data cannot evaluate treated as unmet (offering reaches "may be relevant" but never "relevant") | Recommendations | RESOLVED | 2026-09-25 | Yes. |
@@ -56,6 +61,8 @@
 | D51 | A realistic delivery date starting from the day data and GCP access are in hand | Process | RESOLVED | 2026-09-25 | Process answer: dates go through the WhatsApp group; Sahaj decides. No date given. |
 | D53 | Remaining deliveries as one consolidated drop with a contents list | Process | RESOLVED | 2026-09-25 | Noted, not committed. |
 | D52 | JEV (decision model) inside this delivery? | Scope | RESOLVED | 2026-09-24 | Yes. |
+| E25-4 | Filings for ANZ Holdings NZ, CIMB Group Holdings and CIMB Niaga (absent from filings 1.csv and from the 31-account no-filings list) | Filings: Executive Dashboard financials/priorities | RESOLVED | 2026-09-26 | Yes. Rows added as Filings/filings_client_supplement_2026-09-26.csv (row_id S26-1..6) in f… |
+| E25-5 | Bank Mandiri vs Bank Central Asia: two filings rows named Bank Mandiri carry BCA's territory | Filings | RESOLVED | 2026-09-26 | Yes. FILINGS_CLIENT_RULINGS in split_account_data.py files both rows under PT_BANK_MANDIRI… |
 | E18-1 | Unencrypted copies of Lifecycle / Wolf / HP IQ | Reference | RESOLVED | 2026-09-18 | Yes by the client; the three files never reached this machine (MISSING_FILES.md). |
 | E18-2 | Lifecycle/EOL for Fleet Refresh? | Urgency | RESOLVED | 2026-09-18 | Yes. |
 | E23-2 | Opportunity Map three checks (Verified Evidence / Timing Trigger / HP Fit) | Opportunity Map | RESOLVED | 2026-09-23 | For the UI yes; what computes the Priority label is not stated by the client (CONFLICT C-0… |
@@ -94,8 +101,8 @@
 - **Client answer:** opens_1 answer 2: id "not possible currently"; one account each "no"; "Please take Company Name + Country into consideration along with the domain … Open: We will provide additional columns Company Name + Country in the mentioned sheets." opens_2 item 3: "ALREADY RESOLVED IN CLARIFYING_OPENS_1 DOC".
 - **Date answered:** 2026-09-25
 - **Status:** **PARTIALLY RESOLVED**
-- **Does the answer fully resolve it?** Rule yes, data no. Round 3 A3 (25 Sep): "-> open: will give that". The audit sheet keeps jabil.com and mufg.jp on both entities of each pair, so the Name + Country columns remain the only way to separate them.
-- **Implementation impact:** Jabil Malaysia / Singapore and MUFG Japan / Bangkok branch cannot be separated in hiring, technology, news, connections.
+- **Does the answer fully resolve it?** Rule yes; data delivered 25 Sep 12:34 UTC (C48, predictleads_combined_219_accounts_company_country.xlsm): company_name and account_country_code on every row of every sheet. On jabil.com and mufg.jp, 270 of 1,313 rows name BOTH entities (e.g. "JABIL CIRCUIT SDN BHD - MY; JABIL CIRCUIT (SINGAPORE) PTE LTD - SG", country "MY; SG"), 114 of them in job_openings (of 314).
+- **Implementation impact:** Jabil Malaysia / Singapore and MUFG Japan / Bangkok branch can now be separated for single-entity rows; the dual-entity rows need a rule (attach to both, as for the Jabil 10-Q, or neither).
 - **Unresolved-issue file:** `06_Unresolved_and_Open/03_shared_domains_name_country_columns.md`
 
 ### D4 · Blank domains: Public Bank and Westpac
@@ -142,6 +149,18 @@
 - **Does the answer fully resolve it?** Yes.
 - **Implementation impact:** Hierarchy widget; the only client rule on empty states so far (say nothing).
 
+### D8 · Contact file for the 220 accounts
+
+- **Feature / topic:** Stakeholder Map, Opportunity Map, Objection Playbook, Content Studio, Message Evaluator (BLOCKER)
+- **Original question:** Data question 1 (23 Sep), item 8, 24 Sep email §3, round 3 B2. Contacts sheet empty in all 220 workbooks; Apollo_All_Contacts named in v4 not received.
+- **Original source:** see `00_INDEX/EMAIL_TIMELINE.md`; documents in `05_Questions_and_Clarifications/Source_Documents/`
+- **Client answer:** opens_1: "Ans 1) Contact Data open". opens_2 section B: "->OPEN". Round 3 B2 (25 Sep): "-> open: will give that". Per B3 there will be ONE file: "as of now we go with whatever we have, you will get one file". 26 Sep 03:26 UTC (reply to our 25 Sep 14:30 email §5.1): "Resolved: Apollo_all_contacts(1) uploaded in the google drive folder; as sahaj mentioned , if we can pls be flexible on this ->we are pulling data and will comeback with few more details if we can".
+- **Date answered:** 2026-09-26
+- **Status:** **PARTIALLY RESOLVED**
+- **Does the answer fully resolve it?** Delivered: Apollo_All_Contacts (1).xlsx (C49), 2,296 contacts for 192 of 220 accounts, keyed Company Name + Country Code + domain (all 2,296 rows matched an account). 28 accounts have no contacts (listed in 04_Data_and_Source_Definitions/Contacts_Apollo/README.md) and the client may send "few more details". Split into prospect_contacts on 26 Sep; Astra keeps its pilot seed pending an internal decision.
+- **Implementation impact:** The five contact features can now be built for 192 accounts (Stakeholder Map left empty on the other 28, per D10). Contacts carry no persona and no verified email status; 6 emails that name a different person are withheld, 54 are flagged as a non-company domain, 130 rows are the same person under both sister entities (Jabil, MUFG, UOB).
+- **Unresolved-issue file:** `06_Unresolved_and_Open/05_contact_file_partial_coverage.md`
+
 ### D9 · Role coverage: ~30 buying-committee roles, then 5-8 more
 
 - **Feature / topic:** Contacts
@@ -172,7 +191,7 @@
 - **Client answer:** 18 Sep: "Please use document_url where available and source_page_url as the fallback. Do not use local_path. Where both source URLs are blank, please exclude that record." opens_2 item 11: "RESOLVED: use filings 1.csv plus PredictLeads SEC Filings, merged on domain but where the domain is same … pls use company name and country … and yes pls consider 'the file shows 186 unique company names'" + list of 31 accounts with no public filings. opens_1 answer 10: "Sec filings: pls use from filings.csv + predictleads data->sec_filings".
 - **Date answered:** 2026-09-25
 - **Status:** **PARTIALLY RESOLVED**
-- **Does the answer fully resolve it?** Method yes. Round 3 C5 (25 Sep) placed the two rows: Jabil Inc. 10-Q rows → "yes you can for now" (attach to both Jabil accounts as keyed); Hyundai DART rows → the account is "HKMC GROUP(HYUNDAI AUTOEVER) – KR", domain hyundai-autoever.com, reports are Hyundai Autoever Corp.'s ("in explorium, predictleads everywhere it is this name"). Still open: Agribank and VPBank (round 3 CLARIFICATIONS C1, not answered) and VPBank documents keyed under "VIETNAM POST CORPORATION".
+- **Does the answer fully resolve it?** Method yes. Round 3 C5 (25 Sep) placed the two rows: Jabil Inc. 10-Q rows → "yes you can for now" (attach to both Jabil accounts as keyed); Hyundai DART rows → the account is "HKMC GROUP(HYUNDAI AUTOEVER) – KR", domain hyundai-autoever.com, reports are Hyundai Autoever Corp.'s ("in explorium, predictleads everywhere it is this name"). Still open: Agribank and VPBank (round 3 CLARIFICATIONS C1, not answered) and VPBank documents keyed under "VIETNAM POST CORPORATION". 26 Sep 03:26 UTC settled two more (E25-4, E25-5): the client sent document URLs for ANZ Holdings NZ (3), CIMB Group Holdings (2) and CIMB Niaga (1), now in Filings/filings_client_supplement_2026-09-26.csv; and the two "PT Bank Mandiri" rows carrying BCA's territory belong to Bank Mandiri.
 - **Implementation impact:** Financial figures and strategic priorities on the Executive Dashboard for those accounts.
 - **Unresolved-issue file:** `06_Unresolved_and_Open/07_filings_reconciliation.md`
 
@@ -239,7 +258,7 @@
 - **Client answer:** opens_1 answer 7: "We will provide the date wherever possible by crawling the URLs. For any rows where the date will still not available, please skip that news row for now, do not skip whole company/account"; epoch rows: "skip these three news items as of now".
 - **Date answered:** 2026-09-25
 - **Status:** **PARTIALLY RESOLVED**
-- **Does the answer fully resolve it?** Rule yes; re-crawl not received — round 3 D2 (25 Sep): "OPEN; we will send shortly". Exa is the only source for ~119 accounts.
+- **Does the answer fully resolve it?** Delivered 25 Sep 12:34 UTC: exa_data (3)_2025-2026.xlsx (C46, 3,726 rows) and google_news_rss_data 2 (2)_2025-2026.xlsx (C47, 4,159 rows), every row dated; undatable rows left out of the files; "last 12 months only". Both files start at 2025-01-01, so the 12-month window is still applied on ingest (Exa 2,929 rows / 215 accounts in window; RSS 2,876 / 93).
 - **Implementation impact:** Live Signals volume; AI/growth events in the urgency score.
 - **Unresolved-issue file:** `06_Unresolved_and_Open/09_exa_event_dates.md`
 
@@ -293,11 +312,11 @@
 - **Feature / topic:** Intent & Demand, hiring, Technographic Map, urgency
 - **Original question:** Data question 10, item 22, round 3 E1.
 - **Original source:** see `00_INDEX/EMAIL_TIMELINE.md`; documents in `05_Questions_and_Clarifications/Source_Documents/`
-- **Client answer:** opens_1 answer 10: "no data cases … Job Openings: … we will aggregate it from other tools and give you in same format … Technographics: Please look at the WebStack and Tech_Breakdown sheets … fallback … Related Technologies column".
+- **Client answer:** opens_1 answer 10: "no data cases … Job Openings: … we will aggregate it from other tools and give you in same format … Technographics: Please look at the WebStack and Tech_Breakdown sheets … fallback … Related Technologies column". 26 Sep 03:26 UTC, on our "Hiring data for the remaining accounts, whenever the vendors deliver it": "thank you for this flexibility".
 - **Date answered:** 2026-09-25
 - **Status:** **PARTIALLY RESOLVED**
-- **Does the answer fully resolve it?** Rule yes; the job rows for the 45 accounts have not arrived — round 3 E1 (25 Sep): "OPEN; we will send shortly". The Related-Technologies-as-researched line was not separately confirmed.
-- **Implementation impact:** 45 accounts have no hiring widgets and no hiring driver in the Urgency Score.
+- **Does the answer fully resolve it?** 25 Sep 12:34 UTC: "The job-opening data currently available in the PredictLeads file should be considered the final hiring dataset for now. We are reaching out to the vendors … for the remaining 43 accounts … I request if we can be flexible on this." Our split: 176 of 220 accounts have job rows (175 domains + the Astra seed), so 44 without. The Related-Technologies-as-researched line was not separately confirmed.
+- **Implementation impact:** 44 accounts have no hiring widgets and no hiring driver in the Urgency Score until the vendors deliver.
 - **Unresolved-issue file:** `06_Unresolved_and_Open/11_job_openings_45_accounts_and_related_technologies.md`
 
 ### D23 · 219 vs 220: which account is absent from PredictLeads
@@ -436,6 +455,18 @@
 - **Does the answer fully resolve it?** Yes — no tiers, no minimum; score /10 shown.
 - **Implementation impact:** news_signals_feed; HP-Account-Intelligence-Rules.docx section is stale.
 
+### D37 · Technographic Map Low/Medium/High risk logic
+
+- **Feature / topic:** Technographic Map
+- **Original question:** 23 Sep (Dhruvi asked us); item 37; logic sent 23 Sep as a screenshot and in words in round 3 F7.
+- **Original source:** see `00_INDEX/EMAIL_TIMELINE.md`; documents in `05_Questions_and_Clarifications/Source_Documents/`
+- **Client answer:** 23 Sep: "Please retain the Low Risk / Medium Risk / High Risk labels … what logic is currently being used"; opens_2: "open" and forwarded to Sahaj; round 3 F7 (25 Sep): "OPEN; already escalated to Sahaj". 26 Sep 03:26 UTC, on our "keep as shared, rename, or drop": "can you pls elaborate more on this, because in one of the opens I replied that you can use the risk logic which you shared, hence which are these labels ?"
+- **Date answered:** 2026-09-26
+- **Status:** **RESOLVED**
+- **Does the answer fully resolve it?** Yes. The logic we sent (round 3 F7) is approved - Dhruvi says so, citing her CLARIFICATIONS/UNRESOLVED answers of 25 Sep 12:02 UTC (attachment not on this machine). The labels are the Low / Medium / High Risk she asked us to retain on 23 Sep, so our "rename or drop" offer was redundant; nothing changes in the product.
+- **Implementation impact:** technographic_map risk column stays as built.
+- **Unresolved-issue file:** `06_Unresolved_and_Open/18_tech_map_risk_labels.md`
+
 ### D38 · Service rules that need inputs the data lacks (seat count, WXP tier, print volumes, lifecycle dates)
 
 - **Feature / topic:** Care Pack / WXP / Poly / Print rules; lifecycle check
@@ -525,6 +556,28 @@
 - **Does the answer fully resolve it?** Yes.
 - **Implementation impact:** Proof attaches to WXP / Care / Poly / Print plays too.
 
+### D47 · Evidence-tier gate on proof (only once an Opportunity is established by two pipelines)
+
+- **Feature / topic:** Proof placement
+- **Original question:** Round 3 F11 (item 47). Default: apply it.
+- **Original source:** see `00_INDEX/EMAIL_TIMELINE.md`; documents in `05_Questions_and_Clarifications/Source_Documents/`
+- **Client answer:** "clarification needed pls" (OPEN_v2). Re-explained in clarifying_opens_4_OPEN_and_CLARIFICATIONS.docx (options A/B, default A). Yogesh 25 Sep 09:10 UTC: "F11. Evidence-tier gate on proof. is resolved"; our 25 Sep 14:30 UTC email lists F11 under "Settled by your answers today" with no objection in the 26 Sep reply.
+- **Date answered:** 2026-09-25
+- **Status:** **RESOLVED**
+- **Does the answer fully resolve it?** Yes, as option A (the round-4 default): an HP offering is named and proof attached at the Opportunity tier only, on every feature. The client's own words choosing A are not in the email thread; the resolution rests on our 09:10 and 14:30 emails, which she did not contest.
+- **Implementation impact:** Thin accounts show no offering or case study on objection cards and Content Studio proof points until two pipelines agree.
+
+### D48 · APJ region preference as the second sort key for proof
+
+- **Feature / topic:** Proof ranking
+- **Original question:** Round 3 F12 (item 48). Default: yes. Re-asked by Yogesh 25 Sep 09:10 UTC with three sub-questions.
+- **Original source:** see `00_INDEX/EMAIL_TIMELINE.md`; documents in `05_Questions_and_Clarifications/Source_Documents/`
+- **Client answer:** Dhruvi 25 Sep 09:36 UTC: "This is correct :1. Same use case → 2. Same industry → 3. APJ/APAC region → 4. Stated outcome/metric → 5. HP.com (T0) before third-party (T2). Yes, industry first, followed by APJ/APAC region … Please infer the region from the case-study page/URL where possible … Yes, the same use case should always be the first priority. Region should not override the use-case match."
+- **Date answered:** 2026-09-25
+- **Status:** **RESOLVED**
+- **Does the answer fully resolve it?** Yes: use case → industry → APJ/APAC → stated outcome → T0 before T2; region inferred from the case-study page/URL; region never overrides use case. Engineering follow-up: our 14:30 email said region "cannot be inferred from the URLs", but seven pages carry an APJ locale (au-en, nz-en, sg-en, my-en, ph-en, in-en) and Mazenod College WA names its state, so step 3 should be applied from those.
+- **Implementation impact:** Order of case studies when several match; APJ step currently not applied in the matcher.
+
 ### D50 · Product-line mapping for case studies: keyword table now, Rulebook offering ids after
 
 - **Feature / topic:** Proof matching
@@ -601,6 +654,28 @@
 - **Status:** **RESOLVED**
 - **Does the answer fully resolve it?** Yes.
 - **Implementation impact:** Out of this delivery.
+
+### E25-4 · Filings for ANZ Holdings NZ, CIMB Group Holdings and CIMB Niaga (absent from filings 1.csv and from the 31-account no-filings list)
+
+- **Feature / topic:** Filings: Executive Dashboard financials/priorities
+- **Original question:** FILINGS_PLAN_2026-09-25 §8.2; 25 Sep 14:30 UTC email §5.4.
+- **Original source:** see `00_INDEX/EMAIL_TIMELINE.md`; documents in `05_Questions_and_Clarifications/Source_Documents/`
+- **Client answer:** 26 Sep 03:26 UTC: six document URLs - ANZ Bank NZ disclosure statements Mar26, Sep25, Mar25; CIMB cimb-iar2025.pdf and cimb-fr-2025.pdf; CIMB Niaga AR-2025-ID.pdf.
+- **Date answered:** 2026-09-26
+- **Status:** **RESOLVED**
+- **Does the answer fully resolve it?** Yes. Rows added as Filings/filings_client_supplement_2026-09-26.csv (row_id S26-1..6) in filings 1.csv's columns; periods read from each cover page (ANZ NZ: six months to 31 Mar 2026, year to 30 Sep 2025, six months to 31 Mar 2025). Five PDFs downloaded into the accounts' compliance_filings/. CIMB's integrated report is byte-identical (sha256) to the crawler's unassigned "CIMB Group" 2025-FY row. The CIMB Niaga URL sits behind an AWS WAF browser challenge; Yogesh downloaded it in a browser on 26 Sep (984 pages) and fetch_filings.py placed it from Filings/pdfs/_manual/.
+- **Implementation impact:** ANZ Holdings NZ, CIMB Group Holdings and CIMB Niaga now have filings; the split counts 511 index rows.
+
+### E25-5 · Bank Mandiri vs Bank Central Asia: two filings rows named Bank Mandiri carry BCA's territory
+
+- **Feature / topic:** Filings
+- **Original question:** FILINGS_PLAN_2026-09-25 §8.3; 25 Sep 14:30 UTC email §5.5.
+- **Original source:** see `00_INDEX/EMAIL_TIMELINE.md`; documents in `05_Questions_and_Clarifications/Source_Documents/`
+- **Client answer:** 26 Sep 03:26 UTC: "Resolved: When you look at the urls , those redirect to Bank Mandiri , hence consider Bank Mandiri".
+- **Date answered:** 2026-09-26
+- **Status:** **RESOLVED**
+- **Does the answer fully resolve it?** Yes. FILINGS_CLIENT_RULINGS in split_account_data.py files both rows under PT_BANK_MANDIRI_PERSERO (matched_by "client_ruling"). bankmandiri.co.id does not answer scripted downloads, so Yogesh downloaded both in a browser on 26 Sep; their sha256 matches filings 1.csv, and fetch_filings.py placed them from Filings/pdfs/_manual/.
+- **Implementation impact:** Bank Mandiri gets its 2025-FY and 2026-1H statements; BCA is unchanged.
 
 ### E18-1 · Unencrypted copies of Lifecycle / Wolf / HP IQ
 

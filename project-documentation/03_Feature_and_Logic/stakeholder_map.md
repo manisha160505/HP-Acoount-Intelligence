@@ -3,7 +3,7 @@
 Requirements section: Feature 3 — Stakeholder Map (ABX v3 L54–63). UI label from NORTHSTAR_SIDEBAR_GROUPS; feature key from WIDGET_REGISTRY.
 
 ## Required data
-prospect_contacts (**empty for all 220**; Apollo_All_Contacts per v4 not received); firmographics, technographics, intent_score, news for talking points; Rulebook + case studies (added by DEC-041).
+prospect_contacts (Apollo_All_Contacts, 26 Sep: **192 of 220 accounts**, 28 none; Astra on its pilot seed; `review_flags` per row — see 04_Data_and_Source_Definitions/Contacts_Apollo/README.md); firmographics, technographics, intent_score, news for talking points; Rulebook + case studies (added by DEC-041).
 
 ## Decision / logic documents (read these before changing the feature)
 - C01 ABX F3: 20–30 stakeholders; score 25/25/20/15/15 (no input scales given); influence types incl. "Blocker" in rules but not in output.
@@ -17,7 +17,7 @@ prospect_contacts (**empty for all 220**; Apollo_All_Contacts per v4 not receive
 - CONFLICT_REGISTER X-05
 
 ## Open questions
-- D8 contact file (BLOCKER)
+- D8 contact file: PARTIALLY RESOLVED 26 Sep (28 accounts without contacts; top-up may follow)
 - D9 one file or two
 - D10 empty state with no contacts
 - QA16-6/7/8 avatar, LinkedIn links, active-employee label

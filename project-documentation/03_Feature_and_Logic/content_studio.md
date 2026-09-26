@@ -20,7 +20,7 @@ prospect_contacts (named persona) or job_openings (role proxy), firmographics; R
 - QA16-10 regeneration cost after prompt changes
 
 ## Known data gaps
-- Contacts 0/220 → role-proxy persona only
+- Contacts 192/220 (Apollo, 26 Sep; 28 accounts none) → role-proxy persona where an account has none; no persona field in the file
 - Job openings missing for 45 accounts (proxy persona)
 
 ## Code touched

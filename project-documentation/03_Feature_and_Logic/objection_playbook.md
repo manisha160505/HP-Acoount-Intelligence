@@ -20,7 +20,7 @@ technographics (incumbents), firmographics, prospect_contacts (raiser / topic ow
 - D47 evidence-tier gate removes proof from most objection cards on thin accounts
 
 ## Known data gaps
-- Contacts 0/220 (topic owner)
+- Contacts 192/220 (Apollo, 26 Sep; 28 accounts none) (topic owner)
 - Rulebook FINAL missing
 
 ## Code touched
