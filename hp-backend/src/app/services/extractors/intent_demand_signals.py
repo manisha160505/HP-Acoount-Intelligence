@@ -45,6 +45,7 @@ from datetime import UTC, datetime
 
 from app.core.llm import generate_gpt4o_json_completion
 from app.database.mongodb import get_db
+from app.observability import pipeline
 from app.services.extractors.datasets import (
     account_domain,
     find_file_path,
@@ -794,6 +795,7 @@ def _hiring_widget(account_id: str, job_records: list[dict], now) -> dict:
     "intent_score", "intent_topics", "job_openings", "hp_category_intent",
     "technographics", "webstack",
 )
+@pipeline.feature("intent_demand_signals")
 def extract_intent_demand_signals(account_id: str) -> list[dict]:
     db = get_db()
     now = datetime.now(UTC)
@@ -804,6 +806,12 @@ def extract_intent_demand_signals(account_id: str) -> list[dict]:
     category_rows = read_dataset_rows(account_id, "hp_category_intent")
     inventory = _tech_inventory(_read_dataset_records(account_id, "technographics"),
                                 _read_dataset_records(account_id, "webstack"))
+
+    pipeline.step("datasets", "", intent_score=len(score_records or []),
+                  intent_topics=len(topics_meta_records or []),
+                  jobs=len(job_records or []),
+                  hp_category_intent=len(category_rows or []),
+                  technologies=len(inventory or []))
 
     # Resolved rather than read straight off the account record: nothing
     # populates `accounts.domain`, so this reported "no domain on file" for every
@@ -899,6 +907,8 @@ def extract_intent_demand_signals(account_id: str) -> list[dict]:
             if over:
                 logger.warning("intent: %s So What dropped - %s",
                                entry.get("category"), over)
+                pipeline.guardrail(1, "So What over-claims its tier",
+                                   category=entry.get("category"))
                 entry["so_what_withheld"] = over
                 text = None
             entry["so_what"] = text or None

@@ -32,6 +32,7 @@ import re
 import threading
 
 from app.config.settings import settings
+from app.observability.logging import quieten_noisy_loggers
 
 logger = logging.getLogger(__name__)
 
@@ -283,6 +284,9 @@ async def build_rag(account_id: str, index: str, for_query: bool = False):
     )
     await rag.initialize_storages()
     await initialize_pipeline_status()
+    # LightRAG installs its own handler and level as the handle comes up, which
+    # undoes what `configure_logging` set at startup. Put it back.
+    quieten_noisy_loggers()
     logger.info("retrieval: opened workspace %s", workspace)
     return rag
 

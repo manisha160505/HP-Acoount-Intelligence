@@ -1,9 +1,11 @@
 import json
 import logging
+import time
 
 from openai import OpenAI
 
 from app.config.settings import settings
+from app.observability import pipeline
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +117,7 @@ def generate_gpt4o_json_completion(system_prompt: str, user_prompt: str) -> dict
         return None
 
     model_name = settings.OPENAI_MODEL_NAME or "gpt-4o"
+    started = time.monotonic()
     try:
         response = client.chat.completions.create(
             model=model_name,
@@ -125,10 +128,19 @@ def generate_gpt4o_json_completion(system_prompt: str, user_prompt: str) -> dict
             ],
             temperature=0.2
         )
+        # Counted per feature rather than printed per call: an account makes
+        # dozens of these, and a line each would bury the pipeline's own
+        # output. `pipeline.llm_done` rolls them into one line on the feature's
+        # DONE banner - which is what makes "this feature called the model six
+        # times" checkable during a supervised run.
+        usage = getattr(response, "usage", None)
+        pipeline.llm_call(model_name, time.monotonic() - started,
+                          getattr(usage, "total_tokens", 0) or 0)
         content = response.choices[0].message.content
         if content:
             return json.loads(content)
         return None
     except Exception as e:
+        pipeline.llm_call(model_name, time.monotonic() - started, 0, failed=True)
         logger.error("Error calling GPT-4o API completion: %s", e)
         return None

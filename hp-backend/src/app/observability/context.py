@@ -16,7 +16,26 @@ from contextvars import ContextVar
 # query for than a present-but-empty one.
 request_id_var: ContextVar[str] = ContextVar("request_id", default="")
 
+# The account and feature a pipeline run is currently inside.
+#
+# Same reasoning as the request id, for the case the request id cannot cover: a
+# 220-account build is driven from a script, so there is no request and no id,
+# and the thing a reader needs on every line is which account and which feature
+# produced it. Set by `observability.pipeline`, read by the formatter.
+account_var: ContextVar[str] = ContextVar("account", default="")
+feature_var: ContextVar[str] = ContextVar("feature", default="")
+
 
 def get_request_id() -> str:
     """The id of the in-flight request, or "" outside of one."""
     return request_id_var.get()
+
+
+def get_account() -> str:
+    """The account label of the run in flight, or "" outside one."""
+    return account_var.get()
+
+
+def get_feature() -> str:
+    """The feature key in flight, or "" outside one."""
+    return feature_var.get()

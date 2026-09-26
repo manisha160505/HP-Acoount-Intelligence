@@ -16,6 +16,7 @@ from app.config.settings import settings
 from app.core.deps import get_current_user_flexible, require_admin_role
 from app.database.mongodb import get_db
 from app.errors import ErrorCode
+from app.observability import pipeline
 from app.schemas.account_data import DATASET_REGISTRY, AccountDataFileResponse
 
 logger = logging.getLogger(__name__)
@@ -119,7 +120,12 @@ def _run_dependent_extractors(account_id: str, dataset_key: str) -> tuple[list, 
     which is how a broken regeneration used to pass as a 201.
     """
     regenerated, failed = [], []
-    for feature_key in _features_for_dataset(dataset_key):
+    features = _features_for_dataset(dataset_key)
+    # What this upload is about to set off. Without it a dataset landing looks
+    # identical whether it triggered eight features or none.
+    pipeline.step("upload", "%s -> %d feature(s): %s"
+                  % (dataset_key, len(features), ", ".join(features) or "none"))
+    for feature_key in features:
         try:
             FEATURE_EXTRACTORS[feature_key](account_id)
             regenerated.append(feature_key)

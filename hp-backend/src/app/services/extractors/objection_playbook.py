@@ -9,6 +9,7 @@ from bson import ObjectId
 
 from app.core.llm import generate_gpt4o_json_completion
 from app.database.mongodb import get_db
+from app.observability import pipeline
 from app.services.extractors.grounding import (
     GroundingReport,
     build_corpus,
@@ -628,6 +629,7 @@ def generate_objection_cards(account_id: str, areas: list[dict],
     })
     if (existing and existing.get("status") == "available"
             and existing.get("data", {}).get("evidence_fingerprint") == fingerprint):
+        pipeline.cache_hit("objection_reframe_cards")
         return existing
 
     # Grounding corpus: the datasets this feature reasons over.
@@ -882,6 +884,8 @@ def generate_objection_cards(account_id: str, areas: list[dict],
         logger.warning("objection playbook: retrying %d sector rejection(s) and "
                        "%d HP-claim rejection(s): %s", len(rejected_sectors),
                        len(rejected_claims), rejected_sectors + rejected_claims)
+        pipeline.step("retry", "%d sector and %d HP-claim rejection(s)"
+                      % (len(rejected_sectors), len(rejected_claims)))
         why = []
         if rejected_sectors:
             why.append(
@@ -972,6 +976,8 @@ def generate_objection_cards(account_id: str, areas: list[dict],
     for m in merged:
         m.pop("_canon", None)
     cards = merged[:MAX_OBJECTIONS]
+    pipeline.step("cards", "%d kept of %d written (cap %d)"
+                  % (len(cards), len(merged), MAX_OBJECTIONS))
 
     if cards:
         return {
@@ -995,6 +1001,7 @@ def generate_objection_cards(account_id: str, areas: list[dict],
         }
 
     if existing and existing.get("status") == "available":
+        pipeline.cache_hit("objection_reframe_cards", "kept - this run produced nothing to replace it")
         return existing
     return None
 
@@ -1002,6 +1009,7 @@ def generate_objection_cards(account_id: str, areas: list[dict],
 @requires_local_datasets(
     "firmographics", "prospect_contacts", "technographics",
 )
+@pipeline.feature("objection_playbook")
 def extract_objection_playbook(account_id: str) -> list[dict]:
     db = get_db()
     now = datetime.now(UTC)
@@ -1009,6 +1017,10 @@ def extract_objection_playbook(account_id: str) -> list[dict]:
     techno_records = _read_dataset_records(account_id, "technographics")
     firmo_records = _read_dataset_records(account_id, "firmographics")
     contact_records = _read_dataset_records(account_id, "prospect_contacts")
+
+    pipeline.step("datasets", "", technographics=len(techno_records or []),
+                  firmographics=len(firmo_records or []),
+                  contacts=len(contact_records or []))
 
     account_doc = None
     if ObjectId.is_valid(account_id):

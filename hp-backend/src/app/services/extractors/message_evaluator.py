@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 from bson import ObjectId
 
 from app.database.mongodb import get_db
+from app.observability import pipeline
 from app.services.extractors.datasets import (
     account_display_name,
     read_dataset_records,
@@ -153,12 +154,16 @@ def _personas_from_hiring(job_records: list) -> list:
 @requires_local_datasets(
     "firmographics", "job_openings", "prospect_contacts",
 )
+@pipeline.feature("message_evaluator")
 def extract_message_evaluator(account_id: str) -> list[dict]:
     db = get_db()
     now = datetime.now(UTC)
 
     firmo_records = _read_dataset_records(account_id, "firmographics")
     contacts_records = _read_dataset_records(account_id, "prospect_contacts")
+
+    pipeline.step("datasets", "", firmographics=len(firmo_records),
+                  contacts=len(contacts_records))
 
     results = []
 

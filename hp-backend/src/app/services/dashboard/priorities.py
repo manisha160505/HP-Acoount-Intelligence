@@ -52,6 +52,7 @@ from datetime import UTC, datetime
 
 from app.core.llm import generate_gpt4o_json_completion
 from app.database.mongodb import get_db
+from app.observability import pipeline
 from app.services.dashboard import evidence_strength
 from app.services.extractors import grounding
 from app.services.hp import case_studies as cs
@@ -313,6 +314,8 @@ def _resolve_priorities(account_id: str, candidates: list) -> tuple:
               reverse=True)
     kept.sort(key=lambda p: (-p["measures"]["support_count"],
                              -p["measures"]["distinct_sections"]))
+    pipeline.step("priorities", "%d kept, %d dropped, %d evidence id(s) invalid"
+                  % (len(kept), len(dropped), invalid_total))
     return kept, dropped, invalid_total
 
 

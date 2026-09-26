@@ -13,6 +13,7 @@ from bson import ObjectId
 
 from app.core.llm import generate_gpt4o_json_completion
 from app.database.mongodb import get_db
+from app.observability import pipeline
 from app.services.extractors.datasets import account_display_name
 from app.services.extractors.grounding import (
     HP_PRODUCT_LINES,
@@ -1327,6 +1328,8 @@ def suggest_content_angles(account_id: str, persona_id: str, content_type: str,
                                      label, summary, opening)
             if bad_nums:
                 logger.info("content studio: angle %d dropped, unsourced %s", idx, bad_nums)
+                pipeline.guardrail(1, "angle quotes an unsourced figure",
+                                   angle=idx)
                 continue
             key = summary.lower()
             if key in seen:
@@ -1412,6 +1415,8 @@ def generate_content_asset(account_id: str, persona_id: str, content_type: str,
     # Cached: the same request against unchanged evidence costs no model call.
     cached = next((x for x in existing_assets if x.get("request_fingerprint") == fingerprint), None)
     if cached:
+        pipeline.cache_hit("content_generated_assets",
+                           "same request against unchanged evidence")
         payload = _payload("available", cached, existing_assets, None)
         db["account_widgets"].update_one(
             {"account_id": account_id, "widget_key": "content_generated_assets"},
@@ -1627,6 +1632,7 @@ def generate_content_asset(account_id: str, persona_id: str, content_type: str,
     return payload
 
 
+@pipeline.feature("content_studio")
 def extract_content_studio(account_id: str) -> list[dict]:
     db = get_db()
     now = datetime.now(UTC)
@@ -1636,6 +1642,11 @@ def extract_content_studio(account_id: str) -> list[dict]:
     events_records = _read_dataset_records(account_id, "news_events")
     job_records = _read_dataset_records(account_id, "job_openings")
     intent_records = _read_dataset_records(account_id, "intent_score")
+
+    pipeline.step("datasets", "", firmographics=len(firmo_records or []),
+                  news=len(gnews_records or []) + len(events_records or []),
+                  jobs=len(job_records or []),
+                  intent=len(intent_records or []))
 
     results = []
 
