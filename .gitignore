@@ -150,3 +150,11 @@ DELIVERY_ROADMAP_220_2026-09-25.md
 # Internal rule book for the 220-account run: every client rule against what
 # the build actually does. Working document, kept local.
 HP_220_FINAL_RULE_BOOK_2026-09-25.md
+
+# Local zip snapshots and raw client/vendor drops. Too large for GitHub
+# (project-documentation.zip 622MB, Archive.zip 144MB) and the source data
+# already lives locally in "220 account data /". Never commit.
+Archive.zip
+project-documentation.zip
+drive-download-*/
+*.xlsm
