@@ -1,0 +1,283 @@
+dhruvi.p@bridgeaitech.com
+Attachments
+Sat 22 Aug, 14:53 (12 days ago)
+to maniltongya13, me, Konika, Sahaj
+
+
+Hi Manil and Palash,
+Sharing the key implementation files and reference material for the HP 220-Accounts Platform. Below is a quick explanation of what each item contains and how it can be used for the implementation.
+
+1. Existing implementation codebase - hp-sea-abm-dev-main.zip inside the google drive link mentioned below 
+Codebase: https://drive.google.com/file/d/16WsfrKkdd6ITk3UCfVFcA-lQz0URXdHM/view?usp=sharing
+- This drive contains zip file which has the development codebase for the existing HP Sea Limited ABM POC.
+
+- I would recommend using this as a starting point/reference for implementation, since much of the logic and UI for each feature represented in the POC has already been built here.
+
+Note: Please feel free to modify or restructure the existing codebase as required. The main objective is to take what has already been built for the HP- Sea Limited POC and turn it into a scalable, repeatable implementation that can work across all 220 accounts.
+
+2. Requirements and implementation guide - HP_ABX_v3_final.docx
+- Please use this document alongside the codebase to help understand the feature requirements, intended logic, guardrails and expected outputs.
+
+- The document covers approximately 20 features in total, combining features represented across the two POCs shared below  (Point 4 and 5)- the HP Sea Limited POC and the Palo Alto Caterpillar POC.
+
+For the current HP project, please focus on the following 11 in-scope features:
+
+Executive Dashboard
+
+Recent News Signals
+
+Stakeholder Map
+
+Solution Narrative / Opportunity Map
+
+Tech Landscape
+
+Objection Playbook
+
+Content Studio
+
+Strategy Chat
+
+Message Evaluator
+
+Content Messaging
+
+Intent & Demand Signals
+
+For each feature, the document broadly covers:
+
+What data the feature requires
+
+Where the data comes from
+
+How the data can be cleaned and prepared
+
+Rules and guardrails
+
+Feature build/logic, including where the steps are Deterministic/Derived, VLLM or RAG
+
+Fallback handling
+
+Required final output
+
+- The overall intention of the document is to show how the features can be built in a repeatable way across the HP account list while retaining the required seller-facing outputs from the reference POCs.
+
+- The first three sections of each feature are primarily data-related. @Konika Thakur will be working on collecting and preparing the required data and providing it for implementation.
+
+- For the implementation side, the later sections - particularly Rules + Guardrails, How to Build the Feature, Fallback Handling and Required Output - can be used as a guide to understand the intended behaviour and how the supplied data could be converted into each feature.
+
+Note:These steps are not intended to restrict the technical approach. Please feel free to modify any steps or implementation approach as required to reach the expected outputs shown in the respective POCs for each feature.
+
+3. Account list - APAC_Account_Parent_Child_Mapping.xlsx
+Please refer to:
+
+Sheet: Master List
+Column B: Sales Territory Name
+
+These are the 220 accounts for which we need to build the 11 in-scope features listed above.
+
+The intention is to have a repeatable implementation that can take an account and its prepared data as input and generate the required feature outputs.
+
+4. Palo Alto ABM POC - Caterpillar
+https://paloalto-abm.vercel.app/
+
+Please refer specifically to the Caterpillar account view.
+
+- This POC is useful as a reference for features such as the Executive Dashboard, Stakeholder Map, Solution Narrative / Solution Mapping and Tech Landscape.
+
+5. HP Sea Limited ABM POC
+https://hp-sea-abm.vercel.app/
+
+This is the HP-specific POC corresponding to the implementation codebase shared above (in Point 1)
+
+- Please use this to understand how the implemented features currently come together from the seller's perspective and what we are looking to scale across the larger account set.
+
+NOTE: The material, code, data and POC references shared here are within the scope of our signed NDA.
+
+Also, if possible, please use this email thread for future conversations and updates related to this project, so that we can keep everything in one place.
+
+Best,
+Dhruvi
+
+Attachments: HP_220_Account_Platform_additional data.docx, APAC_Account_Parent_Child_Mapping.xlsx
+---
+
+
+Dhruvi Patel <dhruvi.p@bridgeaitech.com>
+Attachments
+Mon 24 Aug, 14:33 (10 days ago)
+to maniltongya13, Konika, Sahaj, me
+
+Hi Manil and Palash,
+
+I hope you are doing well!!
+
+Adding a few more inputs for the HP 220-Account Platform that we would like to incorporate into the implementation.
+
+I have attached a document covering the first two points below in more detail, including the HP product deck usage/RAG rules and the requirements for the new Reporting & Usage Analytics feature.
+
+1. HP Product Decks for RAG / Recommendations
+HP has shared additional folders named “Notebook" and “Desktop" product decks with us. You can find them in the two Google Drive folders below:
+
+Notebook:
+https://drive.google.com/drive/folders/1gbneD6Rri5ae2ml9Lq09PtM32Ba-z9jO?usp=sharing
+
+Desktop:
+
+https://drive.google.com/drive/folders/1BzoQcTnvu2kinEqnZWXcmVw9Hc7sHTEr?usp=sharing
+
+
+I have gone through these decks briefly and captured some of the key usage rules, examples and RAG guardrails in the attached document to make it easier to understand how we can incorporate this material into the platform. Please refer to the original HP decks as well wherever required during implementation.
+
+The idea is that when an account signal or use case matches one of the defined rules, the relevant HP deck can be used as the preferred source for HP product information. If no rule matches, the platform should actually continue with the normal approved external research or retrieval flow. 
+
+2. Reporting & Usage Analytics Module
+We would also like to add a Reporting & Usage Analytics module to the platform.
+
+This should track usage across users, features, accounts, queries, sessions and time, and include a reporting dashboard as well as a natural-language Ask Reporting interface.
+
+For example, users should be able to ask questions such as “How many queries were asked about Tech Landscape this month?”, “Which features did User X use?” or “Which accounts are viewed most frequently?”
+
+The detailed requirements, example questions and required usage logging are included in the attached document. It would be important to capture the required usage events from the beginning of the implementation so historical reporting is available later.
+
+3. Human in the Loop / Co-creation
+For applicable features where the user provides an input/brief and Gemini/RAG is used to generate content, we would like the experience to be human in the loop / co-creation, rather than the system directly producing one final output.
+
+For example, in Content Studio, the user provides a brief -> the system suggests relevant options -> the user selects or adjusts the option -> the system generates the content accordingly.
+
+The same approach can be followed for other applicable features where user choice or refinement is useful, so that AI assists the user while the user remains involved in deciding the final output.
+
+Please consider these three points along with the implementation requirements already shared.
+
+Let me know if you have any questions!!
+
+Best ,
+Dhruvi
+
+Attachments: HP_220_Account_Platform_additional data.docx
+
+---
+
+
+Konika Thakur
+10:14 (38 minutes ago)
+to Dhruvi, maniltongya13, me, Sahaj
+
+Hi Manil and Palash,
+I’m attaching the data for Intent, Stock Exchange, and Contact details (including phone number data) for your reference.
+For the Intent data, I am also sharing the category-specific intent scores, such as PC, Workstation, and other relevant HP categories.
+The proposed approach is to use the category-specific intent score as the primary signal. For example, if a company has a high Workstation Intent, we can then look at the relevant supporting intent topics available in the source A file—such as AI/ML, AI chips, data analytics, vector databases, and other related signals.
+This will help us not only identify the relevant HP category, but also understand the supporting signals behind the intent, making the overall intelligence stronger and more contextual.
+Please have a look.
+Thanks,
+Konika
+
+
+
+
+​hp_intent_results.xlsx​
+​Car Market May'26 - Wholesales.pdf​
+​Car Market Jun'26 - Wholesales.pdf​
+​Car Market Jul'26 - Wholesales.pdf​
+​Astra-Annual-Report-2024.pdf​
+​2025-Astra-Annual-Report.pdf​
+​Car Market Jan'26 - Wholesales.pdf​
+​Car Market Feb'26 - Wholesales.pdf​
+​Car Market Mar'26 - Wholesales.pdf​
+​Car Market Apr'26 - Wholesales.pdf​
+​apollo_data.xlsx
+
+---
+
+Palash Chatterjee <palashchatterjeeofficial@gmail.com>
+Wed 26 Aug, 18:00 (8 days ago)
+to dhruvi.p, konika.thakur, Manil, Manisha, Anvesha, Sahaj
+
+Hi Dhruvi and Konika,
+
+As we begin designing the data pipeline for the HP 220-Account Platform, we would like to request a representative set of the final cleaned datasets that will be fed into the pipeline to generate an account and its outputs across the 11 in-scope features.
+
+At this stage, there is no need to share the datasets for all 220 accounts. A complete and representative set of cleaned datasets for even one account/company would be sufficient for us to study the data, understand its structure, and start designing the pipeline.
+
+The objective is to build a repeatable pipeline that can take the cleaned datasets for a specific company/account as input and generate the corresponding account intelligence and outputs across the 11 in-scope features. Once we understand the structure and flow for one representative account, we can design the pipeline so that similarly structured datasets for other companies can be fed into the same framework to generate their respective accounts.
+
+We understand that the requirements document shared earlier provides, for each feature, details around what data is required, where that data comes from, and how it should be cleaned and prepared. However, from the pipeline implementation perspective, the upstream sources themselves are not our primary concern.
+
+Our expectation is that the data from the relevant sources will be collected, cleaned, transformed, and organized into a predefined structure before it is provided as input to the pipeline.
+
+What we therefore need to understand is the final cleaned dataset structure and data contract that the pipeline will receive.
+
+It would be helpful if you could share the following for one representative account:
+
+The exhaustive set of final cleaned datasets that will be fed into the pipeline for that account.
+
+A document explaining how these cleaned datasets are structured, including, where applicable:
+
+The different datasets/files/tables/objects that make up the input for an account
+
+Their schemas and key fields
+
+Relationships between the datasets
+
+Identifiers and keys used to link records across datasets
+
+Any standard values, statuses, scores, evidence objects, metadata, or other conventions that form part of the expected input
+
+A direct and explicit mapping of the input data to the 11 in-scope features and their outputs.
+
+More specifically, what we need to understand is where the data required by each feature lives within the final cleaned dataset that will be fed into the pipeline. For each feature, it would be useful to identify:
+
+Which dataset/file/table/object contains the relevant input
+
+Which specific fields or data elements are consumed
+
+Which inputs are used directly and which serve as supporting evidence or inputs for derived logic
+
+How those inputs feed into the corresponding feature output
+
+The earlier document provides a mapping of where the data comes from, such as the underlying sources or APIs for each feature. For the pipeline design, however, what we need is the next level of mapping: after the data has already been collected from those sources, cleaned, transformed, and standardized, where does each piece of data reside in the final dataset structure that we will receive as input?
+
+Having one complete representative account with the exhaustive cleaned dataset, its structure documentation, and a clear feature-level input mapping will allow us to study the actual data contract and start designing the pipeline.
+
+The goal is to ensure that, going forward, a similarly structured cleaned dataset for any other company/account can be fed into the same pipeline to generate that specific account and its corresponding outputs across the 11 in-scope features.
+
+Please share the representative cleaned dataset and the accompanying structure and input-to-feature/output mapping documentation whenever available.
+
+Thanks,
+Palash
+
+---
+
+Dhruvi Patel
+Thu 27 Aug, 11:47 (7 days ago)
+to me, maniltongya13, Manisha, Anvesha, Sahaj, Konika
+
+Hi Palash,
+Thanks for laying this out clearly.
+
+We’ll share the representative data for one account, along with the relevant data structure and mapping details, with you and the team by Monday. This should give you what you need to start understanding the expected input structure and designing the repeatable pipeline.
+
+Best,
+Dhruvi
+
+---
+
+Konika Thakur
+Attachments
+Mon 31 Aug, 23:41 (3 days ago)
+to maniltongya13, me, Sahaj, Dhruvi
+
+Hi Manil and Palash,
+As discussed, sharing the Data Sourcing Reference document along with the source files for the 11 Intelligence Tool features.
+The document provides a clear feature-wise and field-wise mapping of where each data point should be sourced from:
+Source A → Primary source for most company, technology, and general intent data.
+Source B → Primarily for hiring/job-related signals and as an additional reference where applicable.
+Google News RSS → Primary source for news and event-related signals, with Source B's news data as an additional layer.
+For each feature, the document clearly maps:
+Feature → Required Field → Source File → Relevant Sheet/Column
+This should help ensure everyone uses the same data source and mapping while building the features.
+Could you both please review it and let us know if anything needs to be adjusted? Once aligned, we can use this as the reference going forward.
+Thanks,
+Konika 
+
+Attachments: 11-Features-Sourcing-Reference-Anonymized.docx, Source A.xlsx, Source B.xlsx, google_news_rss_data.xlsx

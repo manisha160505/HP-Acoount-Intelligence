@@ -183,3 +183,33 @@ def test_every_declared_dependency_is_a_real_dataset_key():
             assert dataset in DATASET_REGISTRY, (
                 "%s depends on '%s', which is not a dataset key"
                 % (feature_key, dataset))
+
+
+def test_contacts_rebuild_every_feature_that_reads_them_in_order():
+    """Prospect contacts are delivered after the rest of an account's data.
+    Every feature that shows something derived from them must re-run on that
+    upload, and Strategy Chat must run after Stakeholder Map because it reads
+    the grid Stakeholder Map republishes."""
+    from app.api.v1.account_data import _features_for_dataset
+
+    features = _features_for_dataset("prospect_contacts")
+    assert set(features) == {
+        "executive_dashboard",          # stakeholders_mapped_count
+        "stakeholder_map",
+        "solution_narrative_opportunity_map",
+        "objection_playbook",
+        "content_studio",
+        "strategy_chat",                # stakeholders_count, from the grid
+        "message_evaluator",
+    }
+    assert features.index("stakeholder_map") < features.index("strategy_chat")
+
+
+def test_strategy_index_opens_without_contacts():
+    """An account with no prospect contacts publishes an empty stakeholder
+    grid. That must not keep the Strategy Chat index from building."""
+    from app.services.retrieval.registry import INDEX_REGISTRY, STRATEGY
+
+    required = INDEX_REGISTRY[STRATEGY]["required_widgets"]
+    assert "stakeholder_contacts_grid" not in required
+    assert "exec_summary_card" in required

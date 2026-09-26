@@ -148,7 +148,13 @@ INDEX_REGISTRY = {
         # Enough of an account to be worth asking questions about. Not the whole
         # list: a feature that has not run yet narrows the corpus, and the chat
         # says what it does not know rather than refusing to open.
-        "required_widgets": ["exec_summary_card", "stakeholder_contacts_grid"],
+        #
+        # `stakeholder_contacts_grid` is deliberately not required. An account
+        # with no prospect contacts publishes that grid as "empty", which kept
+        # the chat closed on every account delivered without contact data. The
+        # chat opens without them; uploading contacts later republishes the grid
+        # and `requeue_dependents` rebuilds this index.
+        "required_widgets": ["exec_summary_card"],
         # `naive` is vector search over the chunks and nothing else - no entity
         # walk, no relation walk, no graph in the context at all.
         #

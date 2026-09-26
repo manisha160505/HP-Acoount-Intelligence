@@ -1397,7 +1397,7 @@
       "allowed_extensions": [
         ".csv"
       ],
-      "source_sheet": "13_News_Events",
+      "source_sheet": "PredictLeads news_events table (NOT Explorium's 13_News_Events: the columns below - summary, article_sentence, effective_date, found_at - are PredictLeads'; Explorium's sheet carries event_name / event_time / a JSON payload and goes to news_events_additional)",
       "role": "Add-on to google_news.",
       "columns": {
         "article_sentence": {
@@ -1722,6 +1722,7 @@
     },
     "news_events_additional": {
       "status": "not_consumed",
+      "source_sheet": "Explorium 13_News_Events (event_name, event_time, JSON data with title/link/snippet); no extractor reads this key",
       "type": "multi_file",
       "allowed_extensions": [
         ".csv"

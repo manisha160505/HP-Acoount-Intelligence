@@ -108,17 +108,21 @@ vercel app/
 220 account data /
 
 # Per-account CSVs produced from the above by scripts/split_account_data.py.
-# Same client data in a different shape (~233MB), and regenerable from the
-# source folder in about a minute, so it is derived output rather than input.
+# Not committed: ~230MB / 5,942 files, and regenerable. Place the source data
+# at "220 account data /" exactly as named above and run
+# scripts/split_account_data.py to produce this folder locally.
 220 account split csv/
 
 # Client documents (rulebooks, decks, spreadsheets, filings) shared for the
 # 220-account work. Real client material, internal only, never committed.
-NewDocs/
+# Only the open-decisions list is tracked; everything else in the folder stays
+# ignored.
+NewDocs/*
+!NewDocs/220-Open-Decisions-List.md
 
-# Local tooling for splitting and validating the 220-account data above.
-# Kept out of the repo alongside the data it reads.
-scripts/split_account_data.py
+# Local tooling for validating the 220-account data above. The split script
+# itself (scripts/split_account_data.py) is tracked so the team can regenerate
+# the per-account CSVs; the validator and its baseline stay local.
 scripts/split_baseline.json
 scripts/validate_split_data.py
 
@@ -146,3 +150,11 @@ DELIVERY_ROADMAP_220_2026-09-25.md
 # Internal rule book for the 220-account run: every client rule against what
 # the build actually does. Working document, kept local.
 HP_220_FINAL_RULE_BOOK_2026-09-25.md
+
+# Local zip snapshots and raw client/vendor drops. Too large for GitHub
+# (project-documentation.zip 622MB, Archive.zip 144MB) and the source data
+# already lives locally in "220 account data /". Never commit.
+Archive.zip
+project-documentation.zip
+drive-download-*/
+*.xlsm

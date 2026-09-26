@@ -1,0 +1,1424 @@
+{
+  "account": "HP Sea Limited",
+  "base_url": "https://hp-frontend-e56t.onrender.com/dashboard",
+  "run_at": "2026-09-15T05:13:15.164Z",
+  "features": [
+    {
+      "id": "executive_dashboard",
+      "name": "Executive Dashboard",
+      "screenshot": "reports\\screenshots\\executive_dashboard.png",
+      "nav_found": true,
+      "step1_structural": {
+        "score_out_of_10": 2,
+        "auto_checks_passed": 6,
+        "auto_checks_total": 12,
+        "guardrail_red_flags": 2,
+        "required_output_checks": [
+          {
+            "id": "ED-01",
+            "desc": "Account name, status badge (e.g. ACTIVE), Urgency Score element in top bar",
+            "status": "pass"
+          },
+          {
+            "id": "ED-02",
+            "desc": "Account header block: full legal company name + 'ACTIVE TARGET' style tag",
+            "status": "pass"
+          },
+          {
+            "id": "ED-03",
+            "desc": "Account description paragraph (business overview)",
+            "status": "not_found",
+            "note": "Manual: not_found; Groq: pass; disagreement requires review.",
+            "manual_status": "not_found",
+            "groq_status": "pass"
+          },
+          {
+            "id": "ED-04",
+            "desc": "Website / HQ location / industry classification / Ultimate Parent quick-facts row",
+            "status": "pass"
+          },
+          {
+            "id": "ED-05",
+            "desc": "'Watch the Executive Briefing' video/summary element with a one-line description of what it covers",
+            "status": "pass"
+          },
+          {
+            "id": "ED-06",
+            "desc": "'KEY METRICS' section with a 'Verified Datasets Sourced' or equivalent provenance badge",
+            "status": "pass"
+          },
+          {
+            "id": "ED-07",
+            "desc": "Metric tiles present: Total Employees, Yearly Revenue Range, Active Open Job Postings, Revenue Growth (YoY), Est. Annual ICT Spend (or equivalent set)",
+            "status": "pass"
+          },
+          {
+            "id": "ED-08",
+            "desc": "Strategic-priority tiles further down: title, criticality, why-now, reference sentence, source link, confidence (per spec)",
+            "status": "not_found",
+            "note": "Manual review required; no LLM call is made in Step 1."
+          },
+          {
+            "id": "ED-09",
+            "desc": "Recent-signal tiles: event, category, date, urgency/relevance, HP category, source link, confidence (per spec)",
+            "status": "not_found",
+            "note": "Manual review required; no LLM call is made in Step 1."
+          },
+          {
+            "id": "ED-10",
+            "desc": "Stakeholder summary/entry-point card linking to full Stakeholder Map",
+            "status": "not_found",
+            "note": "Manual review required; no LLM call is made in Step 1."
+          },
+          {
+            "id": "ED-11",
+            "desc": "Technology and intent summary cards linking to Tech Landscape / Intent & Demand Signals",
+            "status": "not_found",
+            "note": "Manual review required; no LLM call is made in Step 1."
+          },
+          {
+            "id": "ED-12",
+            "desc": "Urgency score is an actual number out of 100 with 5 named components (Fleet Refresh/AI-Workstation/Hiring/Expansion-Print/Intent), not a placeholder",
+            "status": "not_found",
+            "note": "Manual review required; no LLM call is made in Step 1."
+          }
+        ],
+        "guardrail_checks": [
+          {
+            "id": "ED-13",
+            "desc": "'Urgency Score' badge shows an actual computed number, not a placeholder like 'Contract TBD' — per spec, if an urgency input is genuinely unavailable it must say so explicitly per-component, not blank out the whole score with an unrelated placeholder string",
+            "status": "not_found",
+            "note": "Manual review required; no LLM call is made in Step 1."
+          },
+          {
+            "id": "ED-14",
+            "desc": "CRITICAL: 'Ultimate Parent' field must not contradict the account's own description text — if the description states the company is 'a subsidiary of X', the Ultimate Parent field must show X, not the company's own name",
+            "status": "fail",
+            "expected": "Jardine Cycle & Carriage Limited",
+            "found_candidates": [
+              "pt astra international tbk"
+            ],
+            "note": "Description says \"subsidiary of Jardine Cycle & Carriage Limited\" but Ultimate Parent field shows \"pt astra international tbk\" - these do not match."
+          },
+          {
+            "id": "ED-15",
+            "desc": "Industry classification shown is a defensible match for the actual company (a diversified conglomerate should not be reduced to one narrow SIC-style label like 'automation machinery manufacturing' without at least noting the conglomerate structure)",
+            "status": "not_found",
+            "note": "Manual review required; no LLM call is made in Step 1."
+          },
+          {
+            "id": "ED-16",
+            "desc": "Every displayed metric/card has real data or shows the same empty/missing state used elsewhere in the app — no card should silently show a wrong or placeholder value instead of an honest 'unavailable'",
+            "status": "not_found",
+            "note": "Manual review required; no LLM call is made in Step 1."
+          },
+          {
+            "id": "ED-17",
+            "desc": "Financial figures (revenue range, etc.) match ground truth for the correct fiscal year",
+            "status": "fail",
+            "expected": 323392,
+            "found_candidates": [
+              10001,
+              10,
+              100
+            ]
+          }
+        ]
+      },
+      "step2_deep_check": {
+        "evaluation_mode": "manual only",
+        "insight_quality_score": 2,
+        "contradictions": [
+          {
+            "claim": "Ultimate Parent: pt astra international tbk",
+            "conflicts_with": "subsidiary of Jardine Cycle & Carriage Limited",
+            "explanation": "Deterministic text comparison found different parent names."
+          }
+        ],
+        "unsupported_or_generic_claims": [
+          {
+            "claim": "contract tbd",
+            "why_weak": "Placeholder text detected."
+          }
+        ],
+        "ground_truth_mismatches": [],
+        "genuinely_strong_points": [],
+        "overall_verdict": "Deterministic/manual review for Executive Dashboard. Semantic usefulness and full ground-truth reconciliation require human review.",
+        "groq_result": {
+          "error": "Groq unavailable: Groq API error 429: {\"error\":{\"message\":\"Rate limit reached for model `openai/gpt-oss-20b` in organization `org_01kxekpmafesctwbz55a0a6b2e` service tier `on_demand` on tokens per minute (TPM): Limit 8000, Used 6525, Requested 6777. Please try again in 39.765s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing\",\"type\":\"tokens\",\"code\":\"rate_limit_exceeded\"}}\n"
+        }
+      },
+      "step3_evidence_check": [
+        {
+          "url": "https://astra.co.id",
+          "claim_context": "astra.co.id\njakarta, indonesia\nautomation machinery manufacturing / Other Industrial Machinery Manufacturing / Industrial machinery, nec\nUltimate Parent: pt astra international tbk",
+          "verdict": "broken_link",
+          "explanation": "Could not fetch this source (status: 403). Either the link is dead, blocked, or requires auth."
+        }
+      ],
+      "step4_suggestions": "1. [Data/**/*.xlsx] -> surface extracted workbook evidence from hp_intent_results.xlsx, Source A.xlsx, Source B.xlsx, including sheet-level provenance"
+    },
+    {
+      "id": "recent_news_signals",
+      "name": "Recent News Signals",
+      "screenshot": "reports\\screenshots\\recent_news_signals.png",
+      "nav_found": true,
+      "step1_structural": {
+        "score_out_of_10": 7.4,
+        "auto_checks_passed": 8,
+        "auto_checks_total": 9,
+        "guardrail_red_flags": 1,
+        "required_output_checks": [
+          {
+            "id": "LS-01",
+            "desc": "Title + subtitle naming the account",
+            "status": "pass"
+          },
+          {
+            "id": "LS-02",
+            "desc": "Filters control present",
+            "status": "pass"
+          },
+          {
+            "id": "LS-03",
+            "desc": "Summary counts: total / Critical / High",
+            "status": "pass"
+          },
+          {
+            "id": "LS-04",
+            "desc": "Category tag on each card",
+            "status": "pass"
+          },
+          {
+            "id": "LS-06",
+            "desc": "Relevance/urgency score + colored status dot",
+            "status": "pass"
+          },
+          {
+            "id": "LS-07",
+            "desc": "\"WHAT'S NEW:\" bolded headline summary",
+            "status": "pass"
+          },
+          {
+            "id": "LS-08",
+            "desc": "'Implication for HP:' box visually separated from the factual summary",
+            "status": "pass"
+          },
+          {
+            "id": "LS-09",
+            "desc": "Expandable full body text ('Read more'/'Show less')",
+            "status": "pass"
+          },
+          {
+            "id": "LS-10",
+            "desc": "Source citation chip with name + external link icon",
+            "status": "not_found",
+            "note": "Manual review required; no LLM call is made in Step 1."
+          }
+        ],
+        "guardrail_checks": [
+          {
+            "id": "LS-11",
+            "desc": "'Implication for HP' is phrased as analysis/inference, never as a new unstated fact presented as confirmed",
+            "status": "not_found",
+            "note": "Manual review required; no LLM call is made in Step 1."
+          },
+          {
+            "id": "LS-12",
+            "desc": "No duplicate cards for the same underlying event",
+            "status": "not_found",
+            "note": "Manual review required; no LLM call is made in Step 1."
+          },
+          {
+            "id": "LS-13",
+            "desc": "Signals sorted by relevance score, ties broken by newest first",
+            "status": "not_found",
+            "note": "Manual review required; no LLM call is made in Step 1."
+          },
+          {
+            "id": "LS-14",
+            "desc": "Scores are not flatly identical across every card unless genuinely tied — a red flag scoring isn't running per-signal",
+            "status": "pass",
+            "note": "8 scores found, distinct values: 7"
+          },
+          {
+            "id": "LS-15",
+            "desc": "Cited source actually supports the exact date/headline shown",
+            "status": "not_found",
+            "note": "Manual review required; no LLM call is made in Step 1."
+          },
+          {
+            "id": "LS-16",
+            "desc": "Future/announced/rumoured/completed events are linguistically distinguishable",
+            "status": "fail"
+          }
+        ]
+      },
+      "step2_deep_check": {
+        "evaluation_mode": "manual only",
+        "insight_quality_score": 4,
+        "contradictions": [],
+        "unsupported_or_generic_claims": [
+          {
+            "claim": "contract tbd",
+            "why_weak": "Placeholder text detected."
+          }
+        ],
+        "ground_truth_mismatches": [],
+        "genuinely_strong_points": [],
+        "overall_verdict": "Deterministic/manual review for Recent News Signals. Semantic usefulness and full ground-truth reconciliation require human review.",
+        "groq_result": {
+          "error": "Groq unavailable: Groq API error 429: {\"error\":{\"message\":\"Rate limit reached for model `openai/gpt-oss-20b` in organization `org_01kxekpmafesctwbz55a0a6b2e` service tier `on_demand` on tokens per minute (TPM): Limit 8000, Used 6075, Requested 5102. Please try again in 23.8275s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing\",\"type\":\"tokens\",\"code\":\"rate_limit_exceeded\"}}\n"
+        }
+      },
+      "step3_evidence_check": [
+        {
+          "url": "https://news.google.com/rss/articles/CBMipgFBVV95cUxNX1Fub0R0aFdiVnRsaTJtLXJ4TGw3ay1vR1hRQmU3Q282VnFFRVg1Qnl0VndkSGUzaFJTcXVJcE84bFpJLXNWb2ZTZTYzWmR1VDEyWmh2NWxmZ09Bal9LQS1vV041WnBqZTZud0xvZ1hnNnZPaTNmMmVsdmJockpfeFBsbjg3WUNkZnl1dnZ0SHZRbGNsX0QtZ0FIZENoMEpmNDNnRDR3?oc=5",
+          "claim_context": "IDNFinancials",
+          "verdict": "unreadable",
+          "explanation": "Fetched successfully but returned little/no extractable text (JS-rendered page, PDF, or paywall)."
+        },
+        {
+          "url": "https://news.google.com/rss/articles/CBMiogFBVV95cUxOLWgxU3FLeU53RGxGVEJFTWFid09tOUdnRVk5Uzdwam9UTWQzdDl2RUhvYTRMVkNVYW9tUE5vNmVNT1ozdGdCWWlsMzBZeG8yZjV2Ql8zbjJleWZzb3dlS0VHMERIZWNMbnZTYTl5d3RkMGx0bG9uNlV2YVJQQmdfdHRnamR3eTFLbWlYN00wbFlnQ3JIdzhrUHZfZXd4QjR4cXc?oc=5",
+          "claim_context": "IDNFinancials",
+          "verdict": "unreadable",
+          "explanation": "Fetched successfully but returned little/no extractable text (JS-rendered page, PDF, or paywall)."
+        },
+        {
+          "url": "https://news.google.com/rss/articles/CBMipwFBVV95cUxNNXZqeU1CMWdlYmVWMTVMczZRbGFOenFyekt3b3R2dlVWenJBMmJwM0UxR0NSbzJMbm9iWlhEYTFCQkJmWmxzbmpUM191RHNGTkxqZW1KSFo3WFRiV1ZJcDdPdC1KUG1VdGRSclF4YVNVTmNSVmZYY2FXWjB0RThEUi1ER2tGOUN0WTB5MTdaX09FV18tQ3lPZ0RsNXhuNVJTVjJHSnlmaw?oc=5",
+          "claim_context": "Tempo.co English",
+          "verdict": "unreadable",
+          "explanation": "Fetched successfully but returned little/no extractable text (JS-rendered page, PDF, or paywall)."
+        },
+        {
+          "url": "https://news.google.com/rss/articles/CBMizgFBVV95cUxPT0NPZHEyTHlDdU4xQzR5clZNOTVvOElTMHNPX2xIcldtZUI1SXhTUl9kY2ZrTWtFc29za0YydXdoZGk3dXhCSjRSV0dFMG9aX0QtOVRId1FhQXh3WVRmblJRanJ2S0Y3czFFdHpJcTZpYVdKRzVMR3h6czZaQTRpV3B1UzM5ZEdtWmx0MzVaVUtSbFp1MDJManIzUVkySERpOTJ6SnBGT1ZaTG5EamlZT1B3WTE5bVRpeDRCbi0tTWVUaXYtNjVQakdKVG0yUQ?oc=5",
+          "claim_context": "PT Astra International Tbk",
+          "verdict": "unreadable",
+          "explanation": "Fetched successfully but returned little/no extractable text (JS-rendered page, PDF, or paywall)."
+        }
+      ],
+      "step4_suggestions": "1. [Data/**/*.xlsx] -> surface extracted workbook evidence from hp_intent_results.xlsx, Source A.xlsx, Source B.xlsx, including sheet-level provenance\n2. [Data/**/*.pdf] -> add citations or source cards backed by extracted PDF text from Stock exchange sample data\\2025-Astra-Annual-Report.pdf, Stock exchange sample data\\Astra-Annual-Report-2024.pdf, Stock exchange sample data\\Car Market Apr'26 - Wholesales.pdf, Stock exchange sample data\\Car Market Feb'26 - Wholesales.pdf, Stock exchange sample data\\Car Market Jan'26 - Wholesales.pdf, Stock exchange sample data\\Car Market Jul'26 - Wholesales.pdf, Stock exchange sample data\\Car Market Jun'26 - Wholesales.pdf, Stock exchange sample data\\Car Market Mar'26 - Wholesales.pdf, Stock exchange sample data\\Car Market May'26 - Wholesales.pdf\n3. [gaikindo_wholesale_2026_by_month] -> add the monthly domestic wholesale and Astra market-share trend as an account-specific demand signal"
+    },
+    {
+      "id": "stakeholder_map",
+      "name": "Stakeholder Map",
+      "screenshot": "reports\\screenshots\\stakeholder_map.png",
+      "nav_found": true,
+      "step1_structural": {
+        "score_out_of_10": 7.7,
+        "auto_checks_passed": 17,
+        "auto_checks_total": 22,
+        "guardrail_red_flags": 0,
+        "required_output_checks": [
+          {
+            "id": "SM-01",
+            "desc": "Account name + ticker/exchange shown in top bar",
+            "status": "pass"
+          },
+          {
+            "id": "SM-02",
+            "desc": "Urgency score badge visible (X/100)",
+            "status": "pass"
+          },
+          {
+            "id": "SM-03",
+            "desc": "Total active contact count stated",
+            "status": "fail"
+          },
+          {
+            "id": "SM-04",
+            "desc": "Priority breakdown line (N priority / high / medium / lower-relevance)",
+            "status": "pass"
+          },
+          {
+            "id": "SM-05",
+            "desc": "Filter controls: Seniority, Department, Influence, Priority, HP Relevance",
+            "status": "pass"
+          },
+          {
+            "id": "SM-06",
+            "desc": "Search box (name/title/department)",
+            "status": "pass"
+          },
+          {
+            "id": "SM-07",
+            "desc": "'Showing active employees only' indicator",
+            "status": "fail"
+          },
+          {
+            "id": "SM-08",
+            "desc": "Two view modes: Stakeholder Grid and Entry Path",
+            "status": "pass"
+          },
+          {
+            "id": "SM-09",
+            "desc": "Export action available",
+            "status": "pass"
+          },
+          {
+            "id": "SM-10",
+            "desc": "Avatar + LinkedIn icon/link per person",
+            "status": "fail"
+          },
+          {
+            "id": "SM-14",
+            "desc": "Seniority tag (C-Suite/Director/Manager/Individual Contributor)",
+            "status": "pass"
+          },
+          {
+            "id": "SM-15",
+            "desc": "Influence-type tag (Decision Maker/Budget Holder/Technical Evaluator/Champion/Influencer)",
+            "status": "pass"
+          },
+          {
+            "id": "SM-16",
+            "desc": "Priority tag (High/Medium/Low)",
+            "status": "pass"
+          },
+          {
+            "id": "SM-17",
+            "desc": "Email shown as clickable mailto link",
+            "status": "pass"
+          },
+          {
+            "id": "SM-18",
+            "desc": "Phone number + type label (Office/Direct)",
+            "status": "pass"
+          },
+          {
+            "id": "SM-19",
+            "desc": "Source link OR honest 'pre-existing verified record' label (source itself optional)",
+            "status": "pass"
+          },
+          {
+            "id": "SM-20",
+            "desc": "'HOW TO OPEN' personalized talking point tied to real account evidence",
+            "status": "pass"
+          },
+          {
+            "id": "SM-21",
+            "desc": "'HP PLAY FOCUS' line naming the specific HP category/play",
+            "status": "pass"
+          },
+          {
+            "id": "SM-22",
+            "desc": "Top-tier cards show 'DECISION POWER' reasoning",
+            "status": "not_found",
+            "note": "Manual review required; no LLM call is made in Step 1."
+          },
+          {
+            "id": "SM-23",
+            "desc": "Some cards show evidence-based 'PAIN POINTS'",
+            "status": "not_found",
+            "note": "Manual review required; no LLM call is made in Step 1."
+          },
+          {
+            "id": "SM-27",
+            "desc": "'All Departments'/'Top Contacts' tab toggle",
+            "status": "pass"
+          },
+          {
+            "id": "SM-28",
+            "desc": "Each department shows '[HP-relevant] / [total]' counts",
+            "status": "pass"
+          }
+        ],
+        "guardrail_checks": [
+          {
+            "id": "SM-24",
+            "desc": "News-cross-reference: a stakeholder named in Konika's news dataset has that fact reflected in their card (not generic filler)",
+            "status": "not_found",
+            "note": "Manual review required; no LLM call is made in Step 1."
+          },
+          {
+            "id": "SM-25",
+            "desc": "No talking point contradicts a more recent news signal about that person/team",
+            "status": "not_found",
+            "note": "Manual review required; no LLM call is made in Step 1."
+          },
+          {
+            "id": "SM-26",
+            "desc": "Former employees excluded/marked Former, not shown active",
+            "status": "not_found",
+            "note": "Manual review required; no LLM call is made in Step 1."
+          },
+          {
+            "id": "SM-30",
+            "desc": "No inferred/guessed email labeled 'verified'",
+            "status": "not_found",
+            "note": "Manual review required; no LLM call is made in Step 1."
+          },
+          {
+            "id": "SM-31",
+            "desc": "Influence language doesn't overstate (e.g. never claims a person 'owns the exact HP budget' without evidence)",
+            "status": "not_found",
+            "note": "Manual review required; no LLM call is made in Step 1."
+          },
+          {
+            "id": "SM-32",
+            "desc": "No duplicate person under different title/spelling variants",
+            "status": "not_found",
+            "note": "Manual review required; no LLM call is made in Step 1."
+          }
+        ]
+      },
+      "step2_deep_check": {
+        "evaluation_mode": "manual only",
+        "insight_quality_score": 4,
+        "contradictions": [],
+        "unsupported_or_generic_claims": [
+          {
+            "claim": "contract tbd",
+            "why_weak": "Placeholder text detected."
+          }
+        ],
+        "ground_truth_mismatches": [],
+        "genuinely_strong_points": [],
+        "overall_verdict": "Deterministic/manual review for Stakeholder Map. Semantic usefulness and full ground-truth reconciliation require human review.",
+        "groq_result": {
+          "error": "Groq unavailable: Groq API error 429: {\"error\":{\"message\":\"Rate limit reached for model `openai/gpt-oss-20b` in organization `org_01kxekpmafesctwbz55a0a6b2e` service tier `on_demand` on tokens per minute (TPM): Limit 8000, Used 5277, Requested 6257. Please try again in 26.505s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing\",\"type\":\"tokens\",\"code\":\"rate_limit_exceeded\"}}\n"
+        }
+      },
+      "step3_evidence_check": [
+        {
+          "url": "http://www.linkedin.com/in/irvan-nr-42620b303",
+          "claim_context": "Irvan Nr",
+          "verdict": "broken_link",
+          "explanation": "Could not fetch this source (status: 999). Either the link is dead, blocked, or requires auth."
+        },
+        {
+          "url": "https://linkedin.com/in/ACoAAAEWV9sBq1nj0tas_ecc--6m-UKyhGbNsVA",
+          "claim_context": "Stephen Dharma",
+          "verdict": "not_supported",
+          "explanation": "No meaningful claim-term match found; manual verification recommended.",
+          "groq_review": {
+            "verdict": "not enough info",
+            "explanation": "The fetched source contains only a reCAPTCHA notice and does not mention or provide any information about Stephen Dharma. Therefore, there is insufficient evidence to confirm or refute the claim."
+          },
+          "evaluation_mode": "deterministic/manual + Groq"
+        },
+        {
+          "url": "http://www.linkedin.com/in/alwin-hadikusuma-1a9b247",
+          "claim_context": "Alwin Hadikusuma",
+          "verdict": "broken_link",
+          "explanation": "Could not fetch this source (status: 999). Either the link is dead, blocked, or requires auth."
+        },
+        {
+          "url": "http://www.linkedin.com/in/chandra-savitri",
+          "claim_context": "Ni Savitri",
+          "verdict": "broken_link",
+          "explanation": "Could not fetch this source (status: 999). Either the link is dead, blocked, or requires auth."
+        },
+        {
+          "url": "http://www.linkedin.com/in/hanan-suryono-9b002bb",
+          "claim_context": "Hanan Suryono",
+          "verdict": "broken_link",
+          "explanation": "Could not fetch this source (status: 999). Either the link is dead, blocked, or requires auth."
+        },
+        {
+          "url": "https://linkedin.com/in/ACoAABO8P9EBsamlI5F5Sgcqni8trUDJUsN8Ma0",
+          "claim_context": "Mochamad (ivan) Triawan",
+          "verdict": "not_supported",
+          "explanation": "No meaningful claim-term match found; manual verification recommended.",
+          "groq_review": {
+            "verdict": "unsupported",
+            "explanation": "The source text does not contain the name \"Mochamad (ivan) Triawan\" or any related information."
+          },
+          "evaluation_mode": "deterministic/manual + Groq"
+        },
+        {
+          "url": "https://linkedin.com/in/ACoAABNMsNYBxh2F_Lpw9e_j4dRWou0cKkVpZ1I",
+          "claim_context": "Yosafat Adi",
+          "verdict": "not_supported",
+          "explanation": "No meaningful claim-term match found; manual verification recommended.",
+          "groq_review": {
+            "verdict": "unsupported",
+            "explanation": "The source does not mention Yosafat Adi."
+          },
+          "evaluation_mode": "deterministic/manual + Groq"
+        },
+        {
+          "url": "https://linkedin.com/in/ACoAABSET4YBloEGug75hpW3GOsXED8VkBsCnPg",
+          "claim_context": "Franky Wibisono",
+          "verdict": "not_supported",
+          "explanation": "No meaningful claim-term match found; manual verification recommended.",
+          "groq_review": {
+            "verdict": "NOT_SUPPORTED",
+            "explanation": "The fetched source does not contain any information about Franky Wibisono. The source is a generic reCAPTCHA page from LinkedIn and does not mention or verify the existence of a person named Franky Wibisono. Therefore, the claim cannot be supported by the provided source."
+          },
+          "evaluation_mode": "deterministic/manual + Groq"
+        }
+      ],
+      "step4_suggestions": "1. [Data/**/*.xlsx] -> surface extracted workbook evidence from hp_intent_results.xlsx, Source A.xlsx, Source B.xlsx, including sheet-level provenance\n2. [Data/**/*.pdf] -> add citations or source cards backed by extracted PDF text from Stock exchange sample data\\2025-Astra-Annual-Report.pdf, Stock exchange sample data\\Astra-Annual-Report-2024.pdf, Stock exchange sample data\\Car Market Apr'26 - Wholesales.pdf, Stock exchange sample data\\Car Market Feb'26 - Wholesales.pdf, Stock exchange sample data\\Car Market Jan'26 - Wholesales.pdf, Stock exchange sample data\\Car Market Jul'26 - Wholesales.pdf, Stock exchange sample data\\Car Market Jun'26 - Wholesales.pdf, Stock exchange sample data\\Car Market Mar'26 - Wholesales.pdf, Stock exchange sample data\\Car Market May'26 - Wholesales.pdf\n3. [workforce_trends_2026_07] -> add a hiring-mix trend card showing the available quarterly profiles and role percentages\n4. [financials_fy.2025] -> add the FY2025 financial snapshot with its source and year label\n5. [stock_exchange] -> add ASII market context, quarterly close, and buyback information with provenance\n6. [gaikindo_wholesale_2026_by_month] -> add the monthly domestic wholesale and Astra market-share trend as an account-specific demand signal"
+    },
+    {
+      "id": "solution_narrative",
+      "name": "Solution Narrative / Opportunity Map",
+      "screenshot": "reports\\screenshots\\solution_narrative.png",
+      "nav_found": true,
+      "step1_structural": {
+        "score_out_of_10": 6.1,
+        "auto_checks_passed": 10,
+        "auto_checks_total": 11,
+        "guardrail_red_flags": 2,
+        "required_output_checks": [
+          {
+            "id": "OM-01",
+            "desc": "Title + subtitle stating N opportunities and what the view covers",
+            "status": "pass"
+          },
+          {
+            "id": "OM-02",
+            "desc": "Cards grouped under named HP-category section headers",
+            "status": "pass"
+          },
+          {
+            "id": "OM-03",
+            "desc": "Card icon + specific HP product-family title",
+            "status": "pass"
+          },
+          {
+            "id": "OM-04",
+            "desc": "Criticality badge (Critical/High) with matching colored border",
+            "status": "pass"
+          },
+          {
+            "id": "OM-06",
+            "desc": "Description ties to a named account signal, not generic industry text",
+            "status": "not_found",
+            "note": "Manual review required; no LLM call is made in Step 1."
+          },
+          {
+            "id": "OM-07",
+            "desc": "'HOW HP ENABLES' paragraph explains the reasoning chain",
+            "status": "pass"
+          },
+          {
+            "id": "OM-08",
+            "desc": "'HP PRODUCTS' chips name real specific products",
+            "status": "pass"
+          },
+          {
+            "id": "OM-09",
+            "desc": "'HP PROOF / RESOURCE' link chip present",
+            "status": "pass"
+          },
+          {
+            "id": "OM-18",
+            "desc": "Entry Path TIMELINE field present and directionally sensible",
+            "status": "pass"
+          },
+          {
+            "id": "OM-19",
+            "desc": "Entry Path TARGET BUYERS field names real roles",
+            "status": "pass"
+          },
+          {
+            "id": "OM-20",
+            "desc": "Entry Path RECOMMENDED CTA is a specific actionable sentence",
+            "status": "pass"
+          }
+        ],
+        "guardrail_checks": [
+          {
+            "id": "OM-10",
+            "desc": "'QUANTIFIED IMPACT' box explicitly labeled HP-MODELED / 'Internal projection - not an external source' whenever it's HP's own number",
+            "status": "fail"
+          },
+          {
+            "id": "OM-11",
+            "desc": "'How HP calculated this' expander actually shows calculation basis/inputs, not a restated headline",
+            "status": "not_found",
+            "note": "Manual review required; no LLM call is made in Step 1."
+          },
+          {
+            "id": "OM-12",
+            "desc": "'SUPPORTING SIGNAL - SOURCED' shown (with real citation + quote) only when genuine external source exists",
+            "status": "pass"
+          },
+          {
+            "id": "OM-13",
+            "desc": "Amber 'Unsourced - HP analysis only, no independent citation available yet' state shown honestly when no source exists — core hallucination guardrail",
+            "status": "fail"
+          },
+          {
+            "id": "OM-14",
+            "desc": "Cited source (e.g. SEC 20-F / annual report) actually supports the specific fact quoted next to it — spot-check against ground truth",
+            "status": "not_found",
+            "expected": 507366,
+            "found_candidates": []
+          },
+          {
+            "id": "OM-15",
+            "desc": "Numeric impact figures are reproducible from stated inputs/method, not invented",
+            "status": "not_found",
+            "note": "Manual review required; no LLM call is made in Step 1."
+          },
+          {
+            "id": "OM-16",
+            "desc": "Named HP products logically match the account signal driving the opportunity",
+            "status": "not_found",
+            "note": "Manual review required; no LLM call is made in Step 1."
+          },
+          {
+            "id": "OM-17",
+            "desc": "No opportunity card exists purely from generic industry assumption with no account-specific trigger",
+            "status": "not_found",
+            "note": "Manual review required; no LLM call is made in Step 1."
+          },
+          {
+            "id": "OM-21",
+            "desc": "Every Entry Path 'target buyer' role also exists as a real stakeholder card in Stakeholder Map",
+            "status": "not_found",
+            "note": "Manual review required; no LLM call is made in Step 1."
+          },
+          {
+            "id": "OM-22",
+            "desc": "Opportunity count matches what the subtitle states",
+            "status": "not_found",
+            "note": "Manual review required; no LLM call is made in Step 1."
+          }
+        ]
+      },
+      "step2_deep_check": {
+        "evaluation_mode": "manual only",
+        "insight_quality_score": 4,
+        "contradictions": [],
+        "unsupported_or_generic_claims": [
+          {
+            "claim": "contract tbd",
+            "why_weak": "Placeholder text detected."
+          }
+        ],
+        "ground_truth_mismatches": [],
+        "genuinely_strong_points": [],
+        "overall_verdict": "Deterministic/manual review for Solution Narrative / Opportunity Map. Semantic usefulness and full ground-truth reconciliation require human review.",
+        "groq_result": {
+          "error": "Groq unavailable: Groq API error 429: {\"error\":{\"message\":\"Rate limit reached for model `openai/gpt-oss-20b` in organization `org_01kxekpmafesctwbz55a0a6b2e` service tier `on_demand` on tokens per minute (TPM): Limit 8000, Used 5172, Requested 6442. Please try again in 27.105s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing\",\"type\":\"tokens\",\"code\":\"rate_limit_exceeded\"}}\n"
+        }
+      },
+      "step3_evidence_check": [
+        {
+          "url": "https://www.hp.com/us-en/laptops.html",
+          "claim_context": "HP ↗",
+          "verdict": "not_supported",
+          "explanation": "No meaningful claim-term match found; manual verification recommended.",
+          "groq_review": {
+            "verdict": "NOT SUPPORTED",
+            "explanation": "The claim \"HP ↗\" suggests HP is trending upwards or showing improvement, but the fetched source consists solely of navigation and product listings from the HP website without any reference to stock performance, market trend, or any indication that HP is rising. Therefore the claim cannot be verified from the provided source."
+          },
+          "evaluation_mode": "deterministic/manual + Groq"
+        },
+        {
+          "url": "https://www.hp.com/us-en/workstations.html",
+          "claim_context": "HP ↗",
+          "verdict": "not_supported",
+          "explanation": "No meaningful claim-term match found; manual verification recommended.",
+          "groq_review": {
+            "verdict": "NOT SUPPORTED",
+            "explanation": "The fetched source is a snapshot of HP’s official website containing product categories and navigation links; it does not contain any information indicating that HP is trending upward, nor does it include the arrow symbol ‘↗’ or any context that would support such a claim."
+          },
+          "evaluation_mode": "deterministic/manual + Groq"
+        },
+        {
+          "url": "https://www.hp.com/us-en/poly.html",
+          "claim_context": "HP ↗",
+          "verdict": "not_supported",
+          "explanation": "No meaningful claim-term match found; manual verification recommended.",
+          "evaluation_mode": "deterministic/manual"
+        },
+        {
+          "url": "https://www.hp.com/us-en/services/workforce-solutions/workforce-computing/managed-device-services.html",
+          "claim_context": "HP ↗",
+          "verdict": "not_supported",
+          "explanation": "No meaningful claim-term match found; manual verification recommended.",
+          "evaluation_mode": "deterministic/manual"
+        }
+      ],
+      "step4_suggestions": "1. [Data/**/*.xlsx] -> surface extracted workbook evidence from hp_intent_results.xlsx, Source A.xlsx, Source B.xlsx, including sheet-level provenance\n2. [Data/**/*.pdf] -> add citations or source cards backed by extracted PDF text from Stock exchange sample data\\2025-Astra-Annual-Report.pdf, Stock exchange sample data\\Astra-Annual-Report-2024.pdf, Stock exchange sample data\\Car Market Apr'26 - Wholesales.pdf, Stock exchange sample data\\Car Market Feb'26 - Wholesales.pdf, Stock exchange sample data\\Car Market Jan'26 - Wholesales.pdf, Stock exchange sample data\\Car Market Jul'26 - Wholesales.pdf, Stock exchange sample data\\Car Market Jun'26 - Wholesales.pdf, Stock exchange sample data\\Car Market Mar'26 - Wholesales.pdf, Stock exchange sample data\\Car Market May'26 - Wholesales.pdf\n3. [financials_fy.2025] -> add the FY2025 financial snapshot with its source and year label\n4. [stock_exchange] -> add ASII market context, quarterly close, and buyback information with provenance\n5. [gaikindo_wholesale_2026_by_month] -> add the monthly domestic wholesale and Astra market-share trend as an account-specific demand signal"
+    },
+    {
+      "id": "tech_landscape",
+      "name": "Tech Landscape",
+      "screenshot": "reports\\screenshots\\tech_landscape.png",
+      "nav_found": true,
+      "step1_structural": {
+        "score_out_of_10": 7.3,
+        "auto_checks_passed": 7,
+        "auto_checks_total": 8,
+        "guardrail_red_flags": 1,
+        "required_output_checks": [
+          {
+            "id": "TM-01",
+            "desc": "Title + subtitle stating total detected technologies and category count",
+            "status": "pass"
+          },
+          {
+            "id": "TM-02",
+            "desc": "'Opportunities only' filter toggle present",
+            "status": "pass"
+          },
+          {
+            "id": "TM-03",
+            "desc": "'STRATEGIC READ' summary box explaining the 3-way split",
+            "status": "pass"
+          },
+          {
+            "id": "TM-04",
+            "desc": "4 summary stat tiles: Detected Technologies / Categories / HP-Mapped / Whitespace",
+            "status": "pass"
+          },
+          {
+            "id": "TM-06",
+            "desc": "Status badge per category: Contextual / Displacement / Complementary attach / Greenfield",
+            "status": "pass"
+          },
+          {
+            "id": "TM-07",
+            "desc": "'WHAT IT MEANS FOR HP' paragraph on every category, including Contextual ones",
+            "status": "pass"
+          },
+          {
+            "id": "TM-09",
+            "desc": "Risk badge (High/Medium/Low risk) on competitor entries; green whitespace badge on HP-open entries",
+            "status": "pass"
+          },
+          {
+            "id": "TM-11",
+            "desc": "Every vendor/technology card carries a provenance citation + confidence % — zero exceptions",
+            "status": "fail"
+          }
+        ],
+        "guardrail_checks": [
+          {
+            "id": "TM-12",
+            "desc": "Sum of 'N detected signals' across category cards equals the header's total 'Detected Technologies' figure",
+            "status": "fail",
+            "expected": 220,
+            "found_candidates": [
+              10
+            ],
+            "note": "summed 6 per-category values"
+          },
+          {
+            "id": "TM-13",
+            "desc": "Count of non-Contextual category badges equals the header's 'HP-Mapped Categories' stat (X/7)",
+            "status": "not_found",
+            "note": "Manual review required; no LLM call is made in Step 1."
+          },
+          {
+            "id": "TM-14",
+            "desc": "Count of categories with a green whitespace card equals the header's 'Whitespace Categories' stat (X/7)",
+            "status": "not_found",
+            "note": "Manual review required; no LLM call is made in Step 1."
+          },
+          {
+            "id": "TM-15",
+            "desc": "'Contextual - no direct HP line' categories never show a false HP-product recommendation arrow",
+            "status": "not_found",
+            "note": "Manual review required; no LLM call is made in Step 1."
+          },
+          {
+            "id": "TM-16",
+            "desc": "Multi-source citations ('X + Y') are genuinely two distinct sources, not one duplicated",
+            "status": "not_found",
+            "note": "Manual review required; no LLM call is made in Step 1."
+          },
+          {
+            "id": "TM-17",
+            "desc": "Risk badges are applied by a defensible, consistent rule, not arbitrarily",
+            "status": "not_found",
+            "note": "Manual review required; no LLM call is made in Step 1."
+          },
+          {
+            "id": "TM-18",
+            "desc": "A whitespace/greenfield card is only shown when the account genuinely has zero confirmed incumbent in that slot",
+            "status": "not_found",
+            "note": "Manual review required; no LLM call is made in Step 1."
+          }
+        ]
+      },
+      "step2_deep_check": {
+        "evaluation_mode": "manual only",
+        "insight_quality_score": 4,
+        "contradictions": [],
+        "unsupported_or_generic_claims": [
+          {
+            "claim": "contract tbd",
+            "why_weak": "Placeholder text detected."
+          }
+        ],
+        "ground_truth_mismatches": [],
+        "genuinely_strong_points": [],
+        "overall_verdict": "Deterministic/manual review for Tech Landscape. Semantic usefulness and full ground-truth reconciliation require human review.",
+        "groq_result": {
+          "error": "Groq unavailable: Groq API error 429: {\"error\":{\"message\":\"Rate limit reached for model `openai/gpt-oss-20b` in organization `org_01kxekpmafesctwbz55a0a6b2e` service tier `on_demand` on tokens per minute (TPM): Limit 8000, Used 6372, Requested 6221. Please try again in 34.4475s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing\",\"type\":\"tokens\",\"code\":\"rate_limit_exceeded\"}}\n"
+        }
+      },
+      "step3_evidence_check": [],
+      "step4_suggestions": "1. [Data/**/*.xlsx] -> surface extracted workbook evidence from hp_intent_results.xlsx, Source A.xlsx, Source B.xlsx, including sheet-level provenance\n2. [Data/**/*.pdf] -> add citations or source cards backed by extracted PDF text from Stock exchange sample data\\2025-Astra-Annual-Report.pdf, Stock exchange sample data\\Astra-Annual-Report-2024.pdf, Stock exchange sample data\\Car Market Apr'26 - Wholesales.pdf, Stock exchange sample data\\Car Market Feb'26 - Wholesales.pdf, Stock exchange sample data\\Car Market Jan'26 - Wholesales.pdf, Stock exchange sample data\\Car Market Jul'26 - Wholesales.pdf, Stock exchange sample data\\Car Market Jun'26 - Wholesales.pdf, Stock exchange sample data\\Car Market Mar'26 - Wholesales.pdf, Stock exchange sample data\\Car Market May'26 - Wholesales.pdf\n3. [workforce_trends_2026_07] -> add a hiring-mix trend card showing the available quarterly profiles and role percentages\n4. [financials_fy.2025] -> add the FY2025 financial snapshot with its source and year label\n5. [gaikindo_wholesale_2026_by_month] -> add the monthly domestic wholesale and Astra market-share trend as an account-specific demand signal"
+    },
+    {
+      "id": "objection_playbook",
+      "name": "Objection Playbook",
+      "screenshot": "reports\\screenshots\\objection_playbook.png",
+      "nav_found": true,
+      "step1_structural": {
+        "score_out_of_10": 4.3,
+        "auto_checks_passed": 3,
+        "auto_checks_total": 7,
+        "guardrail_red_flags": 0,
+        "required_output_checks": [
+          {
+            "id": "OP-01",
+            "desc": "Title + subtitle with objection count",
+            "status": "pass"
+          },
+          {
+            "id": "OP-02",
+            "desc": "Quoted objection phrased as the customer would say it",
+            "status": "pass"
+          },
+          {
+            "id": "OP-03",
+            "desc": "'Likely raised by:' role/persona line",
+            "status": "fail"
+          },
+          {
+            "id": "OP-05",
+            "desc": "REFRAME box with a substantive argument",
+            "status": "pass"
+          },
+          {
+            "id": "OP-06",
+            "desc": "COUNTER QUESTION box with a genuine discovery question",
+            "status": "fail"
+          },
+          {
+            "id": "OP-07",
+            "desc": "Footer repeats 'Likely Raiser: [role]'",
+            "status": "fail"
+          },
+          {
+            "id": "OP-08",
+            "desc": "PROOF POINT box appears only on objections with real external evidence, not on every card",
+            "status": "not_found",
+            "note": "Manual review required; no LLM call is made in Step 1."
+          }
+        ],
+        "guardrail_checks": [
+          {
+            "id": "OP-09",
+            "desc": "REFRAME text is specific to this account's real situation, not generic sales talk",
+            "status": "not_found",
+            "note": "Manual review required; no LLM call is made in Step 1."
+          },
+          {
+            "id": "OP-10",
+            "desc": "COUNTER QUESTION is neutral/discovery-oriented, doesn't assume an unverified premise is already true",
+            "status": "not_found",
+            "note": "Manual review required; no LLM call is made in Step 1."
+          },
+          {
+            "id": "OP-11",
+            "desc": "Where a PROOF POINT is shown, the citation is real and the quoted number matches the source document",
+            "status": "not_found",
+            "expected": 323392,
+            "found_candidates": []
+          },
+          {
+            "id": "OP-12",
+            "desc": "'Likely raised by' role matches an actual persona/stakeholder type present in Stakeholder Map",
+            "status": "not_found",
+            "note": "Manual review required; no LLM call is made in Step 1."
+          },
+          {
+            "id": "OP-13",
+            "desc": "No comparative competitor-weakness claim appears without an approved battlecard/sourced fact",
+            "status": "not_found",
+            "note": "Manual review required; no LLM call is made in Step 1."
+          },
+          {
+            "id": "OP-14",
+            "desc": "Objections are prioritized by real account relevance, not padded with generics to hit a count",
+            "status": "not_found",
+            "note": "Manual review required; no LLM call is made in Step 1."
+          }
+        ]
+      },
+      "step2_deep_check": {
+        "evaluation_mode": "manual only",
+        "insight_quality_score": 4,
+        "contradictions": [],
+        "unsupported_or_generic_claims": [
+          {
+            "claim": "contract tbd",
+            "why_weak": "Placeholder text detected."
+          }
+        ],
+        "ground_truth_mismatches": [],
+        "genuinely_strong_points": [],
+        "overall_verdict": "Deterministic/manual review for Objection Playbook. Semantic usefulness and full ground-truth reconciliation require human review.",
+        "groq_result": {
+          "error": "Groq unavailable: Groq API error 429: {\"error\":{\"message\":\"Rate limit reached for model `openai/gpt-oss-20b` in organization `org_01kxekpmafesctwbz55a0a6b2e` service tier `on_demand` on tokens per minute (TPM): Limit 8000, Used 5953, Requested 4427. Please try again in 17.849999999s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing\",\"type\":\"tokens\",\"code\":\"rate_limit_exceeded\"}}\n"
+        }
+      },
+      "step3_evidence_check": [],
+      "step4_suggestions": "1. [Data/**/*.xlsx] -> surface extracted workbook evidence from hp_intent_results.xlsx, Source A.xlsx, Source B.xlsx, including sheet-level provenance\n2. [Data/**/*.pdf] -> add citations or source cards backed by extracted PDF text from Stock exchange sample data\\2025-Astra-Annual-Report.pdf, Stock exchange sample data\\Astra-Annual-Report-2024.pdf, Stock exchange sample data\\Car Market Apr'26 - Wholesales.pdf, Stock exchange sample data\\Car Market Feb'26 - Wholesales.pdf, Stock exchange sample data\\Car Market Jan'26 - Wholesales.pdf, Stock exchange sample data\\Car Market Jul'26 - Wholesales.pdf, Stock exchange sample data\\Car Market Jun'26 - Wholesales.pdf, Stock exchange sample data\\Car Market Mar'26 - Wholesales.pdf, Stock exchange sample data\\Car Market May'26 - Wholesales.pdf\n3. [workforce_trends_2026_07] -> add a hiring-mix trend card showing the available quarterly profiles and role percentages\n4. [financials_fy.2025] -> add the FY2025 financial snapshot with its source and year label\n5. [stock_exchange] -> add ASII market context, quarterly close, and buyback information with provenance\n6. [gaikindo_wholesale_2026_by_month] -> add the monthly domestic wholesale and Astra market-share trend as an account-specific demand signal"
+    },
+    {
+      "id": "content_studio",
+      "name": "Content Studio",
+      "screenshot": "reports\\screenshots\\content_studio.png",
+      "nav_found": true,
+      "step1_structural": {
+        "score_out_of_10": 8.3,
+        "auto_checks_passed": 5,
+        "auto_checks_total": 6,
+        "guardrail_red_flags": 0,
+        "required_output_checks": [
+          {
+            "id": "generation_controls",
+            "desc": "Controls for account, persona/contact, objective/topic, format",
+            "status": "pass"
+          },
+          {
+            "id": "formats_supported",
+            "desc": "Email, LinkedIn message, one-pager outputs represented",
+            "status": "pass"
+          },
+          {
+            "id": "content_grounded",
+            "desc": "Generated copy references trigger, HP play/product, proof point, next step",
+            "status": "pass"
+          },
+          {
+            "id": "evidence_view",
+            "desc": "Evidence/'used inputs' view exposed",
+            "status": "pass"
+          },
+          {
+            "id": "actions",
+            "desc": "Regenerate/edit/copy/export actions shown",
+            "status": "pass"
+          },
+          {
+            "id": "human_in_loop",
+            "desc": "Co-creation flow: brief -> suggested options -> user selects/adjusts -> generation (per Dhruvi's follow-up email requirement)",
+            "status": "not_found",
+            "note": "Manual review required; no LLM call is made in Step 1."
+          }
+        ],
+        "guardrail_checks": [
+          {
+            "id": "format_limits_respected",
+            "desc": "Email <=110 words; LinkedIn post 150-200 words (2-3 variants); one-pager <=400 words in Challenge/How HP Helps/Proof/Next Step order",
+            "status": "not_found",
+            "note": "Manual review required; no LLM call is made in Step 1."
+          },
+          {
+            "id": "no_invented_roi",
+            "desc": "No invented capability/guarantee/ROI figure/customer result not in official HP content",
+            "status": "not_found",
+            "note": "Manual review required; no LLM call is made in Step 1."
+          },
+          {
+            "id": "no_cross_account_bleed",
+            "desc": "Content does not reference another account/person from cached context",
+            "status": "not_found",
+            "note": "Manual review required; no LLM call is made in Step 1."
+          }
+        ]
+      },
+      "step2_deep_check": {
+        "evaluation_mode": "manual only",
+        "insight_quality_score": 4,
+        "contradictions": [],
+        "unsupported_or_generic_claims": [
+          {
+            "claim": "contract tbd",
+            "why_weak": "Placeholder text detected."
+          }
+        ],
+        "ground_truth_mismatches": [],
+        "genuinely_strong_points": [],
+        "overall_verdict": "Deterministic/manual review for Content Studio. Semantic usefulness and full ground-truth reconciliation require human review.",
+        "groq_result": {
+          "error": "Groq unavailable: Groq API error 429: {\"error\":{\"message\":\"Rate limit reached for model `openai/gpt-oss-20b` in organization `org_01kxekpmafesctwbz55a0a6b2e` service tier `on_demand` on tokens per minute (TPM): Limit 8000, Used 5531, Requested 4887. Please try again in 18.135s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing\",\"type\":\"tokens\",\"code\":\"rate_limit_exceeded\"}}\n"
+        }
+      },
+      "step3_evidence_check": [],
+      "step4_suggestions": "1. [Data/**/*.xlsx] -> surface extracted workbook evidence from hp_intent_results.xlsx, Source A.xlsx, Source B.xlsx, including sheet-level provenance\n2. [Data/**/*.pdf] -> add citations or source cards backed by extracted PDF text from Stock exchange sample data\\2025-Astra-Annual-Report.pdf, Stock exchange sample data\\Astra-Annual-Report-2024.pdf, Stock exchange sample data\\Car Market Apr'26 - Wholesales.pdf, Stock exchange sample data\\Car Market Feb'26 - Wholesales.pdf, Stock exchange sample data\\Car Market Jan'26 - Wholesales.pdf, Stock exchange sample data\\Car Market Jul'26 - Wholesales.pdf, Stock exchange sample data\\Car Market Jun'26 - Wholesales.pdf, Stock exchange sample data\\Car Market Mar'26 - Wholesales.pdf, Stock exchange sample data\\Car Market May'26 - Wholesales.pdf\n3. [stock_exchange] -> add ASII market context, quarterly close, and buyback information with provenance\n4. [gaikindo_wholesale_2026_by_month] -> add the monthly domestic wholesale and Astra market-share trend as an account-specific demand signal"
+    },
+    {
+      "id": "strategy_chat",
+      "name": "Strategy Chat",
+      "screenshot": "reports\\screenshots\\strategy_chat.png",
+      "nav_found": true,
+      "step1_structural": {
+        "score_out_of_10": 6,
+        "auto_checks_passed": 3,
+        "auto_checks_total": 5,
+        "guardrail_red_flags": 0,
+        "required_output_checks": [
+          {
+            "id": "scoped_qa",
+            "desc": "Conversational Q&A scoped to one selected account",
+            "status": "pass"
+          },
+          {
+            "id": "answer_plus_rationale",
+            "desc": "Direct answer/recommendation followed by rationale from account evidence",
+            "status": "pass"
+          },
+          {
+            "id": "cites_relevant_modules",
+            "desc": "References stakeholders/priorities/tech findings/risks/HP play when relevant",
+            "status": "pass"
+          },
+          {
+            "id": "source_links",
+            "desc": "Supporting evidence/reference sentences and source links shown",
+            "status": "fail"
+          },
+          {
+            "id": "uncertainty_state",
+            "desc": "Visible 'information not available' or conflict state when evidence doesn't support an answer",
+            "status": "fail"
+          }
+        ],
+        "guardrail_checks": [
+          {
+            "id": "account_isolation",
+            "desc": "No facts/names appear that belong to a different account",
+            "status": "not_found",
+            "note": "Manual review required; no LLM call is made in Step 1."
+          },
+          {
+            "id": "no_model_memory_facts",
+            "desc": "Named people/titles/vendors/numbers/events trace to retrieved evidence, not model general knowledge",
+            "status": "not_found",
+            "note": "Manual review required; no LLM call is made in Step 1."
+          },
+          {
+            "id": "fact_vs_recommendation_labeled",
+            "desc": "Facts and recommendations are distinguishable in the answer text",
+            "status": "not_found",
+            "note": "Manual review required; no LLM call is made in Step 1."
+          }
+        ]
+      },
+      "step2_deep_check": {
+        "evaluation_mode": "manual only",
+        "insight_quality_score": 4,
+        "contradictions": [],
+        "unsupported_or_generic_claims": [
+          {
+            "claim": "contract tbd",
+            "why_weak": "Placeholder text detected."
+          }
+        ],
+        "ground_truth_mismatches": [],
+        "genuinely_strong_points": [],
+        "overall_verdict": "Deterministic/manual review for Strategy Chat. Semantic usefulness and full ground-truth reconciliation require human review.",
+        "groq_result": {
+          "error": "Groq unavailable: Groq API error 429: {\"error\":{\"message\":\"Rate limit reached for model `openai/gpt-oss-20b` in organization `org_01kxekpmafesctwbz55a0a6b2e` service tier `on_demand` on tokens per minute (TPM): Limit 8000, Used 5121, Requested 4371. Please try again in 11.19s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing\",\"type\":\"tokens\",\"code\":\"rate_limit_exceeded\"}}\n"
+        }
+      },
+      "step3_evidence_check": [],
+      "step4_suggestions": "Manual evaluation:\n1. [Data/**/*.xlsx] -> surface extracted workbook evidence from hp_intent_results.xlsx, Source A.xlsx, Source B.xlsx, including sheet-level provenance\n2. [Data/**/*.pdf] -> add citations or source cards backed by extracted PDF text from Stock exchange sample data\\2025-Astra-Annual-Report.pdf, Stock exchange sample data\\Astra-Annual-Report-2024.pdf, Stock exchange sample data\\Car Market Apr'26 - Wholesales.pdf, Stock exchange sample data\\Car Market Feb'26 - Wholesales.pdf, Stock exchange sample data\\Car Market Jan'26 - Wholesales.pdf, Stock exchange sample data\\Car Market Jul'26 - Wholesales.pdf, Stock exchange sample data\\Car Market Jun'26 - Wholesales.pdf, Stock exchange sample data\\Car Market Mar'26 - Wholesales.pdf, Stock exchange sample data\\Car Market May'26 - Wholesales.pdf\n3. [technographics] -> add a verified technology footprint card covering CRM, cloud, security, productivity, design and QA tools\n4. [workforce_trends_2026_07] -> add a hiring-mix trend card showing the available quarterly profiles and role percentages\n5. [stock_exchange] -> add ASII market context, quarterly close, and buyback information with provenance\n6. [gaikindo_wholesale_2026_by_month] -> add the monthly domestic wholesale and Astra market-share trend as an account-specific demand signal\n\nIndependent Groq evaluation:\n**Grounded suggestions for PT Astra International Tbk**\n\n1. **Best entry point** – Target the CIO (high‑influence stakeholder, score 92 / 100 from Source A “Stakeholder Map”).  \n2. **Strongest HP line to promote** – HP ProLiant servers; they have the highest intent score for “Cloud Infrastructure” (Source A “11_intent_score”).  \n3. **Top signals to act on first** – A live news trigger in Source B “news_events” indicating Astra’s FY‑25 digital‑transformation budget lift.  \n4. **Who to message for AI PCs** – Head of Digital Innovation (Source A “Stakeholder Map”). Opening line: *“AI PCs can cut IT costs by ~15 % while enabling secure, mobile‑first work.”*  \n5. **Common objections & rebuttals** –  \n   * **Price** – counter with HP’s cost‑saving case studies (Source A “5_Tech_Breakdown”).  \n   * **Integration risk** – reference HP’s proven integration framework (Source A “5_Webstack”).  \n6. **Financial context** – Astra’s FY 24 revenue is $12.4 B (Source A “1_Firmographics”), signalling a medium‑size enterprise; focus messaging on ROI and scalability.\n\nCombined result: manual and Groq suggestions are shown together for review."
+    },
+    {
+      "id": "message_evaluator",
+      "name": "Message Evaluator",
+      "screenshot": "reports\\screenshots\\message_evaluator.png",
+      "nav_found": true,
+      "step1_structural": {
+        "score_out_of_10": 8.3,
+        "auto_checks_passed": 5,
+        "auto_checks_total": 6,
+        "guardrail_red_flags": 0,
+        "required_output_checks": [
+          {
+            "id": "inputs",
+            "desc": "Seller input: account, persona/contact, objective, pasted message",
+            "status": "pass"
+          },
+          {
+            "id": "overall_score",
+            "desc": "Overall score out of 100 with weighting profile named",
+            "status": "pass"
+          },
+          {
+            "id": "dimension_scores",
+            "desc": "Dimension scores: Relevance, Impact, Brand Recall, Clarity, Creativity, Emotional Connection, next-step strength",
+            "status": "pass"
+          },
+          {
+            "id": "phrase_highlights",
+            "desc": "Phrase-level Keep/Improve/Change highlights with explanations",
+            "status": "fail"
+          },
+          {
+            "id": "persona_reaction",
+            "desc": "Simulated persona reaction clearly labelled as simulation",
+            "status": "pass"
+          },
+          {
+            "id": "rewrite_actions",
+            "desc": "Recommended improvements, AI rewrite, original vs revised comparison, retry/edit/copy",
+            "status": "pass"
+          }
+        ],
+        "guardrail_checks": [
+          {
+            "id": "scores_bounded",
+            "desc": "Every dimension score is between 0-100",
+            "status": "not_found",
+            "note": "Manual review required; no LLM call is made in Step 1."
+          },
+          {
+            "id": "objective_formula_switches",
+            "desc": "Awareness/Engagement/Consideration/Conversion uses the matching weighting formula",
+            "status": "not_found",
+            "note": "Manual review required; no LLM call is made in Step 1."
+          },
+          {
+            "id": "rewrite_preserves_facts",
+            "desc": "Rewrite preserves verified facts and doesn't strengthen unsupported claims",
+            "status": "not_found",
+            "note": "Manual review required; no LLM call is made in Step 1."
+          },
+          {
+            "id": "persona_reaction_not_factual",
+            "desc": "Persona reaction framed as simulation, not stated as fact about the real person",
+            "status": "not_found",
+            "note": "Manual review required; no LLM call is made in Step 1."
+          }
+        ]
+      },
+      "step2_deep_check": {
+        "evaluation_mode": "manual only",
+        "insight_quality_score": 4,
+        "contradictions": [],
+        "unsupported_or_generic_claims": [
+          {
+            "claim": "contract tbd",
+            "why_weak": "Placeholder text detected."
+          }
+        ],
+        "ground_truth_mismatches": [],
+        "genuinely_strong_points": [],
+        "overall_verdict": "Deterministic/manual review for Message Evaluator. Semantic usefulness and full ground-truth reconciliation require human review.",
+        "groq_result": {
+          "error": "Groq unavailable: Groq API error 429: {\"error\":{\"message\":\"Rate limit reached for model `openai/gpt-oss-20b` in organization `org_01kxekpmafesctwbz55a0a6b2e` service tier `on_demand` on tokens per minute (TPM): Limit 8000, Used 6497, Requested 4203. Please try again in 20.25s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing\",\"type\":\"tokens\",\"code\":\"rate_limit_exceeded\"}}\n"
+        }
+      },
+      "step3_evidence_check": [],
+      "step4_suggestions": "1. [Data/**/*.xlsx] -> surface extracted workbook evidence from hp_intent_results.xlsx, Source A.xlsx, Source B.xlsx, including sheet-level provenance\n2. [Data/**/*.pdf] -> add citations or source cards backed by extracted PDF text from Stock exchange sample data\\2025-Astra-Annual-Report.pdf, Stock exchange sample data\\Astra-Annual-Report-2024.pdf, Stock exchange sample data\\Car Market Apr'26 - Wholesales.pdf, Stock exchange sample data\\Car Market Feb'26 - Wholesales.pdf, Stock exchange sample data\\Car Market Jan'26 - Wholesales.pdf, Stock exchange sample data\\Car Market Jul'26 - Wholesales.pdf, Stock exchange sample data\\Car Market Jun'26 - Wholesales.pdf, Stock exchange sample data\\Car Market Mar'26 - Wholesales.pdf, Stock exchange sample data\\Car Market May'26 - Wholesales.pdf\n3. [technographics] -> add a verified technology footprint card covering CRM, cloud, security, productivity, design and QA tools\n4. [workforce_trends_2026_07] -> add a hiring-mix trend card showing the available quarterly profiles and role percentages\n5. [financials_fy.2025] -> add the FY2025 financial snapshot with its source and year label\n6. [stock_exchange] -> add ASII market context, quarterly close, and buyback information with provenance"
+    },
+    {
+      "id": "intent_demand_signals",
+      "name": "Intent & Demand Signals",
+      "screenshot": "reports\\screenshots\\intent_demand_signals.png",
+      "nav_found": true,
+      "step1_structural": {
+        "score_out_of_10": 8.6,
+        "auto_checks_passed": 6,
+        "auto_checks_total": 7,
+        "guardrail_red_flags": 0,
+        "required_output_checks": [
+          {
+            "id": "raw_topic_view",
+            "desc": "Raw intent-topic view: topic, score/intensity, source/provider, match, refresh window",
+            "status": "pass"
+          },
+          {
+            "id": "theme_grouping",
+            "desc": "Broad theme/group per topic (AI & Compute, Devices & Endpoints, Collaboration & Workplace, Print, 3D, Other)",
+            "status": "pass"
+          },
+          {
+            "id": "hp_category_view",
+            "desc": "HP-category intent view: PC, Workstation, Poly/Collaboration, Print, 3D",
+            "status": "pass"
+          },
+          {
+            "id": "top_category_matches_gt",
+            "desc": "Top HP category / top score matches ground truth (3D Printers, 34/100)",
+            "status": "not_found",
+            "expected": 34,
+            "found_candidates": []
+          },
+          {
+            "id": "summary_stats",
+            "desc": "Max/average/trend deterministic summaries shown",
+            "status": "pass"
+          },
+          {
+            "id": "research_disclaimer",
+            "desc": "Explicit statement that intent = research activity, not confirmed purchase intent",
+            "status": "pass"
+          },
+          {
+            "id": "confidence_refresh_date",
+            "desc": "Confidence/source/refresh date shown",
+            "status": "pass"
+          }
+        ],
+        "guardrail_checks": [
+          {
+            "id": "pc_score_not_hidden",
+            "desc": "PCs score of 0 (per ground truth) is shown, not silently hidden or omitted from the category list",
+            "status": "not_found",
+            "expected": 0,
+            "found_candidates": []
+          },
+          {
+            "id": "providers_not_averaged",
+            "desc": "Source_A intent-topic composite score and hp_intent_results category scores are shown as separate provider signals, not blended into one number",
+            "status": "not_found",
+            "note": "Manual review required; no LLM call is made in Step 1."
+          },
+          {
+            "id": "no_buying_claim",
+            "desc": "Text does not say the account 'is buying' or 'is in market', only 'research interest'",
+            "status": "not_found",
+            "note": "Manual review required; no LLM call is made in Step 1."
+          }
+        ]
+      },
+      "step2_deep_check": {
+        "evaluation_mode": "manual only",
+        "insight_quality_score": 4,
+        "contradictions": [],
+        "unsupported_or_generic_claims": [
+          {
+            "claim": "contract tbd",
+            "why_weak": "Placeholder text detected."
+          }
+        ],
+        "ground_truth_mismatches": [],
+        "genuinely_strong_points": [],
+        "overall_verdict": "Deterministic/manual review for Intent & Demand Signals. Semantic usefulness and full ground-truth reconciliation require human review.",
+        "groq_result": {
+          "error": "Groq unavailable: Groq API error 429: {\"error\":{\"message\":\"Rate limit reached for model `openai/gpt-oss-20b` in organization `org_01kxekpmafesctwbz55a0a6b2e` service tier `on_demand` on tokens per minute (TPM): Limit 8000, Used 6082, Requested 6510. Please try again in 34.44s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing\",\"type\":\"tokens\",\"code\":\"rate_limit_exceeded\"}}\n"
+        }
+      },
+      "step3_evidence_check": [],
+      "step4_suggestions": "1. [Data/**/*.xlsx] -> surface extracted workbook evidence from hp_intent_results.xlsx, Source A.xlsx, Source B.xlsx, including sheet-level provenance\n2. [Data/**/*.pdf] -> add citations or source cards backed by extracted PDF text from Stock exchange sample data\\2025-Astra-Annual-Report.pdf, Stock exchange sample data\\Astra-Annual-Report-2024.pdf, Stock exchange sample data\\Car Market Apr'26 - Wholesales.pdf, Stock exchange sample data\\Car Market Feb'26 - Wholesales.pdf, Stock exchange sample data\\Car Market Jan'26 - Wholesales.pdf, Stock exchange sample data\\Car Market Jul'26 - Wholesales.pdf, Stock exchange sample data\\Car Market Jun'26 - Wholesales.pdf, Stock exchange sample data\\Car Market Mar'26 - Wholesales.pdf, Stock exchange sample data\\Car Market May'26 - Wholesales.pdf\n3. [financials_fy.2025] -> add the FY2025 financial snapshot with its source and year label\n4. [gaikindo_wholesale_2026_by_month] -> add the monthly domestic wholesale and Astra market-share trend as an account-specific demand signal"
+    },
+    {
+      "id": "content_messaging",
+      "name": "Content Messaging",
+      "screenshot": "reports\\screenshots\\content_messaging.png",
+      "nav_found": true,
+      "step1_structural": {
+        "score_out_of_10": 5.6,
+        "auto_checks_passed": 5,
+        "auto_checks_total": 7,
+        "guardrail_red_flags": 1,
+        "required_output_checks": [
+          {
+            "id": "CM-01",
+            "desc": "Title + subtitle with pillar count and proof-sourcing fraction",
+            "status": "pass"
+          },
+          {
+            "id": "CM-02",
+            "desc": "'UMBRELLA MESSAGE' box with a single bold account-specific headline",
+            "status": "pass"
+          },
+          {
+            "id": "CM-04",
+            "desc": "4 one-line sub-bullets under the umbrella message, one per pillar",
+            "status": "not_found",
+            "note": "Manual review required; no LLM call is made in Step 1."
+          },
+          {
+            "id": "CM-05",
+            "desc": "'MESSAGING PILLARS' table: Pillar / Challenge / HP Benefit / Proof",
+            "status": "pass"
+          },
+          {
+            "id": "CM-08",
+            "desc": "Each pillar shows a 'Proof' fraction badge (e.g. X/Y sourced)",
+            "status": "pass"
+          },
+          {
+            "id": "CM-09",
+            "desc": "'WHY HP' section with 4 reason cards",
+            "status": "pass"
+          },
+          {
+            "id": "CM-11",
+            "desc": "'SOURCES:' footer lists citation chips actually used across pillars",
+            "status": "fail"
+          }
+        ],
+        "guardrail_checks": [
+          {
+            "id": "CM-12",
+            "desc": "Header's 'X/Y proof points sourced' equals the sum of per-pillar proof fractions",
+            "status": "not_found",
+            "note": "found 5 pillar fractions"
+          },
+          {
+            "id": "CM-13",
+            "desc": "Each pillar's Challenge is account-evidenced, not generic industry pain dressed as an account fact",
+            "status": "not_found",
+            "note": "Manual review required; no LLM call is made in Step 1."
+          },
+          {
+            "id": "CM-14",
+            "desc": "Pillars are meaningfully distinct — no two repeat the same challenge + solution",
+            "status": "not_found",
+            "note": "Manual review required; no LLM call is made in Step 1."
+          },
+          {
+            "id": "CM-15",
+            "desc": "Unsourced proof points (e.g. within '1/3 sourced') are honestly labeled 'HP analysis' rather than silently presented as sourced — core hallucination guardrail for this feature",
+            "status": "fail"
+          },
+          {
+            "id": "CM-16",
+            "desc": "'WHY HP' reasons introduce no new facts beyond what the 4 pillars already established",
+            "status": "not_found",
+            "note": "Manual review required; no LLM call is made in Step 1."
+          },
+          {
+            "id": "CM-17",
+            "desc": "Sources listed in the footer correspond to citations actually used in the pillar proof points",
+            "status": "not_found",
+            "note": "Manual review required; no LLM call is made in Step 1."
+          },
+          {
+            "id": "CM-18",
+            "desc": "Pillar coverage consistent with Opportunity Map's categories; any dropped category (e.g. 3D) should be a deliberate evidence-based omission, not an unexplained gap",
+            "status": "not_found",
+            "note": "Manual review required; no LLM call is made in Step 1."
+          }
+        ]
+      },
+      "step2_deep_check": {
+        "evaluation_mode": "manual only",
+        "insight_quality_score": 4,
+        "contradictions": [],
+        "unsupported_or_generic_claims": [
+          {
+            "claim": "contract tbd",
+            "why_weak": "Placeholder text detected."
+          }
+        ],
+        "ground_truth_mismatches": [],
+        "genuinely_strong_points": [],
+        "overall_verdict": "Deterministic/manual review for Content Messaging. Semantic usefulness and full ground-truth reconciliation require human review.",
+        "groq_result": {
+          "error": "Groq unavailable: Groq API error 429: {\"error\":{\"message\":\"Rate limit reached for model `openai/gpt-oss-20b` in organization `org_01kxekpmafesctwbz55a0a6b2e` service tier `on_demand` on tokens per minute (TPM): Limit 8000, Used 5656, Requested 4981. Please try again in 19.7775s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing\",\"type\":\"tokens\",\"code\":\"rate_limit_exceeded\"}}\n"
+        }
+      },
+      "step3_evidence_check": [],
+      "step4_suggestions": "1. [Data/**/*.xlsx] -> surface extracted workbook evidence from hp_intent_results.xlsx, Source A.xlsx, Source B.xlsx, including sheet-level provenance\n2. [Data/**/*.pdf] -> add citations or source cards backed by extracted PDF text from Stock exchange sample data\\2025-Astra-Annual-Report.pdf, Stock exchange sample data\\Astra-Annual-Report-2024.pdf, Stock exchange sample data\\Car Market Apr'26 - Wholesales.pdf, Stock exchange sample data\\Car Market Feb'26 - Wholesales.pdf, Stock exchange sample data\\Car Market Jan'26 - Wholesales.pdf, Stock exchange sample data\\Car Market Jul'26 - Wholesales.pdf, Stock exchange sample data\\Car Market Jun'26 - Wholesales.pdf, Stock exchange sample data\\Car Market Mar'26 - Wholesales.pdf, Stock exchange sample data\\Car Market May'26 - Wholesales.pdf\n3. [technographics] -> add a verified technology footprint card covering CRM, cloud, security, productivity, design and QA tools\n4. [workforce_trends_2026_07] -> add a hiring-mix trend card showing the available quarterly profiles and role percentages\n5. [financials_fy.2025] -> add the FY2025 financial snapshot with its source and year label\n6. [gaikindo_wholesale_2026_by_month] -> add the monthly domestic wholesale and Astra market-share trend as an account-specific demand signal"
+    }
+  ]
+}
