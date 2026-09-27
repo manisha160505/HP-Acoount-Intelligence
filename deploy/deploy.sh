@@ -52,8 +52,13 @@ healthy() {
 
 # Chained with && rather than relying on set -e, which bash suspends inside a
 # function called from an `if` - a failed build would otherwise carry on.
+#
+# --force because a checkout that fails part-way leaves some tracked files at
+# the new commit's content, and a plain checkout of any commit then refuses to
+# overwrite them. Nothing on the VM edits tracked files; .env and the data
+# directories are untracked and untouched.
 release() {
-    git checkout --quiet --detach "$1" &&
+    git checkout --quiet --force --detach "$1" &&
         compose build &&
         compose up -d --remove-orphans &&
         healthy
@@ -84,6 +89,18 @@ main() {
 
     echo "$sha" >"$STATE_DIR/failed_sha"
     log "deploy of $sha FAILED - rolling back to $previous"
+
+    # Stop the failed commit's containers while its files are still checked
+    # out. A container stuck restarting would otherwise outlive the checkout
+    # that deletes a file it bind-mounts, and Docker recreates a missing mount
+    # source as an empty root-owned directory - which git then cannot remove,
+    # so every later checkout of that commit fails. Only when the checkout got
+    # that far: if it did not, the running containers are still the previous
+    # commit's and stay up.
+    if [[ "$(git rev-parse HEAD)" == "$sha" ]]; then
+        compose down --remove-orphans || true
+    fi
+
     if release "$previous"; then
         log "rolled back to $previous"
     else
