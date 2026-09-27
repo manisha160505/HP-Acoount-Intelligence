@@ -4,14 +4,49 @@
 #
 # Configuration comes from the gitignored .env next to this file (copy
 # deploy/env.prod.example). Compose reads it both for ${SITE_ADDRESS} below and,
-# through env_file, as the backend's environment. MongoDB is Atlas, not a
-# container here: the retrieval layer needs Atlas Vector Search.
+# through env_file, as the backend's environment.
+#
+# MongoDB runs here as the `mongodb` service. The backend uses it once .env
+# sets MONGODB_URI to it together with VECTOR_STORAGE=nano (a self-hosted
+# MongoDB has no Atlas Vector Search); until then it keeps using Atlas and this
+# service just runs empty. Pointing MONGODB_URI back at Atlas, with
+# VECTOR_STORAGE=atlas, is the rollback.
 
 services:
+  mongodb:
+    image: mongo:8.0
+    # No `ports:` on purpose. The database is reachable only from the other
+    # containers on this compose network, never from the host's public address.
+    command: ["mongod", "--wiredTigerCacheSizeGB", "0.75"]
+    environment:
+      # Refuses to start without them. A first start with no root password
+      # would initialise the data directory with authentication disabled.
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:?set MONGO_ROOT_USERNAME in .env}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?set MONGO_ROOT_PASSWORD in .env}
+      MONGO_APP_DB: ${DB_NAME:-hp_account_db}
+      MONGO_APP_USER: ${MONGO_APP_USER:?set MONGO_APP_USER in .env}
+      MONGO_APP_PASSWORD: ${MONGO_APP_PASSWORD:?set MONGO_APP_PASSWORD in .env}
+    volumes:
+      # Outside the repository (~/hp-data/mongo when the repo is ~/hp), so no
+      # git operation can touch it, and on the VM disk the snapshots cover.
+      - ../hp-data/mongo:/data/db
+      # Runs once, on the first start with an empty data directory.
+      - ./deploy/mongo/init-app-user.js:/docker-entrypoint-initdb.d/init-app-user.js:ro
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
+
   backend:
     build: ./hp-backend
     env_file:
       - .env
+    depends_on:
+      mongodb:
+        condition: service_healthy
     volumes:
       # Uploaded account files. Mongo stores paths relative to /app, so this
       # directory is the only copy of every upload - it is on the VM disk,
