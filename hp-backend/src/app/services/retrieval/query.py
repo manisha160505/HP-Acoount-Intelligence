@@ -22,6 +22,7 @@ What a build means for a query:
     returning an empty answer that looks like "no such fact".
 """
 
+import asyncio
 import logging
 import re
 
@@ -164,7 +165,27 @@ def _normalise(raw, mode, workspace, stale, only_context=False) -> RetrievalResu
 async def retrieve(account_id: str, index: str, question: str, mode: str | None = None,
                    top_k: int = DEFAULT_TOP_K, only_context: bool = False,
                    conversation_history=None) -> RetrievalResult:
-    """Ask one index one question."""
+    """Ask one index one question. Awaitable from any event loop.
+
+    The cached handles live on the query loop, and a handle cannot be driven
+    from another loop. So a retrieval that starts anywhere else - a worker's
+    per-job `asyncio.run()`, FastAPI's own loop, a test - is handed to the
+    query loop and awaited from here, rather than run in place against a handle
+    it cannot use (or, worse, building and caching a handle on a loop that is
+    about to close). Synchronous callers use `ask`, which does the same without
+    a loop of their own.
+    """
+    coro = _retrieve(account_id, index, question, mode=mode, top_k=top_k,
+                     only_context=only_context,
+                     conversation_history=conversation_history)
+    if client.on_query_loop():
+        return await coro
+    return await asyncio.wrap_future(client.submit_to_query_loop(coro))
+
+
+async def _retrieve(account_id: str, index: str, question: str, mode: str | None,
+                    top_k: int, only_context: bool, conversation_history) -> RetrievalResult:
+    """The retrieval itself. Runs on the query loop, always - see `retrieve`."""
     from lightrag import QueryParam
 
     state = index_state.get(account_id, index)
@@ -192,9 +213,10 @@ async def retrieve(account_id: str, index: str, question: str, mode: str | None 
     # every question, and more than the vector search and graph reads together.
     # It is NOT finalised afterwards: the whole point is that the next question
     # reuses it. `client.forget_query_handle` releases it when the workspace is
-    # dropped or rebuilt.
+    # dropped or rebuilt. `release_query_handle` only marks this question done,
+    # so cache eviction never closes a handle a question is still using.
     rag = await client.query_handle(account_id, index)
-    if True:
+    try:
         param = QueryParam(
             mode=mode,
             top_k=top_k,
@@ -211,6 +233,8 @@ async def retrieve(account_id: str, index: str, question: str, mode: str | None 
         # real entry point and returns the structured result, which is where
         # include_references actually lands.
         raw = await rag.aquery_llm(question, param=param)
+    finally:
+        await client.release_query_handle(rag)
 
     result = _normalise(raw, mode, workspace, stale, only_context=only_context)
     logger.info("retrieval: %s/%s answered in %s mode (%d refs, %d evidence ids)",

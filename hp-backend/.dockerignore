@@ -13,6 +13,8 @@
 # docker-compose mounts ./hp-backend/data at /app/data instead, and the seeder
 # restores the benchmark CSVs from seed_data/ on startup.
 data/
+# Vector files (VECTOR_STORAGE=nano) are mounted at /app/rag_storage, likewise.
+rag_storage/
 
 # Build and tooling noise
 __pycache__/

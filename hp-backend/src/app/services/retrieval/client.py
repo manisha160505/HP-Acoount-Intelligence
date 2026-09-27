@@ -26,12 +26,14 @@ Three things here are load-bearing and easy to get wrong:
 """
 
 import asyncio
+import collections
 import logging
 import os
 import re
+import shutil
 import threading
 
-from app.config.settings import settings
+from app.config.settings import backend_path, settings
 from app.observability.logging import quieten_noisy_loggers
 
 logger = logging.getLogger(__name__)
@@ -212,11 +214,15 @@ async def build_rag(account_id: str, index: str, for_query: bool = False):
     from lightrag.kg.shared_storage import initialize_pipeline_status
     from lightrag.utils import EmbeddingFunc
 
-    from app.services.retrieval import shared_vdb
+    from app.services.retrieval import multiloop, shared_vdb
 
     workspace = workspace_name(account_id, index)
     _apply_mongo_env()
     shared_vdb.register()
+    # Before the first LightRAG is constructed: this process drives LightRAG
+    # from the query loop AND the worker's per-job loops, and the library's
+    # Mongo client and shared locks are single-loop objects until patched.
+    multiloop.install()
 
     # MONGODB_WORKSPACE is deliberately NOT set, and must not be.
     #
@@ -250,10 +256,11 @@ async def build_rag(account_id: str, index: str, for_query: bool = False):
         # counts search and vector indexes together and that capacity is
         # reserved for the three shared vector indexes.
         graph_storage="HpMongoGraphStorage",
-        # Three shared collections for every account, partitioned by workspace
-        # with an Atlas pre-filter. This is what makes account #2 possible: the
-        # index cost is now constant rather than three per account per index.
-        vector_storage="HpSharedVectorStorage",
+        # "atlas": three shared collections for every account, partitioned by
+        # workspace with an Atlas pre-filter - what makes account #2 possible
+        # under the cluster's index cap. "nano": per-workspace files, for a
+        # MongoDB without $vectorSearch. See `_vector_storage_config`.
+        **_vector_storage_config(),
         # Both sides of the merge belong here. The storage classes above came
         # with the shared-vector migration; the model split below came with
         # Strategy Chat, where a query handle answers on `query_model()` while a
@@ -291,10 +298,50 @@ async def build_rag(account_id: str, index: str, for_query: bool = False):
     return rag
 
 
+VECTOR_BACKENDS = ("atlas", "nano")
+
+
+def vector_backend() -> str:
+    backend = (settings.VECTOR_STORAGE or "").strip().lower()
+    if backend not in VECTOR_BACKENDS:
+        raise RetrievalConfigError("VECTOR_STORAGE must be one of %s, not %r"
+                                   % (", ".join(VECTOR_BACKENDS), settings.VECTOR_STORAGE))
+    return backend
+
+
+def _vector_storage_config() -> dict:
+    """The LightRAG constructor arguments that pick the vector store.
+
+    The threshold is the part that must not drift. Atlas scores a cosine index
+    as `(1 + cosine) / 2`, and LightRAG compares its threshold (default 0.2)
+    against that score - so on Atlas the cut-off has always been cosine >= -0.6,
+    which in practice keeps every top-k result. NanoVectorDB compares the same
+    threshold against raw cosine, where 0.2 would drop results Atlas returns.
+    Converting it keeps the retrieved set the same after the switch.
+    """
+    if vector_backend() == "atlas":
+        return {"vector_storage": "HpSharedVectorStorage"}
+
+    from lightrag.constants import DEFAULT_COSINE_THRESHOLD
+    from lightrag.utils import get_env_value
+
+    atlas_score = get_env_value("COSINE_THRESHOLD", DEFAULT_COSINE_THRESHOLD, float)
+    return {"vector_storage": "NanoVectorDBStorage",
+            "cosine_better_than_threshold": 2 * atlas_score - 1}
+
+
+def rag_storage_dir() -> str:
+    """LightRAG's working directory: with "nano", the only copy of every vector."""
+    return backend_path(settings.RAG_STORAGE_DIR)
+
+
+def workspace_vector_dir(workspace: str) -> str:
+    """Where NanoVectorDB keeps one workspace's `vdb_*.json` files."""
+    return os.path.join(rag_storage_dir(), workspace)
+
+
 def _working_dir() -> str:
-    """Local scratch. Holds no index state when Mongo backends are in use, but
-    LightRAG still wants a path it can write to."""
-    path = os.path.join(os.getcwd(), "rag_storage")
+    path = rag_storage_dir()
     os.makedirs(path, exist_ok=True)
     return path
 
@@ -321,11 +368,24 @@ def _working_dir() -> str:
 #
 # Ingest deliberately does NOT use this. A build mutates storage, runs for the
 # better part of an hour and then finalises; it keeps its own short-lived handle
-# so a failed build can never leave a poisoned one behind for queries.
+# so a failed build can never leave a poisoned one behind for queries. That
+# handle is genuinely its own only because `multiloop.py` gives each loop its
+# own Mongo client - LightRAG's default is one client per process, which the
+# cached handles here had bound to this loop, and the worker's loop then failed
+# on it with "Cannot use AsyncMongoClient in different event loop".
+
+#
+# The cache is bounded (QUERY_HANDLE_CACHE_SIZE), least recently used first
+# out. With "nano" a handle holds its workspace's vectors in memory, so one
+# handle per account ever queried would grow without limit. An evicted handle
+# that a question is still using is closed when that question releases it,
+# not under it.
 
 _query_loop = None
 _query_thread = None
-_query_handles = {}
+_query_handles = collections.OrderedDict()   # workspace -> handle, oldest first
+_handle_users = {}                           # id(handle) -> questions using it
+_retiring = {}                               # id(handle) -> handle evicted while in use
 _query_lock = threading.Lock()
 
 
@@ -349,10 +409,26 @@ def _ensure_query_loop():
         return loop
 
 
+def submit_to_query_loop(coro):
+    """Schedule a coroutine on the query loop; returns a `concurrent.futures.Future`.
+
+    The caller decides how to wait: block on it from a plain thread, or
+    `asyncio.wrap_future` it from a coroutine running on some other loop.
+    """
+    return asyncio.run_coroutine_threadsafe(coro, _ensure_query_loop())
+
+
 def run_on_query_loop(coro, timeout: float = 180.0):
     """Await a coroutine on the shared query loop, from any thread."""
-    loop = _ensure_query_loop()
-    return asyncio.run_coroutine_threadsafe(coro, loop).result(timeout)
+    return submit_to_query_loop(coro).result(timeout)
+
+
+def on_query_loop() -> bool:
+    """True when the caller is running on the query loop itself."""
+    try:
+        return asyncio.get_running_loop() is _query_loop
+    except RuntimeError:
+        return False
 
 
 async def query_handle(account_id: str, index: str):
@@ -365,17 +441,59 @@ async def query_handle(account_id: str, index: str):
 
     The handle it returns is bound to whichever loop awaits this, which is the
     query loop by construction, because that is the only place `retrieve` runs.
+
+    Every call must be paired with `release_query_handle` once the question is
+    answered; that pairing is what lets eviction avoid closing a handle mid-use.
     """
     workspace = workspace_name(account_id, index)
     handle = _query_handles.get(workspace)
-    if handle is not None:
-        return handle
-
-    handle = await build_rag(account_id, index, for_query=True)
-    # No lock needed around this: every creation happens on the single query
-    # loop, so there is no concurrent writer to race with.
-    _query_handles[workspace] = handle
+    if handle is None:
+        built = await build_rag(account_id, index, for_query=True)
+        # Two questions can both miss and both build while the first awaits.
+        # Keep whichever landed first; the loser was never shared.
+        handle = _query_handles.get(workspace)
+        if handle is None:
+            handle = _query_handles[workspace] = built
+        else:
+            await _finalise_quietly(built, workspace)
+    _query_handles.move_to_end(workspace)
+    _handle_users[id(handle)] = _handle_users.get(id(handle), 0) + 1
+    await _evict_query_handles()
     return handle
+
+
+async def release_query_handle(handle):
+    """The question using `handle` is done. Runs on the query loop."""
+    users = _handle_users.get(id(handle))
+    if users is None:
+        return
+    if users > 1:
+        _handle_users[id(handle)] = users - 1
+        return
+    del _handle_users[id(handle)]
+    retired = _retiring.pop(id(handle), None)
+    if retired is not None:
+        await _finalise_quietly(retired, "an evicted workspace")
+
+
+async def _evict_query_handles():
+    """Close the least recently used handles beyond the cache size."""
+    limit = max(1, int(settings.QUERY_HANDLE_CACHE_SIZE))
+    while len(_query_handles) > limit:
+        workspace, handle = _query_handles.popitem(last=False)
+        if _handle_users.get(id(handle)):
+            _retiring[id(handle)] = handle
+        else:
+            await _finalise_quietly(handle, workspace)
+        logger.info("retrieval: evicted the cached query handle for %s", workspace)
+
+
+async def _finalise_quietly(handle, workspace):
+    try:
+        await handle.finalize_storages()
+    except Exception:
+        logger.warning("retrieval: could not finalise the query handle for %s",
+                       workspace)
 
 
 def forget_query_handle(workspace: str):
@@ -398,7 +516,8 @@ def forget_query_handle(workspace: str):
 
 
 def drop_workspace(workspace: str) -> dict:
-    """Erase one workspace: its own collections, and its rows in the shared ones.
+    """Erase one workspace: its own collections, its rows in the shared ones,
+    and its NanoVectorDB files.
 
     Both halves are required, and the second is the one that is easy to forget.
     A workspace's KV, graph and doc-status collections carry its name as a
@@ -460,7 +579,19 @@ def drop_workspace(workspace: str) -> dict:
                 workspace, collection)
             raise
 
+    # Its NanoVectorDB files. Cleared whichever backend is configured, like the
+    # shared rows above: a leftover from the other backend would resurface the
+    # day someone switches back.
+    vector_dir = workspace_vector_dir(workspace)
+    dropped["vector_files"] = 0
+    if os.path.isdir(vector_dir):
+        dropped["vector_files"] = len(os.listdir(vector_dir))
+        # Not ignore_errors: a half-removed directory would answer queries for
+        # a workspace whose graph is gone, exactly like a stale partition.
+        shutil.rmtree(vector_dir)
+
     logger.info("retrieval: dropped workspace %s (%d collections, %d search "
-                "indexes, %d shared vectors)", workspace, dropped["collections"],
-                dropped["search_indexes"], dropped["vectors"])
+                "indexes, %d shared vectors, %d vector files)", workspace,
+                dropped["collections"], dropped["search_indexes"],
+                dropped["vectors"], dropped["vector_files"])
     return dropped

@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 from pydantic_settings import BaseSettings
 
@@ -53,6 +54,24 @@ class Settings(BaseSettings):
     # what the other ten features run on.
     OPENAI_RETRIEVAL_MODEL: str = ""
 
+    # Where the retrieval layer keeps its vectors.
+    #   "atlas" - the three shared collections behind Atlas Vector Search
+    #             (shared_vdb.py). Needs an Atlas cluster.
+    #   "nano"  - LightRAG's NanoVectorDB: one set of files per workspace under
+    #             RAG_STORAGE_DIR. Runs on any MongoDB, including a plain
+    #             self-hosted one, which cannot serve $vectorSearch.
+    # Defaults to "atlas" so a host that has not opted in keeps its vectors;
+    # switching back is this one value, provided the Atlas data is still there.
+    VECTOR_STORAGE: str = "atlas"
+    # LightRAG's working directory, and with "nano" the only copy of every
+    # vector - so it must sit on a persistent volume. Relative paths resolve
+    # against hp-backend/, not the process working directory.
+    RAG_STORAGE_DIR: str = "rag_storage"
+    # Warm query handles kept open at once. Each "nano" handle holds its
+    # workspace's vectors in memory (roughly 6 KB per vector), so an unbounded
+    # cache grows with every account ever queried.
+    QUERY_HANDLE_CACHE_SIZE: int = 20
+
     # --- Observability -----------------------------------------------------
     # Stamped onto every log record, span and metric so that signals from the
     # backend stay distinguishable once other services share a project.
@@ -91,3 +110,8 @@ class Settings(BaseSettings):
         extra = "ignore"
 
 settings = Settings()
+
+
+def backend_path(path: str) -> str:
+    """`path` as an absolute path, relative ones anchored at hp-backend/."""
+    return path if Path(path).is_absolute() else os.path.join(_BACKEND_ROOT, path)

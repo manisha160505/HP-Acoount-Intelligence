@@ -45,7 +45,6 @@ raw-data-to-driver formula for all accounts"*, and its own missing-input rule
 then forbids computing an overall score from incomplete drivers.
 """
 
-import asyncio
 import logging
 import re
 from datetime import UTC, datetime
@@ -218,10 +217,14 @@ def _recency(row: dict) -> str | None:
 # Step 3: candidates, then evidence validation
 # ---------------------------------------------------------------------------
 
-async def _candidate_priorities(account_id: str, mode: str | None = None) -> tuple:
+def _candidate_priorities(account_id: str, mode: str | None = None) -> tuple:
     """(candidates, retrieval_result). Retrieval first - no filtering yet."""
-    result = await query.retrieve(account_id, INDEX, PRIORITY_QUESTION,
-                                  mode=mode, top_k=60)
+    # query.ask rather than a fresh event loop per call: the cached handle's
+    # AsyncMongoClient is bound to the shared query loop, and any other loop
+    # fails with "Cannot use AsyncMongoClient in different event loop".
+    # The LLM call below stays on this thread so it never blocks that loop.
+    result = query.ask(account_id, INDEX, PRIORITY_QUESTION,
+                       mode=mode, top_k=60)
     user = "\n".join([
         "RETRIEVED CONTEXT (every line carries its evidence identifier):",
         result.context[:60000],
@@ -868,7 +871,7 @@ def generate_dashboard_intelligence(account_id: str, mode: str | None = None) ->
     # careers page and its newsroom are one category; a publication is another.
     domain = _text(summary_card.get("domain"))
 
-    candidates, retrieval = asyncio.run(_candidate_priorities(account_id, mode))
+    candidates, retrieval = _candidate_priorities(account_id, mode)
     priorities, dropped, invalid_count = _resolve_priorities(account_id, candidates)
     priorities, merged = _distinct(priorities)
 
