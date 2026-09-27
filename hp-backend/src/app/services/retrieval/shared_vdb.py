@@ -620,5 +620,10 @@ def __getattr__(name):
 #      scheme they rely on, the overrides break quietly: retrieval would keep
 #      working while ranking on different degree numbers. The equivalence check
 #      against the live graph is what catches that, not the unit tests.
+#   5. Re-check multiloop.py. It replaces `ClientManager.get_client` /
+#      `release_client`, `shared_storage._internal_lock` / `_data_init_lock`
+#      and `KeyedUnifiedLock`'s lock factory so several event loops can share
+#      one process. `install()` refuses to run if a name it patches is gone,
+#      but a name that survives with a changed contract is not caught.
 #
 # The version warning in `register()` is the tripwire, not a substitute for this.

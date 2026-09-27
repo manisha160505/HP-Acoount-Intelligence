@@ -212,11 +212,15 @@ async def build_rag(account_id: str, index: str, for_query: bool = False):
     from lightrag.kg.shared_storage import initialize_pipeline_status
     from lightrag.utils import EmbeddingFunc
 
-    from app.services.retrieval import shared_vdb
+    from app.services.retrieval import multiloop, shared_vdb
 
     workspace = workspace_name(account_id, index)
     _apply_mongo_env()
     shared_vdb.register()
+    # Before the first LightRAG is constructed: this process drives LightRAG
+    # from the query loop AND the worker's per-job loops, and the library's
+    # Mongo client and shared locks are single-loop objects until patched.
+    multiloop.install()
 
     # MONGODB_WORKSPACE is deliberately NOT set, and must not be.
     #
@@ -321,7 +325,12 @@ def _working_dir() -> str:
 #
 # Ingest deliberately does NOT use this. A build mutates storage, runs for the
 # better part of an hour and then finalises; it keeps its own short-lived handle
-# so a failed build can never leave a poisoned one behind for queries.
+# so a failed build can never leave a poisoned one behind for queries. That
+# handle is genuinely its own only because `multiloop.py` gives each loop its
+# own Mongo client - LightRAG's default is one client per process, which the
+# cached handles here had bound to this loop, and the worker's loop then failed
+# on it with "Cannot use AsyncMongoClient in different event loop".
+
 
 _query_loop = None
 _query_thread = None
@@ -349,10 +358,26 @@ def _ensure_query_loop():
         return loop
 
 
+def submit_to_query_loop(coro):
+    """Schedule a coroutine on the query loop; returns a `concurrent.futures.Future`.
+
+    The caller decides how to wait: block on it from a plain thread, or
+    `asyncio.wrap_future` it from a coroutine running on some other loop.
+    """
+    return asyncio.run_coroutine_threadsafe(coro, _ensure_query_loop())
+
+
 def run_on_query_loop(coro, timeout: float = 180.0):
     """Await a coroutine on the shared query loop, from any thread."""
-    loop = _ensure_query_loop()
-    return asyncio.run_coroutine_threadsafe(coro, loop).result(timeout)
+    return submit_to_query_loop(coro).result(timeout)
+
+
+def on_query_loop() -> bool:
+    """True when the caller is running on the query loop itself."""
+    try:
+        return asyncio.get_running_loop() is _query_loop
+    except RuntimeError:
+        return False
 
 
 async def query_handle(account_id: str, index: str):

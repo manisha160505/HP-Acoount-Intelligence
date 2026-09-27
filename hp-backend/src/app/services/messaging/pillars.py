@@ -27,7 +27,6 @@ claim it supported and increments `invalid_evidence_count`. Same discipline as
 the Message Evaluator's phrase spans.
 """
 
-import asyncio
 import logging
 import re
 from datetime import UTC, datetime
@@ -277,10 +276,14 @@ Return JSON:
                  "theme": "<two or three words>"}]}"""
 
 
-async def _candidate_challenges(account_id: str, mode: str | None = None) -> tuple:
+def _candidate_challenges(account_id: str, mode: str | None = None) -> tuple:
     """(candidates, retrieval_result). Retrieval first - no filtering yet."""
-    result = await query.retrieve(account_id, INDEX, CHALLENGE_QUESTION,
-                                  mode=mode, top_k=60)
+    # query.ask rather than a fresh event loop per call: the cached handle's
+    # AsyncMongoClient is bound to the shared query loop, and any other loop
+    # fails with "Cannot use AsyncMongoClient in different event loop".
+    # The LLM call below stays on this thread so it never blocks that loop.
+    result = query.ask(account_id, INDEX, CHALLENGE_QUESTION,
+                       mode=mode, top_k=60)
     user = "\n".join([
         "RETRIEVED CONTEXT (every line carries its evidence identifier):",
         result.context[:60000],
@@ -958,7 +961,7 @@ def generate_messaging_pillars(account_id: str, mode: str | None = None) -> dict
     company = _text(context_card.get("company_name")
                     or business_context.get("company_name"))
 
-    candidates, _retrieval = asyncio.run(_candidate_challenges(account_id, mode))
+    candidates, _retrieval = _candidate_challenges(account_id, mode)
     challenges, _dropped, invalid_count = _resolve_challenges(account_id, candidates)
     if not challenges:
         raise PillarError(
