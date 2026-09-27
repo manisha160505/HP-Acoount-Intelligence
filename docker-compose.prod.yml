@@ -17,6 +17,10 @@ services:
       # directory is the only copy of every upload - it is on the VM disk,
       # which the daily snapshot schedule backs up.
       - ./hp-backend/data:/app/data
+      # LightRAG's working directory. With VECTOR_STORAGE=nano it is the only
+      # copy of every vector - mongodump does not include it - so it lives on
+      # the VM disk beside the uploads, under the same snapshot schedule.
+      - ./hp-backend/rag_storage:/app/rag_storage
     restart: unless-stopped
 
   frontend:

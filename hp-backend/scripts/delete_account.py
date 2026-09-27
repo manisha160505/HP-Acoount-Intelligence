@@ -7,7 +7,8 @@ Run from hp-backend:
 
 An account's data is spread across six collections keyed by `account_id`, a
 directory of uploaded files, and - once it has been indexed - a set of
-per-workspace LightRAG collections and a slice of each shared vector collection.
+per-workspace LightRAG collections, a slice of each shared vector collection
+and, with VECTOR_STORAGE=nano, a directory of vector files per index.
 Deleting the `accounts` row alone leaves all of that orphaned: invisible in the
 UI, still occupying the database, and still counted by anything that sweeps a
 collection rather than querying by account.
@@ -34,6 +35,7 @@ sys.path.insert(0, os.path.join(
 
 from app.config.settings import settings  # noqa: E402
 from app.database.mongodb import connect_to_mongo, get_db, redact_uri  # noqa: E402
+from app.services.retrieval.client import rag_storage_dir  # noqa: E402
 from app.services.retrieval.shared_vdb import (  # noqa: E402
     PARTITION_FIELD, shared_collection_name)
 
@@ -71,6 +73,22 @@ def workspace_collections(db, account_id: str) -> list:
                   if c.startswith(prefix) and not c.startswith("_bak_"))
 
 
+def vector_dirs(account_id: str) -> list:
+    """This account's NanoVectorDB workspace directories, one per index.
+
+    Matched on the same `acct_<id>_` prefix as the workspace collections, and
+    looked for whichever vector backend is configured: files left behind by a
+    switch between backends are still this account's data.
+    """
+    root = rag_storage_dir()
+    if not os.path.isdir(root):
+        return []
+    prefix = "acct_%s_" % str(account_id).lower()
+    return sorted(os.path.join(root, name) for name in os.listdir(root)
+                  if name.startswith(prefix)
+                  and os.path.isdir(os.path.join(root, name)))
+
+
 def survey(db, account) -> dict:
     """Everything that would be removed for one account. Reads only."""
     account_id = str(account["_id"])
@@ -99,6 +117,7 @@ def survey(db, account) -> dict:
         "documents": sum(counts.values()),
         "workspaces": workspace_collections(db, account_id),
         "partitions": partitions,
+        "vector_dirs": vector_dirs(account_id),
         "directory": directory if os.path.isdir(directory) else "",
         "files": files,
         # An indexed account is a real one. This is the guard that separates
@@ -155,6 +174,11 @@ def delete(db, report) -> dict:
     if report["workspaces"]:
         removed["workspace collections"] = len(report["workspaces"])
 
+    for vector_dir in report["vector_dirs"]:
+        shutil.rmtree(vector_dir)
+    if report["vector_dirs"]:
+        removed["vector dirs"] = len(report["vector_dirs"])
+
     if report["directory"]:
         shutil.rmtree(report["directory"], ignore_errors=True)
         removed["files"] = report["files"]
@@ -206,6 +230,8 @@ def main():
                 print("       %-24s %d" % (name, n))
         for collection, n in sorted(report["partitions"].items()):
             print("       %-24s %d vector row(s)" % (collection, n))
+        for vector_dir in report["vector_dirs"]:
+            print("       %-24s vector files" % os.path.basename(vector_dir))
 
     print("\ntotal: %d account(s), %d document(s), %d file(s)"
           % (len(reports), sum(r["documents"] for r in reports),

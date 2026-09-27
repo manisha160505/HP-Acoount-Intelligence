@@ -26,6 +26,8 @@ services:
     # impossible to point a container at the shared cluster.
     volumes:
       - ./hp-backend/data:/app/data
+      # Vector files when VECTOR_STORAGE=nano; see docker-compose.prod.yml.
+      - ./hp-backend/rag_storage:/app/rag_storage
     # No depends_on: mongodb. That service is behind the local-db profile, and
     # depending on a profiled service makes `docker compose up` fail outright.
     restart: always

@@ -208,3 +208,28 @@ def test_partition_regex_is_anchored_to_this_account(account_id):
 
 
 PARTITION = da.PARTITION_FIELD
+
+
+# --- NanoVectorDB directories ----------------------------------------------
+
+
+def test_vector_dirs_are_surveyed_and_removed_for_this_account_only(monkeypatch, tmp_path):
+    monkeypatch.setattr(da, "rag_storage_dir", lambda: str(tmp_path))
+    for name in ("acct_abc123_strategy", "acct_abc123_content_messaging",
+                 "acct_abc1234_strategy", "acct_other_strategy"):
+        os.makedirs(tmp_path / name)
+        (tmp_path / name / "vdb_chunks.json").write_text("{}")
+
+    db = db_with()
+    report = da.survey(db, {"_id": "abc123", "name": "TestCorp"})
+    assert sorted(os.path.basename(p) for p in report["vector_dirs"]) == [
+        "acct_abc123_content_messaging", "acct_abc123_strategy"]
+
+    removed = da.delete(db, report)
+    assert removed["vector dirs"] == 2
+    assert sorted(os.listdir(tmp_path)) == ["acct_abc1234_strategy", "acct_other_strategy"]
+
+
+def test_no_rag_storage_directory_means_no_vector_dirs(monkeypatch, tmp_path):
+    monkeypatch.setattr(da, "rag_storage_dir", lambda: str(tmp_path / "missing"))
+    assert da.survey(db_with(), {"_id": "abc123"})["vector_dirs"] == []
