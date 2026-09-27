@@ -14,7 +14,12 @@
 
 services:
   mongodb:
-    image: mongo:8.0
+    # 7.0, not 8.0: MongoDB 8.0+ refuses to start on Linux kernel 6.19 and
+    # newer (SERVER-121912 - its TCMalloc breaks the kernel's rseq ABI), and
+    # the VM's Ubuntu kernel is past that. 7.0 uses the older allocator. A
+    # dump taken from 8.0 restores into it unchanged, and nothing here needs
+    # an 8.0 feature: vectors are NanoVectorDB files, not $vectorSearch.
+    image: mongo:7.0
     # No `ports:` on purpose. The database is reachable only from the other
     # containers on this compose network, never from the host's public address.
     command: ["mongod", "--wiredTigerCacheSizeGB", "0.75"]
