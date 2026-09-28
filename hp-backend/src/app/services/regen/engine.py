@@ -386,6 +386,15 @@ class Engine:
 
     def run_job(self, job: dict) -> dict:
         account_id, nid = job["account_id"], job["node_id"]
+        if nid not in self.graph:
+            # Queued before a deploy removed the node (Content Messaging, 28
+            # Sep). Left RUNNING it crashed the loop on every claim until its
+            # lease ran out, then came back.
+            jobs.finish(self.db, job, jobs.CANCELLED,
+                        result={"outcome": "node_removed"})
+            logger.warning("regen.cancelled %s/%s - node no longer in the graph",
+                           account_id, nid)
+            return {"outcome": "cancelled", "node_id": nid}
         node = self.graph[nid]
         started = time.monotonic()
         snapshot = load_snapshot(self.db, account_id)

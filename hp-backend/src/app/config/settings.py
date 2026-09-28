@@ -167,11 +167,16 @@ class Settings(BaseSettings):
 
     @property
     def llm_client_kwargs(self) -> dict:
-        """Arguments for openai.OpenAI(...). A Vertex express key travels as
-        ?key=; sent as the Bearer token Vertex rejects it (401, wants OAuth)."""
+        """Arguments for openai.OpenAI(...). A Vertex express key travels in the
+        x-goog-api-key header; sent as the Bearer token Vertex rejects it (401,
+        wants OAuth). Not ?key=: a URL lands in error messages and logs."""
         if self.llm_provider == "vertex":
             return {"base_url": self.llm_endpoint, "api_key": "vertex-express",
-                    "default_query": {"key": self.llm_api_key}}
+                    "default_headers": {"x-goog-api-key": self.llm_api_key},
+                    # The SDK's default is 2; express-mode quota answers 429
+                    # under a full regeneration, and a retry is cheaper than a
+                    # DEGRADED widget.
+                    "max_retries": 5}
         return {"base_url": self.llm_endpoint or None, "api_key": self.llm_api_key}
 
     def _google_model(self, name: str) -> str:
