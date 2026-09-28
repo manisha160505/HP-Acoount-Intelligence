@@ -7,7 +7,7 @@ already defines:
 
   compliance_filings/_filings_index.csv   filings 1.csv + PredictLeads rows
   compliance_filings/predictleads_sec_*.pdf  each PredictLeads filing's text
-  webstack.csv                            + "Tech Breakdown - <category>" columns
+  tech_breakdown.csv                      Explorium 5_Tech_Breakdown
   hp_category_intent.csv                  Related Technologies (unchanged)
 
 This runs the SAME functions the producers call - `filings_register.register`
@@ -97,8 +97,7 @@ def main():
             pl_narrative += [{"file": p.name, **x} for x in passing]
 
         # --- Technographic Map: Tech_Breakdown (in webstack) + Related Technologies
-        webstack = records(folder / "webstack.csv")
-        breakdown = _parse_tech_breakdown(webstack)
+        breakdown = _parse_tech_breakdown(records(folder / "tech_breakdown.csv"))
         cat = _parse_category_file(rows(folder / "hp_category_intent.csv"), domain)
         researched = []
         if cat.get("status") == "matched":

@@ -302,13 +302,6 @@ def content_messaging_documents(account_id: str, index: str = "content_messaging
                                             record_id="%s:%d" % (play.get("play_key") or i, j),
                                             dataset=_text(ev.get("dataset")),
                                             quote=_text(ev.get("quote"))))
-                entry = play.get("entry_path")
-                if isinstance(entry, dict):
-                    timeline = _text(entry.get("timeline"))
-                    if timeline:
-                        out.append("  Suggested timeline: %s"
-                                   % b.line(timeline, field="entry_path.timeline",
-                                            record_id=play.get("play_key") or i))
             return out
         docs.append(_build(account_id, index, "content_messaging", "opportunity_plays",
                            "HP opportunity plays for %s" % company, plays, fill_plays))
@@ -1130,41 +1123,27 @@ def executive_dashboard_documents(account_id: str,
     if influence:
         def fill_people(b):
             out = []
-            coverage = influence.get("buying_group_coverage")
-            if _text(coverage):
-                out.append("Buying-group coverage: %s"
-                           % b.line(coverage, field="buying_group_coverage",
-                                    dataset="prospect_contacts"))
-            breakdown = influence.get("influence_breakdown") or {}
-            if isinstance(breakdown, dict) and breakdown:
-                out.append("Stakeholders by influence type: %s"
-                           % b.line(", ".join("%s %s" % (k, v) for k, v
-                                              in sorted(breakdown.items())),
-                                    field="influence_breakdown",
-                                    dataset="prospect_contacts"))
+            # No influence-type counts here, and none in the buying-group
+            # coverage that restated them. The client dropped the influence
+            # tag from the Stakeholder Map on 27 Sep - "hard to defend ... we
+            # don't have a logic in place to tag these in a specific
+            # category" - and an answer written from this index would
+            # otherwise have gone on counting them back at the reader.
             for i, group in enumerate((influence.get("department_groups") or [])
                                       [:MAX_DEPARTMENTS]):
                 department = _text(group.get("department"))
                 total = _text(group.get("total_count"))
-                relevant = _text(group.get("hp_relevant_count"))
+                # The HP-relevant half of this sentence, and the ranked entry
+                # path that followed it, are both gone: the client dropped
+                # both from the Stakeholder Map on 27 Sep as scoring we cannot
+                # defend, and an answer built from this index would otherwise
+                # have gone on reciting them as prose.
                 if department and total:
-                    out.append("%s department: %s contact(s) mapped, %s "
-                               "HP-relevant." % (
-                                   department,
-                                   b.line(total, field="total_count",
-                                          record_id=i,
-                                          dataset="prospect_contacts"),
-                                   relevant or "0"))
-            entry = influence.get("ranked_entry_path")
-            if isinstance(entry, list) and entry:
-                names = [_text(e.get("department") if isinstance(e, dict) else e)
-                         for e in entry[:5]]
-                names = [n for n in names if n]
-                if names:
-                    out.append("Recommended entry path by department: %s"
-                               % b.line(" then ".join(names),
-                                        field="ranked_entry_path",
-                                        dataset="prospect_contacts"))
+                    out.append("%s department: %s contact(s) mapped." % (
+                        department,
+                        b.line(total, field="total_count",
+                               record_id=i,
+                               dataset="prospect_contacts")))
             return out
 
         docs.append(_build(account_id, index, "executive_dashboard",
@@ -1653,27 +1632,25 @@ def _strategy_people_documents(db, account_id, index, company) -> list:
     if influence:
         def fill_map(b):
             out = []
-            coverage = influence.get("buying_group_coverage")
-            if _text(coverage):
-                out.append("Buying-group coverage at %s: %s"
-                           % (company, b.line(coverage, field="buying_group_coverage",
-                                              dataset="prospect_contacts")))
-            for key, label in (("influence_breakdown", "Stakeholders by influence type"),
-                               ("seniority_breakdown", "Stakeholders by seniority")):
-                block = influence.get(key)
-                if isinstance(block, dict) and block:
-                    out.append("%s: %s" % (label, b.line(
-                        ", ".join("%s %s" % (k, v) for k, v in sorted(block.items())),
-                        field=key, dataset="prospect_contacts")))
+            # Seniority only. The influence-type counts, and the buying-group
+            # coverage built from them, left the product on 27 Sep; seniority
+            # is read off the title in the uploaded file and is still what the
+            # roster is ordered and grouped by.
+            block = influence.get("seniority_breakdown")
+            if isinstance(block, dict) and block:
+                out.append("Stakeholders by seniority: %s" % b.line(
+                    ", ".join("%s %s" % (k, v) for k, v in sorted(block.items())),
+                    field="seniority_breakdown", dataset="prospect_contacts"))
             for i, group in enumerate(influence.get("department_groups") or []):
                 department = _text(group.get("department"))
                 total = _text(group.get("total_count"))
                 if department and total:
-                    out.append("%s department: %s contact(s), %s HP-relevant."
+                    # Headcount only - the HP-relevant split left the product
+                    # on 27 Sep and must not survive here as prose.
+                    out.append("%s department: %s contact(s)."
                                % (department,
                                   b.line(total, field="department_total",
-                                         record_id=i, dataset="prospect_contacts"),
-                                  _text(group.get("hp_relevant_count")) or "0"))
+                                         record_id=i, dataset="prospect_contacts")))
             return out
         docs.append(_sd(account_id, index, "buying_group",
                         "Buying group - %s" % company, influence, fill_map))
@@ -1906,8 +1883,10 @@ def _strategy_opportunity_documents(db, account_id, index, company) -> list:
             contacts = [_text(c.get("name")) for c in (entry.get("target_contacts") or [])
                         if isinstance(c, dict) and _text(c.get("name"))]
             if contacts:
-                out.append("Suggested entry path (%s): %s" % (
-                    _text(entry.get("timeline")) or "no timeline stated",
+                # No timeline: it was model prose, and it left the card with the
+                # entry-path box on 27 Sep. The people are this account's own
+                # contact rows and stay.
+                out.append("Who to approach: %s" % (
                     b.line(", ".join(contacts), field="entry_path",
                            record_id=play.get("play_key"),
                            dataset="prospect_contacts")))
@@ -1998,18 +1977,15 @@ def _strategy_technology_documents(db, account_id, index, company) -> list:
                 vendor_name = _text(vendor.get("vendor_name"))
                 detected = ", ".join(_text(x) for x in (vendor.get("detected_as") or []) if _text(x))
                 if vendor_name and detected:
-                    # `confidence` is now the Tech Landscape score, 0-100, and a
-                    # legitimate score of 0 is falsy - `or "not stated"` would
-                    # have reported a card scored zero as one that was never
-                    # scored, which is the opposite of what it means.
-                    score = vendor.get("confidence")
-                    confidence_text = ("not stated" if score is None
-                                       else "%s%%" % _text(score))
-                    out.append("%s detected at %s as %s (confidence: %s)." % (
+                    # No confidence figure. The client dropped it from the card
+                    # on 27 Sep - "I would stay away from this" - and an answer
+                    # written from this index would otherwise have gone on
+                    # quoting the percentage the card no longer shows. The
+                    # score is still computed; it decides which cards exist.
+                    out.append("%s detected at %s as %s." % (
                         vendor_name, company,
                         b.line(detected, field="detected_as", record_id=i,
-                               dataset="technographics"),
-                        confidence_text))
+                               dataset="technographics")))
                 play = vendor.get("hp_play") or {}
                 if _text(play.get("play_text")):
                     out.append("HP play against %s: %s" % (

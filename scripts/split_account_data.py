@@ -91,6 +91,7 @@ import sys
 import unicodedata
 from datetime import UTC, datetime
 from pathlib import Path
+from urllib.parse import quote
 
 try:
     import pandas as pd
@@ -132,6 +133,29 @@ PREDICTLEADS_FILE = SOURCE_DIR / "predictleads_combined_219_accounts_company_cou
 APOLLO_FILE = SOURCE_DIR / "Apollo_All_Contacts (1).xlsx"
 APOLLO_SHEET = "Contacts"
 APOLLO_HEADER_ROW = 4
+
+# The 26 Sep enrichment pass, delivered at the repository root rather than in
+# the vendor drop. Two workbooks arrived together:
+#
+#   Apollo_220_Companies_Unique_Contacts.xlsx   2,959 deduplicated contacts
+#   Company_Personas_Enriched.xlsx              the same 2,959 rows in its
+#       "Apollo contacts" sheet, plus nine enrichment columns AND more filled
+#       data - 2,079 work emails against 1,988, 601 phones against 409, which
+#       is exactly the "Added work email" / "Added phone" counts it records.
+#
+# So the enriched workbook supersedes the standalone file and is the one read.
+# The standalone file is kept as the provenance name on the rows, because that
+# is the delivery the client will refer to.
+ENRICHED_FILE = REPO_ROOT / "Company_Personas_Enriched.xlsx"
+APOLLO_UNIQUE_FILE = REPO_ROOT / "Apollo_220_Companies_Unique_Contacts.xlsx"
+ENRICHED_CONTACTS_SHEET = "Apollo contacts"
+# 32 client-defined target personas x 220 companies. A row names a real
+# contact or states that no suitable candidate was found; the second kind is a
+# coverage gap, never a person.
+PERSONA_COVERAGE_SHEET = "Persona coverage"
+PERSONA_ROLE_SHEET = "Role aliases"          # persona -> department, buying angle
+PERSONA_STATS_SHEET = "Prospect stats"       # per company, one row
+PERSONA_PREVIEW_SHEET = "Preview candidates"  # candidates not yet selected
 
 # The client's news window, 25 Sep: "considering the last 12 months of data
 # only". Both files start at 2025-01-01, so the window is still applied here,
@@ -227,6 +251,7 @@ APOLLO = "apollo"
 PREDICTLEADS = "predictleads"
 HP_INTENT = "hp_intent"
 GOOGLE_NEWS = "google_news"
+PERSONAS = "personas"
 
 DATASET_PLAN = {
     # --- Explorium workbook, one file per company, sheets pass through as-is
@@ -235,15 +260,10 @@ DATASET_PLAN = {
     "subsidiaries":         {"source": EXPLORIUM, "sheet": "2_Subsidiaries"},
     "funding":              {"source": EXPLORIUM, "sheet": "3_Funding_Overview"},
     "technographics":       {"source": EXPLORIUM, "sheet": "4_Technographics"},
-    # DEC-019 / opens_1 answer 10: WebStack AND Tech_Breakdown are the
-    # technographic sources. Both are one row per company about the same
-    # website, so Tech_Breakdown's category columns (Cms, Hosting, Ssl ...) are
-    # written onto the webstack row under TECH_BREAKDOWN_PREFIX rather than as
-    # a dataset of their own - the prefix keeps them apart from 5_Webstack's
-    # own columns (both sheets have "Parked").
-    "webstack":             {"source": EXPLORIUM, "sheet": "5_Webstack",
-                             "merge_sheet": "5_Tech_Breakdown",
-                             "merge_prefix": "Tech Breakdown - "},
+    "webstack":             {"source": EXPLORIUM, "sheet": "5_Webstack"},
+    # Was a reference table until the client named it (27 Sep) as a source to
+    # read where Technographics is thin. Same estate, one row per technology.
+    "tech_breakdown":       {"source": EXPLORIUM, "sheet": "5_Tech_Breakdown"},
     "workforce_trends":     {"source": EXPLORIUM, "sheet": "6_Workforce_Trends"},
     "company_ratings":      {"source": EXPLORIUM, "sheet": "7_Company_Ratings"},
     "website_traffic":      {"source": EXPLORIUM, "sheet": "8_Website_Traffic"},
@@ -286,6 +306,13 @@ DATASET_PLAN = {
                              "key": "Domain", "two_row_header": True},
     "google_news":          {"source": GOOGLE_NEWS, "sheet": "google_news_rss_data",
                              "key": "website_domain"},
+
+    # The client's buying committee: 32 target personas for every account, each
+    # either filled with a real contact or stated as a gap. Written by the
+    # --refresh pass rather than the main split, because its workbook arrived
+    # after the vendor drop and updates only this file and prospect_contacts.
+    "company_personas":     {"source": PERSONAS, "sheet": PERSONA_COVERAGE_SHEET,
+                             "key": "Company domain"},
 
     # --- No feed yet. Created empty, on purpose.
     # compliance_filings is PDFs, not a table, so it gets a directory rather
@@ -1219,8 +1246,16 @@ PROSPECT_CONTACT_COLUMNS = [
     "apollo_id", "apollo_seed_id", "apollo_country_code", "apollo_requested_role",
     "apollo_title", "apollo_seniority", "apollo_department",
     "apollo_verified_work_email", "apollo_verified_work_email_as_delivered",
-    "apollo_direct_mobile_phone", "apollo_linkedin_url",
+    "apollo_direct_mobile_phone", "apollo_direct_mobile_phone_as_delivered",
+    "apollo_personal_email_as_delivered", "apollo_linkedin_url",
     "apollo_zerobounce_email_status", "apollo_phone_job_status", "apollo_review_reason",
+    # 26 Sep enrichment pass only; blank on rows from the earlier delivery.
+    "apollo_source_row", "apollo_enrichment_status", "apollo_explorium_prospect_id",
+    "apollo_explorium_match_status", "apollo_added_work_email", "apollo_added_phone",
+    # Where the persona on this contact came from, when one was attached. The
+    # persona itself goes in Prospect buying_committee_personas, which is the
+    # column the Stakeholder Map reads.
+    "persona_source", "persona_matched_alias", "persona_match_basis",
     "review_flags",
 ]
 APOLLO_DATA_SOURCE = f"Apollo ({APOLLO_FILE.name} / {APOLLO_SHEET})"
@@ -1272,6 +1307,38 @@ def _domain_labels(domain: str) -> set[str]:
     return {l for l in domain.lower().split(".") if l and l not in _GENERIC_LABELS}
 
 
+# The two Apollo deliveries name the same fields differently, and the second
+# one packs several values into a cell. Both are read through the aliases below
+# so one mapping serves either file.
+#
+#   "Matched Contact"     "Adam Neal; Adam"   name, then the requested first name
+#   "Phone Numbers"       "+1484...; +1410..."  4 rows carry two numbers
+#   "Personal Email"      38 rows carry two addresses
+#
+# The separator is the delivery's own "; ". The first value goes into the
+# single-value column the backend reads and the whole cell is preserved in a
+# column nothing reads, which is the same treatment the withheld work email
+# already gets. Nothing else is normalised.
+APOLLO_COLUMN_ALIASES = {
+    "Verified Work Email": ("Verified Work Email", "Work Emails"),
+    "Direct Mobile Phone": ("Direct Mobile Phone", "Phone Numbers"),
+}
+
+
+def apollo_cell(row: dict, key: str) -> str:
+    """The delivered cell for a field, under whichever name this file uses."""
+    for name in APOLLO_COLUMN_ALIASES.get(key, (key,)):
+        value = _clean(row.get(name))
+        if value:
+            return value
+    return ""
+
+
+def apollo_first(row: dict, key: str) -> str:
+    """The first value of a cell that may carry several, separated by ";"."""
+    return apollo_cell(row, key).split(";")[0].strip()
+
+
 def apollo_review_flags(row: dict, company_domains: set[str]) -> list[str]:
     """Why a contact row should be looked at before a seller relies on it.
 
@@ -1287,8 +1354,8 @@ def apollo_review_flags(row: dict, company_domains: set[str]) -> list[str]:
     """
     flags = []
     row = {k: _clean(v) or "" for k, v in row.items()}
-    name = row.get("Matched Contact", "")
-    email = row.get("Verified Work Email", "")
+    name = apollo_first(row, "Matched Contact")
+    email = apollo_first(row, "Verified Work Email")
     if row.get("Match Status", "").lower() != "matched":
         flags.append("not_matched")
     if set(_letters(w) for w in name.split()) & NON_PERSON_WORDS:
@@ -1309,12 +1376,15 @@ def apollo_review_flags(row: dict, company_domains: set[str]) -> list[str]:
 def apollo_to_prospect(row: dict, company_domains: set[str], sister: bool) -> dict:
     """One Apollo row in the prospect_contacts layout."""
     def v(key):
-        value = _clean(row.get(key))
-        return value or ""
+        return apollo_first(row, key)
 
     flags = apollo_review_flags(row, company_domains)
     if sister:
         flags.append("same_person_listed_under_sister_account")
+    # "Matched Contact" in the 26 Sep file is "<full name>; <requested first
+    # name>", and its own First/Last Name columns hold only that first token
+    # (Last Name is blank on 1,782 of 2,959 rows), so the name comes from the
+    # first value of Matched Contact rather than from them.
     name = v("Matched Contact")
     first, _, last = name.partition(" ")
     email = "" if "email_names_someone_else" in flags else v("Verified Work Email")
@@ -1367,14 +1437,32 @@ def apollo_to_prospect(row: dict, company_domains: set[str], sister: bool) -> di
         # the display columns are blank, so a withheld email must be blank
         # here too; the delivered value is kept under a column nothing reads.
         "apollo_verified_work_email": email,
-        "apollo_verified_work_email_as_delivered": v("Verified Work Email"),
+        "apollo_verified_work_email_as_delivered": apollo_cell(row, "Verified Work Email"),
         "apollo_direct_mobile_phone": phone,
+        "apollo_direct_mobile_phone_as_delivered": apollo_cell(row, "Direct Mobile Phone"),
+        "apollo_personal_email_as_delivered": apollo_cell(row, "Personal Email"),
         "apollo_linkedin_url": linkedin,
         "apollo_zerobounce_email_status": v("Zerobounce Email Status"),
         "apollo_phone_job_status": v("Phone Job Status"),
         "apollo_review_reason": v("Review Reason"),
+        # Only present in the 26 Sep enriched workbook; blank on the earlier
+        # delivery. apollo_source_row is what the persona coverage sheet joins
+        # on, so it has to survive into the file.
+        "apollo_source_row": _int_like(row.get("Apollo Source Row")),
+        "apollo_enrichment_status": v("Enrichment Status"),
+        "apollo_explorium_prospect_id": v("Explorium Prospect ID"),
+        "apollo_explorium_match_status": v("Explorium Match Status"),
+        "apollo_added_work_email": v("Added work email"),
+        "apollo_added_phone": v("Added phone"),
         "review_flags": "; ".join(flags),
     }
+
+
+def _int_like(value) -> str:
+    """"185.0" -> "185". pandas reads the join key as a float; the sheet it
+    joins to holds it as an integer, and "185.0" matches nothing."""
+    text = _clean(value) or ""
+    return text[:-2] if text.endswith(".0") and text[:-2].isdigit() else text
 
 
 def assign_apollo_contacts(accounts: list[Account], sources: SourceData) -> dict:
@@ -1601,26 +1689,15 @@ def extract_dataset(account: Account, dataset_key: str, spec: dict,
             return None, None, f"sheet '{sheet}' not in the Explorium workbook"
         except Exception as exc:
             return None, None, f"could not read sheet '{sheet}': {exc}"
-        merge = _explorium_merge_sheet(account, spec)
         if df.empty:
             # Explorium writes a single "No data available" column instead of
             # the real header when it has nothing. Passing that through would
             # make the placeholder look like a schema, so the file is left
             # genuinely empty and the real columns fill in when data arrives.
             cols = list(df.columns)
-            if merge is not None:
-                # The merged sheet alone still describes the account.
-                return merge.reset_index(drop=True), list(merge.columns), ""
             if len(cols) == 1 and "no data" in str(cols[0]).lower():
                 return None, [], f"sheet '{sheet}' reports no data available"
             return None, cols, f"sheet '{sheet}' is present but empty"
-        if merge is not None:
-            if len(df) != 1 or len(merge) != 1:
-                raise ValueError(f"{account.slug}: cannot merge '{spec['merge_sheet']}' "
-                                 f"onto '{sheet}' - expected one row each, got "
-                                 f"{len(df)} and {len(merge)}")
-            df = pd.concat([df.reset_index(drop=True), merge.reset_index(drop=True)],
-                           axis=1)
         return df, list(df.columns), ""
 
     if source == PREDICTLEADS:
@@ -1673,22 +1750,6 @@ def extract_dataset(account: Account, dataset_key: str, spec: dict,
     return None, None, f"unknown source '{source}'"
 
 
-def _explorium_merge_sheet(account: Account, spec: dict) -> pd.DataFrame | None:
-    """The sheet `spec["merge_sheet"]` with its columns prefixed, or None when
-    the spec has none or the sheet holds nothing."""
-    extra = spec.get("merge_sheet")
-    if not extra or account.explorium_file is None:
-        return None
-    try:
-        frame = pd.read_excel(account.explorium_file, sheet_name=extra)
-    except ValueError:
-        return None
-    cols = list(frame.columns)
-    if frame.empty or (len(cols) == 1 and "no data" in str(cols[0]).lower()):
-        return None
-    return frame.rename(columns={c: f"{spec['merge_prefix']}{c}" for c in cols})
-
-
 def write_dataset(out_dir: Path, dataset_key: str, df, header,
                   two_row_header: bool, dry_run: bool) -> int:
     """Write one CSV. Returns the number of data rows written.
@@ -1724,6 +1785,478 @@ def write_dataset(out_dir: Path, dataset_key: str, df, header,
 
     df.to_csv(target, index=False, encoding=ENCODING)
     return len(df)
+
+
+# --------------------------------------------------------------------------
+# The 26 Sep refresh: contacts and personas, written into an existing split
+# --------------------------------------------------------------------------
+# A full re-split is the wrong tool for this delivery. The two workbooks change
+# exactly two files per account, while re-running everything would re-read the
+# vendor drop - where the local copies of the news and PredictLeads workbooks
+# are NOT the 25 Sep re-drop the client told us to use ("google_news_rss_data
+# 1.xlsx", "predictleads_combined_219_accounts.xlsm"). Re-splitting would
+# quietly swap 24 datasets back to superseded feeds in order to update two.
+#
+# So this mode reads the split already on disk - _ACCOUNTS.csv for identity,
+# _manifest.json for what each folder holds - rewrites prospect_contacts.csv
+# and company_personas.csv, and recomputes readiness from the folders as they
+# now stand. Nothing else is touched.
+
+def read_split_accounts() -> list[dict]:
+    """Identity for every account in the existing split, from _ACCOUNTS.csv."""
+    index = OUTPUT_DIR / "_ACCOUNTS.csv"
+    if not index.exists():
+        sys.exit(f"no split to refresh: {index} not found. Run the full split first.")
+    with open(index, newline="", encoding=ENCODING) as fh:
+        rows = [r for r in csv.DictReader(fh) if (r.get("account_slug") or "").strip()]
+    for row in rows:
+        row["domain"] = normalize_domain(row.get("domain"))
+    return rows
+
+
+def read_enriched_sheet(sheet: str):
+    """One sheet of the enrichment workbook, every cell a string."""
+    if not ENRICHED_FILE.exists():
+        print(f"  ! {ENRICHED_FILE} not found")
+        return None
+    try:
+        frame = pd.read_excel(ENRICHED_FILE, sheet_name=sheet, dtype=str)
+        return frame.dropna(how="all")
+    except Exception as exc:
+        print(f"  ! could not read {ENRICHED_FILE.name} / {sheet}: {exc}")
+        return None
+
+
+def _row_domains(value) -> list[str]:
+    """The domains in a "Website Domain" cell.
+
+    28 rows carry two - "ocbc.com; sc.com" and "uob.com.my; uob.com.sg" - where
+    the vendor served two of our accounts from one request. Taking the first
+    would silently drop the second account's contacts, so both are returned and
+    the row is attached to each account that claims one. Recorded as a
+    correction, because it is this script reading a cell in a way the delivery
+    did not spell out.
+    """
+    return [d for d in (normalize_domain(part)
+                        for part in str(value or "").split(";")) if d]
+
+
+def _company_keys(name, country) -> list[str]:
+    """Every territory name a "Company Name" + "Country Code" pair can mean.
+
+    This delivery deduplicates a contact across the source files it came from,
+    and where the same person was requested for two sister entities it merges
+    their labels into the cell rather than splitting the row:
+
+        Company Name  "JABIL CIRCUIT SDN BHD - MY; JABIL CIRCUIT (SINGAPORE) PTE LTD - SG"
+        Country Code  "MY; SG"
+
+    Some parts already carry the " - XX" suffix and some do not, so each part is
+    tried as delivered and then against each country code. Without this, 64 rows
+    across the Jabil, MUFG and UOB pairs match nothing at all and their contacts
+    are lost.
+    """
+    names = [p.strip() for p in str(name or "").split(";") if p.strip()]
+    codes = [c.strip() for c in str(country or "").split(";") if c.strip()]
+    keys = []
+    for part in names:
+        keys.append(_territory_key(part))
+        keys.extend(_territory_key(f"{part} - {code}") for code in codes)
+    return list(dict.fromkeys(k for k in keys if k))
+
+
+def assign_enriched_contacts(accounts: list[dict], df) -> tuple[dict, dict]:
+    """slug -> the account's contact rows, in the prospect_contacts layout.
+
+    Same key order as the main split's Apollo assignment: territory name, then
+    name plus country, then domain. A row that matches nothing is reported
+    rather than guessed at.
+    """
+    by_territory = {_territory_key(a["sales_territory_name"]): a
+                    for a in accounts if a.get("sales_territory_name")}
+    by_domain: dict[str, list[dict]] = {}
+    for acct in accounts:
+        if acct["domain"]:
+            by_domain.setdefault(acct["domain"], []).append(acct)
+
+    stats = {"rows": len(df), "by_territory": 0, "by_name_and_country": 0,
+             "by_domain": 0, "unassigned": [], "multi_domain_rows": 0}
+    placed: list[tuple[dict, dict]] = []
+    for row in df.to_dict("records"):
+        name = _clean(row.get("Company Name")) or ""
+        country = _clean(row.get("Country Code")) or ""
+        domains = _row_domains(row.get("Website Domain"))
+        if len(domains) > 1:
+            stats["multi_domain_rows"] += 1
+        # Territory name first, then name plus country, then domain - the same
+        # order the main split uses. Each step may return more than one account
+        # when the cell names more than one; a contact the vendor filed under
+        # two sister entities belongs to both, as delivered.
+        matched: list[dict] = []
+        how = "by_territory"
+        for key in _company_keys(name, country):
+            found = by_territory.get(key)
+            if found is not None and found not in matched:
+                matched.append(found)
+        if not matched:
+            how = "by_name_and_country"
+            acct = by_territory.get(_territory_key(name))
+            if acct is not None and (acct.get("country") or "") in ("", country):
+                matched = [acct]
+        if not matched:
+            how = "by_domain"
+            for domain in domains:            # every domain in the cell
+                found = by_domain.get(domain) or []
+                if len(found) == 1 and found[0] not in matched:
+                    matched.append(found[0])
+        if not matched:
+            stats["unassigned"].append(
+                f"{name} - {country} ({'; '.join(domains) or '-'})")
+            continue
+        for acct in matched:
+            stats[how] += 1
+            placed.append((acct, row))
+        if len(matched) > 1:
+            record_correction(
+                name, "prospect_contacts account",
+                f"{name} | {country} | {'; '.join(domains)}",
+                ", ".join(a["account_slug"] for a in matched),
+                "one delivered row names two of our accounts; the contact is "
+                "attached to both rather than dropped from one")
+
+    # A domain most of a company's staff use is that company's, whatever the
+    # website column says - the same rule the main split applies.
+    email_domains: dict[str, dict[str, int]] = {}
+    for acct, row in placed:
+        email = apollo_first(row, "Verified Work Email")
+        if email and "@" in email:
+            counts = email_domains.setdefault(acct["account_slug"], {})
+            key = email.split("@")[-1].lower()
+            counts[key] = counts.get(key, 0) + 1
+
+    id_accounts: dict[str, set[str]] = {}
+    for acct, row in placed:
+        apollo_id = _clean(row.get("Apollo Id"))
+        if apollo_id:
+            id_accounts.setdefault(apollo_id, set()).add(acct["account_slug"])
+
+    grouped: dict[str, list[dict]] = {}
+    for acct, row in placed:
+        slug = acct["account_slug"]
+        sister = len(id_accounts.get(_clean(row.get("Apollo Id")) or "", ())) > 1
+        company_domains = {acct["domain"]} | {
+            d for d, n in email_domains.get(slug, {}).items() if n >= 3}
+        grouped.setdefault(slug, []).append(
+            apollo_to_prospect(row, company_domains, sister))
+    return grouped, stats
+
+
+COMPANY_PERSONA_COLUMNS = [
+    "target_persona", "department", "buying_committee_angle", "contact_name",
+    "actual_job_title", "work_email", "personal_email", "phone_number",
+    "linkedin_url", "department_on_contact", "contact_status", "source",
+    "matched_alias", "match_basis", "availability_note", "contact_lookup_result",
+    "explorium_prospect_id", "apollo_source_row", "company_domain",
+    "company_name_as_delivered",
+]
+
+
+def persona_index(coverage, roles) -> tuple[dict, dict, dict, dict]:
+    """(rows by territory, rows by domain, by Apollo source row, by Explorium id).
+
+    Two account keys, because neither alone is enough: the coverage sheet names
+    a company the way the client's master list does ("AUSTRALIA POST - AU"),
+    which matches 219 of 220 accounts, and the domain catches the one it does
+    not (PT ASTRA INTERNATIONAL TBK). The domain alone would be wrong for the
+    sister pairs - Jabil MY and Jabil SG share jabil.com and have 32 target
+    personas each, so a domain lookup hands both accounts all 64.
+
+    The two lookups are how a persona reaches a contact: of the 2,839 rows that
+    name someone, 2,481 carry the Apollo source row they came from and the rest
+    an Explorium prospect id. A row naming no one is in neither - it is a
+    coverage gap, with nobody to attach it to.
+    """
+    angle: dict[str, dict] = {}
+    if roles is not None:
+        for row in roles.to_dict("records"):
+            persona = _clean(row.get("Target persona"))
+            if persona:
+                angle[persona] = {
+                    "department": _clean(row.get("Department")) or "",
+                    "buying_committee_angle":
+                        _clean(row.get("Buying committee angle")) or "",
+                }
+
+    by_territory: dict[str, list[dict]] = {}
+    by_domain: dict[str, list[dict]] = {}
+    by_apollo_row: dict[str, dict] = {}
+    by_prospect_id: dict[str, dict] = {}
+    for row in coverage.to_dict("records"):
+        domain = normalize_domain(row.get("Company domain"))
+        territory = _territory_key(_clean(row.get("Company name")) or "")
+        persona = _clean(row.get("Target persona")) or ""
+        record = {
+            "target_persona": persona,
+            "department": angle.get(persona, {}).get("department", ""),
+            "buying_committee_angle":
+                angle.get(persona, {}).get("buying_committee_angle", ""),
+            "contact_name": _clean(row.get("Contact name")) or "",
+            "actual_job_title": _clean(row.get("Actual job title")) or "",
+            "work_email": _clean(row.get("Work email")) or "",
+            "personal_email": _clean(row.get("Personal email")) or "",
+            "phone_number": _clean(row.get("Phone number")) or "",
+            "linkedin_url": _clean(row.get("LinkedIn URL")) or "",
+            "department_on_contact": _clean(row.get("Department")) or "",
+            "contact_status": _clean(row.get("Contact status")) or "",
+            "source": _clean(row.get("Source")) or "",
+            "matched_alias": _clean(row.get("Matched alias")) or "",
+            "match_basis": _clean(row.get("Match basis")) or "",
+            "availability_note": _clean(row.get("Availability note")) or "",
+            "contact_lookup_result": _clean(row.get("Contact lookup result")) or "",
+            "explorium_prospect_id": _clean(row.get("Explorium prospect ID")) or "",
+            "apollo_source_row": _int_like(row.get("Apollo source row")),
+            "company_domain": domain,
+            "company_name_as_delivered": _clean(row.get("Company name")) or "",
+        }
+        if territory:
+            by_territory.setdefault(territory, []).append(record)
+        if domain:
+            by_domain.setdefault(domain, []).append(record)
+        if not record["contact_name"]:
+            continue
+        if record["apollo_source_row"]:
+            by_apollo_row.setdefault(record["apollo_source_row"], record)
+        if record["explorium_prospect_id"]:
+            by_prospect_id.setdefault(record["explorium_prospect_id"], record)
+    return by_territory, by_domain, by_apollo_row, by_prospect_id
+
+
+def attach_personas(rows: list[dict], by_apollo_row: dict, by_prospect_id: dict) -> int:
+    """Fill the persona column the Stakeholder Map reads. Returns how many.
+
+    Apollo delivers no persona of its own - "Requested Role" is the role we
+    asked the vendor to find, not the person's - so this column has been blank
+    on every Apollo contact. The coverage sheet is the client stating which of
+    their 32 target roles a named person actually fills, and it is the only
+    thing allowed to set it.
+    """
+    filled = 0
+    for row in rows:
+        match = (by_apollo_row.get(row.get("apollo_source_row") or "")
+                 or by_prospect_id.get(row.get("apollo_explorium_prospect_id") or ""))
+        if not match:
+            continue
+        row["Prospect buying_committee_personas"] = match["target_persona"]
+        row["persona_source"] = f"{ENRICHED_FILE.name} / {PERSONA_COVERAGE_SHEET}"
+        row["persona_matched_alias"] = match["matched_alias"]
+        row["persona_match_basis"] = match["match_basis"]
+        filled += 1
+    return filled
+
+
+def refresh_in_place(only: list[str], dry_run: bool) -> dict:
+    """Rewrite prospect_contacts.csv and company_personas.csv across the split."""
+    accounts = read_split_accounts()
+    if only:
+        wanted = {s.strip().upper() for s in only if s.strip()}
+        accounts = [a for a in accounts if a["account_slug"].upper() in wanted]
+        if not accounts:
+            sys.exit(f"no account in the split matched: {', '.join(only)}")
+
+    contacts_sheet = read_enriched_sheet(ENRICHED_CONTACTS_SHEET)
+    coverage_sheet = read_enriched_sheet(PERSONA_COVERAGE_SHEET)
+    if contacts_sheet is None or coverage_sheet is None:
+        sys.exit(f"{ENRICHED_FILE.name} is required for --refresh and could not be read")
+    roles_sheet = read_enriched_sheet(PERSONA_ROLE_SHEET)
+    stats_sheet = read_enriched_sheet(PERSONA_STATS_SHEET)
+    preview_sheet = read_enriched_sheet(PERSONA_PREVIEW_SHEET)
+
+    grouped, assign_stats = assign_enriched_contacts(accounts, contacts_sheet)
+    personas_by_territory, personas_by_domain, by_apollo_row, by_prospect_id =         persona_index(coverage_sheet, roles_sheet)
+
+    summary = {
+        "generated_at": datetime.now(UTC).isoformat(),
+        "source": ENRICHED_FILE.name,
+        "also_delivered": APOLLO_UNIQUE_FILE.name,
+        "dry_run": dry_run,
+        "accounts": len(accounts),
+        "contacts": assign_stats,
+        "accounts_with_contacts": 0,
+        "contact_rows_written": 0,
+        "personas_attached_to_contacts": 0,
+        "accounts_with_personas": 0,
+        "persona_rows_written": 0,
+        "seed_preferred": [],
+        "accounts_without_contacts": [],
+        "accounts_without_personas": [],
+        "tech_breakdown_promoted": 0,
+    }
+
+    for acct in accounts:
+        slug = acct["account_slug"]
+        out_dir = OUTPUT_DIR / slug
+        if not out_dir.is_dir():
+            continue
+        summary["tech_breakdown_promoted"] += _promote_tech_breakdown(out_dir, dry_run)
+        rows = grouped.get(slug, [])
+        summary["personas_attached_to_contacts"] += attach_personas(
+            rows, by_apollo_row, by_prospect_id)
+
+        frame = (pd.DataFrame(rows).reindex(columns=PROSPECT_CONTACT_COLUMNS).fillna("")
+                 if rows else pd.DataFrame(columns=PROSPECT_CONTACT_COLUMNS))
+        # Astra's live Stakeholder Map runs on the pilot's 23 seeded contacts.
+        # Replacing the demo account's stakeholder list is not this script's
+        # call (see SEED_PREFERRED), so its Apollo rows are written beside the
+        # file instead of over it.
+        seed_wins = "prospect_contacts" in SEED_PREFERRED.get(slug, set())
+        if seed_wins:
+            summary["seed_preferred"].append(slug)
+            if rows and not dry_run:
+                (out_dir / REFERENCE_DIR).mkdir(exist_ok=True)
+                frame.to_csv(out_dir / REFERENCE_DIR / "apollo_prospect_contacts.csv",
+                             index=False, encoding=ENCODING)
+        else:
+            if not dry_run:
+                frame.to_csv(out_dir / "prospect_contacts.csv",
+                             index=False, encoding=ENCODING)
+            if rows:
+                summary["accounts_with_contacts"] += 1
+                summary["contact_rows_written"] += len(rows)
+            else:
+                summary["accounts_without_contacts"].append(slug)
+
+        # The account's own name first; the domain only when the sheet does not
+        # carry that name, so a shared domain cannot hand one account another's
+        # buying committee as well as its own.
+        personas = (personas_by_territory.get(_territory_key(acct["sales_territory_name"]))
+                    or personas_by_domain.get(acct["domain"], []))
+        if personas:
+            summary["accounts_with_personas"] += 1
+            summary["persona_rows_written"] += len(personas)
+        else:
+            summary["accounts_without_personas"].append(slug)
+        if not dry_run:
+            (pd.DataFrame(personas).reindex(columns=COMPANY_PERSONA_COLUMNS).fillna("")
+             .to_csv(out_dir / "company_personas.csv", index=False, encoding=ENCODING))
+            _write_persona_reference(out_dir, acct, roles_sheet, stats_sheet, preview_sheet)
+
+    if not dry_run:
+        _update_manifests_after_refresh(accounts, summary)
+        _append_refresh_corrections(summary)
+        (OUTPUT_DIR / "_REFRESH_SUMMARY.json").write_text(json.dumps(summary, indent=2))
+    return summary
+
+
+def _promote_tech_breakdown(out_dir: Path, dry_run: bool) -> int:
+    """reference/explorium_tech_breakdown.csv -> tech_breakdown.csv.
+
+    The sheet was split as a reference table because no feature read it. The
+    client named it on 27 Sep as a source for Technographics where that sheet
+    is thin, so it now has a dataset_key and has to sit at the top of the folder
+    where the uploader looks.
+
+    Copied rather than re-split: the rows are already the account's own, and the
+    Explorium workbooks this run cannot reach would produce exactly these.
+    """
+    source = out_dir / REFERENCE_DIR / "explorium_tech_breakdown.csv"
+    target = out_dir / "tech_breakdown.csv"
+    if not source.exists():
+        return 0
+    if not dry_run:
+        target.write_bytes(source.read_bytes())
+    return 1
+
+
+def _write_persona_reference(out_dir: Path, acct: dict, roles, stats, preview):
+    """The persona workbook's supporting sheets, per account, under reference/.
+
+    None of these has a dataset_key, so none is ever uploaded. They are written
+    so that "what does the client say about this account's buying committee"
+    has one place to look.
+    """
+    ref = out_dir / REFERENCE_DIR
+    ref.mkdir(exist_ok=True)
+    if roles is not None and len(roles):
+        roles.to_csv(ref / "persona_role_aliases.csv", index=False, encoding=ENCODING)
+    for frame, name in ((stats, "persona_prospect_stats.csv"),
+                        (preview, "persona_preview_candidates.csv")):
+        if frame is None or not len(frame) or "Company domain" not in frame.columns:
+            continue
+        mine = frame[frame["Company domain"].map(normalize_domain) == acct["domain"]]
+        if len(mine):
+            mine.to_csv(ref / name, index=False, encoding=ENCODING)
+
+
+def _csv_rows(path: Path) -> int:
+    if not path.exists():
+        return 0
+    with open(path, newline="", encoding=ENCODING) as fh:
+        return max(0, sum(1 for _ in csv.reader(fh)) - 1)
+
+
+def _update_manifests_after_refresh(accounts: list[dict], summary: dict):
+    """Re-state what each folder holds, then recompute readiness from that.
+
+    Three dataset entries can have moved: prospect_contacts and
+    company_personas because this pass wrote them, and compliance_filings
+    because the PDFs were downloaded after the split ran - which is why every
+    account still reads "partial" on the five features that declare filings.
+    """
+    deps = load_feature_dependencies()
+    manifests = []
+    for acct in accounts:
+        folder = OUTPUT_DIR / acct["account_slug"]
+        path = folder / "_manifest.json"
+        if not path.exists():
+            continue
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+        for key, source, sheet in (
+                ("prospect_contacts", APOLLO, ENRICHED_CONTACTS_SHEET),
+                ("company_personas", PERSONAS, PERSONA_COVERAGE_SHEET),
+                ("tech_breakdown", EXPLORIUM, "5_Tech_Breakdown")):
+            rows = _csv_rows(folder / f"{key}.csv")
+            manifest["datasets"][key] = {
+                "rows": rows, "source": source, "sheet": sheet,
+                "status": "ok" if rows else "empty",
+                "reason": None if rows else
+                          f"no rows for this account in {ENRICHED_FILE.name}",
+            }
+        pdfs = sorted((folder / "compliance_filings").glob("*.pdf"))
+        manifest["datasets"]["compliance_filings"] = {
+            "rows": len(pdfs), "source": "filings crawl", "kind": "pdf_directory",
+            "status": "ok" if pdfs else "awaiting_files",
+            "files": [p.name for p in pdfs],
+        }
+        manifest["refreshed_at"] = summary["generated_at"]
+        manifests.append(manifest)
+
+    if not deps:
+        print("  ! feature dependencies unavailable - readiness not recomputed")
+        for manifest in manifests:
+            (OUTPUT_DIR / manifest["account_slug"] / "_manifest.json").write_text(
+                json.dumps(manifest, indent=2))
+        return
+    nobody_has = write_readiness(manifests, deps)
+    write_root_indexes(manifests, deps, nobody_has)
+    summary["readiness_recomputed"] = True
+
+
+def _append_refresh_corrections(summary: dict):
+    """Add this pass's derived values to _CORRECTIONS.txt without losing the
+    split's own. The file is the record of everything not taken at face value,
+    so it is appended to, never rewritten."""
+    if not CORRECTIONS:
+        return
+    lines = ["", "=" * 74,
+             f"Refresh pass {summary['generated_at']} - {summary['source']}",
+             "=" * 74, ""]
+    for c in CORRECTIONS:
+        lines += [f"{c['account']}", f"  {c['field']}:",
+                  f"    source:  {c['source']}",
+                  f"    derived: {c['derived']}",
+                  f"    reason:  {c['reason']}", ""]
+    with open(OUTPUT_DIR / "_CORRECTIONS.txt", "a", encoding="utf-8") as fh:
+        fh.write("\n".join(lines) + "\n")
 
 
 # --------------------------------------------------------------------------
@@ -2755,6 +3288,268 @@ def print_report(manifests: list[dict]):
                   f"{statuses.count('partial'):>9} {statuses.count('none'):>6}  {on_avail:>27}")
 
 
+def print_refresh_summary(summary: dict):
+    """What the refresh changed, in the terms the wave will be judged on."""
+    c = summary["contacts"]
+    print()
+    print(f"Refresh from {summary['source']}"
+          + ("  (dry run - nothing written)" if summary["dry_run"] else ""))
+    print(f"  contact rows read      {c['rows']:,}")
+    print(f"    matched by territory {c['by_territory']:,}"
+          f"  by name+country {c['by_name_and_country']:,}"
+          f"  by domain {c['by_domain']:,}")
+    print(f"    rows naming two domains, attached to both: {c['multi_domain_rows']}")
+    if c["unassigned"]:
+        print(f"    UNASSIGNED {len(c['unassigned'])}: {', '.join(c['unassigned'][:4])}")
+    print(f"  contacts written       {summary['contact_rows_written']:,} rows across "
+          f"{summary['accounts_with_contacts']} of {summary['accounts']} accounts")
+    if summary["seed_preferred"]:
+        print(f"    seed kept (not overwritten): {', '.join(summary['seed_preferred'])}")
+    if summary["accounts_without_contacts"]:
+        print(f"    still no contacts: {len(summary['accounts_without_contacts'])} "
+              f"accounts ({', '.join(summary['accounts_without_contacts'][:4])}...)")
+    print(f"  personas written       {summary['persona_rows_written']:,} rows across "
+          f"{summary['accounts_with_personas']} accounts")
+    print(f"    attached to contacts {summary['personas_attached_to_contacts']:,} "
+          f"(the rest of the coverage rows name nobody - they are stated gaps)")
+    if summary["accounts_without_personas"]:
+        print(f"    no persona rows: {', '.join(summary['accounts_without_personas'][:6])}")
+    if summary.get("readiness_recomputed"):
+        print("  readiness, _ACCOUNTS.csv, _READINESS.csv and _DATASET_USAGE.md "
+              "recomputed from the folders as they now stand")
+
+
+# --------------------------------------------------------------------------
+# Upload: the split folder into a running backend
+# --------------------------------------------------------------------------
+# --print-upload-plan writes the curl lines by hand. That was fine for one
+# account and is not fine for a wave, so this does the same thing over HTTP:
+# create the account under the client's name for it, then POST every dataset
+# that carries rows. The rule about empty files still holds - a registered but
+# empty dataset makes an extractor believe it has data (see the module
+# docstring), so they are skipped here exactly as they are in the plan.
+#
+# Credentials come from the environment, never from an argument, the same way
+# scripts/regenerate_features.py takes them:
+#     HP_TOKEN                 a bearer token from a browser session
+#     HP_EMAIL + HP_PASSWORD   a dashboard login, exchanged for a token here
+
+def _unwrap(body):
+    """The API wraps every response as {"success": true, "data": ...}.
+
+    envelope_middleware does it for the whole v1 surface, so a caller that
+    reads body["access_token"] gets None and reports a login failure on an
+    HTTP 200. Unwrapped here, once, rather than at four call sites.
+    """
+    if isinstance(body, dict) and "success" in body and "data" in body:
+        return body["data"]
+    return body
+
+
+def _api(url: str, token: str = "", payload=None, method: str = "",
+         timeout: int = 600):
+    import urllib.error
+    import urllib.request
+    data = json.dumps(payload).encode() if payload is not None else None
+    req = urllib.request.Request(
+        url, data=data, method=method or ("POST" if data is not None else "GET"))
+    if data is not None:
+        req.add_header("Content-Type", "application/json")
+    if token:
+        req.add_header("Authorization", f"Bearer {token}")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = resp.read().decode()
+            return resp.status, (_unwrap(json.loads(body)) if body else None)
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode(errors="replace")
+        try:
+            return exc.code, _unwrap(json.loads(body))
+        except ValueError:
+            return exc.code, {"detail": body[:400]}
+
+
+def _api_upload(url: str, token: str, dataset_key: str, path: Path,
+                defer: bool = True, timeout: int = 900):
+    """One multipart POST of one file. Written out rather than pulled from
+    requests, which is not a dependency of this script.
+
+    `defer` asks the endpoint to store the file without re-running the features
+    that declare it. A feature with seven dependencies would otherwise run
+    seven times per account, six of them against a half-loaded account; the
+    caller regenerates each feature once when every dataset is in.
+    """
+    import urllib.error
+    import urllib.request
+    boundary = "----hpsplit" + datetime.now(UTC).strftime("%H%M%S%f")
+    sep = f"--{boundary}".encode()
+    body = b"".join([
+        sep, b"\r\n",
+        b'Content-Disposition: form-data; name="dataset_key"\r\n\r\n',
+        dataset_key.encode(), b"\r\n",
+        sep, b"\r\n",
+        b'Content-Disposition: form-data; name="defer_extraction"\r\n\r\n',
+        (b"true" if defer else b"false"), b"\r\n",
+        sep, b"\r\n",
+        f'Content-Disposition: form-data; name="file"; filename="{path.name}"\r\n'
+        .encode(),
+        b"Content-Type: application/octet-stream\r\n\r\n",
+        path.read_bytes(), b"\r\n",
+        sep, b"--\r\n",
+    ])
+    req = urllib.request.Request(url, data=body, method="POST")
+    req.add_header("Content-Type", f"multipart/form-data; boundary={boundary}")
+    if token:
+        req.add_header("Authorization", f"Bearer {token}")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            text = resp.read().decode()
+            return resp.status, (_unwrap(json.loads(text)) if text else None)
+    except urllib.error.HTTPError as exc:
+        text = exc.read().decode(errors="replace")
+        try:
+            return exc.code, _unwrap(json.loads(text))
+        except ValueError:
+            return exc.code, {"detail": text[:400]}
+
+
+def _api_token(base_url: str) -> str:
+    import os
+    token = (os.getenv("HP_TOKEN") or "").strip()
+    if token:
+        return token
+    email, password = os.getenv("HP_EMAIL"), os.getenv("HP_PASSWORD")
+    if not email or not password:
+        sys.exit("set HP_TOKEN, or HP_EMAIL and HP_PASSWORD, in the environment")
+    status, body = _api(f"{base_url}/api/v1/auth/login",
+                        payload={"email": email, "password": password})
+    if status != 200 or not body or "access_token" not in body:
+        sys.exit(f"login failed (HTTP {status})")
+    return body["access_token"]
+
+
+def _find_or_create_account(base_url: str, token: str, name: str, dry_run: bool):
+    """The account id for this name, creating it when it does not exist."""
+    status, body = _api(f"{base_url}/api/v1/accounts?search={quote(name)}", token)
+    if status == 200 and isinstance(body, list):
+        for row in body:
+            if (row.get("name") or "").strip().lower() == name.strip().lower():
+                return row["id"], "existing"
+    if dry_run:
+        return "", "would create"
+    status, body = _api(f"{base_url}/api/v1/accounts", token, {"name": name})
+    if status not in (200, 201) or not body:
+        sys.exit(f"could not create account '{name}' (HTTP {status}): {body}")
+    return body["id"], "created"
+
+
+# The extractors, in the order the wave runs them. Dependencies first: the
+# opportunity map reads the tech landscape's cards, Content Studio reads the
+# Stakeholder Map's grid, and Strategy Chat reads what all of them wrote.
+FEATURE_RUN_ORDER = [
+    "executive_dashboard", "stakeholder_map", "tech_landscape",
+    "solution_narrative_opportunity_map", "recent_news_signals",
+    "intent_demand_signals", "objection_playbook", "content_messaging",
+    "content_studio", "message_evaluator", "strategy_chat",
+]
+
+
+def _regenerate_all(base_url: str, token: str, account_id: str):
+    """Run every feature once, now that the account's datasets are all in."""
+    print("  regenerating:")
+    for feature in FEATURE_RUN_ORDER:
+        status, body = _api(
+            f"{base_url}/api/v1/accounts/{account_id}/widgets/{feature}/regenerate",
+            token, payload={}, timeout=1800)
+        if status in (200, 201):
+            widgets = len(body) if isinstance(body, list) else 0
+            print(f"    {feature:<38} {widgets} widget(s)")
+        else:
+            detail = (body or {}).get("detail") or (body or {}).get("error")
+            print(f"    {feature:<38} FAILED HTTP {status}: {detail}")
+
+
+def upload_accounts(slugs: list[str], base_url: str, dry_run: bool):
+    """Create each account and POST the datasets in its split folder."""
+    import os
+    if not slugs:
+        sys.exit("--upload needs --accounts SLUG[,SLUG]")
+    base_url = (base_url or os.getenv("HP_BASE_URL")
+                or "http://localhost:8000").rstrip("/")
+    token = "" if dry_run else _api_token(base_url)
+    print(f"Backend: {base_url}\n")
+
+    for slug in [s.strip().upper() for s in slugs]:
+        folder = OUTPUT_DIR / slug
+        manifest_path = folder / "_manifest.json"
+        if not manifest_path.exists():
+            print(f"{slug}: no _manifest.json in the split - skipped")
+            continue
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        identity = json.loads((folder / "_account.json").read_text(encoding="utf-8"))
+        # The client's name for the account, not our folder slug: the dashboard
+        # shows this, and the master list is what the client reads back.
+        name = identity.get("name_for_upload") or manifest["account_name"]
+
+        account_id, how = _find_or_create_account(base_url, token, name, dry_run)
+        print(f"{slug}  ->  {name}  [{how} {account_id}]")
+
+        uploaded = failed = skipped = 0
+        for key, info in sorted(manifest["datasets"].items()):
+            if info.get("kind") == "pdf_directory":
+                continue
+            path = folder / f"{key}.csv"
+            if info.get("rows", 0) <= 0 or not path.exists():
+                skipped += 1
+                continue
+            if dry_run:
+                print(f"    would upload {key:<24} {info['rows']:>7,} rows")
+                uploaded += 1
+                continue
+            status, body = _api_upload(
+                f"{base_url}/api/v1/accounts/{account_id}/data", token, key, path)
+            if status in (200, 201):
+                uploaded += 1
+                print(f"    {key:<24} {info['rows']:>7,} rows  OK")
+            else:
+                failed += 1
+                print(f"    {key:<24} FAILED HTTP {status}: "
+                      f"{(body or {}).get('detail')}")
+
+        # The filings are the multi-file key: one POST each - every PDF (the
+        # downloaded ones and those written from PredictLeads' text) and the
+        # filings list, _filings_index.csv, which the Executive Dashboard reads.
+        pdfs = sorted((folder / "compliance_filings").glob("*.pdf"))
+        pdfs += sorted((folder / "compliance_filings").glob("_filings_index.csv"))
+        for pdf in pdfs:
+            if dry_run:
+                uploaded += 1
+                continue
+            status, body = _api_upload(
+                f"{base_url}/api/v1/accounts/{account_id}/data", token,
+                "compliance_filings", pdf)
+            if status in (200, 201):
+                uploaded += 1
+            else:
+                failed += 1
+                print(f"    compliance_filings/{pdf.name} FAILED HTTP {status}")
+        if pdfs:
+            print(f"    {'compliance_filings':<24} {len(pdfs):>7} file(s)")
+
+        print(f"  {uploaded} uploaded, {failed} failed, {skipped} skipped "
+              f"(no rows)")
+        # Every dataset is in now, so each feature runs once, in dependency
+        # order, against the whole account.
+        if not dry_run and uploaded and not failed:
+            _regenerate_all(base_url, token, account_id)
+        print()
+    if dry_run:
+        print("Dry run - nothing was uploaded.")
+    else:
+        print("Each upload re-runs the features that declare the dataset; watch "
+              "the backend terminal for the per-feature lines.")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Split combined source workbooks into per-account CSV folders.")
@@ -2773,7 +3568,34 @@ def main():
     parser.add_argument("--verify", action="store_true",
                         help="Re-read the written CSVs and check them against "
                              "the manifest. Exits non-zero on any problem.")
+    parser.add_argument("--refresh", action="store_true",
+                        help="Rewrite prospect_contacts.csv and company_personas.csv "
+                             "in the existing split from Company_Personas_Enriched.xlsx, "
+                             "then recompute readiness. Touches nothing else.")
+    parser.add_argument("--upload", action="store_true",
+                        help="Create the account and POST its datasets to the API. "
+                             "Use with --accounts.")
+    parser.add_argument("--accounts", default="",
+                        help="Comma-separated account slugs, for --refresh and --upload.")
+    parser.add_argument("--base-url", default="",
+                        help="API base URL for --upload (default $HP_BASE_URL or "
+                             "http://localhost:8000).")
     args = parser.parse_args()
+
+    slugs = [s for s in (args.accounts or "").split(",") if s.strip()]
+
+    # Both of these work off the split that is already on disk, so neither needs
+    # the vendor drop - which matters, because the source workbooks are not all
+    # present under their configured names on every machine.
+    if args.refresh:
+        for warning in check_registry_drift():
+            print(f"WARNING: {warning}")
+        summary = refresh_in_place(slugs, args.dry_run)
+        print_refresh_summary(summary)
+        return
+    if args.upload:
+        upload_accounts(slugs, args.base_url, args.dry_run)
+        return
 
     if not SOURCE_DIR.exists():
         sys.exit(f"source folder not found: {SOURCE_DIR}")

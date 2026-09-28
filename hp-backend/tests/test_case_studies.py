@@ -164,19 +164,47 @@ class TestItRefusesRatherThanForcing:
 class TestTheCanonicalLine:
     """What a study is about, from two fields that each lie in their own way."""
 
-    def test_the_offering_beats_a_wrong_product_tag(self):
-        """Verbatim from the corpus: a study tagged HP EliteBook that is
-        entirely about managed device services. The tag is HP's, and wrong."""
+    def test_the_product_tag_beats_the_offering(self):
+        """Reversed on 27 Sep. The client: "we need to match the case studies
+        via the tagging provided in the case studies file only."
+
+        This is the row that argues the other way - tagged HP EliteBook and
+        written about managed device services - and the tag now wins anyway.
+        The cost is accepted: the PC line already reaches device services, so
+        the study stays reachable from the same cards."""
         assert cs.canonical_line({
             "product_featured": "HP EliteBook",
             "hp_offering": "HP Managed Device Services",
-        }) == cs.LINE_DEVICE_SERVICES
+        }) == cs.LINE_PC
+
+    def test_the_route_column_places_a_study_with_no_product_tag(self):
+        assert cs.canonical_line({
+            "product_featured": "", "hp_route": "3D Printing",
+        }) == cs.LINE_3D
+
+    def test_siteprint_is_not_filed_under_the_print_route(self):
+        """Every SitePrint study carries hp_route "Print". SitePrint is a
+        construction layout printer and must never answer an MPS play, so the
+        product tag is read before the route."""
+        assert cs.canonical_line({
+            "product_featured": "HP SitePrint", "hp_route": "Print",
+        }) == cs.LINE_SITEPRINT
+
+    def test_the_offering_is_only_a_last_resort(self):
+        """An offering may place an untagged row; it may not move a tagged one."""
+        assert cs.canonical_line({
+            "product_featured": "HP Multi Jet Fusion",
+            "hp_route": "3D Printing",
+            "hp_offering": "HP Managed Print Services",
+        }) == cs.LINE_3D
 
     def test_an_untagged_study_is_still_placed(self):
         """Ulster University, the corpus's only collaboration study, carries no
-        product tag at all. Joining on the tag made it invisible."""
+        tag in either of the file's columns. Tag-only matching would lose it,
+        so the offering still answers for a row the file never tagged."""
         assert cs.canonical_line({
             "product_featured": "",
+            "hp_route": "",
             "hp_offering": "HP Managed Collaboration Services",
         }) == cs.LINE_COLLABORATION
 
@@ -397,7 +425,14 @@ class TestTheCorpusVersion:
     notice when the corpus behind it is reloaded."""
 
     def test_it_reports_the_loaded_version(self):
-        assert cs.knowledge_version(fake_db(CORPUS, "abc123")) == "abc123"
+        assert cs.knowledge_version(fake_db(CORPUS, "abc123")).startswith("abc123")
+
+    def test_the_matcher_version_is_part_of_it(self):
+        """The corpus can be unchanged while the rules that read it move. A
+        cached card stores the study it was given, so it has to rebuild for
+        that too - this is what forces the stale print study off the 3D
+        cards."""
+        assert cs.knowledge_version(fake_db(CORPUS, "abc123")) == "abc123+m%d" % cs.MATCHER_VERSION
 
     def test_an_unloaded_corpus_reports_an_empty_version(self):
         """Stable rather than random: a platform with no case studies loaded

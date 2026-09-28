@@ -31,6 +31,7 @@ from app.services.extractors.intent_demand_signals import (
     _parse_category_file,
 )
 from app.services.extractors.recent_news_signals import extract_recent_news_signals
+from app.services.extractors.tech_versions import spellings, superseded
 from app.services.hp import (
     case_studies as cs,
     evidence_tier,
@@ -106,7 +107,12 @@ NL = chr(10)
 #      source of evidence and "is relevant" only on two, enforced on the prose
 #      rather than only stated in the prompt.
 # 33 - generated prose names the account from the audit sheet (DEC-052).
-OPPORTUNITY_PROMPT_VERSION = 33
+# 34 - 27 Sep feedback: quantified_impact and entry_path leave the brief with
+#      the boxes that showed them, and a version this account's own export has
+#      superseded may not carry a play or appear in its prose.
+# 35 - a model number is not a version: the first cut of that rule read Office
+#      365 as older than Office 2016 and a Catalyst 6500 as an older 6503.
+OPPORTUNITY_PROMPT_VERSION = 35
 MAX_PLAYS = 5
 
 # HP_ABX_v3_final defines NO numeric opportunity score for this feature. Plays
@@ -675,40 +681,6 @@ def _service_plays(db, corpus: list, country: str, roster: list) -> tuple:
     if not book.get("rules"):
         return [], []
 
-    def _display_name(term: str, indices: list) -> str:
-        """The account's own spelling of a matched term.
-
-        The stored terms are normalised for matching, so "power bi" is what
-        fires the rule and "Microsoft Power BI" is what the account's file
-        actually says. Quoting the file back is both better English and a
-        smaller claim - it is their wording, not ours. Long cells are a vendor
-        list rather than a name, so those fall back to the term.
-        """
-        for i in indices:
-            text = " ".join(str(corpus[i].get("text") or "").split())
-            if len(text) <= 40 and _token_present(term, _norm_text(text)):
-                return text
-        return term
-
-    def _and_list(items: list) -> str:
-        items = [i for i in items if i]
-        if len(items) <= 1:
-            return items[0] if items else ""
-        return "%s and %s" % (", ".join(items[:-1]), items[-1])
-
-    def _service_cta(match: dict, owners: list) -> str:
-        who = owners[0]["title"] if owners else None
-        names = [_display_name(t, match["evidence_indices"])
-                 for t in match["matched_terms"][:3]]
-        found = _and_list(names)
-        ask = "Ask the %s" % who if who else "Ask the owning team"
-        if not found:
-            return ("%s whether %s would fit what they run today."
-                    % (ask, match["offering"]))
-        verb = "is" if len(names) == 1 else "are"
-        return ("%s how %s %s used today, and whether %s would fit alongside."
-                % (ask, found, verb, match["offering"]))
-
     routes = rb.route(book, corpus)
     # Part B only. Part A chooses a hardware product, which is what the four
     # product plays above already do from this same corpus - offering both
@@ -796,12 +768,13 @@ def _service_plays(db, corpus: list, country: str, roster: list) -> tuple:
             # produced it says in its own words "Existing use shows possible
             # fit, not buying intent", and C 01 says HP material cannot
             # establish a need.
+            # Timeline and next step are gone with the box that showed them
+            # (client, 27 Sep). The owners stay - they are this account's own
+            # contact rows, matched in Python.
             "entry_path": {
-                "timeline": "0-90 days",
                 "target_contacts": owners,
                 "target_buyers_source": "prospect_contacts" if owners else "no_match",
                 "no_contact_note": None if owners else NO_CONTACT_NOTE,
-                "recommended_cta": _service_cta(match, owners),
             },
         }
 
@@ -1041,12 +1014,9 @@ def generate_opportunity_map_plays_with_gpt4o(account_id: str) -> dict:  # noqa:
         "news_events": events_records,
     })
     report = GroundingReport(ground, [
-        "title", "hp_capability", "inference", "recommended_cta",
+        "title", "hp_capability", "inference",
         "proof_point", "source_url", "hp_products",
     ])
-
-    corpus_blob = " || ".join(_norm_text(c["text"]) for c in corpus)
-    corpus_digits = re.sub(r"[,\s]", "", corpus_blob)
 
     # ---- the account's real roster, for entry paths -------------------------
     grid = widget_store.get(account_id, "stakeholder_contacts_grid", db=db)
@@ -1067,6 +1037,22 @@ def generate_opportunity_map_plays_with_gpt4o(account_id: str) -> dict:  # noqa:
         pipeline.cache_hit("opportunity_narrative_plays")
         widget_store.keep(account_id, "opportunity_narrative_plays")
         return existing
+
+    # ---- versions this account's own export has already moved past ----------
+    #
+    # The client, 27 Sep, on a card built around Windows 7: "Win 7 went into EOL
+    # Jan 2020, unlikely. I think this would have been Win 10, can we please
+    # double check on this." The export does say Windows 7 - and says Windows 10
+    # in the same cell. Where the file names two versions of one product, only
+    # the newer one may carry a play.
+    superseded_tech = superseded(
+        name.strip()
+        for c in corpus if c["dataset"] == "technographics"
+        for name in str(c.get("text") or "").split(",")
+    )
+    if superseded_tech:
+        pipeline.step("technology", "%d superseded version(s) not usable as evidence: %s"
+                      % (len(superseded_tech), ", ".join(sorted(superseded_tech))))
 
     # ---- which plays the evidence can actually support -----------------------
     play_menu = {}
@@ -1202,12 +1188,9 @@ FIELDS:
   RELEVANCE WORDING (the client's own ladder, and it is checked): where this play rests on ONE source of evidence, an HP offering "MAY BE RELEVANT to this opportunity" - never "is relevant", "is a strong fit" or anything that settles it. Only a play corroborated by TWO independent sources may say an offering "is relevant". A play resting on account context alone must not recommend an offering at all.
   LENGTH: hp_capability, inference, timing_note and owner_angle together must total BETWEEN 80 AND 160 WORDS. The inference carries most of that.
 - "hp_products": HP product names.
-- "quantified_impact": an exact figure that appears VERBATIM above, copied character for character from a line in the evidence, or null. It is re-verified against the source data. A figure is a SOURCED ACCOUNT SIGNAL, never an HP projection, and never by itself evidence of demand for a product - if you cite one, say what it does and does not establish.
 - "proof_point" and "source_url": copied EXACTLY from the NEWS list above, or null. Never invent a URL.
 - "timing_note": REQUIRED for any play whose evidence block is marked NO TIMING SIGNAL, otherwise null. One sentence naming what a seller would need to confirm before timing this, e.g. "no refresh cycle, budget window or project is visible in this account's data - confirm the current device refresh schedule before positioning". Never imply timing here.
 - "owner_angle": REQUIRED whenever topic owners are listed for the play, otherwise null. One sentence on what that named remit would be weighing. Use the title exactly as given. Never say what the person thinks, wants or has decided.
-- "entry_path": {{"timeline": "0-90 days | 90-180 days", "recommended_cta": "..."}}
-    Do NOT return target buyers. The people are resolved from this account's own contact records, not by you.
 
 LANGUAGE - these are failures, not style preferences:
 - Never write "require", "will need", "is ready to", "needs", "now is the perfect time", "perfect", "ideal" or "fully compatible" about this account.
@@ -1215,7 +1198,7 @@ LANGUAGE - these are failures, not style preferences:
 - Never claim a procurement window is open unless something above says so.
 
 Output JSON:
-{{"opportunity_plays": [{{"play_key": "...", "title": "...", "account_evidence": [{{"quote": "...", "statement": "..."}}], "hp_capability": "...", "inference": "...", "hp_products": ["..."], "quantified_impact": null, "proof_point": "...", "source_url": null, "timing_note": null, "owner_angle": null, "entry_path": {{"timeline": "0-90 days", "recommended_cta": "..."}}}}]}}
+{{"opportunity_plays": [{{"play_key": "...", "title": "...", "account_evidence": [{{"quote": "...", "statement": "..."}}], "hp_capability": "...", "inference": "...", "hp_products": ["..."], "proof_point": "...", "source_url": null, "timing_note": null, "owner_angle": null}}]}}
 """
 
     user_prompt = (
@@ -1242,7 +1225,7 @@ Output JSON:
     # continues - and it pushed the count from 40 to 41. Its message-building is
     # already extracted to `_play_length_fault`; extracting the chain itself is
     # a refactor of this whole loop and is not worth the risk for a word count.
-    def _process(raw_plays) -> None:  # noqa: PLR0915, PLR0912 - long extractor predates the lint gate
+    def _process(raw_plays) -> None:  # noqa: PLR0915 - long extractor predates the lint gate
         """One validation pass. Appends survivors to cleaned_plays and records
         why anything else was rejected."""
         if not isinstance(raw_plays, list):
@@ -1258,11 +1241,8 @@ Output JSON:
             prior = first_pass_raw.get(pk_early)
             if prior:
                 # Retry values win; anything it omitted falls back to this play's
-                # own earlier answer. entry_path needs a nested merge or a partial
-                # one still wipes timeline and recommended_cta.
-                merged_entry = {**(prior.get("entry_path") or {}),
-                                **(p.get("entry_path") or {})}
-                p = {**prior, **p, "entry_path": merged_entry}
+                # own earlier answer.
+                p = {**prior, **p}
             elif pk_early:
                 first_pass_raw[pk_early] = p
             play_key = str(p.get("play_key") or "").strip().lower()
@@ -1319,6 +1299,23 @@ Output JSON:
                 if not match:
                     dropped.append(f"{play_key}: unverified quote {quote[:60]!r}")
                     continue
+
+                # Real, in the file, and superseded by a newer version of the
+                # same product in that same file. It is not evidence of what
+                # the account runs today, so it cannot carry a play.
+                stale = [t for t in superseded_tech
+                         if any(_token_present(sp, _norm_text(quote))
+                                for sp in spellings(t))]
+                if stale:
+                    dropped.append("%s: %s is superseded in this account's own "
+                                   "export - quote not used" % (play_key, stale[0]))
+                    retry_notes.setdefault(play_key, (
+                        "you cited %s. This account's own technology export also lists a "
+                        "NEWER version of the same product, so the older one says nothing "
+                        "about what they run today. Cite the newest version, or other "
+                        "evidence." % ", ".join(sorted(stale))))
+                    continue
+
                 verified.append({
                     "quote": ", ".join(matched_parts),
                     "statement": str(item.get("statement") or "").strip(),
@@ -1392,33 +1389,6 @@ Output JSON:
             else:
                 language_warning = None
 
-            # --- quantified impact, re-verified ------------------------------
-            impact_raw = p.get("quantified_impact")
-            impact_val, impact_state, impact_source = None, "none", None
-            if impact_raw and any(ch.isdigit() for ch in str(impact_raw)):
-                digits = re.sub(r"[,\s]", "", _norm_text(impact_raw))
-                # The figure must come from evidence THIS play cites, and that
-                # evidence must itself be topically relevant. Otherwise a
-                # dividend headline ends up as the "impact" on a device play.
-                relevant_quotes = [
-                    v["quote"] for v in verified
-                    if not signal_tokens
-                    or any(_token_present(tok, _norm_text(v["quote"])) for tok in signal_tokens)
-                ]
-                cited_digits = re.sub(r"[,\s]", "", _norm_text(" || ".join(relevant_quotes)))
-                if digits and digits in cited_digits:
-                    impact_val = str(impact_raw).strip()
-                    impact_state = "sourced_signal"
-                    hit = next((c for c in corpus
-                                if re.sub(r"[,\s]", "", _norm_text(c["text"])).find(digits) >= 0), None)
-                    if hit:
-                        impact_source = f'{hit["dataset"]} -> {hit["field"]}'
-                elif digits and digits in corpus_digits:
-                    dropped.append(f"{play_key}: figure {impact_raw!r} is real but not from "
-                                   f"evidence relevant to this play - not shown")
-                else:
-                    dropped.append(f"{play_key}: unverified figure {impact_raw!r}")
-
             # --- deterministic priority --------------------------------------
             cited_dts = [v["dt"] for v in verified if v.get("dt")]
             newest = max(cited_dts) if cited_dts else None
@@ -1446,8 +1416,6 @@ Output JSON:
                 has_any_signal=bool(verified or has_trigger or signal_tokens),
             )
 
-            entry_p = p.get("entry_path") or {}
-
             timing_note = str(p.get("timing_note") or "").strip() or None
             owner_angle = str(p.get("owner_angle") or "").strip() or None
 
@@ -1469,18 +1437,6 @@ Output JSON:
                                f"{language_attempts[play_key]} rewrites - default note applied")
                 logger.warning("opportunity map: %s published with the default timing note",
                                play_key)
-
-            if not str(entry_p.get("recommended_cta") or "").strip():
-                if language_attempts.get(play_key, 0) < MAX_PROSE_REWRITES:
-                    language_attempts[play_key] = language_attempts.get(play_key, 0) + 1
-                    dropped.append(f"{play_key}: no recommended_cta - sent for rewrite")
-                    retry_notes.setdefault(play_key, (
-                        "entry_path.recommended_cta was missing. Return it: the concrete "
-                        "next action for this play, naming the contact or function to "
-                        "approach"))
-                    continue
-                dropped.append(f"{play_key}: no recommended_cta after "
-                               f"{language_attempts[play_key]} rewrites - published without it")
 
             # Where a real owner was resolved, the chain must reach them.
             if (play_contacts.get(play_key) or []) and not owner_angle:
@@ -1517,9 +1473,35 @@ Output JSON:
             # ---- grounding gate ------------------------------------------------
             proof_point = str(p.get("proof_point") or "").strip() or None
             source_url = str(p.get("source_url") or "").strip() or None
-            cta = str(entry_p.get("recommended_cta") or "").strip()
             capability = str(p.get("hp_capability") or "").strip()
             inference = str(p.get("inference") or "").strip()
+
+            # Dropping the quote is not enough: the first fix left the evidence
+            # citing Windows 10 while the inference still opened on "a mix of
+            # legacy systems (Windows 7)". The prose is checked for the same
+            # names, and a play that leads on a version its own account has
+            # already moved past goes back for a rewrite.
+            prose_blob = _norm_text(" ".join((title, capability, inference,
+                                              timing_note or "", owner_angle or "")))
+            stale_prose = [t for t in superseded_tech
+                           if any(_token_present(sp, prose_blob)
+                                  for sp in spellings(t))]
+            if stale_prose:
+                if language_attempts.get(play_key, 0) < MAX_PROSE_REWRITES:
+                    language_attempts[play_key] = language_attempts.get(play_key, 0) + 1
+                    dropped.append("%s: prose names %s, superseded in this account's "
+                                   "own export - sent for rewrite"
+                                   % (play_key, stale_prose[0]))
+                    retry_notes[play_key] = (
+                        "do not mention %s anywhere - not in the title, the capability, "
+                        "the inference or any note. This account's own technology export "
+                        "lists a NEWER version of that same product, so the older one "
+                        "says nothing about what they run today. Write the play from the "
+                        "newest version, and do not contrast the two."
+                        % ", ".join(sorted(stale_prose)))
+                    continue
+                dropped.append("%s: still names %s after %d rewrites - published as is"
+                               % (play_key, stale_prose[0], language_attempts[play_key]))
 
             # The client's relevance ladder, before the grounding gate: a play
             # on one pipeline may say an offering "may be relevant", never "is
@@ -1542,7 +1524,7 @@ Output JSON:
 
             bad_nums, bad_urls = check_text(
                 ground, report, play_key,
-                title, capability, inference, cta, proof_point or "", source_url or "",
+                title, capability, inference, proof_point or "", source_url or "",
                 timing_note or "", owner_angle or "")
 
             if bad_nums:
@@ -1561,7 +1543,6 @@ Output JSON:
                 proof_point = strip_unsourced_urls(ground, proof_point) if proof_point else None
                 capability = strip_unsourced_urls(ground, capability)
                 inference = strip_unsourced_urls(ground, inference)
-                cta = strip_unsourced_urls(ground, cta)
 
             # HP product names are an allow-list, never free text.
             products, bad_products = filter_enum_list(p.get("hp_products"), HP_PRODUCT_LINES)
@@ -1593,9 +1574,6 @@ Output JSON:
                 "language_warning": language_warning,
                 "hp_products": products,
                 "hp_resource_url": PLAY_RESOURCE_URLS.get(play_key, DEFAULT_RESOURCE_URL),
-                "quantified_impact": impact_val,
-                "quantified_impact_state": impact_state,
-                "quantified_impact_source": impact_source,
                 # Composed in Python from named fields; the model never sees or
                 # supplies these, so they cannot drift.
                 "scale_statement": (scale or {}).get("statement"),
@@ -1603,12 +1581,17 @@ Output JSON:
                 "scale_fields_used": (scale or {}).get("fields_used", 0),
                 "proof_point": proof_point,
                 "source_url": source_url,
+                # The client, 27 Sep: "Delete the Quantified Impact and
+                # Supporting Signal section and timeline entire box with Target
+                # buyers and Next steps." The timeline and the call to action
+                # were model prose and are gone with the box. The contacts stay:
+                # they are matched in Python from this account's own contact
+                # rows, the Discovery Areas still list them as "Who to ask",
+                # and the feature-mapping contract pins the field by name.
                 "entry_path": {
-                    "timeline": str(entry_p.get("timeline") or "0-90 days"),
                     "target_contacts": contacts,
                     "target_buyers_source": "prospect_contacts" if contacts else "no_match",
                     "no_contact_note": None if contacts else NO_CONTACT_NOTE,
-                    "recommended_cta": cta,
                 },
             })
 
@@ -1630,9 +1613,8 @@ Output JSON:
         retry_system = system_prompt + (
             NL + NL + "RETRY - YOUR PREVIOUS ANSWER WAS REJECTED." + NL
             + "Each play below was discarded for the stated reason. Fix exactly that, "
-              "and return the COMPLETE play object for it - every field, including "
-              "entry_path.timeline and entry_path.recommended_cta - carrying the "
-              "parts that were already correct through unchanged." + NL
+              "and return the COMPLETE play object for it - every field - carrying "
+              "the parts that were already correct through unchanged." + NL
             + faults + NL
             + "Keep the same evidence where it was accepted. Use calibrated language "
               "(\"may indicate\", \"could create an opportunity\", \"suggests\", "
@@ -1705,15 +1687,10 @@ Output JSON:
         # this split: a discovery area has no HP narrative for a case study to
         # support, and the day the order changes this is what keeps that true.
         for field in ("inference", "hp_capability", "hp_resource_url",
-                      "owner_angle", "quantified_impact", "quantified_impact_source",
-                      "proof_point", "source_url", "hp_proof_point",
+                      "owner_angle", "proof_point", "source_url", "hp_proof_point",
                       "hp_proof_point_note", "hp_proof_point_detail"):
             entry[field] = None
-        entry["quantified_impact_state"] = "none"
         entry["hp_products"] = []
-        ep = dict(entry.get("entry_path") or {})
-        ep["recommended_cta"] = None
-        entry["entry_path"] = ep
         discovery_areas.append(entry)
         dropped.append(f'{play["play_key"]}: fails the HP-fit check - moved to '
                        f'discovery areas, sales narrative removed')

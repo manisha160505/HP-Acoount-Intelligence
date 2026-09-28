@@ -77,18 +77,19 @@ _P = "app.services.regen.producers"
 NODES = (
     Node("stakeholder_roster", "stakeholder_map",
          widgets=("stakeholder_contacts_grid", "stakeholder_influence_map"),
-         datasets=("prospect_contacts",),
+         # company_personas: the client's buying committee (Manisha, 28 Sep).
+         datasets=("prospect_contacts", "company_personas"),
          run=f"{_P}:stakeholder_roster"),
     Node("tech_core", "tech_landscape",
          widgets=("technographic_map", "tech_stack_matrix",
                   "tech_detections_reference", "webstack_breakdown"),
          datasets=("technographics", "technology_detections", "webstack",
-                   "firmographics", "hp_category_intent"),
+                   "tech_breakdown", "firmographics", "hp_category_intent"),
          config=("tech_confidence",), knowledge=("rulebook", "case_studies"),
          llm=True,
-         # 2: webstack_breakdown reads the Tech_Breakdown columns merged into
-         # webstack; technographic_map lists hp_category_intent's Related
-         # Technologies as researched.
+         # 2: detected technology pools Technographics with the intent file's
+         # Related Technologies, falling back to WebStack + Tech_Breakdown
+         # when there is no estate; webstack_breakdown groups tech_breakdown.
          logic_version=2,
          logic_refs=("app.services.hp.map_narrative:MAP_NARRATIVE_PROMPT_VERSION",),
          run=f"{_P}:tech_core"),
@@ -126,7 +127,7 @@ NODES = (
     Node("content_persona", "content_studio",
          widgets=("content_persona_context",),
          datasets=("firmographics", "google_news", "news_events", "job_openings",
-                   "intent_score"),
+                   "intent_score", "prospect_contacts", "company_personas"),
          upstream=("stakeholder_roster",),
          run=f"{_P}:content_persona"),
     Node("news", "recent_news_signals",
@@ -139,8 +140,8 @@ NODES = (
          run=f"{_P}:news"),
     Node("stakeholder_talking_points", "stakeholder_map",
          widgets=("stakeholder_talking_points",),
-         datasets=("prospect_contacts", "firmographics", "technographics",
-                   "intent_score", "google_news", "news_events"),
+         datasets=("prospect_contacts", "company_personas", "firmographics",
+                   "technographics", "intent_score", "google_news", "news_events"),
          upstream=("stakeholder_roster", "opp_core"),
          llm=True,
          logic_refs=("app.services.extractors.stakeholder_map:"
@@ -154,18 +155,24 @@ NODES = (
          widgets=("exec_summary_card", "exec_key_metrics", "exec_hiring_velocity",
                   "exec_urgency_score"),
          datasets=("firmographics", "company_hierarchy", "job_openings",
-                   "prospect_contacts", "technographics", "webstack",
+                   "technographics", "webstack",
                    "intent_score", "hp_category_intent", "extended_company",
                    "google_news", "news_events", "compliance_filings"),
          upstream=("news", "opp_core"),
          config=("urgency",),
+         # The company description is reorganised into bullets by one cached,
+         # grounded model call (client feedback 1.a, 27 Sep).
+         llm=True,
+         logic_refs=("app.services.extractors.executive_dashboard:SUMMARY_PROMPT_VERSION",),
          # 2: exec_key_metrics lists the filings on record (the filings list
-         # CSV uploaded with the PDFs under compliance_filings).
+         # CSV uploaded with the PDFs under compliance_filings); Quick Stats
+         # counts and the contacts read dropped (client feedback 1.e).
          logic_version=2,
          run=f"{_P}:exec_core"),
     Node("evaluator_personas", "message_evaluator",
          widgets=("evaluator_persona_context",),
-         datasets=("firmographics", "prospect_contacts", "job_openings"),
+         datasets=("firmographics", "prospect_contacts", "company_personas",
+                   "job_openings"),
          upstream=("stakeholder_roster", "stakeholder_talking_points"),
          run=f"{_P}:evaluator_personas"),
     Node("tech_recs", "tech_landscape",

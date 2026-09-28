@@ -4,9 +4,8 @@ files the application already defines.
 Filings = filings 1.csv + PredictLeads sec_filings, one list
 (`_filings_index.csv`, uploaded under compliance_filings) with the 18 Sep link
 rule (document_url, else source_page_url, never local_path, drop when both
-blank) and the 12-month window. Technographics = WebStack + Tech_Breakdown, the
-latter's columns merged onto the webstack row under a prefix. Related
-Technologies stay in hp_category_intent and are shown as researched only.
+blank) and the 12-month window. Tech_Breakdown is its own dataset
+(tech_breakdown.csv); the Website stack card groups it by the vendor's columns.
 
 Run: python -m pytest tests/test_filings_and_tech_breakdown.py -v
 """
@@ -19,10 +18,7 @@ from datetime import date
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from app.services.dashboard import filings_register as fr
-from app.services.extractors.tech_landscape import (
-    TECH_BREAKDOWN_PREFIX,
-    _parse_tech_breakdown,
-)
+from app.services.extractors.tech_landscape import _parse_tech_breakdown
 
 AS_OF = date(2026, 9, 28)
 
@@ -129,18 +125,12 @@ def test_predictleads_pdfs_are_recognised_by_name():
     assert not fr.is_predictleads_file("sony_2026-FY_annual_report.pdf")
 
 
-def _ws(**tb):
-    row = {"Business Id": "abc", "Status": "ok", "Parked": "No",
-           "Technologies Used By Company Website": "WordPress, Cloudflare"}
-    row.update({TECH_BREAKDOWN_PREFIX + k: v for k, v in tb.items()})
-    return [row]
-
-
-def test_tech_breakdown_is_read_from_the_webstack_row():
-    out = _parse_tech_breakdown(_ws(
-        Cms="Enterprise: Adobe Experience Manager | Other: WordPress 5.3, Adobe Experience Manager",
-        **{"Seo Title": "Other: SEO_TITLE", "Hosting": "", "Mx": "—"}))
-    # 5_Webstack's own columns (Status, Parked, ...) are never read as categories.
+def test_tech_breakdown_groups_are_kept_as_delivered():
+    out = _parse_tech_breakdown([{
+        "Cms": "Enterprise: Adobe Experience Manager | Other: WordPress 5.3, Adobe Experience Manager",
+        "Seo Title": "Other: SEO_TITLE", "Hosting": "", "Mx": "\u2014",
+        "Business Id": "abc", "Parked": "No"}])
+    # Identifier and status columns are never read as categories.
     assert [c["category"] for c in out] == ["Cms", "Seo Title"]
     cms = out[0]
     assert cms["groups"][0] == {"group": "Enterprise",
@@ -149,6 +139,5 @@ def test_tech_breakdown_is_read_from_the_webstack_row():
     assert cms["page_metadata"] is False and out[1]["page_metadata"] is True
 
 
-def test_webstack_without_tech_breakdown_columns():
-    assert _parse_tech_breakdown(_ws()) == []
+def test_tech_breakdown_empty():
     assert _parse_tech_breakdown([]) == []

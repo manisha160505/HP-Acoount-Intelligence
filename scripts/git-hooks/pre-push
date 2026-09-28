@@ -23,8 +23,8 @@ PROTECTED_BRANCH="main"
 # This is a local convenience, NOT a security control. Every developer can skip
 # it with --no-verify, and it does not exist at all for anyone who has not run
 # scripts/install-hooks.sh. Only GitHub branch protection on the remote can
-# actually enforce this; see docs/branch-protection.md. The hook is here to stop
-# the honest mistake - a reflexive `git push` while main happens to be checked
+# actually enforce this; see docs/engineering/branch-protection.md. The hook is
+# here to stop the honest mistake - a reflexive `git push` while main happens to be checked
 # out - which is what nearly every direct-to-main push actually is.
 #
 # The refs being pushed arrive on stdin as:  <local ref> <local sha> <remote ref> <remote sha>

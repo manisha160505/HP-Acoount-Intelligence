@@ -53,8 +53,6 @@ def _collect(widget_key: str, data: dict):
         for p in (data.get("opportunity_plays") or []):
             for f in ("title", "hp_capability", "inference", "proof_point", "source_url"):
                 out.append((f"{p.get('play_key')}.{f}", p.get(f)))
-            out.append((f"{p.get('play_key')}.recommended_cta",
-                        (p.get("entry_path") or {}).get("recommended_cta")))
     elif widget_key == "technographic_hp_recommendations":
         # ACCOUNT-FACING FIELDS ONLY.
         #

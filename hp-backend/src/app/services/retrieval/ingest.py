@@ -36,7 +36,6 @@ the documented behaviour is *"Modified content gets a new ID; old chunks remain
 until explicit deletion"* - so delete always precedes insert.
 """
 
-import asyncio
 import logging
 import threading
 import time
@@ -306,13 +305,50 @@ async def _verify(rag, documents):
 # Worker
 # ---------------------------------------------------------------------------
 
+# A build can run for the better part of an hour. The cap is a backstop against
+# a wedged job holding the loop forever, not a budget.
+BUILD_TIMEOUT_SECONDS = 4 * 60 * 60
+
+# One build at a time per process.
+#
+# LightRAG keeps its pipeline status in process-global state behind its own
+# asyncio locks (`initialize_pipeline_status`), so two builds in one process
+# are not independent however they are scheduled: on separate loops they
+# fought over the shared Mongo client, and on one loop they wait on each
+# other's pipeline lock. Three concurrent builds sat for 20 minutes without a
+# single document landing, and the machine ran out of memory underneath them.
+#
+# Queries are unaffected - they share the loop, not this lock - so a page view
+# still answers while a build runs.
+_BUILD_LOCK = threading.Lock()
+
+
 def run_job(job) -> dict:
     from app.services.retrieval import jobs
 
     account_id, index = job["account_id"], job["index"]
     full = bool(job.get("full"))
     try:
-        stats = asyncio.run(update_index(account_id, index, full=full))
+        # On the shared retrieval loop, NOT asyncio.run().
+        #
+        # LightRAG's Mongo backend caches one AsyncMongoClient in a class-level
+        # dict (kg/mongo_impl.py, ClientManager) and that client binds to the
+        # event loop it was created on. The query path keeps warm handles on a
+        # long-lived loop, so once any feature has read from retrieval, that
+        # cached client belongs to the query loop - and a build started with
+        # asyncio.run() on a fresh loop picks up the same object and dies with
+        # "Cannot use AsyncMongoClient in different event loop".
+        #
+        # It only shows up when a process queries and then builds, which is
+        # exactly what loading an account does: 8 of 12 index jobs failed that
+        # way on the first account loaded through the API. One loop for all
+        # LightRAG work removes the class of failure. The build still creates
+        # and finalises its own handle, so a failed build cannot poison the
+        # query cache - that separation was never about the loop.
+        with _BUILD_LOCK:
+            stats = client.run_on_query_loop(
+                update_index(account_id, index, full=full),
+                timeout=BUILD_TIMEOUT_SECONDS)
         # The index is only half the job: whatever it feeds has to follow it,
         # or the data moves and the feature built on top quietly goes stale.
         stats["generated"] = _run_generator(account_id, index, stats)

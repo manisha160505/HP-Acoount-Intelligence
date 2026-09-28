@@ -143,6 +143,13 @@ async def upload_account_data(
     account_id: str,
     dataset_key: str = Form(...),
     file_id_to_replace: str | None = Form(None),
+    # Bulk loading, one account at a time: a feature that declares seven
+    # datasets is otherwise re-run seven times as they arrive, six of them
+    # against data that is still incomplete. The loader sets this on every
+    # upload and then regenerates each feature once, at the end, which is both
+    # cheaper and the only way the first run sees the whole account.
+    # Default false, so a single upload from the UI behaves exactly as before.
+    defer_extraction: bool = Form(False),
     file: UploadFile = File(...),
     current_user: dict = Depends(require_admin_role)
 ):
@@ -293,8 +300,15 @@ async def upload_account_data(
     )
 
     payload = serialize_data_file(new_metadata)
-    payload["regeneration"] = _notify_regeneration(
-        account_id, key_clean, "dataset %s uploaded" % key_clean, current_user)
+    if defer_extraction:
+        # A bulk loader storing an account's files one by one asks for the
+        # regeneration to wait until the last file is in, then triggers it once.
+        logger.info("upload: %s stored; regeneration deferred to the caller",
+                    key_clean)
+        payload["regeneration"] = {"queued": [], "features": [], "deferred": True}
+    else:
+        payload["regeneration"] = _notify_regeneration(
+            account_id, key_clean, "dataset %s uploaded" % key_clean, current_user)
     return payload
 
 @router.get("", response_model=list[AccountDataFileResponse])

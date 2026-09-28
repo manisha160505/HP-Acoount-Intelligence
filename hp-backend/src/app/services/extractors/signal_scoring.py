@@ -108,10 +108,17 @@ def recency_points(event_dt: datetime | None, now: datetime | None = None) -> tu
 
     age_days = max((now - event_dt).days, 0)
 
+    # The basis names the DATE, not an age. The client, 27 Sep: "will this
+    # number of days automatically change or will stay as '11 days'? because if
+    # it will not change automatically, then we should just mention the exact
+    # date of the signal and leave it there." It does not change - it is
+    # written at extraction and read months later - so it is gone. The score,
+    # its band and the 30% weight are untouched; only the sentence changed.
+    stamp = event_dt.strftime("%d %b %Y")
     for max_days, points in RECENCY_BANDS:
         if age_days <= max_days:
-            return points, "%d days old" % age_days
-    return RECENCY_OVER_365, "%d days old, over 365" % age_days
+            return points, "event dated %s" % stamp
+    return RECENCY_OVER_365, "event dated %s, over 12 months before scoring" % stamp
 
 
 # ==============================================================================
@@ -129,6 +136,60 @@ UNVERIFIABLE = _CFG["source_unverifiable"]
 # evidence that the source is bad, so the caller can choose to ask the model
 # rather than silently scoring it 0.
 UNKNOWN = None
+
+
+# The "Source classification" column of HP_Live_Signal_Scoring_Logic, verbatim.
+#
+# The client asked on 27 Sep whether we follow a tier strategy - T0 filings, T1
+# established news, T2 paid tools, T3 long tail - and said the definition shown
+# on the card "doesn't tell much". Those tier names are from that message, not
+# from the scoring document, so they are not used: the document's own five
+# classifications are, and they are what these bands have always been. What
+# changes is only that the card now names the classification instead of the
+# phrase describing the lookup that produced it.
+SOURCE_CLASSIFICATIONS = {
+    FIRST_PARTY: "First-party or authoritative",
+    ESTABLISHED_REPORTING: "Established independent reporting",
+    STRUCTURED_THIRD_PARTY: "Structured third-party evidence",
+    WEAK_SECONDARY: "Weak secondary evidence",
+    UNVERIFIABLE: "Unverifiable",
+}
+
+
+def classification_for(points) -> str:
+    """The scoring document's name for a source-reliability score."""
+    return SOURCE_CLASSIFICATIONS.get(points, "")
+
+
+def describe_source(points, basis: str, publisher: str = "") -> str:
+    """The source line a reader sees.
+
+    The classification first - the document's own word for this band - then who
+    the source actually was, because the band alone says nothing about THIS
+    signal and the publisher sat on the card while the explanation never named
+    it. The lookup basis follows only where it adds something the first two do
+    not already say.
+    """
+    label = classification_for(points)
+    parts = [p for p in (label, (publisher or "").strip()) if p]
+    detail = (basis or "").strip()
+    if detail and not _restates_the_band(detail):
+        parts.append(detail[0].upper() + detail[1:])
+    return ". ".join(parts) if parts else detail
+
+
+# A basis that only says the band again. "Established independent reporting.
+# Nikkei. Established publication" tells a reader the same thing three times;
+# the others ("no underlying source URL", "via an aggregator link") each add
+# the reason this signal landed in its band, so they stay.
+_BAND_RESTATEMENTS = ("established publication",)
+
+
+def _restates_the_band(detail: str) -> bool:
+    # A trailing "(domain)" is part of the same restatement.
+    core = detail.split("(", maxsplit=1)[0].strip().lower()
+    return core in _BAND_RESTATEMENTS
+
 
 # --- 10/10: first-party or authoritative --------------------------------------
 # "Company newsroom, investor relations, official company filing,
@@ -152,6 +213,21 @@ FIRST_PARTY_PATH_MARKERS = (
 
 # Regulators, exchanges and government. These are institutions, not companies,
 # so naming them is not account-specific.
+# The same first-party pages, reached by SUBDOMAIN rather than path.
+#
+# The scoring document puts "Company newsroom ... investor relations ...
+# official careers page" in the 10/10 row, and the markers above catch them
+# when they sit on a path (hp.com/newsroom). Plenty of companies put them on a
+# subdomain instead, and those were scoring 6 as an unrecognised domain:
+# Accenture's own announcements arrive as newsroom.accenture.com, which is the
+# company speaking about itself and the strongest evidence there is.
+#
+# Checked after the established-publisher list, like the path markers, so a
+# newspaper's own newsroom subdomain is still reporting rather than first-party
+# evidence about the account.
+FIRST_PARTY_HOST_PREFIXES = ("newsroom.", "news.", "press.", "media.", "investor.",
+                             "investors.", "ir.", "careers.", "jobs.")
+
 AUTHORITATIVE_DOMAIN_SUFFIXES = (
     ".gov", ".gov.uk", ".gov.au", ".gov.sg", ".gov.my", ".gov.ph", ".gov.vn",
     ".go.id", ".go.jp", ".go.kr", ".go.th",
@@ -489,8 +565,16 @@ def source_reliability_points(
     # A company's own newsroom, IR page or careers page. Checked after the
     # publisher list so a newspaper's own /press-release section is still scored
     # as reporting rather than as first-party evidence about the account.
-    if any(marker in path for marker in FIRST_PARTY_PATH_MARKERS):
-        return FIRST_PARTY, "first-party company page" + via, resolved
+    # ... whether it sits on a path (hp.com/newsroom) or on a subdomain
+    # (newsroom.accenture.com). The label-count guard stops a bare "media.com"
+    # or "news.com", where a two-label host is the publisher itself rather than
+    # somebody's newsroom.
+    on_path = any(marker in path for marker in FIRST_PARTY_PATH_MARKERS)
+    on_host = host.count(".") >= 2 and host.startswith(FIRST_PARTY_HOST_PREFIXES)
+    if on_path or on_host:
+        where = ("" if on_path
+                 else " (%s subdomain)" % host.split(".", maxsplit=1)[0])
+        return FIRST_PARTY, "first-party company page" + where + via, resolved
 
     return UNKNOWN, "unrecognised domain '%s'" % host, resolved
 

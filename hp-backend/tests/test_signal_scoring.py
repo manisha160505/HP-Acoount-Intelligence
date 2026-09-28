@@ -95,11 +95,15 @@ class TestRecencyBands:
         points, _ = ss.recency_points(datetime(2026, 9, 16), now=NOW)  # noqa: DTZ001
         assert points == 10
 
-    def test_the_basis_says_how_old_it_was(self):
-        """The number alone is not auditable - a reader needs to see the age it
-        came from."""
+    def test_the_basis_names_the_date_not_an_age(self):
+        """The number alone is not auditable - a reader needs to see what it
+        was computed from. That used to be "147 days old", which is frozen at
+        extraction and reads as today's age months later. The client asked for
+        the date instead (27 Sep), so the basis carries the date and the score
+        still carries the band."""
         _points, basis = ss.recency_points(_aged(147), now=NOW)
-        assert "147" in basis
+        assert "days old" not in basis
+        assert _aged(147).strftime("%d %b %Y") in basis
 
 
 class TestSourceReliabilityBands:
@@ -324,7 +328,7 @@ class TestTheComposite:
 
         recency, basis = ss.recency_points(published, now=scored_on)
         assert recency == 4, "147 days falls in the 91-180 band"
-        assert "147" in basis
+        assert "23 Apr 2026" in basis
 
         source, _basis, _url = ss.source_reliability_points(
             "https://www.idnfinancials.com/news/astra-capex")

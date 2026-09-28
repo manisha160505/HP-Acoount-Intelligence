@@ -35,6 +35,14 @@ HP_PRODUCT_LINES = [
     "Poly Studio",
     "HP Enterprise Print / MPS",
     "HP Enterprise Printing & MPS",
+    # 3D. The line existed everywhere except here: the opportunity map has a
+    # "3d" play key, a 3D resource URL and a 3D display name, and 63 of the 90
+    # case studies are 3D - but with no member on this list a 3D play could
+    # never carry a correct product. "HP 3D Printing Solutions" fell through
+    # the "print" token below and was tagged HP Enterprise Print / MPS on every
+    # account, which is why the client saw a Managed Print Services case study
+    # on a 3D printing card on 27 Sep. Named as PLAY_DISPLAY_NAMES names it.
+    "HP Multi Jet Fusion (3D)",
     "HP Anyware / DaaS",
     "HP Anyware",
     "HP DaaS",
@@ -213,6 +221,12 @@ HP_LINE_TOKENS = [
      "HP Elite / Pro PCs"),
     (("wolf",), "HP Wolf Security"),
     (("poly",), "Poly Collaboration"),
+    # 3D BEFORE print, and the order is load-bearing: every 3D name contains
+    # the word "print". Same reason "ink" is spelled out above rather than left
+    # bare - a loose token pulls a claim into the wrong line.
+    (("multi jet fusion", "jet fusion", "metal jet", "3d print", "3d printing",
+      "additive manufacturing"),
+     "HP Multi Jet Fusion (3D)"),
     (("print", "mps"), "HP Enterprise Print / MPS"),
     (("anyware", "daas", "device as a service"), "HP Anyware / DaaS"),
 ]
