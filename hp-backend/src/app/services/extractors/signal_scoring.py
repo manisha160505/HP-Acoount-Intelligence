@@ -162,33 +162,25 @@ def classification_for(points) -> str:
 
 
 def describe_source(points, basis: str, publisher: str = "") -> str:
-    """The source line a reader sees.
+    """The source line a reader sees: the document's classification, and who
+    the source was.
 
-    The classification first - the document's own word for this band - then who
-    the source actually was, because the band alone says nothing about THIS
-    signal and the publisher sat on the card while the explanation never named
-    it. The lookup basis follows only where it adds something the first two do
-    not already say.
+    The client, 27 Sep, on the scoring document's table: "only show the part
+    written in classification n not definition". The first pass kept the lookup
+    basis alongside the classification - "Structured third-party evidence.
+    Structured provider record with no underlying source URL" - and the second
+    half of that is the definition column, which is what they asked us to stop
+    printing. It is gone.
+
+    The publisher stays where there is one. It is not from the document at all:
+    it is who actually published THIS signal, which the band alone never says.
+
+    `basis` is still taken so the call sites and the stored scores keep their
+    shape; it is no longer read.
     """
     label = classification_for(points)
     parts = [p for p in (label, (publisher or "").strip()) if p]
-    detail = (basis or "").strip()
-    if detail and not _restates_the_band(detail):
-        parts.append(detail[0].upper() + detail[1:])
-    return ". ".join(parts) if parts else detail
-
-
-# A basis that only says the band again. "Established independent reporting.
-# Nikkei. Established publication" tells a reader the same thing three times;
-# the others ("no underlying source URL", "via an aggregator link") each add
-# the reason this signal landed in its band, so they stay.
-_BAND_RESTATEMENTS = ("established publication",)
-
-
-def _restates_the_band(detail: str) -> bool:
-    # A trailing "(domain)" is part of the same restatement.
-    core = detail.split("(", maxsplit=1)[0].strip().lower()
-    return core in _BAND_RESTATEMENTS
+    return ". ".join(parts)
 
 
 # --- 10/10: first-party or authoritative --------------------------------------

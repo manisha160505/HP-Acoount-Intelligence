@@ -201,3 +201,91 @@ class TestContentStudioFindsTheBuyingCommittee:
         monkeypatch.setattr(cstudio, "_derive_named_personas", lambda _db, _aid: [])
         found = cstudio._persona_by_id(None, "acct", [], "role_chief_technology_officer_cto")
         assert found is not None and found["id"] == "role_chief_technology_officer_cto"
+
+
+class TestTheBusinessUnitReads:
+    """Sahaj, 28 Sep: "on top we can show the summary from the bombora data
+    itself, llm can generate in cards". The model writes one line per unit; the
+    numbers on the card stay Python's."""
+
+    def test_a_read_carrying_a_figure_is_dropped(self, monkeypatch):
+        """Rule 4. The card already prints the count and the maximum, so a
+        number inside the prose is either a repetition or an invention."""
+        monkeypatch.setattr(ids, "generate_gpt4o_json_completion", lambda *_a, **_k: {
+            "overview": "The research leans towards print and desktop conversations here.",
+            "units": [{"category": ids.tm.CAT_PC,
+                       "read": "Four topics point to a desktop refresh conversation "
+                               "worth opening on with the workplace team."}]})
+        out = ids._bu_reads("A Co", [{"category": ids.tm.CAT_PC, "hp_play": "HP Elite",
+                                      "bombora_top_topics": [{"topic": "2-in-1 pcs", "score": 72}]}])
+        assert out["reads"] == {}
+
+    def test_the_models_own_spelling_of_a_topic_still_counts(self, monkeypatch):
+        """The topic is "personal computer: 2-in-1 pcs" and the model writes
+        "2-in-1 PCs". Matching whole names left the digit behind and dropped
+        the read; the token is what is checked."""
+        text = ("The interest in end user digital experiences, 2-in-1 PCs and "
+                "desktop apps may indicate an opening to discuss how the fleet "
+                "supports modern work.")
+        monkeypatch.setattr(ids, "generate_gpt4o_json_completion", lambda *_a, **_k: {
+            "overview": "", "units": [{"category": ids.tm.CAT_PC, "read": text}]})
+        out = ids._bu_reads("A Co", [{"category": ids.tm.CAT_PC,
+                                      "hp_play": "HP Elite & Pro PCs",
+                                      "bombora_top_topics": [
+                                          {"topic": "personal computer: 2-in-1 pcs", "score": 72},
+                                          {"topic": "desktop: desktop apps", "score": 64}]}])
+        assert out["reads"][ids.tm.CAT_PC] == text
+
+    def test_a_percentage_is_still_a_figure(self, monkeypatch):
+        monkeypatch.setattr(ids, "generate_gpt4o_json_completion", lambda *_a, **_k: {
+            "overview": "", "units": [{"category": ids.tm.CAT_PC,
+                                       "read": "Interest is up 20% this quarter, which "
+                                               "suggests a fleet conversation is worth "
+                                               "opening with the workplace team."}]})
+        out = ids._bu_reads("A Co", [{"category": ids.tm.CAT_PC, "hp_play": "HP Elite",
+                                      "bombora_top_topics": [{"topic": "2-in-1 pcs", "score": 72}]}])
+        assert out["reads"] == {}
+
+    def test_a_name_with_a_digit_in_it_is_not_a_figure(self, monkeypatch):
+        """The unit is called 3D and one topic is "2-in-1 pcs". The first cut
+        of the no-figures rule dropped every read that named either."""
+        text = ("For 3D, no researched topic maps to this unit, so the opening "
+                "conversation would have to start from somewhere else entirely.")
+        monkeypatch.setattr(ids, "generate_gpt4o_json_completion", lambda *_a, **_k: {
+            "overview": "", "units": [{"category": ids.tm.CAT_3D, "read": text}]})
+        out = ids._bu_reads("A Co", [{"category": ids.tm.CAT_3D,
+                                      "hp_play": "HP Multi Jet Fusion (3D)",
+                                      "bombora_top_topics": [{"topic": "2-in-1 pcs", "score": 72}]}])
+        assert out["reads"][ids.tm.CAT_3D] == text
+
+    def test_a_clean_read_is_kept(self, monkeypatch):
+        text = ("Research on two-in-one desktops suggests a fleet conversation "
+                "could be worth opening on with the workplace team soon.")
+        monkeypatch.setattr(ids, "generate_gpt4o_json_completion", lambda *_a, **_k: {
+            "overview": "", "units": [{"category": ids.tm.CAT_PC, "read": text}]})
+        out = ids._bu_reads("A Co", [{"category": ids.tm.CAT_PC, "hp_play": "HP Elite",
+                                      "bombora_top_topics": [{"topic": "2-in-1 pcs", "score": 72}]}])
+        assert out["reads"][ids.tm.CAT_PC] == text
+
+    def test_a_read_outside_the_word_band_is_dropped(self, monkeypatch):
+        monkeypatch.setattr(ids, "generate_gpt4o_json_completion", lambda *_a, **_k: {
+            "overview": "", "units": [{"category": ids.tm.CAT_PC, "read": "Worth a look."}]})
+        out = ids._bu_reads("A Co", [{"category": ids.tm.CAT_PC, "hp_play": "HP Elite",
+                                      "bombora_top_topics": [{"topic": "2-in-1 pcs", "score": 72}]}])
+        assert out["reads"] == {}
+
+    def test_an_account_with_no_researched_topic_is_never_sent(self, monkeypatch):
+        """No topics, nothing to read - and no call to pay for."""
+        called = []
+        monkeypatch.setattr(ids, "generate_gpt4o_json_completion",
+                            lambda *_a, **_k: called.append(1))
+        assert ids._bu_reads("A Co", [{"category": ids.tm.CAT_PC, "hp_play": "HP Elite",
+                                       "bombora_top_topics": []}]) == {}
+        assert called == []
+
+    def test_a_model_failure_costs_prose_and_nothing_else(self, monkeypatch):
+        def boom(*_a, **_k):
+            raise RuntimeError("upstream is down")
+        monkeypatch.setattr(ids, "generate_gpt4o_json_completion", boom)
+        assert ids._bu_reads("A Co", [{"category": ids.tm.CAT_PC, "hp_play": "HP Elite",
+                                       "bombora_top_topics": [{"topic": "x", "score": 1}]}]) == {}

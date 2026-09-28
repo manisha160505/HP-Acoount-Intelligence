@@ -112,7 +112,9 @@ NODES = (
                    "hp_category_intent", "technographics", "webstack",
                    "firmographics"),
          knowledge=("case_studies",), llm=True,
-         logic_refs=("app.services.hp.intent_topic_map:DICTIONARY_VERSION",),
+         logic_refs=("app.services.hp.intent_topic_map:DICTIONARY_VERSION",
+                     "app.services.extractors.intent_demand_signals:"
+                     "BU_READ_PROMPT_VERSION"),
          # 2: Sahaj 27 Sep - no trend or volume in the So What, no proof point,
          # a business-unit summary led by Bombora.
          logic_version=2,

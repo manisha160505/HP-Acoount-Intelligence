@@ -151,19 +151,29 @@ class TestTheSourceClassification:
                                   "established publication", "Nikkei")
         assert line == "Established independent reporting. Nikkei"
 
-    def test_a_basis_that_only_repeats_the_band_is_dropped(self):
-        """"Established independent reporting. Nikkei. Established
-        publication" says the same thing three times."""
+    def test_no_basis_reaches_the_line_whatever_it_says(self):
         line = ss.describe_source(ss.ESTABLISHED_REPORTING,
                                   "established publication (reuters.com)", "Reuters")
-        assert line.count("stablished") == 1
+        assert line == "Established independent reporting. Reuters"
 
-    def test_a_basis_that_adds_the_reason_is_kept(self):
+    def test_the_definition_is_never_printed(self):
+        """Sahaj, 28 Sep: "only show the part written in classification n not
+        definition". The first pass kept the lookup basis beside the
+        classification - "Structured third-party evidence. Structured provider
+        record with no underlying source URL" - and the second half of that is
+        the document's definition column."""
         line = ss.describe_source(ss.STRUCTURED_THIRD_PARTY,
                                   "structured provider record with no underlying "
                                   "source URL", "")
-        assert line.startswith("Structured third-party evidence.")
-        assert "no underlying source URL" in line
+        assert line == "Structured third-party evidence"
+
+    def test_the_publisher_is_not_a_definition_and_stays(self):
+        """It is not from the document at all - it is who published THIS
+        signal, which the band alone never says."""
+        line = ss.describe_source(ss.FIRST_PARTY,
+                                  "first-party company page (newsroom subdomain)",
+                                  "Accenture")
+        assert line == "First-party or authoritative. Accenture"
 
     def test_a_company_newsroom_on_a_subdomain_is_first_party(self):
         """The document puts "Company newsroom" in the 10/10 row. We matched
