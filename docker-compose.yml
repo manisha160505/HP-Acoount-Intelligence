@@ -21,6 +21,11 @@ services:
       - "8000:8000"
     env_file:
       - .env
+    # The regeneration engine is off here unless you switch it on. Only do that
+    # against a database no one else uses (e.g. the local-db profile below):
+    #   environment:
+    #     REGEN_WORKER_ENABLED: "1"
+    #     REGEN_SWEEP_ENABLED: "1"
     # MONGODB_URI intentionally NOT overridden here. It used to be pinned to the
     # local mongodb service, which silently beat whatever .env said and made it
     # impossible to point a container at the shared cluster.

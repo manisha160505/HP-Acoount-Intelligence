@@ -49,6 +49,12 @@ services:
     build: ./hp-backend
     env_file:
       - .env
+    environment:
+      # The regeneration engine's worker and sweep run here, on the VM - the
+      # host that holds the uploaded files. Off by default everywhere else, so
+      # a laptop pointed at a shared database never regenerates against it.
+      REGEN_WORKER_ENABLED: "1"
+      REGEN_SWEEP_ENABLED: "1"
     depends_on:
       mongodb:
         condition: service_healthy
