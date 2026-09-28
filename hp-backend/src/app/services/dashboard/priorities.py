@@ -55,6 +55,7 @@ from app.observability import pipeline
 from app.services.dashboard import evidence_strength
 from app.services.extractors import grounding
 from app.services.hp import case_studies as cs
+from app.services.regen import context as run_context, store as widget_store
 from app.services.retrieval import evidence as ev, index_state, query
 
 logger = logging.getLogger(__name__)
@@ -386,10 +387,8 @@ def _hp_facts(db, account_id: str, limit: int = 40) -> list:
     """
     facts = []
 
-    recs = (db["account_widgets"].find_one(
-        {"account_id": account_id,
-         "widget_key": "technographic_hp_recommendations"}) or {}
-    ).get("data") or {}
+    recs = (widget_store.get(account_id, "technographic_hp_recommendations", db=db)
+            or {}).get("data") or {}
     for rec in (recs.get("recommendations") or []):
         family = _text(rec.get("hp_family"))
         for fact in (rec.get("approved_facts") or []):
@@ -407,10 +406,8 @@ def _hp_facts(db, account_id: str, limit: int = 40) -> list:
     # the rulebook's workforce-experience, Care Pack and deployment rules -
     # the ones that actually speak to efficiency - were sitting in the
     # Opportunity Map unread.
-    plays = (db["account_widgets"].find_one(
-        {"account_id": account_id,
-         "widget_key": "opportunity_narrative_plays"}) or {}
-    ).get("data") or {}
+    plays = (widget_store.get(account_id, "opportunity_narrative_plays", db=db)
+             or {}).get("data") or {}
     for play in (plays.get("service_plays") or []):
         offering = _text(play.get("title")) or _text(play.get("offering"))
         for fact in (play.get("allowed_facts") or []):
@@ -767,8 +764,7 @@ def _publish_metrics(db, account_id: str, reported: list, now) -> dict:
     the company told a regulator - and showing them side by side is what lets a
     seller see which is which. Replacing the band would hide that distinction.
     """
-    existing = db["account_widgets"].find_one(
-        {"account_id": account_id, "widget_key": METRICS_WIDGET_KEY}) or {}
+    existing = widget_store.get(account_id, METRICS_WIDGET_KEY, db=db) or {}
     data = dict(existing.get("data") or {})
     data["reported_metrics"] = reported
     data["reported_metric_count"] = len(reported)
@@ -790,9 +786,7 @@ def _publish_metrics(db, account_id: str, reported: list, now) -> dict:
     }
     if not existing:
         payload["extracted_at"] = now
-    db["account_widgets"].update_one(
-        {"account_id": account_id, "widget_key": METRICS_WIDGET_KEY},
-        {"$set": payload}, upsert=True)
+    widget_store.put(account_id, METRICS_WIDGET_KEY, payload, db=db)
     return data
 
 
@@ -863,9 +857,8 @@ def generate_dashboard_intelligence(account_id: str, mode: str | None = None) ->
             "the Executive Dashboard index is %s - %s"
             % (state.get("status"), state.get("last_error") or "build it first"))
 
-    summary_card = (db["account_widgets"].find_one(
-        {"account_id": account_id, "widget_key": "exec_summary_card"}) or {}
-    ).get("data") or {}
+    summary_card = (widget_store.get(account_id, "exec_summary_card", db=db)
+                    or {}).get("data") or {}
     company = _text(summary_card.get("company_name")) or "This account"
     # What makes "the company's own site" decidable for source diversity. Its
     # careers page and its newsroom are one category; a publication is another.
@@ -938,7 +931,14 @@ def generate_dashboard_intelligence(account_id: str, mode: str | None = None) ->
             here.add(proof["study_id"])
 
     reported = _reported_metrics(account_id)
-    _publish_metrics(db, account_id, reported, now)
+    # Under the regeneration engine `exec_key_metrics` has one owner, the
+    # executive-dashboard core producer. This one used to rewrite it too, and
+    # each producer erasing the other's fields rebuilt the dashboard index in a
+    # loop (audit R8). The reported figures already travel on
+    # `exec_strategic_priorities`, which the dashboard and the strategy corpus
+    # read. The legacy paths keep the copy.
+    if run_context.current() is None:
+        _publish_metrics(db, account_id, reported, now)
     summary = _executive_summary(company, priorities, reported)
 
     payload = {
@@ -984,9 +984,7 @@ def generate_dashboard_intelligence(account_id: str, mode: str | None = None) ->
         "updated_at": now,
     }
 
-    db["account_widgets"].update_one(
-        {"account_id": account_id, "widget_key": WIDGET_KEY},
-        {"$set": payload}, upsert=True)
+    widget_store.put(account_id, WIDGET_KEY, payload, db=db)
     logger.info("executive_dashboard: published %d priority(ies) and %d reported "
                 "metric(s) for account %s", len(priorities), len(reported),
                 account_id)

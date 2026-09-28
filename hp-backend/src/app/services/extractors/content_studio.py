@@ -1,20 +1,17 @@
-import csv
 import hashlib
 import html as _html
 import json
 import logging
-import os
 import re
 from collections import Counter
 from datetime import UTC, datetime
 
-import pandas as pd
 from bson import ObjectId
 
 from app.core.llm import generate_gpt4o_json_completion
 from app.database.mongodb import get_db
 from app.observability import pipeline
-from app.services.extractors.datasets import account_display_name
+from app.services.extractors.datasets import account_display_name, read_dataset_records
 from app.services.extractors.grounding import (
     HP_PRODUCT_LINES,
     GroundingReport,
@@ -37,6 +34,7 @@ from app.services.extractors.stakeholder_map import (
     seniority_band,
 )
 from app.services.hp import case_studies as cs
+from app.services.regen import context as run_context, store as widget_store
 
 logger = logging.getLogger(__name__)
 
@@ -172,8 +170,7 @@ def _derive_named_personas(db, account_id: str) -> list[dict]:
     from prospect_contacts. Apollo-sourced rows are excluded ("Source A only").
     Empty when the contacts export is empty, in which case the role-type proxy
     carries the persona."""
-    grid = db["account_widgets"].find_one({
-        "account_id": account_id, "widget_key": "stakeholder_contacts_grid"})
+    grid = widget_store.get(account_id, "stakeholder_contacts_grid", db=db)
     contacts = ((grid or {}).get("data") or {}).get("contacts") or []
 
     eligible = [c for c in contacts
@@ -274,46 +271,14 @@ def _derive_role_proxy_personas(job_records: list[dict]) -> list[dict]:
     return personas[:ROLE_PROXY_MAX]
 
 def _read_dataset_records(account_id: str, dataset_key: str) -> list[dict]:
-    db = get_db()
-    file_doc = db["account_data_files"].find_one({
-        "account_id": account_id,
-        "$or": [{"dataset_key": dataset_key}, {"category": dataset_key}],
-        "status": "active"
-    })
+    """Rows for one dataset, through the shared loader.
 
-    if not file_doc:
-        return []
-
-    rel_path = file_doc.get("file_path", "")
-    candidate_paths = [
-        os.path.join(os.getcwd(), rel_path),
-        os.path.join("/app", rel_path),
-        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", rel_path)),
-        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", rel_path)),
-        os.path.join(r"C:\hp-account\HP-Acoount-Intelligence\hp-backend", rel_path)
-    ]
-
-    full_path = None
-    for cp in candidate_paths:
-        if os.path.exists(cp):
-            full_path = cp
-            break
-
-    if not full_path:
-        return []
-
-    ext = os.path.splitext(full_path)[1].lower()
-    try:
-        if ext in [".xlsx", ".xls"]:
-            df = pd.read_excel(full_path)
-            df = df.fillna("")
-            return df.to_dict(orient="records")
-        else:
-            with open(full_path, encoding="utf-8-sig", errors="replace") as f:
-                reader = csv.DictReader(f)
-                return list(reader)
-    except Exception:
-        return []
+    This module used to carry its own copy, with a hard-coded Windows path among
+    its candidates. The shared loader resolves the same locations, and inside a
+    regeneration run it reads the pinned rows and records the read - which a
+    private copy would silently bypass.
+    """
+    return read_dataset_records(account_id, dataset_key, strict=False)
 
 # --- Generation (spec row 4: generated_content, INFERRED / SYNTHESIZED) --------
 # Same flow as the other inferred extractors: fingerprint -> cache -> one GPT-4o
@@ -1216,8 +1181,7 @@ def _build_generation_context(db, account_id: str, persona_id: str, content_type
                                       "cta", "persona_framing"])
 
     # Names the copy may not use when the target is a role type, not a person.
-    grid = db["account_widgets"].find_one({
-        "account_id": account_id, "widget_key": "stakeholder_contacts_grid"})
+    grid = widget_store.get(account_id, "stakeholder_contacts_grid", db=db)
     banned_names = []
     for c in (((grid or {}).get("data") or {}).get("contacts") or []):
         n = str(c.get("full_name") or "").strip().lower()
@@ -1745,12 +1709,15 @@ def extract_content_studio(account_id: str) -> list[dict]:
         "updated_at": now
     }
 
-    db["account_widgets"].update_one(
-        {"account_id": account_id, "widget_key": "content_persona_context"},
-        {"$set": context_payload},
-        upsert=True
-    )
+    widget_store.put(account_id, "content_persona_context", context_payload, db=db)
     results.append(context_payload)
+
+    # The generated-assets widget is a seller's history, not a function of the
+    # account's data: under the regeneration engine it has no owner and the
+    # read path reports "pending" until the first asset exists. The
+    # placeholder below serves only the legacy direct-call paths.
+    if run_context.current() is not None:
+        return results
 
     # Widget 2: content_generated_assets (Inferred). Request-scoped: assets are
     # produced by generate_content_asset() behind POST .../content_studio/generate

@@ -173,3 +173,7 @@ class AccountDataFileResponse(BaseModel):
     status: Literal['active', 'replaced', 'archived', 'deleted']
     uploaded_at: str
     updated_at: str
+    # What the upload set off in the regeneration engine: the nodes queued and
+    # the features they belong to. Regeneration runs in the background - the
+    # upload no longer waits on it.
+    regeneration: dict | None = None

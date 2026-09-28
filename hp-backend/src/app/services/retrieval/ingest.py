@@ -38,6 +38,7 @@ until explicit deletion"* - so delete always precedes insert.
 
 import asyncio
 import logging
+import threading
 import time
 
 from app.database.mongodb import get_db
@@ -49,6 +50,26 @@ logger = logging.getLogger(__name__)
 
 class BuildBlocked(Exception):
     """The index cannot be built yet - not a failure."""
+
+
+class BuildBusy(Exception):
+    """Another build of this workspace is already running in this process.
+
+    Deliberately NOT a `BuildBlocked`: the caller must retry later, not record
+    the build as done. Two live event loops cannot build one LightRAG workspace
+    at once - its pipeline ingress refuses the second - and the two builds would
+    also race on `retrieval_index_state`, which is how one of them was seen
+    silently promoted to a full rebuild that dropped the workspace.
+    """
+
+
+_BUILD_LOCKS: dict = {}
+_BUILD_LOCKS_MUTEX = threading.Lock()
+
+
+def _build_lock(workspace: str) -> threading.Lock:
+    with _BUILD_LOCKS_MUTEX:
+        return _BUILD_LOCKS.setdefault(workspace, threading.Lock())
 
 
 async def _ingest_document(rag, doc, replace: bool):
@@ -66,7 +87,21 @@ async def _ingest_document(rag, doc, replace: bool):
 
 async def update_index(account_id: str, index: str, full: bool = False,
                        progress=None) -> dict:
-    """Bring one index up to date. `full=True` drops and rebuilds in place."""
+    """Bring one index up to date. `full=True` drops and rebuilds in place.
+
+    Holds a per-workspace lock for the whole build: see `BuildBusy`.
+    """
+    lock = _build_lock(client.workspace_name(account_id, index))
+    if not lock.acquire(blocking=False):
+        raise BuildBusy("%s/%s is already building in this process" % (account_id, index))
+    try:
+        return await _update_index(account_id, index, full, progress)
+    finally:
+        lock.release()
+
+
+async def _update_index(account_id: str, index: str, full: bool = False,
+                        progress=None) -> dict:
     db = get_db()
     started = time.time()
     stats = {"mode": index_state.FULL if full else index_state.INCREMENTAL,
@@ -93,12 +128,16 @@ async def update_index(account_id: str, index: str, full: bool = False,
 
     fingerprints = corpus.fingerprints(documents)
     by_id = {d.doc_id: d for d in documents}
-    delta = index_state.diff(account_id, index, fingerprints)
+    # One read, three answers. These used to be three separate reads, and a
+    # concurrent build's `begin_build` landing between them made `have_index`
+    # False - promoting this build to a full rebuild that drops the workspace.
+    snapshot = index_state.get(account_id, index)
+    delta = index_state.diff_state(snapshot, fingerprints)
     # An interrupted build counts as an index to update, not as nothing. Its
     # finished documents are recorded and still in the workspace, so the work
     # left is the ordinary incremental delta - see `index_state.is_resumable`.
-    resuming = index_state.is_resumable(account_id, index)
-    have_index = index_state.has_index(account_id, index) or resuming
+    resuming = index_state.resumable_state(snapshot)
+    have_index = index_state.has_index_state(snapshot) or resuming
     if resuming:
         logger.info("retrieval: resuming an interrupted %s build for account %s "
                     "- %d document(s) already indexed",
@@ -518,6 +557,13 @@ def retire_index(account_id: str, index: str, reason: str = "") -> dict:
     working source chips; it simply cannot retrieve or regenerate until rebuilt.
     """
     workspace = client.workspace_name(account_id, index)
-    dropped = client.drop_workspace(workspace)
-    state = index_state.retire(account_id, index, reason)
+    lock = _build_lock(workspace)
+    if not lock.acquire(blocking=False):
+        raise BuildBusy("%s/%s is building - retire it once the build finishes"
+                        % (account_id, index))
+    try:
+        dropped = client.drop_workspace(workspace)
+        state = index_state.retire(account_id, index, reason)
+    finally:
+        lock.release()
     return {"workspace": workspace, "dropped": dropped, "status": state["status"]}

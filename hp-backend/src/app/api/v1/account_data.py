@@ -1,4 +1,5 @@
 import csv
+import hashlib
 import io
 import logging
 import os
@@ -15,8 +16,6 @@ from app.api.v1.feature_mapping import FEATURE_MAPPINGS
 from app.config.settings import settings
 from app.core.deps import get_current_user_flexible, require_admin_role
 from app.database.mongodb import get_db
-from app.errors import ErrorCode
-from app.observability import pipeline
 from app.schemas.account_data import DATASET_REGISTRY, AccountDataFileResponse
 
 logger = logging.getLogger(__name__)
@@ -103,6 +102,33 @@ FEATURE_EXTRACTORS = {
 }
 
 
+def _notify_regeneration(account_id: str, dataset_key: str, what: str,
+                         current_user: dict) -> dict:
+    """Tell the regeneration engine an input changed, and report what it queued.
+
+    Replaces running every dependent extractor inside the request. The engine
+    works out which producers the change actually affects - from what each one
+    reads, not from a hand-kept list - queues them in dependency order, and a
+    background worker regenerates them. The upload returns at once.
+
+    Never raises: the file is stored either way, and the sweep that runs every
+    few minutes would pick the change up even if queueing failed here.
+    """
+    try:
+        from app.services.regen.engine import get_engine
+        plan = get_engine().notify_input_changed(
+            account_id, what, "user:%s" % (current_user or {}).get("id", "?"),
+            datasets=[dataset_key])
+    except Exception:
+        logger.exception("could not queue regeneration after %s", what)
+        return {"queued": [], "features": [], "error": "queueing failed; the "
+                "periodic sweep will pick the change up"}
+    from app.services.regen.graph import DEFAULT
+    nodes = [p["node_id"] for p in plan]
+    return {"queued": nodes,
+            "features": sorted({DEFAULT[n].feature for n in nodes if n in DEFAULT})}
+
+
 def _features_for_dataset(dataset_key: str) -> list[str]:
     """Features that declare this dataset as a dependency, in registry order."""
     return [
@@ -110,86 +136,6 @@ def _features_for_dataset(dataset_key: str) -> list[str]:
         if dataset_key in (spec.get("dependent_datasets") or [])
         and fk in FEATURE_EXTRACTORS
     ]
-
-
-def _run_dependent_extractors(account_id: str, dataset_key: str) -> tuple[list, list]:
-    """Re-run every feature that depends on this dataset.
-
-    Returns (regenerated, failed). A failure never blocks the upload - the file
-    is stored either way - but it is logged and returned rather than swallowed,
-    which is how a broken regeneration used to pass as a 201.
-    """
-    regenerated, failed = [], []
-    features = _features_for_dataset(dataset_key)
-    # What this upload is about to set off. Without it a dataset landing looks
-    # identical whether it triggered eight features or none.
-    pipeline.step("upload", "%s -> %d feature(s): %s"
-                  % (dataset_key, len(features), ", ".join(features) or "none"))
-    for feature_key in features:
-        try:
-            FEATURE_EXTRACTORS[feature_key](account_id)
-            regenerated.append(feature_key)
-        except Exception as exc:
-            logger.warning("re-extraction failed for %s after %s changed: %s",
-                           feature_key, dataset_key, exc, exc_info=True)
-            # The exception text is in the log line above with the traceback.
-            # What reaches the UI is the feature name and a stable reason: an
-            # extractor's internal message ("KeyError: 'revenue_usd'") tells a
-            # seller nothing and can carry row data from the source file.
-            failed.append({
-                "feature": feature_key,
-                "error": "This feature could not be rebuilt from the new data.",
-                "code": ErrorCode.EXTRACTION_FAILED.value,
-            })
-
-    _queue_retrieval_updates(account_id, dataset_key, regenerated)
-    return regenerated, failed
-
-
-def _queue_retrieval_updates(account_id: str, dataset_key: str, regenerated: list):
-    """Queue an index update once the whole regeneration batch has finished.
-
-    Here rather than inside the loop above: one dataset change re-runs several
-    extractors, and enqueueing per extractor would ask for the same index
-    several times. The queue coalesces anyway, but asking once is the point of
-    doing it after the batch - that is the debounce.
-
-    Queued, never run inline. A retrieval build takes minutes and an LLM call
-    per chunk; an upload must not wait on it, and an index that fails to build
-    must not fail the upload.
-    """
-    from app.services.retrieval import registry
-    from app.services.retrieval.ingest import request_update, requeue_dependents
-
-    # Two reasons an index is behind, and they are not the same reason.
-    #
-    # A dataset it reads directly changed - that is this loop, matched on
-    # `datasets`. Or a widget it reads was republished by one of the extractors
-    # that just ran - that is `requeue_dependents` below, which resolves widget
-    # -> index through the registry. Both paths now share that one mapping with
-    # the `/regenerate` endpoint and with `_run_generator`, so a widget added to
-    # a registry entry becomes visible to all three at once.
-    for index, spec in registry.INDEX_REGISTRY.items():
-        if not spec.get("enabled"):
-            continue
-        if dataset_key not in (spec.get("datasets") or []):
-            continue
-        try:
-            request_update(account_id, index,
-                           reason="%s changed" % dataset_key)
-        except Exception:
-            logger.exception("could not queue a retrieval update for %s", index)
-
-    requeue_dependents(account_id, _widgets_of(regenerated),
-                       reason="%s changed" % dataset_key)
-
-
-def _widgets_of(features) -> list:
-    """Every widget key the given features publish."""
-    from app.api.v1.widgets import WIDGET_REGISTRY
-
-    return [c["widget_key"] for feature in (features or [])
-            for c in WIDGET_REGISTRY.get(feature, []) if c.get("widget_key")]
 
 
 @router.post("", response_model=AccountDataFileResponse, status_code=status.HTTP_201_CREATED)
@@ -235,6 +181,9 @@ async def upload_account_data(
     # 4. Read File Content & Check non-empty
     content = await file.read()
     file_size = len(content)
+    # The dataset's version is built from these hashes, so re-uploading
+    # identical bytes changes nothing downstream.
+    content_sha256 = hashlib.sha256(content).hexdigest()
     if file_size == 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -282,17 +231,14 @@ async def upload_account_data(
     dataset_dir = os.path.join(settings.DATA_STORAGE_DIR, account_id, key_clean)
     os.makedirs(dataset_dir, exist_ok=True)
 
+    # Every stored file is immutable: a new upload never overwrites the bytes an
+    # existing row points at. A regeneration run pins the file rows it starts
+    # from, and a row whose file changed underneath it would make the output
+    # disagree with the fingerprint it is committed under. Single-file datasets
+    # are content-addressed; multi-file ones get a fresh name even when they
+    # replace a specific file.
     if dataset_info["type"] == "single_file_csv":
-        stored_filename = dataset_info["canonical_filename"]
-    # Multi-file News Datasets
-    elif file_id_to_replace and ObjectId.is_valid(file_id_to_replace):
-        old_doc = db["account_data_files"].find_one({"_id": ObjectId(file_id_to_replace)})
-        if old_doc and old_doc.get("stored_filename"):
-            stored_filename = old_doc["stored_filename"]
-        else:
-            timestamp = int(time.time())
-            sanitized_name = sanitize_filename(os.path.splitext(original_filename)[0])
-            stored_filename = f"{key_clean}_{timestamp}_{sanitized_name}{file_ext}"
+        stored_filename = f"{content_sha256[:12]}_{dataset_info['canonical_filename']}"
     else:
         timestamp = int(time.time())
         sanitized_name = sanitize_filename(os.path.splitext(original_filename)[0])
@@ -331,6 +277,7 @@ async def upload_account_data(
         "file_path": relative_file_path,
         "file_size": file_size,
         "row_count": row_count,
+        "content_sha256": content_sha256,
         "status": "active",
         "uploaded_at": now,
         "updated_at": now
@@ -345,14 +292,9 @@ async def upload_account_data(
         {"$set": {"updated_at": now}}
     )
 
-    # Regenerate every feature that declares this dataset as a dependency. The
-    # table is derived from FEATURE_MAPPINGS, so a feature that gains a dataset
-    # cannot silently fall out of the trigger set the way two of them had.
-    regenerated, failed = _run_dependent_extractors(account_id, key_clean)
-
     payload = serialize_data_file(new_metadata)
-    payload["regenerated"] = regenerated
-    payload["regeneration_failed"] = failed
+    payload["regeneration"] = _notify_regeneration(
+        account_id, key_clean, "dataset %s uploaded" % key_clean, current_user)
     return payload
 
 @router.get("", response_model=list[AccountDataFileResponse])
@@ -392,7 +334,12 @@ def delete_account_data_file(
 
     # Delete physical file if exists
     rel_path = file_doc.get("file_path", "")
-    if rel_path:
+    # Files are content-addressed, so an identical re-upload shares this path
+    # with another row. Only remove the bytes when no other live row uses them.
+    shared = rel_path and db["account_data_files"].count_documents({
+        "file_path": rel_path, "_id": {"$ne": file_doc["_id"]},
+        "status": {"$in": ["active", "replaced"]}})
+    if rel_path and not shared:
         full_path = _find_file_path(rel_path)
         if full_path and os.path.exists(full_path):
             try:
@@ -422,13 +369,12 @@ def delete_account_data_file(
 
     # A widget must stop presenting data derived from a file that is gone.
     dataset_key = str(file_doc.get("dataset_key") or file_doc.get("category") or "").strip().lower()
-    regenerated, failed = _run_dependent_extractors(account_id, dataset_key)
 
     return {
         "status": "success",
         "message": f"File '{file_doc.get('original_filename')}' deleted successfully.",
-        "regenerated": regenerated,
-        "regeneration_failed": failed,
+        "regeneration": _notify_regeneration(
+            account_id, dataset_key, "dataset %s deleted" % dataset_key, current_user),
     }
 
 @router.get("/download/{dataset_key}")

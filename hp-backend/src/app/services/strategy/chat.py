@@ -47,6 +47,7 @@ from app.core.llm import (
 )
 from app.database.mongodb import get_db
 from app.services.extractors import grounding
+from app.services.regen import store as widget_store
 from app.services.retrieval import evidence as ev, index_state, query
 
 logger = logging.getLogger(__name__)
@@ -452,9 +453,8 @@ def answer_stream(account_id: str, messages: list, mode: str | None = None):
             "the Strategy index is %s - %s"
             % (state.get("status"), state.get("last_error") or "build it first"))
 
-    company = _text((db["account_widgets"].find_one(
-        {"account_id": account_id, "widget_key": "exec_summary_card"}) or {}
-    ).get("data", {}).get("company_name")) or "this account"
+    company = _text((widget_store.get(account_id, "exec_summary_card", db=db)
+                     or {}).get("data", {}).get("company_name")) or "this account"
 
     question, topic = _resolve_question(messages)
 
@@ -557,9 +557,8 @@ def answer(account_id: str, messages: list, mode: str | None = None) -> dict:
             "the Strategy index is %s - %s"
             % (state.get("status"), state.get("last_error") or "build it first"))
 
-    company = _text((db["account_widgets"].find_one(
-        {"account_id": account_id, "widget_key": "exec_summary_card"}) or {}
-    ).get("data", {}).get("company_name")) or "this account"
+    company = _text((widget_store.get(account_id, "exec_summary_card", db=db)
+                     or {}).get("data", {}).get("company_name")) or "this account"
 
     # A follow-up pays for an LLM rewrite before retrieval even starts, and a
     # first question does not. Timing them together hides that difference.

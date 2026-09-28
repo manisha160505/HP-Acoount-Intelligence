@@ -55,6 +55,7 @@ from app.services.extractors.datasets import (
 )
 from app.services.hp import case_studies as cs, evidence_tier, intent_topic_map as tm
 from app.services.hp.guardrails import tier_language_faults
+from app.services.regen import store as widget_store
 
 logger = logging.getLogger(__name__)
 
@@ -728,11 +729,7 @@ def _summarise(topics: list[dict], category_file: dict, inventory: list[dict]) -
 
 
 def _write(db, payload: dict) -> dict:
-    db["account_widgets"].update_one(
-        {"account_id": payload["account_id"], "widget_key": payload["widget_key"]},
-        {"$set": payload},
-        upsert=True,
-    )
+    widget_store.put(payload["account_id"], payload["widget_key"], payload, db=db)
     return payload
 
 

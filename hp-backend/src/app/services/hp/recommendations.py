@@ -43,6 +43,11 @@ from app.services.hp.guardrails import (
     tier_language_faults,
 )
 from app.services.hp.product_rules import RULES_BY_ID, match_rules
+from app.services.regen import (
+    context as run_context,
+    manifest as regen_manifest,
+    store as widget_store,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -135,8 +140,7 @@ def knowledge_version(db) -> str:
 def _account_evidence(db, account_id: str) -> dict:
     """Only the account's own extracted data. No HP content enters here."""
     def widget(key):
-        return (db["account_widgets"].find_one(
-            {"account_id": account_id, "widget_key": key}) or {}).get("data") or {}
+        return (widget_store.get(account_id, key, db=db) or {}).get("data") or {}
 
     exec_card = widget("exec_summary_card")
     matrix = widget("tech_stack_matrix")
@@ -659,6 +663,12 @@ def generate_hp_recommendations(account_id: str) -> dict | None:
 
     evidence = _account_evidence(db, account_id)
     if not evidence["texts"]:
+        # Legacy callers leave the previous widget in place on None. Under the
+        # engine every owned widget is published each run, and "no evidence to
+        # recommend from" is the truthful state for these inputs.
+        if run_context.current() is not None:
+            return _pending(account_id, now, kversion,
+                            "No account evidence is available to recommend from.", [])
         return None
 
     rulebook_candidates, rulebook_blocked, rversion = [], [], ""
@@ -673,16 +683,18 @@ def generate_hp_recommendations(account_id: str) -> dict | None:
         live = [m for m in matched if not m["blocked"]]
         blocked = [m for m in matched if m["blocked"]]
 
-    existing = db["account_widgets"].find_one({
-        "account_id": account_id, "widget_key": "technographic_hp_recommendations"})
+    existing = widget_store.get(account_id, "technographic_hp_recommendations", db=db)
     rule_ids = ([c["rule_id"] for c in rulebook_candidates] if RULEBOOK_PART_A
                 else [m["rule_id"] for m in live])
     # The rulebook's own version joins the fingerprint, so reloading it
     # rebuilds these the way reloading the decks already did.
-    fingerprint = _fingerprint(evidence, rule_ids, kversion + "|" + rversion)
+    fingerprint = (_fingerprint(evidence, rule_ids, kversion + "|" + rversion)
+                   + regen_manifest.cache_suffix())
     if (existing and existing.get("status") == "available"
+            and existing.get("generation_quality") != "degraded"
             and (existing.get("data") or {}).get("fingerprint") == fingerprint):
         pipeline.cache_hit("technographic_hp_recommendations")
+        widget_store.keep(account_id, "technographic_hp_recommendations")
         return existing
 
     # ---- assemble candidates: Python decides everything here ----------------
@@ -750,7 +762,8 @@ def generate_hp_recommendations(account_id: str) -> dict | None:
         candidates = candidates[:MAX_RECOMMENDATIONS]
 
     if not candidates and not part_b_cards:
-        if existing and existing.get("status") == "available":
+        if (run_context.current() is None and existing
+                and existing.get("status") == "available"):
             pipeline.cache_hit("technographic_hp_recommendations", "kept - this run produced nothing to replace it")
             return existing
         return _pending(account_id, now, kversion,
@@ -931,3 +944,21 @@ def _pending(account_id, now, kversion, notice, blocked):
         "extracted_at": now,
         "updated_at": now,
     }
+
+
+def publish_hp_recommendations(account_id: str) -> dict:
+    """The regeneration engine's `tech_recs` producer.
+
+    Runs on its own, after the committed technographic map, stack, executive
+    summary, intent topics and trigger signals it reads. Unlike the legacy call
+    inside `extract_tech_landscape`, a failure here is not swallowed: it fails
+    the run, and the previously committed recommendations stay published.
+    """
+    payload = generate_hp_recommendations(account_id)
+    if payload is None:
+        raise RuntimeError("recommendations produced no payload")
+    if run_context.current() is None or \
+            "technographic_hp_recommendations" not in run_context.current().staged:
+        widget_store.put(account_id, "technographic_hp_recommendations",
+                         {k: v for k, v in payload.items() if k != "_id"})
+    return payload

@@ -23,6 +23,11 @@ from app.services.hp.guardrails import (
     prose_guardrail_faults,
     summarise,
 )
+from app.services.regen import (
+    context as run_context,
+    manifest as regen_manifest,
+    store as widget_store,
+)
 
 logger = logging.getLogger(__name__)
 from app.services.extractors.datasets import (
@@ -619,15 +624,15 @@ def generate_objection_cards(account_id: str, areas: list[dict],
     likely raiser are owned by Python and are never sent back for rewriting."""
     db = get_db()
     now = datetime.now(UTC)
+    # The suffix folds in the run's model, config and knowledge versions, so the
+    # cache cannot hand back cards built under a model or rulebook since changed.
     fingerprint = _evidence_fingerprint(areas, business_description,
                                         cs.knowledge_version(db),
-                                        rb.knowledge_version(db))
+                                        rb.knowledge_version(db)) + regen_manifest.cache_suffix()
 
-    existing = db["account_widgets"].find_one({
-        "account_id": account_id,
-        "widget_key": "objection_reframe_cards",
-    })
+    existing = widget_store.get(account_id, "objection_reframe_cards", db=db)
     if (existing and existing.get("status") == "available"
+            and existing.get("generation_quality") != "degraded"
             and existing.get("data", {}).get("evidence_fingerprint") == fingerprint):
         pipeline.cache_hit("objection_reframe_cards")
         return existing
@@ -1000,7 +1005,13 @@ def generate_objection_cards(account_id: str, areas: list[dict],
             "updated_at": now,
         }
 
-    if existing and existing.get("status") == "available":
+    # Keeping the old cards is right for the legacy paths, which have no other
+    # way to protect them. Under the engine it would re-label cards built from
+    # the old evidence as current: if the model failed the engine already keeps
+    # the previous output (degraded results never replace complete ones), and if
+    # it did not, "nothing survived" is the truthful answer for these inputs.
+    if (run_context.current() is None and existing
+            and existing.get("status") == "available"):
         pipeline.cache_hit("objection_reframe_cards", "kept - this run produced nothing to replace it")
         return existing
     return None
@@ -1119,11 +1130,7 @@ def extract_objection_playbook(account_id: str) -> list[dict]:
             "updated_at": now
         }
 
-    db["account_widgets"].update_one(
-        {"account_id": account_id, "widget_key": "objection_incumbent_context"},
-        {"$set": incumbent_payload},
-        upsert=True
-    )
+    widget_store.put(account_id, "objection_incumbent_context", incumbent_payload, db=db)
     results.append(incumbent_payload)
 
     # 2. Widget: objection_reframe_cards (Inferred). Cached on a fingerprint of
@@ -1157,11 +1164,7 @@ def extract_objection_playbook(account_id: str) -> list[dict]:
             "updated_at": now
         }
 
-    db["account_widgets"].update_one(
-        {"account_id": account_id, "widget_key": "objection_reframe_cards"},
-        {"$set": reframe_payload},
-        upsert=True
-    )
+    widget_store.put(account_id, "objection_reframe_cards", reframe_payload, db=db)
     results.append(reframe_payload)
 
     return results

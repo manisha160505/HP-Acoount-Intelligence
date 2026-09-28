@@ -75,6 +75,7 @@ from datetime import UTC, date, datetime
 from app.config import scoring as _scoring
 from app.observability import pipeline
 from app.services.hp import intent_topic_map
+from app.services.regen import store as widget_store
 
 logger = logging.getLogger(__name__)
 
@@ -1178,8 +1179,7 @@ def build_urgency_score(account_id: str, scored_on: date | None = None) -> dict:
 
     now = datetime.now(UTC)
     db = get_db()
-    existing = db["account_widgets"].find_one(
-        {"account_id": account_id, "widget_key": WIDGET_KEY}) or {}
+    existing = widget_store.get(account_id, WIDGET_KEY, db=db) or {}
     record = {
         "account_id": account_id,
         "feature_key": "executive_dashboard",
@@ -1195,9 +1195,7 @@ def build_urgency_score(account_id: str, scored_on: date | None = None) -> dict:
     }
     if not existing:
         record["extracted_at"] = now
-    db["account_widgets"].update_one(
-        {"account_id": account_id, "widget_key": WIDGET_KEY},
-        {"$set": record}, upsert=True)
+    widget_store.put(account_id, WIDGET_KEY, record, db=db)
 
     logger.info("urgency score for %s: %s (%d component(s) missing input)",
                 account_id, payload["score"], len(payload["missing_inputs"]))

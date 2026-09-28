@@ -23,6 +23,7 @@ Run: python -m pytest tests/test_scoring_config.py -v
 
 import os
 import sys
+from typing import ClassVar
 
 import pytest
 
@@ -221,60 +222,65 @@ class TestTheVersionStamp:
         assert "authority" not in payload
 
 
-class TestTheRefreshFindsWhatAChangeInvalidated:
+class TestAConfigChangeInvalidatesWhatReadsIt:
+    """The startup scoring refresh is gone; its guarantees are the engine's now.
 
-    def _fake_db(self, stored_stamp):
-        current = scoring.version("urgency")
-        stamp = current if stored_stamp == "current" else stored_stamp
+    Each node that scores with a config section carries that section's version
+    in its fingerprint, so an edited weight makes exactly those nodes - and
+    their dependents - stale, and the periodic sweep regenerates them. This is
+    what the old refresh did for three stamped widgets; it now holds for every
+    node that reads the config, including the evidence-strength scoring the
+    refresh never checked.
+    """
 
-        class Collection:
-            def find(self, query, _projection=None):
-                if query.get("widget_key") != "exec_urgency_score":
-                    return iter([])
-                data = {} if stamp is None else {"scoring_config_version": stamp}
-                return iter([{"account_id": "acc1", "data": data}])
+    # The widgets the retired refresh stamped, and the section each carried.
+    FORMERLY_STAMPED: ClassVar[dict] = {"exec_urgency_score": "urgency",
+                        "news_relevance_summary": "live_signal",
+                        "technographic_map": "tech_confidence"}
 
-        return {"account_widgets": Collection()}
+    def _fp(self, node_id, urgency="u1"):
+        from app.services.regen import manifest
+        from app.services.regen.engine import AccountSnapshot
+        from app.services.regen.graph import DEFAULT
 
-    def test_a_widget_scored_by_the_current_config_is_left_alone(self):
-        from app.services.dashboard import scoring_refresh
+        versions = manifest.StaticVersions(config={
+            "urgency": urgency, "live_signal": "l1", "tech_confidence": "t1",
+            "evidence_strength": "e1"})
+        snap = AccountSnapshot(account_id="acc1")
+        return manifest.fingerprint(manifest.expected(DEFAULT[node_id], snap, versions))
 
-        assert scoring_refresh.find_stale(self._fake_db("current")) == []
+    def test_a_node_built_under_the_current_config_is_left_alone(self):
+        assert self._fp("exec_core") == self._fp("exec_core")
 
-    def test_a_widget_scored_by_a_different_config_is_stale(self):
-        from app.services.dashboard import scoring_refresh
+    def test_a_config_change_makes_the_nodes_that_read_it_stale(self):
+        assert self._fp("exec_core", urgency="u2") != self._fp("exec_core")
 
-        stale = scoring_refresh.find_stale(self._fake_db("an-old-hash"))
-        assert len(stale) == 1
-        assert stale[0]["account_id"] == "acc1"
-        assert stale[0]["feature_key"] == "executive_dashboard"
+    def test_a_config_change_leaves_nodes_that_do_not_read_it_alone(self):
+        for node_id in ("intent", "objection", "stakeholder_roster", "news"):
+            assert self._fp(node_id, urgency="u2") == self._fp(node_id), node_id
 
-    def test_an_unstamped_widget_counts_as_stale(self):
-        """Every widget written before stamping existed has no stamp, and it
-        cannot be shown to agree with the current config. Assuming it does is
-        exactly how the retired urgency formula stayed on the dashboard."""
-        from app.services.dashboard import scoring_refresh
+    def test_every_formerly_stamped_widget_is_owned_by_a_node_reading_its_section(self):
+        from app.services.regen.graph import DEFAULT
 
-        assert len(scoring_refresh.find_stale(self._fake_db(None))) == 1
+        for widget_key, section in self.FORMERLY_STAMPED.items():
+            assert section in DEFAULT[DEFAULT.owner[widget_key]].config, widget_key
 
-    def test_a_dry_run_queues_nothing(self):
-        from app.services.dashboard import scoring_refresh
+    def test_every_config_section_is_read_by_some_node(self):
+        """A section no node declares could change without invalidating
+        anything - exactly how the retired urgency formula stayed on screen."""
+        from app.services.regen.graph import DEFAULT
 
-        report = scoring_refresh.refresh_stale_scores(
-            db=self._fake_db("an-old-hash"), apply=False)
-        assert report["stale"] and report["queued"] == []
+        declared = {s for n in DEFAULT.nodes.values() for s in n.config}
+        assert set(scoring.CONFIG) <= declared
 
-    def test_every_stamped_widget_names_a_real_feature_extractor(self):
-        """A stale widget whose feature has no extractor can never be repaired,
-        and the sweep would report it as stale on every single boot."""
-        from app.api.v1.account_data import FEATURE_EXTRACTORS
-        from app.services.dashboard import scoring_refresh
+    def test_an_unverified_widget_counts_as_stale(self):
+        """Every output adopted from before the engine has no fingerprint, and
+        cannot be shown to agree with the current config."""
+        from app.services.regen import state
+        from app.services.regen.graph import Graph, Node
 
-        for spec in scoring_refresh.STAMPED_WIDGETS:
-            assert spec["feature_key"] in FEATURE_EXTRACTORS, spec["widget_key"]
-
-    def test_every_stamped_widget_names_a_real_config_section(self):
-        from app.services.dashboard import scoring_refresh
-
-        for spec in scoring_refresh.STAMPED_WIDGETS:
-            assert spec["section"] in scoring.CONFIG, spec["widget_key"]
+        graph = Graph((Node("n", "f", widgets=("w",)),))
+        derived = state.derive(graph, {"n": {"current": {"fingerprint": None,
+                                                         "quality": "complete"}}},
+                               {"n": "fp"}, {})
+        assert derived["n"]["lifecycle"] == state.STALE

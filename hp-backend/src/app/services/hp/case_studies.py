@@ -49,6 +49,7 @@ point and the rest will correctly carry none.
 import logging
 
 from app.observability import pipeline
+from app.services.regen import store as widget_store
 
 logger = logging.getLogger(__name__)
 
@@ -621,8 +622,10 @@ def cited_above(db, account_id: str, surface: str) -> set:
     taken: set = set()
     for above in SURFACE_ORDER[:rank]:
         try:
-            doc = db["account_widgets"].find_one(
-                {"account_id": account_id, "widget_key": above})
+            # A soft read: allocation was ruled a non-invalidating input, so it
+            # is recorded for audit but never makes this surface depend on
+            # the ones above it (that would close cycles in the graph).
+            doc = widget_store.get(account_id, above, soft=True, db=db)
         except Exception:
             logger.exception("case studies: could not read %s for allocation", above)
             continue

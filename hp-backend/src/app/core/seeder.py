@@ -1,3 +1,4 @@
+import hashlib
 import logging
 import os
 import shutil
@@ -150,6 +151,11 @@ def seed_database_if_empty():
             rel_file_path = os.path.join("data", "accounts", astra_id, d_key, filename).replace("\\", "/")
 
             file_size = os.path.getsize(dest_file_path) if dest_file_path and os.path.exists(dest_file_path) else 0
+            content_sha256 = None
+            if dest_file_path and os.path.exists(dest_file_path):
+                with open(dest_file_path, "rb") as fh:
+                    content_sha256 = hashlib.sha256(fh.read()).hexdigest()
+
             row_count = 0
             try:
                 if dest_file_path and os.path.exists(dest_file_path):
@@ -169,6 +175,7 @@ def seed_database_if_empty():
                     "file_path": rel_file_path,
                     "file_size": file_size,
                     "row_count": row_count,
+                    "content_sha256": content_sha256,
                     "status": "active",
                     "uploaded_at": now,
                     "updated_at": now
@@ -184,62 +191,15 @@ def seed_database_if_empty():
                         "file_path": rel_file_path,
                         "file_size": file_size,
                         "row_count": row_count,
+                        "content_sha256": content_sha256,
                         "updated_at": now
                     }}
                 )
 
-    # 4. Trigger every extractor to pre-populate widgets.
+    # 4. Nothing is generated here.
     #
-    # These used to be seven hand-written calls inside one try, so the first
-    # failure silently skipped the rest, and objection_playbook,
-    # content_messaging, content_studio and strategy_chat were never listed at
-    # all - Objection Playbook was blank on every fresh clone. FEATURE_EXTRACTORS
-    # is the same table the upload trigger and the read-path bootstrap use, so a
-    # feature cannot be wired into one and missed by another.
-    #
-    # Imported here rather than at module scope: widgets.py pulls in the API
-    # layer, which imports this module's package.
-    from app.api.v1.widgets import FEATURE_EXTRACTORS
-
-    # Only features with NOTHING stored are extracted here, which is what the
-    # function name has always promised.
-    #
-    # Running every extractor on every startup meant each `--reload` rewrote all
-    # the widgets: a file save restarted uvicorn, the seeder fired, and freshly
-    # generated output was replaced by whatever the reloaded process produced.
-    # On a shared cluster it is worse - any developer restarting overwrites
-    # documents everyone else is looking at.
-    #
-    # Data changes are already covered: upload and delete re-run the dependent
-    # features, the read path bootstraps a feature with nothing stored, and
-    # POST /widgets/{feature}/regenerate forces one on demand.
-    existing_features = set(
-        db["account_widgets"].distinct("feature_key", {"account_id": astra_id}))
-
-    # Extractors trigger retrieval index updates when their data changes. That
-    # is correct during normal operation and wrong here: a fresh clone would
-    # start a LightRAG ingest - minutes of work and an LLM call per chunk -
-    # before the application had finished starting. Indexing is driven by real
-    # data changes, never by the application starting, so the whole seeding pass
-    # runs with those triggers suppressed.
-    from app.services.retrieval.ingest import suppressed
-
-    succeeded, failed, skipped = [], [], []
-    with suppressed():
-        for feature_key, extractor in FEATURE_EXTRACTORS.items():
-            if feature_key in existing_features:
-                skipped.append(feature_key)
-                continue
-            try:
-                extractor(astra_id)
-                succeeded.append(feature_key)
-            except Exception:
-                failed.append(feature_key)
-                logger.exception("Seeder: extractor for '%s' failed on account %s",
-                                 feature_key, astra_id)
-
-    logger.info("Seeder: %d feature(s) extracted, %d already populated and left "
-                "untouched, for account %s",
-                len(succeeded), len(skipped), astra_id)
-    if failed:
-        logger.warning("Seeder: these features did not extract: %s", ", ".join(failed))
+    # This used to run every extractor with nothing stored, at startup, inside
+    # the request-free boot path - model calls included. Generation now belongs
+    # to the regeneration engine: the first page view of a feature, or the first
+    # upload, queues it, and the background worker builds it. Startup only
+    # registers the data.

@@ -9,6 +9,7 @@ from fastapi.responses import StreamingResponse
 from app.database.mongodb import get_db
 from app.errors import APIError, ErrorCode
 from app.services.extractors.datasets import account_data_as_of
+from app.services.regen import store as widget_store
 
 logger = logging.getLogger(__name__)
 from app.core.deps import require_admin_role, require_user_role
@@ -42,7 +43,6 @@ from app.services.extractors.objection_playbook import extract_objection_playboo
 from app.services.extractors.recent_news_signals import extract_recent_news_signals
 from app.services.extractors.solution_narrative_opportunity_map import (
     extract_solution_narrative_opportunity_map,
-    generate_opportunity_map_plays_with_gpt4o,
 )
 from app.services.extractors.stakeholder_map import extract_stakeholder_map
 from app.services.extractors.strategy_chat import extract_strategy_chat
@@ -50,7 +50,6 @@ from app.services.extractors.tech_landscape import extract_tech_landscape
 from app.services.messaging import pillars as messaging_pillars
 from app.services.retrieval import (
     ingest as retrieval_ingest,
-    jobs as retrieval_jobs,
     query as retrieval_query,
     registry as retrieval_registry,
 )
@@ -77,37 +76,40 @@ def _widget_as_of(as_of: dict, source_datasets) -> str | None:
 router = APIRouter(tags=["Widget Contracts & Dashboard Shell"])
 
 
-def _queue_indexes_for(account_id: str, feature_key: str = "", widget_keys=None) -> list:
-    """Tell the retrieval layer that a feature's widgets were just republished.
+def _actor(current_user: dict) -> str:
+    return "user:%s" % (current_user or {}).get("id", "?")
 
-    Regenerating a feature used to leave every index built on it silently
-    behind: only a dataset file upload or delete queued anything, so a widget
-    refreshed through this API never reached Strategy Chat and the chat kept
-    answering from the previous version.
 
-    Feature-grained on purpose. The indexes decide per DOCUMENT what actually
-    changed - `update_index` re-ingests only documents whose fingerprint moved -
-    so queuing the index is cheap even when little changed, and working out
-    which documents a widget touches is both unnecessary and unreliable (several
-    documents mix widgets, and several unit keys are positional).
+def _generation_by_widget(account_id: str) -> dict:
+    """widget_key -> its producer's regeneration state, for the response.
 
-    Never raises: the widgets are written and correct, and a queueing failure
-    must not turn a successful regenerate into a 500.
+    Empty for an account the engine does not track yet (before the migration
+    adopts it), so the response never claims a state nobody computed. Never
+    raises - a status that cannot be computed must not break the dashboard.
     """
-    keys = list(widget_keys or [])
-    if feature_key and not keys:
-        keys = [c["widget_key"] for c in WIDGET_REGISTRY.get(feature_key, [])
-                if c.get("widget_key")]
-    if not keys:
-        return []
     try:
-        from app.services.retrieval import ingest as retrieval_ingest_mod
-        return retrieval_ingest_mod.requeue_dependents(
-            account_id, keys, reason="%s regenerated" % (feature_key or "widget"))
+        from app.services.regen.engine import get_engine
+        from app.services.regen.graph import DEFAULT
+        nodes = get_engine().status(account_id)["nodes"]
     except Exception:
-        logger.exception("could not queue retrieval updates after %s regenerated",
-                         feature_key or ", ".join(keys[:3]))
-        return []
+        logger.exception("could not compute regeneration state for %s", account_id)
+        return {}
+    out = {}
+    for widget_key, node_id in DEFAULT.owner.items():
+        entry = nodes.get(node_id) or {}
+        if not entry.get("tracked"):
+            continue
+        out[widget_key] = _jsonable({k: entry.get(k) for k in (
+            "lifecycle", "reasons", "blocked_by", "changed_inputs", "quality",
+            "generated_at", "generation_id", "last_error", "job")}
+            | {"fingerprint": (entry.get("fingerprint") or "")[:12] or None,
+               "node_id": node_id})
+    return out
+
+
+def _jsonable(value):
+    from app.api.v1.regeneration import jsonable
+    return jsonable(value)
 
 WIDGET_REGISTRY = {
     "executive_dashboard": [
@@ -570,26 +572,26 @@ def get_account_feature_widgets(
     # here rewrote every widget on every request, and when the data or a prompt
     # version had changed it regenerated the AI content inline, so the same
     # feature could show different content from one view to the next.
-    stored = list(db["account_widgets"].find({
-        "account_id": account_id,
-        "feature_key": key_clean,
-    }))
+    # Read through the widget store: the committed generation of each widget's
+    # producer, or `account_widgets` for an account the engine has not adopted.
+    stored = [w for w in widget_store.get_many(
+        account_id, [c["widget_key"] for c in widget_contracts]).values() if w]
 
     # Bootstrap: a fresh account, or a feature added since the last upload, has
-    # nothing stored yet. Extract once. A widget that exists but is "pending"
-    # is NOT retried here - that is recovered by an upload or a regenerate.
-    if not stored and key_clean in FEATURE_EXTRACTORS:
+    # nothing stored yet. Queue it - never generate inline: a page view used to
+    # run the extractor, model calls included, inside the request. The widgets
+    # read as pending until the worker commits them.
+    if not stored:
         try:
-            FEATURE_EXTRACTORS[key_clean](account_id)
-            stored = list(db["account_widgets"].find({
-                "account_id": account_id,
-                "feature_key": key_clean,
-            }))
-        except Exception as exc:
-            logger.warning("first-time extraction failed for %s on account %s: %s",
-                           key_clean, account_id, exc, exc_info=True)
+            from app.services.regen.engine import get_engine
+            get_engine().regenerate_feature(account_id, key_clean,
+                                            _actor(current_user), force=False)
+        except Exception:
+            logger.exception("could not queue first-time generation of %s for %s",
+                             key_clean, account_id)
 
     extracted_widgets_map = {w["widget_key"]: w for w in stored}
+    generation = _generation_by_widget(account_id)
 
     # The snapshot behind this account, computed once and then narrowed per
     # widget below.
@@ -618,6 +620,7 @@ def get_account_feature_widgets(
                 "source_fields": contract["source_fields"],
                 "display_order": contract["display_order"],
                 "updated_at": updated_at_str,
+                "generation": generation.get(contract["widget_key"]),
                 # Section E of the Recommendation Tuning Logic. `updated_at`
                 # says when this widget was generated; this says when the
                 # ACCOUNT DATA behind it was loaded, so a dashboard opened
@@ -649,6 +652,7 @@ def get_account_feature_widgets(
                 "source_fields": contract["source_fields"],
                 "display_order": contract["display_order"],
                 "updated_at": None,
+                "generation": generation.get(contract["widget_key"]),
                 "data_as_of_date": _widget_as_of(as_of, contract["source_datasets"]),
                 "data_as_of": {**as_of,
                                "widget_datasets": _widget_datasets(
@@ -680,24 +684,15 @@ def regenerate_account_feature_widgets(
     if key_clean not in WIDGET_REGISTRY:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
                             detail=f"Feature '{feature_key}' not found in widget registry.")
-    if key_clean not in FEATURE_EXTRACTORS:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
-                            detail=f"Feature '{feature_key}' has no extractor to run.")
-
-    try:
-        FEATURE_EXTRACTORS[key_clean](account_id)
-    except Exception as exc:
-        logger.warning("regenerate failed for %s on account %s: %s",
-                       key_clean, account_id, exc, exc_info=True)
-        raise APIError(
-            ErrorCode.GENERATION_FAILED,
-            log_context={"feature": key_clean, "account_id": account_id},
-        ) from exc
-
-    # Only after the extractor succeeded. Queuing before would index the
-    # previous widgets and record them as current.
-    _queue_indexes_for(account_id, feature_key=key_clean)
-
+    # Queued, not run inline: the regeneration engine runs the feature's
+    # producers in the background and commits each one atomically, and the
+    # features that read this one follow it. The response is the widgets as
+    # they stand now, each with its `generation` state (GENERATING while the
+    # job runs). POST /accounts/{id}/features/{feature}/regenerate is the same
+    # call returning the job instead.
+    from app.services.regen.engine import get_engine
+    get_engine().regenerate_feature(account_id, key_clean, _actor(current_user),
+                                    force=True)
     return get_account_feature_widgets(account_id, key_clean, current_user)
 
 
@@ -714,9 +709,11 @@ def generate_opportunity_map_endpoint(
     if not account:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company account not found")
 
-    ext_doc = generate_opportunity_map_plays_with_gpt4o(account_id)
-    _queue_indexes_for(account_id,
-                       widget_keys=["opportunity_narrative_plays"])
+    # Queued; the response is the plays as committed now, with the job state.
+    from app.services.regen.engine import get_engine
+    get_engine().regenerate_nodes(account_id, ["opp_core"], _actor(current_user),
+                                  detail="generate opportunity plays")
+    ext_doc = widget_store.get(account_id, "opportunity_narrative_plays") or {}
     updated_at_val = ext_doc.get("updated_at")
     updated_at_str = updated_at_val.isoformat() if isinstance(updated_at_val, datetime) else str(updated_at_val or "")
 
@@ -735,7 +732,8 @@ def generate_opportunity_map_endpoint(
         "source_datasets": contract["source_datasets"],
         "source_fields": contract["source_fields"],
         "display_order": contract["display_order"],
-        "updated_at": updated_at_str
+        "updated_at": updated_at_str,
+        "generation": _generation_by_widget(account_id).get("opportunity_narrative_plays"),
     }
 
 @router.post("/accounts/{account_id}/widgets/content_studio/generate", response_model=WidgetResponse)
@@ -861,9 +859,7 @@ def message_evaluator_options(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
                             detail="Company account not found")
 
-    widget = db["account_widgets"].find_one({
-        "account_id": account_id,
-        "widget_key": "evaluator_persona_context"}) or {}
+    widget = widget_store.get(account_id, "evaluator_persona_context") or {}
     data = widget.get("data") or {}
     personas = []
     for p in (data.get("persona_archetypes") or []):
@@ -883,8 +879,7 @@ def message_evaluator_options(
     # this account already produced - no template, no generic role priorities.
     # A section with nothing behind it is reported as absent rather than filled.
     def _wdata(key):
-        return (db["account_widgets"].find_one(
-            {"account_id": account_id, "widget_key": key}) or {}).get("data") or {}
+        return (widget_store.get(account_id, key) or {}).get("data") or {}
 
     exec_card = _wdata("exec_summary_card")
     recs = _wdata("technographic_hp_recommendations").get("recommendations") or []
@@ -1048,8 +1043,13 @@ def retrieval_status(
         entry["blocked_reason"] = None if ok else reason
         indexes.append(entry)
 
-    return {"indexes": indexes,
-            "jobs": retrieval_jobs.status(account_id)}
+    from app.services.regen import jobs as regen_jobs
+    jobs_rows = [j for j in regen_jobs.history(db, account_id, 50)
+                 if str(j.get("node_id", "")).startswith("idx_")][:20]
+    for row in jobs_rows:
+        row.pop("fence", None)
+        row.pop("lease_owner", None)
+    return {"indexes": indexes, "jobs": _jsonable(jobs_rows)}
 
 
 @router.post("/accounts/{account_id}/retrieval/{index}/rebuild")
@@ -1081,9 +1081,14 @@ def retrieval_rebuild(
             detail=retrieval_registry.spec(index).get("notice")
             or "This index is not enabled yet.")
 
-    job = retrieval_ingest.request_update(
-        account_id, index, reason="admin rebuild", full=True)
-    return {"queued": bool(job),
+    # Through the regeneration engine, like every other build: one queue, so an
+    # admin rebuild can never run beside the engine's own build of the same
+    # workspace (LightRAG cannot build one workspace from two live loops).
+    from app.services.regen.engine import get_engine
+    job = get_engine().regenerate_nodes(account_id, ["idx_%s" % index],
+                                        _actor(current_user), detail="admin rebuild",
+                                        full=True)
+    return {"queued": bool(job.get("nodes")),
             "index": index,
             "warning": ("A full rebuild drops the index and rebuilds it in place. "
                         "It is unavailable until the rebuild completes, and a "
@@ -1142,12 +1147,19 @@ def retrieval_run_now(
     if not ObjectId.is_valid(account_id):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                             detail="Invalid account ID format")
+    from app.services.regen.engine import get_engine
+    engine = get_engine()
+    results = []
     try:
-        results = retrieval_ingest.drain(max_jobs=3)
+        for _ in range(3):
+            out = engine.run_once()
+            if out is None:
+                break
+            results.append(out)
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                             detail="%s: %s" % (type(exc).__name__, exc)) from exc
-    return {"ran": results, "status": retrieval_query.status(account_id, index)}
+    return {"ran": _jsonable(results), "status": retrieval_query.status(account_id, index)}
 
 
 # --- Content Messaging -------------------------------------------------------
@@ -1168,16 +1180,12 @@ def generate_content_messaging(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
                             detail="Company account not found")
 
-    try:
-        doc = messaging_pillars.generate_messaging_pillars(account_id)
-    except messaging_pillars.PillarError as exc:
-        # "no pillar survived validation" is a state of the data, not a bad
-        # request - 409 says the call was fine and the data is not ready.
-        raise APIError(ErrorCode.NO_SOURCE_DATA, str(exc),
-                       log_context={"account_id": account_id}) from exc
-
-    _queue_indexes_for(account_id,
-                       widget_keys=[messaging_pillars.WIDGET_KEY])
+    # Queued: the message house is rebuilt in the background once its index is
+    # current, and a failure keeps the previous house (see `generation`).
+    from app.services.regen.engine import get_engine
+    get_engine().regenerate_nodes(account_id, ["messaging_pillars"],
+                                  _actor(current_user), detail="generate message house")
+    doc = widget_store.get(account_id, messaging_pillars.WIDGET_KEY) or {}
 
     contract = next(c for c in WIDGET_REGISTRY["content_messaging"]
                     if c["widget_key"] == messaging_pillars.WIDGET_KEY)
@@ -1196,6 +1204,7 @@ def generate_content_messaging(
         "source_fields": contract["source_fields"],
         "display_order": contract["display_order"],
         "updated_at": updated.isoformat() if isinstance(updated, datetime) else str(updated or ""),
+        "generation": _generation_by_widget(account_id).get(messaging_pillars.WIDGET_KEY),
     }
 
 

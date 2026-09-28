@@ -6,6 +6,7 @@ from openai import OpenAI
 
 from app.config.settings import settings
 from app.observability import pipeline
+from app.services.regen import context as run_context
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +41,7 @@ def generate_chat_completion(system_prompt: str, messages: list,
     client = get_openai_client()
     if not client:
         logger.warning("Cannot generate completion: OpenAI client is uninitialized.")
+        run_context.note_llm(failed=True)
         return None
 
     turns = [{"role": "system", "content": system_prompt}]
@@ -59,9 +61,12 @@ def generate_chat_completion(system_prompt: str, messages: list,
     try:
         response = client.chat.completions.create(
             model=model_name, messages=turns, temperature=temperature)
-        return (response.choices[0].message.content or "").strip() or None
+        text = (response.choices[0].message.content or "").strip() or None
+        run_context.note_llm(failed=text is None)
+        return text
     except Exception as exc:
         logger.error("Error calling chat completion: %s", exc)
+        run_context.note_llm(failed=True)
         return None
 
 
@@ -114,6 +119,9 @@ def generate_gpt4o_json_completion(system_prompt: str, user_prompt: str) -> dict
     client = get_openai_client()
     if not client:
         logger.warning("Cannot generate completion: OpenAI client is uninitialized.")
+        # Counted as a failure: a run with no model configured falls back
+        # everywhere, and the engine must know its output is degraded.
+        run_context.note_llm(failed=True)
         return None
 
     model_name = settings.OPENAI_MODEL_NAME or "gpt-4o"
@@ -138,9 +146,15 @@ def generate_gpt4o_json_completion(system_prompt: str, user_prompt: str) -> dict
                           getattr(usage, "total_tokens", 0) or 0)
         content = response.choices[0].message.content
         if content:
-            return json.loads(content)
+            parsed = json.loads(content)
+            run_context.note_llm(failed=False)
+            return parsed
+        # An empty response is a failure to the caller exactly as an exception
+        # is: it gets None either way and falls back.
+        run_context.note_llm(failed=True)
         return None
     except Exception as e:
         pipeline.llm_call(model_name, time.monotonic() - started, 0, failed=True)
         logger.error("Error calling GPT-4o API completion: %s", e)
+        run_context.note_llm(failed=True)
         return None

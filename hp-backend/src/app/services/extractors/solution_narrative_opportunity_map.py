@@ -38,6 +38,11 @@ from app.services.hp import (
     rulebook as rb,
 )
 from app.services.hp.guardrails import tier_language_faults
+from app.services.regen import (
+    context as run_context,
+    manifest as regen_manifest,
+    store as widget_store,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1044,21 +1049,23 @@ def generate_opportunity_map_plays_with_gpt4o(account_id: str) -> dict:  # noqa:
     corpus_digits = re.sub(r"[,\s]", "", corpus_blob)
 
     # ---- the account's real roster, for entry paths -------------------------
-    grid = db["account_widgets"].find_one({
-        "account_id": account_id, "widget_key": "stakeholder_contacts_grid"})
+    grid = widget_store.get(account_id, "stakeholder_contacts_grid", db=db)
     roster = ((grid or {}).get("data") or {}).get("contacts") or []
 
     fingerprint = _opportunity_fingerprint(
         [c["text"] for c in corpus], [str(c.get("contact_id")) for c in roster],
         cs.knowledge_version(db),
         cs.cited_above(db, account_id, cs.SURFACE_OPPORTUNITIES),
-        rb.knowledge_version(db))
+        rb.knowledge_version(db)) + regen_manifest.cache_suffix()
+    # The suffix also carries the account's instructions and guardrails, which
+    # reach the prompt but were never part of this fingerprint.
 
-    existing = db["account_widgets"].find_one({
-        "account_id": account_id, "widget_key": "opportunity_narrative_plays"})
+    existing = widget_store.get(account_id, "opportunity_narrative_plays", db=db)
     if (existing and existing.get("status") == "available"
+            and existing.get("generation_quality") != "degraded"
             and existing.get("data", {}).get("evidence_fingerprint") == fingerprint):
         pipeline.cache_hit("opportunity_narrative_plays")
+        widget_store.keep(account_id, "opportunity_narrative_plays")
         return existing
 
     # ---- which plays the evidence can actually support -----------------------
@@ -1826,7 +1833,11 @@ Output JSON:
             "updated_at": now,
         }
     else:
-        if existing and existing.get("status") == "available":
+        # Legacy paths keep the previous plays; under the engine a model
+        # failure is already kept from replacing them, and otherwise "no play
+        # met the threshold" is the truthful result for these inputs.
+        if (run_context.current() is None and existing
+                and existing.get("status") == "available"):
             pipeline.cache_hit("opportunity_narrative_plays", "kept - this run produced nothing to replace it")
             return existing
         plays_payload = {
@@ -1849,11 +1860,7 @@ Output JSON:
             "updated_at": now,
         }
 
-    db["account_widgets"].update_one(
-        {"account_id": account_id, "widget_key": "opportunity_narrative_plays"},
-        {"$set": plays_payload},
-        upsert=True
-    )
+    widget_store.put(account_id, "opportunity_narrative_plays", plays_payload, db=db)
     return plays_payload
 
 
@@ -1861,7 +1868,12 @@ Output JSON:
     "firmographics", "google_news", "intent_score", "news_events", "prospect_contacts", "technographics",
 )
 @pipeline.feature("solution_narrative_opportunity_map")
-def extract_solution_narrative_opportunity_map(account_id: str) -> list[dict]:
+def extract_solution_narrative_opportunity_map(account_id: str,
+                                               parts=("core", "triggers")) -> list[dict]:
+    """The Opportunity Map. `parts` selects what is published: the regeneration
+    engine runs the context card + plays ("core") and the trigger signals
+    ("triggers") as two producers, because the triggers are a copy of the news
+    feed and news reads the plays."""
     db = get_db()
     now = datetime.now(UTC)
 
@@ -1932,19 +1944,45 @@ def extract_solution_narrative_opportunity_map(account_id: str) -> list[dict]:
             "updated_at": now
         }
 
-    db["account_widgets"].update_one(
-        {"account_id": account_id, "widget_key": "opportunity_context_card"},
-        {"$set": context_payload},
-        upsert=True
-    )
-    results.append(context_payload)
+    if "core" in parts:
+        widget_store.put(account_id, "opportunity_context_card", context_payload, db=db)
+        results.append(context_payload)
 
-    # 2. Widget: opportunity_trigger_signals
-    news_res = extract_recent_news_signals(account_id)
-    news_signals = news_res[0]["data"].get("signals", []) if (news_res and news_res[0]["status"] == "available") else []
+    # 2. Widget: opportunity_trigger_signals - a copy of the published news feed.
+    #
+    # The legacy paths regenerate News first and copy its result. Under the
+    # engine News is its own producer that commits before this one runs, so the
+    # committed feed is read instead - running it here would write another
+    # producer's widgets.
+    news_signals = []
+    if "triggers" in parts:
+        if run_context.current() is not None:
+            feed = widget_store.get(account_id, "news_signals_feed", db=db) or {}
+            if feed.get("status") == "available":
+                news_signals = (feed.get("data") or {}).get("signals", [])
+        else:
+            news_res = extract_recent_news_signals(account_id)
+            news_signals = news_res[0]["data"].get("signals", []) if (news_res and news_res[0]["status"] == "available") else []
 
+    triggers_payload = _triggers_payload(account_id, news_signals, now)
+
+    if "triggers" in parts:
+        widget_store.put(account_id, "opportunity_trigger_signals", triggers_payload, db=db)
+        results.append(triggers_payload)
+
+    # 3. Widget: opportunity_narrative_plays
+    # Cached inside the generator on a fingerprint of the evidence set, so this
+    # costs no model call unless the uploaded data changed.
+    if "core" in parts:
+        results.append(generate_opportunity_map_plays_with_gpt4o(account_id))
+
+    return results
+
+
+def _triggers_payload(account_id: str, news_signals: list, now) -> dict:
+    """The trigger-signals widget: the published news feed's signals, as is."""
     if news_signals:
-        triggers_payload = {
+        return {
             "account_id": account_id,
             "feature_key": "solution_narrative_opportunity_map",
             "widget_key": "opportunity_trigger_signals",
@@ -1958,29 +1996,29 @@ def extract_solution_narrative_opportunity_map(account_id: str) -> list[dict]:
             "extracted_at": now,
             "updated_at": now
         }
-    else:
-        triggers_payload = {
-            "account_id": account_id,
-            "feature_key": "solution_narrative_opportunity_map",
-            "widget_key": "opportunity_trigger_signals",
-            "data_classification": "deterministic",
-            "status": "empty",
-            "data": {},
-            "source_datasets": ["google_news", "news_events"],
-            "extracted_at": now,
-            "updated_at": now
-        }
+    return {
+        "account_id": account_id,
+        "feature_key": "solution_narrative_opportunity_map",
+        "widget_key": "opportunity_trigger_signals",
+        "data_classification": "deterministic",
+        "status": "empty",
+        "data": {},
+        "source_datasets": ["google_news", "news_events"],
+        "extracted_at": now,
+        "updated_at": now
+    }
 
-    db["account_widgets"].update_one(
-        {"account_id": account_id, "widget_key": "opportunity_trigger_signals"},
-        {"$set": triggers_payload},
-        upsert=True
-    )
-    results.append(triggers_payload)
 
-    # 3. Widget: opportunity_narrative_plays
-    # Cached inside the generator on a fingerprint of the evidence set, so this
-    # costs no model call unless the uploaded data changed.
-    results.append(generate_opportunity_map_plays_with_gpt4o(account_id))
+@pipeline.feature("solution_narrative_opportunity_map")
+def publish_trigger_signals(account_id: str) -> dict:
+    """The regeneration engine's `opp_triggers` producer.
 
-    return results
+    Reads only the committed news feed - no dataset - so it can run the moment
+    News commits, without regenerating the rest of the Opportunity Map.
+    """
+    feed = widget_store.get(account_id, "news_signals_feed") or {}
+    signals = ((feed.get("data") or {}).get("signals", [])
+               if feed.get("status") == "available" else [])
+    payload = _triggers_payload(account_id, signals, datetime.now(UTC))
+    widget_store.put(account_id, "opportunity_trigger_signals", payload)
+    return payload

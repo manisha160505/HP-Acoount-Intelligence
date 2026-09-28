@@ -75,16 +75,43 @@ def find_file_path(rel_path: str) -> str | None:
     return None
 
 
-def _parse(full_path: str) -> list[dict]:
+class DatasetParseError(Exception):
+    """A registered file could not be parsed. Raised only inside a regeneration
+    run: there, an unreadable file must fail the run and keep the previous
+    output, not publish an empty widget over it (audit R6)."""
+
+
+def _parse(full_path: str, strict: bool = False) -> list[dict]:
     ext = os.path.splitext(full_path)[1].lower()
     try:
         if ext in (".xlsx", ".xls"):
             return pd.read_excel(full_path).fillna("").to_dict(orient="records")
         with open(full_path, encoding="utf-8-sig", errors="replace") as fh:
             return list(csv.DictReader(fh))
-    except Exception:
+    except Exception as exc:
         logger.exception("Could not parse dataset file %s", full_path)
+        if strict:
+            raise DatasetParseError(os.path.basename(full_path)) from exc
         return []
+
+
+def _pinned(account_id: str, dataset_key: str):
+    """The file rows this dataset is pinned to in the current regeneration run.
+
+    Returns None outside a run (callers keep their existing live lookup). Inside
+    one it records the read - so the engine can check it against what the
+    producer declares - and returns the rows captured when the run started, so a
+    file uploaded mid-run cannot leak into output recorded under the old
+    fingerprint. An undeclared dataset has no pinned rows; it is read live and
+    the recorded read fails the run's validation instead.
+    """
+    from app.services.regen import context as run_context
+
+    ctx = run_context.current()
+    if ctx is None or ctx.account_id != str(account_id):
+        return None
+    run_context.note_dataset_read(dataset_key)
+    return ctx.pinned_rows.get(dataset_key)
 
 
 def account_data_as_of(account_id: str) -> dict:
@@ -144,7 +171,24 @@ def read_dataset_records(account_id: str, dataset_key: str,
 
     Returns [] when nothing is registered. Raises DatasetFileMissing when a
     file IS registered and cannot be found locally, unless `strict` is False.
+
+    Inside a regeneration run the pinned rows are read, and every one of them:
+    a multi-file dataset (news, filings) used to come back as whichever single
+    file `find_one` happened to return, while the run's fingerprint covers all
+    of them. Rows are concatenated in content-hash order, so the result is the
+    same on every run and every machine.
     """
+    pinned = _pinned(account_id, dataset_key)
+    if pinned is not None:
+        records = []
+        for row in pinned:
+            rel_path = row.get("file_path", "")
+            full_path = find_file_path(rel_path)
+            if not full_path:
+                raise DatasetFileMissing(dataset_key, rel_path)
+            records.extend(_parse(full_path, strict=True))
+        return records
+
     db = get_db()
     file_doc = db["account_data_files"].find_one({
         "account_id": account_id,
@@ -175,14 +219,26 @@ def read_dataset_rows(account_id: str, dataset_key: str) -> list[list[str]]:
     exports on Windows: its em dash (0x97) marks an empty cell in that file and
     must not become a replacement character. Returns [] when nothing is
     registered or the file is not on this machine.
+
+    Inside a regeneration run it reads the first pinned row (content-hash
+    order) and raises when that file is missing - this reader serves the one
+    single-file dataset whose header is two rows deep.
     """
-    db = get_db()
-    file_doc = db["account_data_files"].find_one({
-        "account_id": account_id,
-        "$or": [{"dataset_key": dataset_key}, {"category": dataset_key}],
-        "status": "active",
-    })
-    full_path = find_file_path((file_doc or {}).get("file_path", ""))
+    pinned = _pinned(account_id, dataset_key)
+    if pinned is not None:
+        if not pinned:
+            return []
+        full_path = find_file_path(pinned[0].get("file_path", ""))
+        if not full_path:
+            raise DatasetFileMissing(dataset_key, pinned[0].get("file_path", ""))
+    else:
+        db = get_db()
+        file_doc = db["account_data_files"].find_one({
+            "account_id": account_id,
+            "$or": [{"dataset_key": dataset_key}, {"category": dataset_key}],
+            "status": "active",
+        })
+        full_path = find_file_path((file_doc or {}).get("file_path", ""))
     if not full_path:
         return []
 
@@ -207,13 +263,18 @@ def dataset_file_paths(account_id: str, dataset_key: str,
     Ordered by filename so a corpus built twice from the same library comes out
     in the same order, which keeps document ids and fingerprints stable.
     """
-    db = get_db()
+    pinned = _pinned(account_id, dataset_key)
+    if pinned is not None:
+        file_docs = pinned
+        strict = True
+    else:
+        file_docs = get_db()["account_data_files"].find({
+            "account_id": account_id,
+            "$or": [{"dataset_key": dataset_key}, {"category": dataset_key}],
+            "status": "active",
+        })
     found, missing = [], []
-    for file_doc in db["account_data_files"].find({
-        "account_id": account_id,
-        "$or": [{"dataset_key": dataset_key}, {"category": dataset_key}],
-        "status": "active",
-    }):
+    for file_doc in file_docs:
         rel_path = file_doc.get("file_path", "")
         full_path = find_file_path(rel_path)
         if full_path:
@@ -352,6 +413,12 @@ def requires_local_datasets(*dataset_keys: str):
                     absent.append(key)
 
             if absent:
+                from app.services.regen import context as run_context
+                if run_context.current() is not None:
+                    # Inside a regeneration run, returning [] would read as a
+                    # successful run that published nothing. Raising makes the
+                    # engine release the job for a machine that has the file.
+                    raise DatasetFileMissing(absent[0], "")
                 logger.error(
                     "%s skipped for account %s: %s registered but not on this "
                     "machine. Stored widgets left untouched rather than "

@@ -23,6 +23,11 @@ from app.services.extractors.grounding import (
     check_text,
 )
 from app.services.hp import case_studies as cs
+from app.services.regen import (
+    context as run_context,
+    manifest as regen_manifest,
+    store as widget_store,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -399,8 +404,7 @@ def _account_context(account_id: str) -> str:
     db = get_db()
 
     def widget(key):
-        return (db["account_widgets"].find_one(
-            {"account_id": account_id, "widget_key": key}) or {}).get("data") or {}
+        return (widget_store.get(account_id, key, db=db) or {}).get("data") or {}
 
     lines = []
 
@@ -593,15 +597,16 @@ def score_news_signals(account_id: str, signals: list[dict], company_name: str) 
     db = get_db()
     now = datetime.now(UTC)
     account_context = _account_context(account_id)
-    fingerprint = _signals_fingerprint(signals, account_context)
+    # The suffix carries the run's config, knowledge and model versions: the
+    # scoring config changing must not come back as a cache hit (audit R9).
+    fingerprint = _signals_fingerprint(signals, account_context) + regen_manifest.cache_suffix()
 
-    existing = db["account_widgets"].find_one({
-        "account_id": account_id,
-        "widget_key": "news_relevance_summary",
-    })
+    existing = widget_store.get(account_id, "news_relevance_summary", db=db)
     if (existing and existing.get("status") == "available"
+            and existing.get("generation_quality") != "degraded"
             and existing.get("data", {}).get("signals_fingerprint") == fingerprint):
         pipeline.cache_hit("news_relevance_summary")
+        widget_store.keep(account_id, "news_relevance_summary")
         return existing
 
     # Grounding corpus: the two news datasets this feature reads.
@@ -950,7 +955,11 @@ Output JSON:
             "updated_at": now,
         }
     else:
-        if existing and existing.get("status") == "available":
+        # Legacy paths keep the old scores. Under the engine a model failure
+        # already protects them (degraded never replaces complete); without
+        # one, "nothing scored" is the truthful output for these inputs.
+        if (run_context.current() is None and existing
+                and existing.get("status") == "available"):
             pipeline.cache_hit("news_relevance_summary", "kept - this run produced nothing to replace it")
             return existing
         payload = {
@@ -972,11 +981,7 @@ Output JSON:
             "updated_at": now,
         }
 
-    db["account_widgets"].update_one(
-        {"account_id": account_id, "widget_key": "news_relevance_summary"},
-        {"$set": payload},
-        upsert=True
-    )
+    widget_store.put(account_id, "news_relevance_summary", payload, db=db)
     return payload
 
 
@@ -1014,6 +1019,20 @@ def extract_recent_news_signals(account_id: str) -> list[dict]:
         score_doc = score_news_signals(account_id, deduped, company_name)
     else:
         score_doc = {"data": {"scores": {}}}
+        if run_context.current() is not None:
+            # No signal passed the gate. The legacy paths left the previous
+            # summary in place; under the engine every owned widget is published
+            # each run, and an empty summary is the truthful one.
+            widget_store.put(account_id, "news_relevance_summary", {
+                "feature_key": "recent_news_signals",
+                "data_classification": "inferred",
+                "status": "empty",
+                "data": {"signals_fingerprint": None, "scored_count": 0,
+                         "score_weights": SCORE_WEIGHTS,
+                         "scoring_config_version": signal_scoring.version_stamp(),
+                         "scores": {}},
+                "source_datasets": ["google_news", "news_events"],
+            }, db=db)
     scores = (score_doc.get("data") or {}).get("scores") or {}
 
     # 2. Rank and cap. Unscored signals keep their natural date order.
@@ -1126,10 +1145,6 @@ def extract_recent_news_signals(account_id: str) -> list[dict]:
             "updated_at": now,
         }
 
-    db["account_widgets"].update_one(
-        {"account_id": account_id, "widget_key": "news_signals_feed"},
-        {"$set": feed_payload},
-        upsert=True
-    )
+    widget_store.put(account_id, "news_signals_feed", feed_payload, db=db)
 
     return [feed_payload, score_doc] if deduped else [feed_payload]
