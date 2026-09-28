@@ -116,10 +116,15 @@ def begin_build(account_id: str, index: str, mode: str) -> dict:
 
 def finish_build(account_id: str, index: str, documents: dict, mode: str) -> dict:
     """Record a successful build and the fingerprints it actually produced."""
+    from app.config.settings import settings
+
     state = get(account_id, index)
     state["documents"] = documents
     state["version"] = int(state.get("version") or 0) + 1
     state["status"] = READY
+    # What embedded these vectors. A later build under another embedding model
+    # or dimension must start from empty (see ingest._update_index).
+    state["embedding"] = settings.embedding_identity
     state["last_error"] = None
     state["last_built_at"] = _now()
     state["last_build_mode"] = mode
@@ -163,11 +168,14 @@ def record_incremental(account_id: str, index: str, documents: dict,
     its old fingerprint and will be retried on the next run rather than being
     silently considered current.
     """
+    from app.config.settings import settings
+
     state = get(account_id, index)
     state["documents"] = documents
     state["version"] = int(state.get("version") or 0) + 1
     state["last_built_at"] = _now()
     state["last_build_mode"] = INCREMENTAL
+    state["embedding"] = settings.embedding_identity
     state["build_count"] = int(state.get("build_count") or 0) + 1
     state["last_applied"] = applied
     state["damaged_documents"] = list(damaged or [])

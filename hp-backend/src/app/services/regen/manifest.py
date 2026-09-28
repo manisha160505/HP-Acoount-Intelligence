@@ -178,10 +178,12 @@ class Versions:
 
     def models(self) -> dict:
         from app.config.settings import settings
-        return {"chat": settings.OPENAI_MODEL_NAME or "gpt-4o",
-                "retrieval": settings.OPENAI_RETRIEVAL_MODEL or settings.OPENAI_MODEL_NAME
-                or "gpt-4o",
-                "embedding": settings.OPENAI_EMBEDDING_MODEL}
+        # The provider is part of it: the same model name on two providers is
+        # not the same model, and a switch must invalidate every LLM node.
+        return {"provider": settings.llm_provider,
+                "chat": settings.chat_model,
+                "retrieval": settings.retrieval_model,
+                "embedding": settings.embedding_identity}
 
 
 class StaticVersions:

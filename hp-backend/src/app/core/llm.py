@@ -11,13 +11,29 @@ from app.services.regen import context as run_context
 logger = logging.getLogger(__name__)
 
 def get_openai_client() -> OpenAI | None:
-    api_key = settings.OPENAI_API_KEY.strip()
-    if not api_key:
-        logger.warning("OPENAI_API_KEY is not set in environment or settings.")
-        return None
+    """The client for the configured LLM provider (settings.LLM_PROVIDER).
 
-    endpoint = settings.OPENAI_ENDPOINT.strip()
-    return OpenAI(base_url=endpoint, api_key=api_key)
+    Gemini is reached through its OpenAI-compatible endpoint, so the same SDK and
+    the same request shapes serve both providers."""
+    api_key = settings.llm_api_key
+    if not api_key:
+        logger.warning("%s is not set in environment or settings.", settings.llm_api_key_name)
+        return None
+    return OpenAI(**settings.llm_client_kwargs)
+
+
+def _parse_json(content: str) -> dict | None:
+    """The model's JSON answer. Gemini sometimes wraps it in a ```json fence even
+    in JSON mode; the fence is removed rather than the answer thrown away."""
+    text = (content or "").strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[1] if "\n" in text else ""
+        text = text.rsplit("```", 1)[0]
+    text = text.strip()
+    if not text:
+        return None
+    parsed = json.loads(text)
+    return parsed if isinstance(parsed, dict) else None
 
 def generate_chat_completion(system_prompt: str, messages: list,
                              temperature: float = 0.3) -> str | None:
@@ -32,15 +48,15 @@ def generate_chat_completion(system_prompt: str, messages: list,
     is dropped rather than sent, so a malformed history cannot become a prompt
     injection vector. The system prompt is always first and always ours.
 
-    Runs on OPENAI_MODEL_NAME (gpt-4o), not the retrieval model: index building
-    stays on the slower model, but answering happens while a seller waits.
+    Runs on the chat model (settings.chat_model), not the retrieval model: index
+    building stays on the slower model, but answering happens while a seller waits.
 
     The model writes the prose and has no authority over any fact in it -
     everything it says is validated against retrieved evidence afterwards.
     """
     client = get_openai_client()
     if not client:
-        logger.warning("Cannot generate completion: OpenAI client is uninitialized.")
+        logger.warning("Cannot generate completion: LLM client is uninitialized.")
         run_context.note_llm(failed=True)
         return None
 
@@ -57,7 +73,7 @@ def generate_chat_completion(system_prompt: str, messages: list,
         logger.warning("Cannot generate completion: no usable messages supplied.")
         return None
 
-    model_name = settings.OPENAI_MODEL_NAME or "gpt-4o"
+    model_name = settings.chat_model
     try:
         response = client.chat.completions.create(
             model=model_name, messages=turns, temperature=temperature)
@@ -84,7 +100,7 @@ def stream_chat_completion(system_prompt: str, messages: list,
     """
     client = get_openai_client()
     if not client:
-        logger.warning("Cannot stream completion: OpenAI client is uninitialized.")
+        logger.warning("Cannot stream completion: LLM client is uninitialized.")
         return
 
     turns = [{"role": "system", "content": system_prompt}]
@@ -100,7 +116,7 @@ def stream_chat_completion(system_prompt: str, messages: list,
         logger.warning("Cannot stream completion: no usable messages supplied.")
         return
 
-    model_name = settings.OPENAI_MODEL_NAME or "gpt-4o"
+    model_name = settings.chat_model
     try:
         stream = client.chat.completions.create(
             model=model_name, messages=turns, temperature=temperature,
@@ -118,13 +134,13 @@ def stream_chat_completion(system_prompt: str, messages: list,
 def generate_gpt4o_json_completion(system_prompt: str, user_prompt: str) -> dict | None:
     client = get_openai_client()
     if not client:
-        logger.warning("Cannot generate completion: OpenAI client is uninitialized.")
+        logger.warning("Cannot generate completion: LLM client is uninitialized.")
         # Counted as a failure: a run with no model configured falls back
         # everywhere, and the engine must know its output is degraded.
         run_context.note_llm(failed=True)
         return None
 
-    model_name = settings.OPENAI_MODEL_NAME or "gpt-4o"
+    model_name = settings.chat_model
     started = time.monotonic()
     try:
         response = client.chat.completions.create(
@@ -145,8 +161,8 @@ def generate_gpt4o_json_completion(system_prompt: str, user_prompt: str) -> dict
         pipeline.llm_call(model_name, time.monotonic() - started,
                           getattr(usage, "total_tokens", 0) or 0)
         content = response.choices[0].message.content
-        if content:
-            parsed = json.loads(content)
+        parsed = _parse_json(content) if content else None
+        if parsed is not None:
             run_context.note_llm(failed=False)
             return parsed
         # An empty response is a failure to the caller exactly as an exception
@@ -155,6 +171,6 @@ def generate_gpt4o_json_completion(system_prompt: str, user_prompt: str) -> dict
         return None
     except Exception as e:
         pipeline.llm_call(model_name, time.monotonic() - started, 0, failed=True)
-        logger.error("Error calling GPT-4o API completion: %s", e)
+        logger.error("Error calling %s JSON completion: %s", model_name, e)
         run_context.note_llm(failed=True)
         return None

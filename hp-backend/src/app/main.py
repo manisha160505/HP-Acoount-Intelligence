@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 # The placeholder shipped in .env.example. It is a non-empty string, so it
 # passes a truthiness check and fails only at the API call - worth naming.
-PLACEHOLDER_KEY = "your-azure-openai-api-key-here"
+PLACEHOLDER_KEYS = ("your-azure-openai-api-key-here", "your-gemini-api-key-here")
 
 
 def _log_readiness() -> None:
@@ -45,13 +45,18 @@ def _log_readiness() -> None:
     except Exception:
         logger.exception("Could not summarise startup state.")
 
-    key = (settings.OPENAI_API_KEY or "").strip()
+    key = settings.llm_api_key
     if not key:
-        logger.warning("OPENAI_API_KEY is not set - AI-inferred layers will stay "
-                       "empty by design. Deterministic widgets are unaffected.")
-    elif key == PLACEHOLDER_KEY:
-        logger.warning("OPENAI_API_KEY is still the .env.example placeholder - "
-                       "AI generation will fail at the API call.")
+        logger.warning("%s is not set - AI-inferred layers will stay empty by "
+                       "design. Deterministic widgets are unaffected.",
+                       settings.llm_api_key_name)
+    elif key in PLACEHOLDER_KEYS:
+        logger.warning("%s is still the .env.example placeholder - AI generation "
+                       "will fail at the API call.", settings.llm_api_key_name)
+    else:
+        logger.info("LLM: %s - chat %s, retrieval %s, embeddings %s",
+                    settings.llm_provider, settings.chat_model,
+                    settings.retrieval_model, settings.embedding_identity)
 
 
 @asynccontextmanager

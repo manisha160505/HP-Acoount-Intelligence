@@ -1829,7 +1829,7 @@ Output JSON:
                 "opportunity_plays": [],
                 "dropped": dropped,
                 "notice": ("No opportunity play met the evidence threshold, or generation "
-                           "requires OPENAI_API_KEY. No plays are invented."),
+                           "requires an LLM API key. No plays are invented."),
             },
             "source_datasets": ["firmographics", "technographics", "intent_score",
                                 "google_news", "news_events", "prospect_contacts"],

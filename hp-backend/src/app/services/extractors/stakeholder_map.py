@@ -972,7 +972,7 @@ CRITICAL RULES:
                 "contacts_fingerprint": None,
                 "generated_count": 0,
                 "talking_points": {},
-                "notice": "Stakeholder talking points require OPENAI_API_KEY. No content is generated without it.",
+                "notice": "Stakeholder talking points require an LLM API key. No content is generated without it.",
             },
             "source_datasets": ["prospect_contacts", "firmographics", "technographics",
                                 "intent_score", "google_news", "news_events"],

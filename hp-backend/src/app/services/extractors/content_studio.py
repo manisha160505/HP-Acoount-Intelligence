@@ -1574,7 +1574,7 @@ def generate_content_asset(account_id: str, persona_id: str, content_type: str,
 
         llm_res = generate_gpt4o_json_completion(sys_prompt, user_prompt)
         if llm_res is None:
-            return None, ["model returned nothing - OPENAI_API_KEY missing or the call failed"], []
+            return None, ["model returned nothing - the LLM API key is missing or the call failed"], []
 
         a, f, sf = _validate_asset(llm_res, contract, persona, labels, ground, report, banned_names)
         attempts.append(f + sf)

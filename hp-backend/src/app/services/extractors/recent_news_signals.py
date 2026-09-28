@@ -1048,7 +1048,7 @@ def score_news_signals(account_id: str, signals: list[dict], company_name: str) 
                 "score_weights": SCORE_WEIGHTS,
                 "scoring_config_version": signal_scoring.version_stamp(),
                 "scores": {},
-                "notice": "Signal relevance scoring requires OPENAI_API_KEY. The signal feed below is shown unscored; no scores are invented.",
+                "notice": "Signal relevance scoring requires an LLM API key. The signal feed below is shown unscored; no scores are invented.",
             },
             "source_datasets": ["google_news", "news_events"],
             "extracted_at": now,

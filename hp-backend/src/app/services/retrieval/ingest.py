@@ -40,6 +40,7 @@ import logging
 import threading
 import time
 
+from app.config.settings import settings
 from app.database.mongodb import get_db
 from app.observability import pipeline
 from app.services.retrieval import client, corpus, evidence, index_state, registry
@@ -141,6 +142,16 @@ async def _update_index(account_id: str, index: str, full: bool = False,
         logger.info("retrieval: resuming an interrupted %s build for account %s "
                     "- %d document(s) already indexed",
                     index, account_id, len(delta["unchanged"]))
+
+    # Vectors from another embedding model (or dimension) cannot sit beside the
+    # new ones: a query embedded by one model is meaningless against the other's
+    # vectors, and a dimension change breaks the store outright. An index built
+    # before this was recorded was built on Azure OpenAI's text-embedding-3-small.
+    built_with = snapshot.get("embedding") or "openai:text-embedding-3-small:1536"
+    if have_index and not full and built_with != settings.embedding_identity:
+        logger.warning("retrieval: %s/%s was embedded with %s, now %s - full rebuild",
+                       account_id, index, built_with, settings.embedding_identity)
+        full = True
 
     if not full and have_index and not (delta["added"] or delta["changed"]
                                         or delta["removed"]):
