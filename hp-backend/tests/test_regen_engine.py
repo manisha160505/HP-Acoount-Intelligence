@@ -622,3 +622,60 @@ def test_first_upload_builds_only_what_reads_it_and_what_depends_on_that(h):
     h.drain()
     assert sorted(h.ran(acct)) == ["A", "B", "C"]      # B and C follow A's commit
     assert h.lifecycle(acct, "D") == state.NEVER_GENERATED
+
+
+def test_shutdown_hands_running_jobs_back_without_spending_an_attempt(h):
+    acct = _loaded(h)
+    jobs.enqueue(h.db, acct, "D", jobs.trigger("manual"), force=True)
+    job = jobs.claim(h.db, "old-backend")
+    jobs.start_attempt(h.db, job, "fp", None, [])
+    other = _loaded(h)
+    jobs.enqueue(h.db, other, "D", jobs.trigger("manual"), force=True)
+    theirs = jobs.claim(h.db, "another-worker")
+
+    released = jobs.release_owned(h.db, "old-backend")
+    assert [r["_id"] for r in released] == [job["_id"]]
+    row = h.db[jobs.COLLECTION].find_one({"_id": job["_id"]})
+    assert row["status"] == jobs.PENDING and row["attempts"] == 0
+    assert row["lease_owner"] is None and row["fence"] is None
+    # Another worker's job is not touched.
+    assert h.db[jobs.COLLECTION].find_one({"_id": theirs["_id"]})["status"] == jobs.RUNNING
+    # The old worker's late commit is fenced out: its fence was cleared.
+    assert not jobs.finish(h.db, job, jobs.SUCCEEDED)
+    # The next backend picks it straight up.
+    assert jobs.claim(h.db, "new-backend")["_id"] == job["_id"]
+
+
+def test_a_dead_workers_lease_lapses_within_minutes():
+    from app.services.regen import engine as regen_engine
+    assert jobs.LEASE_SECONDS <= 300
+    assert regen_engine.HEARTBEAT_SECONDS * 3 <= jobs.LEASE_SECONDS
+
+
+def test_an_engine_crash_fails_the_job_instead_of_looping(h, monkeypatch):
+    acct = _loaded(h)
+    jobs.enqueue(h.db, acct, "D", jobs.trigger("manual"), force=True)
+
+    def boom(_job):
+        raise RuntimeError("engine bug")
+
+    monkeypatch.setattr(h.engine, "run_job", boom)
+    out = h.engine.run_once()
+    assert out["outcome"] == "failed" and out["error"]["code"] == "ENGINE_ERROR"
+    assert not list(h.db[jobs.COLLECTION].find({"account_id": acct,
+                                                "status": {"$in": list(jobs.LIVE)}}))
+
+
+def test_a_job_whose_worker_keeps_dying_is_failed_after_three_lapses(h):
+    acct = _loaded(h)
+    jobs.enqueue(h.db, acct, "D", jobs.trigger("manual"), force=True)
+    for lapse in range(jobs.MAX_ATTEMPTS):
+        job = jobs.claim(h.db, "dies-every-time")
+        assert job, "lapse %d" % lapse
+        # Dies before start_attempt: no attempt is ever counted.
+        h.db[jobs.COLLECTION].update_one(
+            {"_id": job["_id"]},
+            {"$set": {"lease_expires_at": datetime.now(UTC) - timedelta(seconds=1)}})
+        jobs.reclaim_expired(h.db)
+    row = h.db[jobs.COLLECTION].find_one({"_id": job["_id"]})
+    assert row["status"] == jobs.FAILED and row["error"]["code"] == "LEASE_EXPIRED"

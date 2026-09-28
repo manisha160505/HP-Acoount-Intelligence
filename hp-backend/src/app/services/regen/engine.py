@@ -43,7 +43,8 @@ logger = logging.getLogger(__name__)
 CONTENT_STATUSES = frozenset({"available", "partial", "empty", "pending", "error",
                               "unavailable", "unverified"})
 MAX_GENERATION_BYTES = 12 * 1024 * 1024
-HEARTBEAT_SECONDS = 60
+# Well inside jobs.LEASE_SECONDS, so a missed beat or two does not lapse a live job.
+HEARTBEAT_SECONDS = 30
 # Automatic retries of a node that failed (or published a degraded result) for
 # unchanged inputs: after 1 h, 6 h and 24 h, then only by hand.
 RETRY_SCHEDULE = (3600, 6 * 3600, 24 * 3600)
@@ -382,10 +383,48 @@ class Engine:
         job = jobs.claim(self.db, self.worker_id)
         if not job:
             return None
-        return self.run_job(job)
+        try:
+            return self.run_job(job)
+        except Exception as exc:
+            return self._engine_error(job, exc)
+
+    def _engine_error(self, job: dict, exc: Exception) -> dict:
+        """An exception from the engine itself, not from a producer (those go
+        through _fail). It is a bug, so another attempt would hit it again:
+        fail the job now. Left RUNNING it lapsed, was reclaimed with no attempt
+        counted (it never reached start_attempt) and crashed again, forever -
+        the 'messaging_context' loop of 28 Sep."""
+        account_id, nid = job["account_id"], job["node_id"]
+        logger.error("regen.engine_error %s/%s", account_id, nid, exc_info=exc)
+        error = {"code": "ENGINE_ERROR",
+                 "message": ("%s: %s" % (type(exc).__name__, exc))[:500]}
+        jobs.finish(self.db, job, jobs.FAILED, error=error,
+                    result={"outcome": "engine_error"})
+        state.clear_running(self.db, account_id, nid, job["_id"])
+        target = job.get("target_fingerprint")
+        if not target and nid in self.graph:
+            try:
+                target = self.expected_all(load_snapshot(self.db, account_id))[1][nid]
+            except Exception:
+                target = None
+        if target:
+            # FAILED for these inputs: the sweep retries it on RETRY_SCHEDULE
+            # (1 h, 6 h, 24 h) and then leaves it, instead of every 10 minutes.
+            state.record_failure(self.db, account_id, nid, job["_id"], target,
+                                 "ENGINE_ERROR", error["message"])
+        return {"outcome": "failed", "node_id": nid, "error": error}
 
     def run_job(self, job: dict) -> dict:
         account_id, nid = job["account_id"], job["node_id"]
+        if nid not in self.graph:
+            # Queued before a deploy removed the node (Content Messaging, 28
+            # Sep). Left RUNNING it crashed the loop on every claim until its
+            # lease ran out, then came back.
+            jobs.finish(self.db, job, jobs.CANCELLED,
+                        result={"outcome": "node_removed"})
+            logger.warning("regen.cancelled %s/%s - node no longer in the graph",
+                           account_id, nid)
+            return {"outcome": "cancelled", "node_id": nid}
         node = self.graph[nid]
         started = time.monotonic()
         snapshot = load_snapshot(self.db, account_id)

@@ -31,6 +31,7 @@ import os
 import re
 import shutil
 import threading
+import time
 
 from app.config.settings import backend_path, settings
 from app.observability.logging import quieten_noisy_loggers
@@ -42,6 +43,9 @@ WORKSPACE_RE = re.compile(r"^[A-Za-z0-9_]+$")
 # Kept modest: these bound how much of the LLM budget one ingest can spend.
 LLM_MAX_ASYNC = 2
 EMBEDDING_MAX_ASYNC = 8
+# Vertex express mode rate-limits far lower than Azure did: eight concurrent
+# batches drew 429s on the first production build (28 Sep).
+VERTEX_EMBEDDING_MAX_ASYNC = 2
 EMBEDDING_BATCH_NUM = 32
 
 
@@ -134,8 +138,8 @@ async def _llm_model_func(prompt, system_prompt=None, history_messages=None,
 
     def _call(with_temperature: bool):
         extra = {"temperature": 0} if with_temperature else {}
-        return client.chat.completions.create(
-            model=model, messages=messages, **extra)
+        from app.core.llm import create_completion
+        return create_completion(client, model=model, messages=messages, **extra)
 
     try:
         response = await asyncio.to_thread(_call, model not in _NO_TEMPERATURE)
@@ -158,8 +162,6 @@ def _vertex_embed(texts: list) -> list:
     but refuses it on /embeddings ("API keys are not supported by this API"),
     while `publishers/google/models/<model>:predict` accepts it. The output
     dimension is pinned so it always matches settings.embedding_dim."""
-    import httpx
-
     if not settings.llm_api_key:
         raise RetrievalConfigError("%s is not set - the retrieval layer cannot embed"
                                    % settings.llm_api_key_name)
@@ -171,13 +173,35 @@ def _vertex_embed(texts: list) -> list:
     vectors = []
     for start in range(0, len(texts), EMBEDDING_BATCH_NUM):
         batch = texts[start:start + EMBEDDING_BATCH_NUM]
-        response = httpx.post(
-            url, params={"key": settings.llm_api_key}, timeout=120,
-            json={"instances": [{"content": t} for t in batch],
+        response = _vertex_post(
+            url, {"instances": [{"content": t} for t in batch],
                   "parameters": {"outputDimensionality": settings.embedding_dim}})
-        response.raise_for_status()
         vectors.extend(p["embeddings"]["values"] for p in response.json()["predictions"])
     return vectors
+
+
+# Waits before each retry of a 429/5xx. The express-mode quota answered 429 to
+# eight concurrent index builds' worth of requests on 28 Sep; a minute of
+# backing off lets a per-minute quota refill instead of failing the build.
+VERTEX_RETRY_WAITS = (2, 5, 10, 20, 30)
+
+
+def _vertex_post(url: str, body: dict):
+    """POST with the key in a header - never ?key=, which httpx puts in every
+    error message and so in the logs - retrying rate limits and server errors."""
+    import httpx
+
+    for wait in (*VERTEX_RETRY_WAITS, None):
+        response = httpx.post(url, headers={"x-goog-api-key": settings.llm_api_key},
+                              json=body, timeout=120)
+        if wait is None or not (response.status_code == 429
+                                or response.status_code >= 500):
+            break
+        logger.info("retrieval: embeddings answered %d, retrying in %ds",
+                    response.status_code, wait)
+        time.sleep(wait)
+    response.raise_for_status()
+    return response
 
 
 async def _embedding_func(texts):
@@ -302,7 +326,9 @@ async def build_rag(account_id: str, index: str, for_query: bool = False):
             func=_embedding_func,
         ),
         embedding_batch_num=EMBEDDING_BATCH_NUM,
-        embedding_func_max_async=EMBEDDING_MAX_ASYNC,
+        embedding_func_max_async=(VERTEX_EMBEDDING_MAX_ASYNC
+                                  if settings.llm_provider == "vertex"
+                                  else EMBEDDING_MAX_ASYNC),
         # Both caches live in KV storage, and that storage is prefixed by
         # workspace - so the cache is PER INDEX, not shared between them. A new
         # index therefore starts with an empty cache and extracts everything
