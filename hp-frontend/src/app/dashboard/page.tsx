@@ -2843,7 +2843,7 @@ export default function UserDashboardPage() {
                                 has no bar, which is the honest height for it. */}
                             {byBombora && bu.units.some((u: any) => u.bombora_max != null) && (
                               <div className="overflow-x-auto">
-                                <div className="min-w-[480px] pl-8 pr-2 pt-3">
+                                <div className="min-w-[480px] pl-8 pr-2 pt-7">
                                   <div className="relative h-52">
                                     {[0, 25, 50, 75, 100].map(v => (
                                       <div key={v} className={`absolute left-0 right-0 border-t ${v === 0 ? 'border-slate-300' : 'border-dashed border-slate-200'}`} style={{ bottom: `${v}%` }}>
@@ -2868,24 +2868,6 @@ export default function UserDashboardPage() {
                                               {u.bombora_max ?? '\u2014'}
                                             </span>
 
-                                            {hoveredIntentCat === u.category && (
-                                              <div className="absolute bottom-full mb-2 z-30 w-72 max-w-[18rem] rounded-lg border border-slate-200 bg-white p-3 shadow-lg text-left space-y-1.5 pointer-events-none">
-                                                <p className="text-[11px] font-extrabold text-slate-900">
-                                                  {categoryLabel(u.category)} &middot; {u.bombora_topic_count} researched topic{u.bombora_topic_count === 1 ? '' : 's'}
-                                                </p>
-                                                {u.bombora_top_topics?.length > 0 ? (
-                                                  <p className="text-[10px] text-slate-500 leading-snug">
-                                                    <span className="font-bold text-slate-400 uppercase tracking-wider block">Strongest topics</span>
-                                                    {u.bombora_top_topics.map((t: any) => `${shortTopic(t.topic)} ${t.score}`).join(' \u00b7 ')}
-                                                  </p>
-                                                ) : (
-                                                  <p className="text-[10px] text-slate-500">No researched topic maps to this unit.</p>
-                                                )}
-                                                <p className="text-[9px] text-slate-400 leading-snug pt-0.5 border-t border-slate-100">
-                                                  Composite scores as supplied by Bombora.
-                                                </p>
-                                              </div>
-                                            )}
                                           </div>
                                         );
                                       })}
@@ -2901,6 +2883,42 @@ export default function UserDashboardPage() {
                                       </div>
                                     ))}
                                   </div>
+
+                                  {/* The hovered unit's detail, under the chart
+                                      rather than floating over a bar. The plot
+                                      scrolls sideways on a narrow screen, and
+                                      anything positioned outside a scrolling
+                                      box is clipped by it - which is what cut
+                                      this panel down to a sliver. */}
+                                  {(() => {
+                                    const hovered = bu.units.find((u: any) => u.category === hoveredIntentCat);
+                                    if (!hovered) {
+                                      return (
+                                        <p className="mt-3 text-[11px] text-slate-400 border-t border-slate-100 pt-2">
+                                          Hover a bar for that unit&apos;s researched topics.
+                                        </p>
+                                      );
+                                    }
+                                    return (
+                                      <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-1">
+                                        <p className="text-[11px] font-extrabold text-slate-900">
+                                          {categoryLabel(hovered.category)} &middot; {hovered.bombora_topic_count} researched topic{hovered.bombora_topic_count === 1 ? '' : 's'}
+                                          {hovered.bombora_max != null && (
+                                            <span className="text-slate-500 font-semibold"> &middot; strongest {hovered.bombora_max}</span>
+                                          )}
+                                        </p>
+                                        {hovered.bombora_top_topics?.length > 0 ? (
+                                          <p className="text-[10px] text-slate-500 leading-snug">
+                                            <span className="font-bold text-slate-400 uppercase tracking-wider">Strongest topics: </span>
+                                            {hovered.bombora_top_topics.map((t: any) => `${shortTopic(t.topic)} ${t.score}`).join(' \u00b7 ')}
+                                          </p>
+                                        ) : (
+                                          <p className="text-[10px] text-slate-500">No researched topic maps to this unit.</p>
+                                        )}
+                                        <p className="text-[9px] text-slate-400">Composite scores as supplied by Bombora.</p>
+                                      </div>
+                                    );
+                                  })()}
                                 </div>
                               </div>
                             )}
@@ -3024,7 +3042,7 @@ export default function UserDashboardPage() {
                             </div>
                             {chartCats.length > 0 ? (
                               <div className="overflow-x-auto">
-                                <div className="min-w-[480px] pl-8 pr-2 pt-3">
+                                <div className="min-w-[480px] pl-8 pr-2 pt-7">
                                   <div className="relative h-52">
                                     {[0, 25, 50, 75, 100].map(v => (
                                       <div key={v} className={`absolute left-0 right-0 border-t ${v === 0 ? 'border-slate-300' : 'border-dashed border-slate-200'}`} style={{ bottom: `${v}%` }}>
@@ -3051,8 +3069,48 @@ export default function UserDashboardPage() {
 
                                             {/* Hover detail: the category file's own fields for this category,
                                                 each attributed and taken as supplied. */}
-                                            {hoveredIntentCat === c.category && (
-                                              <div className="absolute bottom-full mb-2 z-30 w-72 max-w-[18rem] rounded-lg border border-slate-200 bg-white p-3 shadow-lg text-left space-y-1.5 pointer-events-none">
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                  <div className="flex justify-around pt-2">
+                                    {chartCats.map((c: any) => (
+                                      <div key={c.category} className="w-20 text-center">
+                                        <span className="text-xs block font-semibold text-slate-600">{categoryLabel(c.category)}</span>
+                                        {(c.primary.quality_flags || []).length > 0 && (
+                                          <span
+                                            className="text-[10px] font-semibold text-amber-700 block"
+                                            title={(c.primary.quality_flags || []).map((q: any) => `'${q.term}' (${q.field}): ${q.reason}`).join('; ')}
+                                          >
+                                            Check the keyword
+                                          </span>
+                                        )}
+                                        {!c.primary.has_signal && c.primary.score != null && (
+                                          <span className="text-[10px] font-semibold text-slate-400 block">No buying stage</span>
+                                        )}
+                                      </div>
+
+                                    ))}
+                                  </div>
+
+                                  {/* The hovered category's detail, under the
+                                      chart. It used to sit above the bar inside
+                                      this horizontally scrolling box, and a box
+                                      that leaves a scrolling container on any
+                                      axis is clipped by it. */}
+                                  {(() => {
+                                    const c = chartCats.find((x: any) => x.category === hoveredIntentCat);
+                                    if (!c) {
+                                      return (
+                                        <p className="mt-3 text-[11px] text-slate-400 border-t border-slate-100 pt-2">
+                                          Hover a bar for that category&apos;s detail from the intent file.
+                                        </p>
+                                      );
+                                    }
+                                    const p = c.primary || {};
+                                    return (
+                                              <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-left space-y-1.5">
                                                 <p className="text-[11px] font-extrabold text-slate-900">
                                                   {categoryLabel(c.category)} &middot; {p.score ?? '—'}/100
                                                 </p>
@@ -3098,30 +3156,8 @@ export default function UserDashboardPage() {
                                                   All values as supplied by the HP Category Intent file.
                                                 </p>
                                               </div>
-                                            )}
-                                          </div>
-                                        );
-                                      })}
-                                    </div>
-                                  </div>
-                                  <div className="flex justify-around pt-2">
-                                    {chartCats.map((c: any) => (
-                                      <div key={c.category} className="w-20 text-center">
-                                        <span className="text-xs block font-semibold text-slate-600">{categoryLabel(c.category)}</span>
-                                        {(c.primary.quality_flags || []).length > 0 && (
-                                          <span
-                                            className="text-[10px] font-semibold text-amber-700 block"
-                                            title={(c.primary.quality_flags || []).map((q: any) => `'${q.term}' (${q.field}): ${q.reason}`).join('; ')}
-                                          >
-                                            Check the keyword
-                                          </span>
-                                        )}
-                                        {!c.primary.has_signal && c.primary.score != null && (
-                                          <span className="text-[10px] font-semibold text-slate-400 block">No buying stage</span>
-                                        )}
-                                      </div>
-                                    ))}
-                                  </div>
+                                    );
+                                  })()}
                                 </div>
                               </div>
                             ) : (
@@ -3368,6 +3404,14 @@ export default function UserDashboardPage() {
                               const shown = filteredTopics.filter((x: any) => x.included && x.theme === 'Other / Low Relevance');
                               const flaggedShown = shown.filter((x: any) => x.mapping_status === 'flagged');
                               const rest = shown.filter((x: any) => x.mapping_status !== 'flagged');
+                              // Open like every other theme group: a search opens
+                              // it, otherwise the button decides. It used to toggle
+                              // between the whole list and the first five rows,
+                              // with the flagged list rendered either way - so on
+                              // an account with flagged topics "Collapse" looked
+                              // like it did nothing.
+                              const otherOpen = isOtherTopicsExpanded
+                                || (intentSearch.trim() !== '' && shown.length > 0);
                               return (
                                 <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs space-y-3">
                                   <div className="flex items-center justify-between border-b border-slate-100 pb-2.5 gap-2">
@@ -3382,11 +3426,11 @@ export default function UserDashboardPage() {
                                       onClick={() => setIsOtherTopicsExpanded(!isOtherTopicsExpanded)}
                                       className="text-xs font-bold text-hp-navy hover:underline flex items-center gap-1 flex-shrink-0"
                                     >
-                                      <span>{isOtherTopicsExpanded ? 'Collapse' : `Expand (${rest.length})`}</span>
-                                      <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isOtherTopicsExpanded ? 'rotate-180' : ''}`} />
+                                      <span>{otherOpen ? 'Collapse' : `Expand (${shown.length})`}</span>
+                                      <ChevronDown className={`w-3.5 h-3.5 transition-transform ${otherOpen ? 'rotate-180' : ''}`} />
                                     </button>
                                   </div>
-                                  {flaggedShown.length > 0 && (
+                                  {otherOpen && flaggedShown.length > 0 && (
                                     <div className="space-y-2 bg-amber-50/60 border border-amber-200 rounded-xl p-3">
                                       <span className="text-[10px] font-bold uppercase tracking-wider text-amber-800 block">Flagged for review · near-misses the dictionary does not map</span>
                                       {flaggedShown.map((item: any) => (
@@ -3400,9 +3444,11 @@ export default function UserDashboardPage() {
                                       ))}
                                     </div>
                                   )}
-                                  <div className="space-y-2">
-                                    {(isOtherTopicsExpanded ? rest : rest.slice(0, 5)).map((item: any, idx: number) => renderTopicRow(item, idx, 'bg-slate-500'))}
-                                  </div>
+                                  {otherOpen && (
+                                    <div className="space-y-2">
+                                      {rest.map((item: any, idx: number) => renderTopicRow(item, idx, 'bg-slate-500'))}
+                                    </div>
+                                  )}
                                 </div>
                               );
                             })()}
