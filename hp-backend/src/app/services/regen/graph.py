@@ -82,6 +82,13 @@ NODES = (
          widgets=("stakeholder_contacts_grid", "stakeholder_influence_map"),
          # company_personas: the client's buying committee (Manisha, 28 Sep).
          datasets=("prospect_contacts", "company_personas"),
+         # 2: the 27 Sep feedback. Every contact carries `source_label`
+         # ("Explorium + Contacts Waterfall Tools"), each department group
+         # carries its whole roster in `contact_ids`, the roster is ordered by
+         # seniority rather than the composite score, and `source_breakdown`
+         # and `ranked_entry_path` are gone. All of it is Python, so nothing
+         # else here would have moved the fingerprint.
+         logic_version=2,
          run=f"{_P}:stakeholder_roster"),
     Node("tech_core", "tech_landscape",
          widgets=("technographic_map", "tech_stack_matrix",
@@ -95,7 +102,10 @@ NODES = (
          # when there is no estate; webstack_breakdown groups tech_breakdown.
          # 3: tech_stack_matrix carries stack_view - every technology as a card
          # in eight families with its HP play (Sahaj, 27 Sep; Caterpillar layout).
-         logic_version=3,
+         # 4: tech_stack_matrix also carries category_groups - the whole estate
+         # clubbed into the export's own 20 category columns, with what the
+         # export left uncategorised in a group of its own.
+         logic_version=4,
          logic_refs=("app.services.hp.map_narrative:MAP_NARRATIVE_PROMPT_VERSION",),
          run=f"{_P}:tech_core"),
     Node("objection", "objection_playbook",
@@ -112,7 +122,9 @@ NODES = (
                    "hp_category_intent", "technographics", "webstack",
                    "firmographics"),
          knowledge=("case_studies",), llm=True,
-         logic_refs=("app.services.hp.intent_topic_map:DICTIONARY_VERSION",),
+         logic_refs=("app.services.hp.intent_topic_map:DICTIONARY_VERSION",
+                     "app.services.extractors.intent_demand_signals:"
+                     "BU_READ_PROMPT_VERSION"),
          # 2: Sahaj 27 Sep - no trend or volume in the So What, no proof point,
          # a business-unit summary led by Bombora.
          logic_version=2,
@@ -141,6 +153,13 @@ NODES = (
          datasets=("google_news", "news_events", "firmographics"),
          upstream=("opp_core", "intent", "tech_core"),
          config=("live_signal",), knowledge=("case_studies",), llm=True,
+         # 2: the source line names the scoring document's classification and
+         # the publisher, and no longer repeats the document's definition
+         # column (Sahaj, 28 Sep). The line is composed in Python but stored
+         # inside the scored entry, and `describe_source` runs behind this
+         # feature's own fingerprint cache - which `cache_suffix()` keys on
+         # this number, so the bump is what re-scores and rewrites it.
+         logic_version=2,
          logic_refs=("app.services.extractors.recent_news_signals:"
                      "SIGNAL_SCORING_PROMPT_VERSION",),
          run=f"{_P}:news"),

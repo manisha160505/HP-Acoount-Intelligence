@@ -790,6 +790,110 @@ def _hiring_widget(account_id: str, job_records: list[dict], now) -> dict:
 # How many topics a business unit's summary line names.
 BU_TOP_TOPICS = 3
 
+# One short read per business unit, written by the model from the Bombora
+# topics Python has already mapped and scored. Sahaj, 28 Sep: "on top we can
+# show the summary from the bombora data itself, llm can generate in cards".
+#
+# The model gets the numbers; it never produces one. Every figure on the card -
+# the topic count, the maximum, the topic names - is Python's, and the read is
+# checked for any figure the account's own files do not carry before it is
+# published.
+BU_READ_PROMPT_VERSION = 1
+BU_READ_MIN_WORDS = 18
+BU_READ_MAX_WORDS = 40
+
+BU_READ_SYSTEM = """You write one short read per HP business unit from a company's Bombora research topics.
+
+You are given, for each unit, the topics this company's people have been researching and the composite score of each. Those numbers are computed and are not yours to change.
+
+RULES - these are failures, not preferences:
+1. ONE sentence per unit, BETWEEN {min_words} AND {max_words} WORDS.
+2. Say what the RESEARCH suggests a seller could open on. Research is not buying intent: use "suggests", "points to", "may indicate", "could be worth opening on". NEVER "is ready to", "needs", "requires", "is in market", "plans to buy".
+3. Name the unit's own topics from the list. Do NOT name a topic that is not listed for that unit.
+4. NEVER write a number, a score, a percentage or a date. The card already carries them; a figure you write is a figure you invented.
+5. Where a unit has no topics, say plainly that no researched topic maps to it and that the conversation would have to start elsewhere. Do not pad it.
+6. Each unit reads differently. Do not reuse one sentence shape across the five.
+7. Also write one "overview" sentence, {min_words} to {max_words} words, naming the two or three units the research leans towards across the whole account.
+
+Output JSON:
+{{"overview": "...", "units": [{{"category": "<exactly as given>", "read": "..."}}]}}
+"""
+
+
+def _bu_reads(company: str, units: list[dict]) -> dict:
+    """{"overview": str, "reads": {category: sentence}} - or {} on any failure.
+
+    A missing read costs a line of prose on a card that still carries all of
+    its numbers, so nothing here raises and nothing here blocks the widget.
+    """
+    payload = [{"category": u["category"],
+                "hp_play": u["hp_play"],
+                "topics": [t["topic"] for t in (u.get("bombora_top_topics") or [])]}
+               for u in units]
+    if not any(p["topics"] for p in payload):
+        return {}
+
+    system = BU_READ_SYSTEM.format(min_words=BU_READ_MIN_WORDS,
+                                   max_words=BU_READ_MAX_WORDS)
+    try:
+        raw = generate_gpt4o_json_completion(
+            system, json.dumps({"company": company, "units": payload},
+                               ensure_ascii=False)) or {}
+    except Exception:
+        logger.exception("intent: business-unit reads failed")
+        return {}
+
+    named = {p["category"]: [p["category"], p["hp_play"], *p["topics"]]
+             for p in payload}
+    reads = {}
+    for item in (raw.get("units") or []):
+        if not isinstance(item, dict):
+            continue
+        name = _clean(item.get("category"))
+        text = " ".join(str(item.get("read") or "").split())
+        if not (name and text) or _has_figure(text, named.get(name, ())):
+            continue
+        # A read that runs long stops being a read. Dropped rather than
+        # retried: the card keeps every number either way.
+        if not BU_READ_MIN_WORDS <= len(text.split()) <= BU_READ_MAX_WORDS:
+            logger.info("intent: %s read is %d words, outside %d-%d - dropped",
+                        name, len(text.split()), BU_READ_MIN_WORDS, BU_READ_MAX_WORDS)
+            continue
+        reads[name] = text
+    overview = " ".join(str(raw.get("overview") or "").split())
+    if _has_figure(overview, [n for names in named.values() for n in names]):
+        overview = ""
+    return {"overview": overview, "reads": reads}
+
+
+# A token carrying a digit: "73", "2-in-1", "3D", "365", "11".
+_FIGURE_TOKEN_RE = re.compile(r"[\w./-]*\d[\w./-]*")
+
+
+def _has_figure(text: str, allowed=()) -> bool:
+    """A read may carry no figure of its own - rule 4.
+
+    Cheaper and stricter than grounding the sentence: the card's numbers sit
+    beside it, so a figure inside the prose can only be a repetition or an
+    invention, and neither is wanted.
+
+    `allowed` are the names the read is supposed to use - the unit, the HP play
+    and this unit's own researched topics - and several carry a digit that is
+    part of the name: the 3D unit, "2-in-1 pcs", "Windows 11". A digit-bearing
+    token is fine when it appears in one of those names and is a figure
+    otherwise. Matching on the token rather than the whole name matters: the
+    topic reads "personal computer: 2-in-1 pcs" and the model writes "2-in-1
+    PCs", so stripping the full string left the digit behind and dropped a
+    perfectly good read.
+    """
+    permitted = {tok.lower()
+                 for name in allowed
+                 for tok in _FIGURE_TOKEN_RE.findall(str(name or ""))}
+    for tok in _FIGURE_TOKEN_RE.findall(str(text or "")):
+        if tok.lower().strip(".,;:()") not in permitted:
+            return True
+    return False
+
 
 def _bu_summary(topics: list[dict], categories: list[dict]) -> dict:
     """Intent across HP's five business units, one line each, for the top of
@@ -964,8 +1068,19 @@ def extract_intent_demand_signals(account_id: str) -> list[dict]:
         # that used to sit here is gone, so its studies stay free for the tabs
         # that still carry proof.
 
-        # The broad summary the client asked to lead with (Sahaj, 27 Sep).
-        summary["bu_summary"] = _bu_summary(topics, summary.get("hp_categories") or [])
+        # The broad summary the client asked to lead with (Sahaj, 27 Sep), and
+        # the model's one-line read of each unit's own research on top of it
+        # (Sahaj, 28 Sep). The reads are written only where Bombora leads -
+        # they are a reading of the research, and an account with none has
+        # nothing for them to read.
+        bu = _bu_summary(topics, summary.get("hp_categories") or [])
+        if bu["lead_source"] == "Bombora":
+            written = _bu_reads(company, bu["units"])
+            if written:
+                bu["overview"] = written.get("overview") or None
+                for unit in bu["units"]:
+                    unit["read"] = written["reads"].get(unit["category"])
+        summary["bu_summary"] = bu
 
         summary_payload["status"] = "available"
         summary_payload["data"] = {

@@ -94,9 +94,12 @@ def extract_strategy_chat(account_id: str) -> list[dict]:
     # Each count comes from the widget that owns it, so the header agrees with
     # the screen a seller can click through to. Absent where that feature has
     # not run.
+    # No stakeholder count. The client, 27 Sep: "please drop mention of 22
+    # stakeholders, this has nothing to do with chat." The line that printed it
+    # went then; the number went on being computed and shipped to the browser
+    # in this payload until 28 Sep, which is the same claim by a quieter route.
     grounding_metadata = {
         "company_name": company_name or None,
-        "stakeholders_count": _int(contacts.get("total_contacts_count")),
         "solutions_count": (len(plays.get("opportunity_plays") or [])
                             if plays.get("opportunity_plays") is not None else None),
         "installed_vendors_count": _int(techmap.get("total_detected_technologies")),
@@ -128,7 +131,6 @@ def extract_strategy_chat(account_id: str) -> list[dict]:
 
     snapshot_context = {
         "company_name": company_name or None,
-        "stakeholders_count": grounding_metadata["stakeholders_count"],
         "installed_vendors": vendors,
         "top_intent_topics": topics,
         "recent_trigger_events": recent_events,

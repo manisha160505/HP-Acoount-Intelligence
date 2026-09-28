@@ -513,7 +513,6 @@ export default function UserDashboardPage() {
   const [revealedContacts, setRevealedContacts] = useState<Record<string, boolean>>({});
 
   // Tech Landscape Filter & Sub-Tab State
-  const [techSubTab, setTechSubTab] = useState<'map' | 'raw_matrix' | 'webstack' | 'detections'>('map');
   // Intent theme groups start collapsed (Sahaj, 27 Sep).
   const [expandedIntentThemes, setExpandedIntentThemes] = useState<Record<string, boolean>>({});
   const [opportunitiesOnly, setOpportunitiesOnly] = useState(false);
@@ -536,14 +535,6 @@ export default function UserDashboardPage() {
   const [isGeneratingContent, setIsGeneratingContent] = useState<boolean>(false);
   const [hasGeneratedContent, setHasGeneratedContent] = useState<boolean>(false);
   const [generatedAsset, setGeneratedAsset] = useState<any>(null);
-  // Co-creation step: the brief produces angles, the seller picks or edits one,
-  // and only then is the asset written. `selectedAngle` carries the chosen text
-  // (editable, so "selects OR ADJUSTS" is satisfied) into the generate call.
-  const [angleOptions, setAngleOptions] = useState<any[]>([]);
-  const [isSuggestingAngles, setIsSuggestingAngles] = useState<boolean>(false);
-  const [selectedAngleId, setSelectedAngleId] = useState<string | null>(null);
-  const [selectedAngle, setSelectedAngle] = useState<string>('');
-  const [angleNotice, setAngleNotice] = useState<string | null>(null);
   // Which LinkedIn variant is on screen (1-based, matching variant_index).
   const [activeVariantIndex, setActiveVariantIndex] = useState<number>(1);
   const [generateError, setGenerateError] = useState<any>(null);
@@ -2595,8 +2586,6 @@ export default function UserDashboardPage() {
                         (buByCat[b.category]?.bombora_max ?? -1) - (buByCat[a.category]?.bombora_max ?? -1))
                     : hpCategories;
                   const chartCats = hpCategories.filter((c: any) => c.primary).sort((a: any, b: any) => (b.primary.score ?? -1) - (a.primary.score ?? -1));
-                  const hiringLinked = summaryData?.hiring_linked;
-                  const staffingTopics = topicsList.filter(t => t.included && t.hiring_linked);
                   const disclaimer: string = summaryData?.disclaimer || topicsData?.disclaimer || 'Intent indicates research activity, not confirmed purchase intent.';
                   // Source A that is missing or belongs to another domain is stated, never drawn as zero scores.
                   // Client ruling, 24 Sep: when a dataset is missing, leave the section
@@ -2640,11 +2629,6 @@ export default function UserDashboardPage() {
                     'Financial Services & Fintech': { chip: 'bg-green-100 text-green-800 border-green-200', bar: 'bg-green-500', border: 'border-green-200' },
                     'E-commerce & Logistics': { chip: 'bg-orange-100 text-orange-800 border-orange-200', bar: 'bg-orange-500', border: 'border-orange-200' },
                     'Other / Low Relevance': { chip: 'bg-slate-100 text-slate-700 border-slate-200', bar: 'bg-slate-400', border: 'border-slate-200' }
-                  };
-                  const INTENSITY_CHIP: Record<string, string> = {
-                    'High': 'bg-red-50 text-red-700 border-red-200',
-                    'Moderate': 'bg-amber-50 text-amber-800 border-amber-200',
-                    'Low': 'bg-slate-50 text-slate-600 border-slate-200'
                   };
                   const categoryLabel = (name: string) => (name === 'Poly/Collaboration' ? 'Poly' : name);
                   const shortDate = (v?: string | null) => (v ? String(v).slice(0, 10) : null);
@@ -2779,44 +2763,219 @@ export default function UserDashboardPage() {
                         </div>
                       </div>
 
-                      {/* Intent across HP's five business units (Sahaj, 27 Sep):
-                          led by Bombora where the account has topics, else by
-                          the category file. Every number as received. */}
+                      {/* The read leads the tab (Sahaj, 28 Sep: "move this
+                          box to the top in intent n demand"). It is the answer;
+                          the unit summary and the topics below are the working. */}
+                      {summaryData && (
+                      <div className="bg-blue-50/80 border border-blue-200/90 rounded-2xl p-6 text-xs text-blue-950 space-y-3 shadow-xs">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <h3 className="text-xs font-black uppercase tracking-wider text-hp-navy flex flex-wrap items-center gap-2">
+                            <Lightbulb className="w-4 h-4 text-hp-navy" />
+                            <span>SO WHAT FOR HP</span>
+                            {includedCount > 0 && (
+                              <span className="normal-case tracking-normal font-medium text-[11px] text-blue-700/80">
+                                · {includedCount} intent topics categorized, {otherTheme?.topic_count ?? 0} ({unmappedPct}%) low-relevance and kept out of the theme read below
+                              </span>
+                            )}
+                          </h3>
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200">
+                            Rule-based · {dictionaryVersion}
+                          </span>
+                        </div>
+                        <div className="space-y-2.5">
+                          {(summaryData.so_what || []).map((line: string, i: number) => (
+                            <p key={i} className="text-[12px] leading-relaxed text-slate-700 font-medium flex items-start gap-2.5">
+                              <Target className="w-4 h-4 text-hp-navy flex-shrink-0 mt-0.5" />
+                              <span>{line}</span>
+                            </p>
+                          ))}
+                        </div>
+
+                        {/* Case-study proof for the categories this read
+                            covers. Client direction, 24 Sep: proof may
+                            strengthen the So What for HP, and it follows
+                            the read rather than creating it. Each is
+                            labelled with the category it supports, so a
+                            seller can see which part of the read it backs. */}
+                        <p className="text-[11px] leading-relaxed text-blue-950 font-bold flex items-start gap-2.5 pt-2 border-t border-blue-200/60">
+                          <Info className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                          <span>{disclaimer}</span>
+                        </p>
+                      </div>
+                      )}
+
+                      {/* Intent across HP's five business units.
+                          Sahaj, 27 Sep: "add a broad summary at the start that
+                          mentions intent around HP's key business units".
+                          Sahaj, 28 Sep: "on top we can show the summary from the
+                          bombora data itself, llm can generate in cards".
+
+                          Where the account has Bombora, this is the whole of the
+                          HP-unit view - one card per unit, its own researched
+                          topics, and the model's one-line read of them. The
+                          category file's numbers are not shown beside them: that
+                          file is the fallback for the accounts with no Bombora,
+                          and those keep the list form and the sections below.
+                          Every number here is Python's; the read carries none. */}
                       {(summaryData?.bu_summary?.units || []).length > 0 && (() => {
                         const bu: any = summaryData?.bu_summary;
                         const byBombora = bu.lead_source === 'Bombora';
                         return (
-                          <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm space-y-3">
+                          <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm space-y-4">
                             <div className="flex items-center justify-between gap-2">
                               <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700">
                                 Intent across HP business units
                               </h3>
                               <span className="text-[10px] text-slate-400">
-                                {byBombora ? 'Led by Bombora research topics' : 'From the PredictLeads intent file'}
+                                {byBombora ? 'From this account’s Bombora research' : 'From the HP category intent file'}
                               </span>
                             </div>
-                            <ul className="space-y-1.5">
-                              {bu.units.map((u: any) => (
-                                <li key={u.category} className="text-xs text-slate-700 leading-relaxed">
-                                  <span className="font-semibold text-slate-900">{u.category}</span>
-                                  <span className="text-slate-400"> &middot; {u.hp_play}</span>
-                                  {' - '}
-                                  {byBombora ? (
-                                    u.bombora_topic_count > 0 ? (
-                                      <>
-                                        {u.bombora_topic_count} Bombora topic{u.bombora_topic_count === 1 ? '' : 's'}, max {u.bombora_max}
-                                        {u.bombora_top_topics?.length > 0 && (
-                                          <span className="text-slate-500"> (e.g. {u.bombora_top_topics.map((t: any) => `${t.topic} ${t.score}`).join('; ')})</span>
+
+                            {byBombora && bu.overview && (
+                              <p className="text-xs text-slate-700 leading-relaxed bg-slate-50 border border-slate-200 rounded-xl p-3">
+                                {bu.overview}
+                              </p>
+                            )}
+
+                            {/* The same chart shape the category file gets, drawn
+                                from Bombora instead: one bar per unit at its
+                                strongest researched topic. A unit nothing maps to
+                                has no bar, which is the honest height for it. */}
+                            {byBombora && bu.units.some((u: any) => u.bombora_max != null) && (
+                              <div className="overflow-x-auto">
+                                <div className="min-w-[480px] pl-8 pr-2 pt-3">
+                                  <div className="relative h-52">
+                                    {[0, 25, 50, 75, 100].map(v => (
+                                      <div key={v} className={`absolute left-0 right-0 border-t ${v === 0 ? 'border-slate-300' : 'border-dashed border-slate-200'}`} style={{ bottom: `${v}%` }}>
+                                        <span className="absolute -left-8 -translate-y-1/2 w-6 text-right text-[10px] font-mono text-slate-400">{v}</span>
+                                      </div>
+                                    ))}
+                                    <div className="absolute inset-0 flex items-end justify-around">
+                                      {bu.units.map((u: any) => {
+                                        const pct = Math.min(100, Math.max(0, u.bombora_max ?? 0));
+                                        return (
+                                          <div
+                                            key={u.category}
+                                            className="relative flex flex-col items-center justify-end h-full w-20"
+                                            onMouseEnter={() => setHoveredIntentCat(u.category)}
+                                            onMouseLeave={() => setHoveredIntentCat(null)}
+                                          >
+                                            <div
+                                              className={`w-14 rounded-t-md cursor-default ${CATEGORY_STYLE[u.category]?.bar || 'bg-slate-400'}`}
+                                              style={{ height: `${pct}%` }}
+                                            ></div>
+                                            <span className="absolute text-[11px] font-bold text-slate-700" style={{ bottom: `calc(${pct}% + 6px)` }}>
+                                              {u.bombora_max ?? '\u2014'}
+                                            </span>
+
+                                            {hoveredIntentCat === u.category && (
+                                              <div className="absolute bottom-full mb-2 z-30 w-72 max-w-[18rem] rounded-lg border border-slate-200 bg-white p-3 shadow-lg text-left space-y-1.5 pointer-events-none">
+                                                <p className="text-[11px] font-extrabold text-slate-900">
+                                                  {categoryLabel(u.category)} &middot; {u.bombora_topic_count} researched topic{u.bombora_topic_count === 1 ? '' : 's'}
+                                                </p>
+                                                {u.bombora_top_topics?.length > 0 ? (
+                                                  <p className="text-[10px] text-slate-500 leading-snug">
+                                                    <span className="font-bold text-slate-400 uppercase tracking-wider block">Strongest topics</span>
+                                                    {u.bombora_top_topics.map((t: any) => `${shortTopic(t.topic)} ${t.score}`).join(' \u00b7 ')}
+                                                  </p>
+                                                ) : (
+                                                  <p className="text-[10px] text-slate-500">No researched topic maps to this unit.</p>
+                                                )}
+                                                <p className="text-[9px] text-slate-400 leading-snug pt-0.5 border-t border-slate-100">
+                                                  Composite scores as supplied by Bombora.
+                                                </p>
+                                              </div>
+                                            )}
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                  <div className="flex justify-around pt-2">
+                                    {bu.units.map((u: any) => (
+                                      <div key={u.category} className="w-20 text-center">
+                                        <span className="text-xs block font-semibold text-slate-600">{categoryLabel(u.category)}</span>
+                                        {u.bombora_topic_count === 0 && (
+                                          <span className="text-[10px] font-semibold text-slate-400 block">No topic</span>
                                         )}
-                                      </>
-                                    ) : 'no Bombora topic maps to this unit'
-                                  ) : null}
-                                  {u.category_file_score !== null && u.category_file_score !== undefined && (
-                                    <span className="text-slate-500">{byBombora ? '; ' : ''}category score {u.category_file_score}/100</span>
-                                  )}
-                                </li>
-                              ))}
-                            </ul>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+
+                            {byBombora ? (
+                              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                                {bu.units.map((u: any) => {
+                                  const researched = u.bombora_topic_count > 0;
+                                  const style = CATEGORY_STYLE[u.category]
+                                    || { bar: 'bg-slate-400', chip: 'bg-slate-50 text-slate-700 border-slate-200' };
+                                  return (
+                                    <div
+                                      key={u.category}
+                                      className={`rounded-xl border overflow-hidden ${researched
+                                        ? 'bg-white border-slate-200 shadow-xs'
+                                        : 'bg-slate-50/60 border-slate-200'}`}
+                                    >
+                                      {/* The unit's own colour, the same one its bar
+                                          carries in the chart above. */}
+                                      <div className={`h-1 ${researched ? style.bar : 'bg-slate-200'}`}></div>
+                                      <div className="p-3.5 space-y-2">
+                                      <div className="flex items-center justify-between gap-2">
+                                        <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full border ${style.chip}`}>
+                                          {categoryLabel(u.category)}
+                                        </span>
+                                        {researched && (
+                                          <span className="text-sm font-extrabold text-slate-800">
+                                            {u.bombora_max}<span className="text-[10px] text-slate-400 font-medium">/100</span>
+                                          </span>
+                                        )}
+                                      </div>
+                                      <p className="text-[11px] text-slate-400 leading-snug">{u.hp_play}</p>
+
+                                      <p className="text-[11px] font-semibold text-slate-600">
+                                        {researched
+                                          ? <>{u.bombora_topic_count} researched topic{u.bombora_topic_count === 1 ? '' : 's'}</>
+                                          : <span className="text-slate-400">No researched topic maps to this unit</span>}
+                                      </p>
+
+                                      {u.bombora_top_topics?.length > 0 && (
+                                        <div className="flex flex-wrap gap-1">
+                                          {u.bombora_top_topics.map((t: any) => (
+                                            <span
+                                              key={t.topic}
+                                              className="text-[10px] font-medium text-slate-600 bg-slate-50 border border-slate-200 px-1.5 py-0.5 rounded-full"
+                                            >
+                                              {shortTopic(t.topic)} <span className="text-slate-400">{t.score}</span>
+                                            </span>
+                                          ))}
+                                        </div>
+                                      )}
+
+                                      {u.read && (
+                                        <p className="text-[11px] text-slate-700 leading-relaxed pt-1 border-t border-slate-100">
+                                          {u.read}
+                                        </p>
+                                      )}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            ) : (
+                              <ul className="space-y-1.5">
+                                {bu.units.map((u: any) => (
+                                  <li key={u.category} className="text-xs text-slate-700 leading-relaxed">
+                                    <span className="font-semibold text-slate-900">{categoryLabel(u.category)}</span>
+                                    <span className="text-slate-400"> &middot; {u.hp_play}</span>
+                                    {u.category_file_score !== null && u.category_file_score !== undefined && (
+                                      <span className="text-slate-500"> - category score {u.category_file_score}/100</span>
+                                    )}
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
                           </div>
                         );
                       })()}
@@ -2845,43 +3004,13 @@ export default function UserDashboardPage() {
 
                       {summaryData && (
                         <>
-                          {/* So What for HP */}
-                          <div className="bg-blue-50/80 border border-blue-200/90 rounded-2xl p-6 text-xs text-blue-950 space-y-3 shadow-xs">
-                            <div className="flex flex-wrap items-center justify-between gap-2">
-                              <h3 className="text-xs font-black uppercase tracking-wider text-hp-navy flex flex-wrap items-center gap-2">
-                                <Lightbulb className="w-4 h-4 text-hp-navy" />
-                                <span>SO WHAT FOR HP</span>
-                                {includedCount > 0 && (
-                                  <span className="normal-case tracking-normal font-medium text-[11px] text-blue-700/80">
-                                    · {includedCount} intent topics categorized, {otherTheme?.topic_count ?? 0} ({unmappedPct}%) low-relevance and kept out of the theme read below
-                                  </span>
-                                )}
-                              </h3>
-                              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200">
-                                Rule-based · {dictionaryVersion}
-                              </span>
-                            </div>
-                            <div className="space-y-2.5">
-                              {(summaryData.so_what || []).map((line: string, i: number) => (
-                                <p key={i} className="text-[12px] leading-relaxed text-slate-700 font-medium flex items-start gap-2.5">
-                                  <Target className="w-4 h-4 text-hp-navy flex-shrink-0 mt-0.5" />
-                                  <span>{line}</span>
-                                </p>
-                              ))}
-                            </div>
-
-                            {/* Case-study proof for the categories this read
-                                covers. Client direction, 24 Sep: proof may
-                                strengthen the So What for HP, and it follows
-                                the read rather than creating it. Each is
-                                labelled with the category it supports, so a
-                                seller can see which part of the read it backs. */}
-                            <p className="text-[11px] leading-relaxed text-blue-950 font-bold flex items-start gap-2.5 pt-2 border-t border-blue-200/60">
-                              <Info className="w-4 h-4 flex-shrink-0 mt-0.5" />
-                              <span>{disclaimer}</span>
-                            </p>
-                          </div>
-
+                          {/* The HP Category Intent Scores - the intent file's own
+                              chart and its five category cards - are shown only where
+                              the account has NO Bombora research. Sahaj, 28 Sep: for
+                              the 173 accounts that have Bombora, the summary at the
+                              top stands in their place; the other 47 keep this. */}
+                          {!leadWithBombora && (
+                          <>
                           {/* Step 1 - HP Category Intent Scores, as received from the category file */}
                           <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-4">
                             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -3071,7 +3200,7 @@ export default function UserDashboardPage() {
                                     </p>
                                   )}
 
-                                  {/* Signal topics as pills, then geo */}
+                                  {/* Signal topics as pills */}
                                   {p && (
                                     <div className="space-y-2.5">
                                       <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Signal Topics</span>
@@ -3125,6 +3254,8 @@ export default function UserDashboardPage() {
                               );
                             })}
                           </div>
+                          </>
+                          )}
 
                         </>
                       )}
@@ -3316,7 +3447,6 @@ export default function UserDashboardPage() {
                   // retained separately as discovery gaps, with no sales narrative.
                   const discoveryAreas: any[] = playsData.discovery_areas || [];
                   const servicePlays: any[] = playsData.service_plays || [];
-                  const serviceNotes: string[] = playsData.service_notes || [];
                   const isAvailable = playsWidget?.status === 'available' && generatedPlays.length > 0;
 
                   return (
@@ -3581,7 +3711,7 @@ export default function UserDashboardPage() {
                           above: those are a model's reading of the account, these are
                           a rule the account matched, and every sentence in them is
                           HP's own approved wording rather than generated copy. */}
-                      {(servicePlays.length > 0 || serviceNotes.length > 0) && (
+                      {servicePlays.length > 0 && (
                         <div className="space-y-3 pt-2">
                           <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-600 flex items-center gap-2">
                             <BookOpen className="w-3.5 h-3.5 text-hp-navy" />
@@ -3687,16 +3817,11 @@ export default function UserDashboardPage() {
                             </div>
                           ))}
 
-                          {/* Why a family is absent. An offering blocked in this market,
-                              or a rule withheld because the same evidence already carries
-                              another, is more useful said than silently missing. */}
-                          {serviceNotes.length > 0 && (
-                            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-1">
-                              {serviceNotes.map((note: string, i: number) => (
-                                <p key={i} className="text-[11px] text-slate-500 leading-relaxed">{note}</p>
-                              ))}
-                            </div>
-                          )}
+                          {/* The "PRINT 04 withheld ... " / "HP IQ not offered ... "
+                              notes were removed on the client's instruction, 28 Sep.
+                              They are rulebook bookkeeping, not something a seller
+                              acts on. Still recorded in `service_notes` on the
+                              widget, so why a family is absent is still answerable. */}
                         </div>
                       )}
 
@@ -4212,7 +4337,6 @@ export default function UserDashboardPage() {
                 {activeFeatureKey === 'tech_landscape' && (() => {
                   const mapWidget = widgets.find(w => w.widget_key === 'technographic_map');
                   const matrixWidget = widgets.find(w => w.widget_key === 'tech_stack_matrix');
-                  const webstackWidget = widgets.find(w => w.widget_key === 'webstack_breakdown');
                   const detectionsWidget = widgets.find(w => w.widget_key === 'tech_detections_reference');
                   const hpRecWidget = widgets.find(w => w.widget_key === 'technographic_hp_recommendations');
                   const hpRecData: any = hpRecWidget?.data || {};
@@ -4220,7 +4344,6 @@ export default function UserDashboardPage() {
 
                   const mapData = mapWidget?.data || {};
                   const matrixData = matrixWidget?.data || {};
-                  const webstackData = webstackWidget?.data || {};
                   const detectionsData = detectionsWidget?.data || {};
 
                   const categoriesList: any[] = mapData.categories || [];
@@ -4230,10 +4353,6 @@ export default function UserDashboardPage() {
                   });
 
                   const totalTechCount = matrixData.total_tech_count ?? 0;
-                  const totalWebTechCount = webstackData.total_web_tech_count ?? 0;
-                  const premiumTechCount = webstackData.premium_tech_count || '0';
-                  const webSpendEst = webstackData.web_spend_estimate || 'N/A';
-                  const webstackTechs: string[] = webstackData.technologies || [];
                   const totalDetectionsCount = detectionsData.total_detections_count ?? 0;
                   const detectionsList: any[] = detectionsData.detections || [];
 
@@ -4648,57 +4767,11 @@ export default function UserDashboardPage() {
                         </div>
                       )}
 
-                      {/* Website stack: Explorium WebStack (totals, spend) and
-                          Tech_Breakdown (the same stack grouped by what each
-                          technology does). Both are the client's named
-                          technographic sources; page metadata is folded away. */}
-                      {webstackWidget?.status === 'available' && (() => {
-                        const breakdown: any[] = webstackData.breakdown || [];
-                        const infra = breakdown.filter((c: any) => !c.page_metadata);
-                        const meta = breakdown.filter((c: any) => c.page_metadata);
-                        return (
-                          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 space-y-3">
-                            <div className="flex items-center justify-between gap-2 border-b border-slate-100 pb-2">
-                              <h4 className="text-xs font-extrabold uppercase tracking-wider text-slate-700">Website stack</h4>
-                              <span className="text-[10px] text-slate-400">
-                                {totalWebTechCount} web technologies · {premiumTechCount} premium · est. spend {webSpendEst}
-                              </span>
-                            </div>
-                            {infra.length > 0 ? (
-                              <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2">
-                                {infra.map((c: any) => (
-                                  <div key={c.category} className="text-xs">
-                                    <span className="font-semibold text-slate-700">{c.category}</span>
-                                    <span className="text-slate-400"> ({c.technologies.length})</span>
-                                    <p className="text-slate-600 leading-relaxed">
-                                      {c.technologies.slice(0, 10).join(' · ')}
-                                      {c.technologies.length > 10 ? ` · +${c.technologies.length - 10} more` : ''}
-                                    </p>
-                                  </div>
-                                ))}
-                              </div>
-                            ) : (
-                              <p className="text-xs text-slate-600 leading-relaxed">
-                                {webstackTechs.slice(0, 40).join(' · ')}
-                                {webstackTechs.length > 40 ? ` · +${webstackTechs.length - 40} more` : ''}
-                              </p>
-                            )}
-                            {meta.length > 0 && (
-                              <details className="text-[11px] text-slate-500">
-                                <summary className="cursor-pointer select-none">Page metadata ({meta.length} categories)</summary>
-                                {meta.map((c: any) => (
-                                  <p key={c.category} className="mt-1">
-                                    <span className="font-semibold">{c.category}:</span> {c.technologies.join(' · ')}
-                                  </p>
-                                ))}
-                              </details>
-                            )}
-                            <p className="text-[10px] text-slate-400">
-                              Source: Explorium WebStack{breakdown.length > 0 ? ' and Tech_Breakdown' : ''}. Technologies detected on the company website.
-                            </p>
-                          </div>
-                        );
-                      })()}
+                      {/* The Website stack panel - the Explorium WebStack totals,
+                          the estimated spend and the 298-name list - was removed on
+                          the client's instruction, 28 Sep. The widget is still
+                          produced: `detected_technologies` falls back to it when an
+                          account has no technographics estate at all. */}
 
                         </div>
 
@@ -6547,42 +6620,6 @@ export default function UserDashboardPage() {
                     'HP Multi Jet Fusion (3D)'
                   ];
 
-                  // Co-creation step 2: ask for angles instead of an asset. One
-                  // cheap call; the expensive generate+retry loop runs later, on
-                  // the one angle the seller actually picked.
-                  const handleSuggestAngles = async () => {
-                    if (!selectedAccountId) return;
-                    const topicValue = (customTopic.trim() || selectedTopic || '').trim();
-                    if (!topicValue) return;
-                    const personaForRequest = targetPersonas.find(p => p.id === selectedPersona) || targetPersonas[0];
-                    setIsSuggestingAngles(true);
-                    setAngleNotice(null);
-                    setGenerateError(null);
-                    try {
-                      const response = await api.post<WidgetResponse>(
-                        `/accounts/${selectedAccountId}/widgets/content_studio/angles`,
-                        {
-                          persona_id: personaForRequest?.id,
-                          content_type: selectedContentType,
-                          topic: topicValue,
-                          additional_context: additionalContext.trim(),
-                        }
-                      );
-                      const opts = response.data?.data?.options || [];
-                      setAngleOptions(opts);
-                      setSelectedAngleId(null);
-                      setSelectedAngle('');
-                      if (!opts.length) {
-                        setAngleNotice(response.data?.data?.last_error?.notice
-                          || 'No angles were returned. You can generate directly instead.');
-                      }
-                    } catch (err: any) {
-                      setAngleNotice(err?.response?.data?.detail || err?.message || 'Could not suggest angles.');
-                    } finally {
-                      setIsSuggestingAngles(false);
-                    }
-                  };
-
                   const handleGenerateClick = async () => {
                     if (!selectedAccountId) return;
                     const topicValue = (customTopic.trim() || selectedTopic || '').trim();
@@ -6598,7 +6635,6 @@ export default function UserDashboardPage() {
                           content_type: selectedContentType,
                           topic: topicValue,
                           additional_context: additionalContext.trim(),
-                          selected_angle: selectedAngle.trim(),
                         }
                       );
                       const latest = response.data?.data?.latest || null;
@@ -6794,7 +6830,7 @@ export default function UserDashboardPage() {
                             ) : (
                               <>
                                 <Sparkles className="w-4 h-4 text-amber-300" />
-                                <span>{selectedAngleId ? 'Generate from Selected Angle' : 'Generate Content'}</span>
+                                <span>Generate Content</span>
                               </>
                             )}
                           </button>
