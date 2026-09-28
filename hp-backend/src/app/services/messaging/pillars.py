@@ -44,6 +44,7 @@ from app.services.hp.guardrails import (
     SUPERLATIVE_BLOCK_COUNTRIES,
     normalize_country,
 )
+from app.services.regen import store as widget_store
 from app.services.retrieval import evidence as ev, index_state, query
 
 logger = logging.getLogger(__name__)
@@ -439,9 +440,8 @@ def _stakeholder_roles(db, account_id: str) -> list:
     prompt - a pillar speaks to a ROLE, and naming an individual in marketing
     copy is a different decision that nobody has asked for.
     """
-    grid = (db["account_widgets"].find_one(
-        {"account_id": account_id,
-         "widget_key": "stakeholder_contacts_grid"}) or {}).get("data") or {}
+    grid = (widget_store.get(account_id, "stakeholder_contacts_grid", db=db)
+            or {}).get("data") or {}
 
     roles, seen = [], set()
     for contact in (grid.get("contacts") or []):
@@ -463,9 +463,8 @@ def _hp_fact_block(db, account_id: str) -> tuple:
 
 
 def _restrictions(db, account_id: str) -> dict:
-    exec_card = (db["account_widgets"].find_one(
-        {"account_id": account_id, "widget_key": "exec_summary_card"}) or {}
-    ).get("data") or {}
+    exec_card = (widget_store.get(account_id, "exec_summary_card", db=db)
+                 or {}).get("data") or {}
     country = normalize_country(_text(exec_card.get("hq_location")))
     return {
         "country": country,
@@ -954,9 +953,8 @@ def generate_messaging_pillars(account_id: str, mode: str | None = None) -> dict
             "the Content Messaging index is %s - %s"
             % (state.get("status"), state.get("last_error") or "build it first"))
 
-    context_card = (db["account_widgets"].find_one(
-        {"account_id": account_id, "widget_key": "messaging_context_card"}) or {}
-    ).get("data", {})
+    context_card = (widget_store.get(account_id, "messaging_context_card", db=db)
+                    or {}).get("data", {})
     business_context = context_card.get("business_context") or {}
     company = _text(context_card.get("company_name")
                     or business_context.get("company_name"))
@@ -996,10 +994,8 @@ def generate_messaging_pillars(account_id: str, mode: str | None = None) -> dict
         raise PillarError("no pillar survived validation - nothing is published "
                           "rather than publishing generic copy")
 
-    plays = ((db["account_widgets"].find_one(
-        {"account_id": account_id,
-         "widget_key": "opportunity_narrative_plays"}) or {}).get("data")
-        or {}).get("opportunity_plays") or []
+    plays = ((widget_store.get(account_id, "opportunity_narrative_plays", db=db)
+              or {}).get("data") or {}).get("opportunity_plays") or []
 
     # An HP case study for each pillar, chosen in Python from the HP lines the
     # pillar already names.
@@ -1070,9 +1066,7 @@ def generate_messaging_pillars(account_id: str, mode: str | None = None) -> dict
         "updated_at": now,
     }
 
-    db["account_widgets"].update_one(
-        {"account_id": account_id, "widget_key": WIDGET_KEY},
-        {"$set": payload}, upsert=True)
+    widget_store.put(account_id, WIDGET_KEY, payload, db=db)
     logger.info("content_messaging: published %d pillar(s) for account %s",
                 len(pillars), account_id)
     return payload

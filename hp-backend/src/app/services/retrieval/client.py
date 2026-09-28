@@ -503,16 +503,28 @@ def forget_query_handle(workspace: str):
     rebuild would answer from storage that no longer exists, which reads as "no
     such fact" rather than as an error.
     """
-    with _query_lock:
-        handle = _query_handles.pop(workspace, None)
-    if handle is None:
-        return
+    async def _forget():
+        # On the query loop, like every other change to the handle cache, and
+        # never under a question still using the handle - that one is retired
+        # and finalised when its last user lets go, as eviction already does.
+        with _query_lock:
+            handle = _query_handles.pop(workspace, None)
+        if handle is None:
+            return False
+        if _handle_users.get(id(handle)):
+            _retiring[id(handle)] = handle
+        else:
+            await _finalise_quietly(handle, workspace)
+        return True
+
     try:
-        run_on_query_loop(handle.finalize_storages(), timeout=30)
+        released = run_on_query_loop(_forget(), timeout=30)
     except Exception:
         logger.warning("retrieval: could not finalise the cached handle for %s",
                        workspace)
-    logger.info("retrieval: released the cached query handle for %s", workspace)
+        return
+    if released:
+        logger.info("retrieval: released the cached query handle for %s", workspace)
 
 
 def drop_workspace(workspace: str) -> dict:

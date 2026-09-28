@@ -205,6 +205,15 @@ async def _retrieve(account_id: str, index: str, question: str, mode: str | None
             else (state.get("last_error")
                   or "no index has been built for this account yet"))
 
+    # A full rebuild drops the workspace before rebuilding it. If it then failed,
+    # the workspace holds nothing, and answering from it reads as "no such
+    # fact" rather than "no index". A failed incremental update is different:
+    # the rest of the index is intact and still answers, marked stale.
+    if (state.get("status") == index_state.FAILED
+            and state.get("last_build_mode") == index_state.FULL):
+        raise IndexNotReady("the last full rebuild failed - this index holds "
+                            "nothing until it is rebuilt")
+
     mode = mode or registry.spec(index).get("default_mode") or "mix"
     stale = state.get("status") in (index_state.STALE, index_state.FAILED)
 

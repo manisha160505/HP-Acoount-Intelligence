@@ -68,38 +68,36 @@ async def lifespan(app: FastAPI):
         logger.exception("Seeding failed. Features that depend on seeded data "
                          "will render empty.")
 
-    # Started only after seeding has finished, so it cannot pick up a job that
-    # seeding would otherwise have queued. Seeding itself runs with retrieval
-    # triggers suppressed, so there should be none - this ordering is the
-    # second guard rather than the first.
+    # The regeneration engine: one queue for every feature and every retrieval
+    # index. It replaces the retrieval worker (index builds are nodes in the
+    # same graph now - two workers building one LightRAG workspace from two
+    # live event loops is exactly what LightRAG refuses) and the startup
+    # scoring refresh (a scoring-config change moves the fingerprint of every
+    # node that reads it, and the sweep regenerates those).
+    #
+    # Only where it is switched on (REGEN_WORKER_ENABLED / REGEN_SWEEP_ENABLED,
+    # set by the compose files): a laptop pointed at a shared database must not
+    # regenerate against it with different code. Adopting existing widgets is
+    # idempotent and changes no content; it runs first so the engine starts
+    # from what is already published instead of regenerating it.
     try:
-        from app.services.retrieval import worker as retrieval_worker
-        retrieval_worker.start()
+        from app.services.regen import worker as regen_worker
+        if regen_worker.worker_enabled():
+            from app.services.regen import migrate as regen_migrate
+            regen_migrate.run(get_db(), dry_run=False)
+        regen_worker.start()
     except Exception:
-        logger.exception("Retrieval worker did not start. Indexes will not "
-                         "rebuild until it does; widgets are unaffected.")
-
-    # A scoring weight can be retuned in config/scoring.yaml without touching
-    # code, and that file is read at import - so startup is the moment the
-    # change becomes live, and the moment to rebuild what it invalidated. The
-    # rebuilds are queued on worker threads, never awaited: a config edit must
-    # not make a deploy look hung.
-    try:
-        from app.services.dashboard.scoring_refresh import refresh_stale_scores
-        refresh_stale_scores()
-    except Exception:
-        logger.exception("Scoring refresh did not run. Widgets scored under an "
-                         "older config will keep their existing numbers until "
-                         "the feature is regenerated.")
+        logger.exception("Regeneration engine did not start. Published widgets "
+                         "are still served; nothing regenerates until it does.")
 
     _log_readiness()
     yield
 
     try:
-        from app.services.retrieval import worker as retrieval_worker
-        retrieval_worker.stop()
+        from app.services.regen import worker as regen_worker
+        regen_worker.stop()
     except Exception:
-        logger.exception("Retrieval worker did not stop cleanly.")
+        logger.exception("Regeneration worker did not stop cleanly.")
     close_mongo_connection()
     # Last: both exporters buffer, so the telemetry for the final requests
     # before a redeploy is only kept if they are flushed explicitly.

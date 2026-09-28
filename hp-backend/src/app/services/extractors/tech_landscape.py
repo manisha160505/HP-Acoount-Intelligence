@@ -18,6 +18,7 @@ from app.services.hp import (
     rulebook as rb,
     tech_confidence as tconf,
 )
+from app.services.regen import store as widget_store
 
 logger = logging.getLogger(__name__)
 
@@ -456,7 +457,13 @@ def _score_card_confidence(categories: list, intent_scores: dict) -> dict:
     "technographics", "technology_detections", "webstack",
 )
 @pipeline.feature("tech_landscape")
-def extract_tech_landscape(account_id: str) -> list[dict]:  # noqa: PLR0912, PLR0915 - branch-heavy extractor predates the lint gate
+def extract_tech_landscape(account_id: str,  # noqa: PLR0912, PLR0915 - branch-heavy extractor predates the lint gate
+                           parts=("core", "recs")) -> list[dict]:
+    """Tech Landscape. `parts` selects what is published: the regeneration
+    engine runs the four deterministic widgets ("core") and the HP
+    recommendations ("recs") as two producers, because the recommendations read
+    outputs - the executive summary, trigger signals - that sit downstream of
+    the tech stack."""
     db = get_db()
     now = datetime.now(UTC)
 
@@ -1049,11 +1056,7 @@ def extract_tech_landscape(account_id: str) -> list[dict]:  # noqa: PLR0912, PLR
         "updated_at": now
     }
 
-    db["account_widgets"].update_one(
-        {"account_id": account_id, "widget_key": "technographic_map"},
-        {"$set": techno_map_payload},
-        upsert=True
-    )
+    widget_store.put(account_id, "technographic_map", techno_map_payload, db=db)
     results.append(techno_map_payload)
 
     # 2. Widget: tech_stack_matrix (Raw 19 Category Matrix)
@@ -1097,11 +1100,7 @@ def extract_tech_landscape(account_id: str) -> list[dict]:  # noqa: PLR0912, PLR
             "updated_at": now
         }
 
-    db["account_widgets"].update_one(
-        {"account_id": account_id, "widget_key": "tech_stack_matrix"},
-        {"$set": matrix_payload},
-        upsert=True
-    )
+    widget_store.put(account_id, "tech_stack_matrix", matrix_payload, db=db)
     results.append(matrix_payload)
 
     # 3. Widget: tech_detections_reference
@@ -1150,11 +1149,7 @@ def extract_tech_landscape(account_id: str) -> list[dict]:  # noqa: PLR0912, PLR
             "updated_at": now
         }
 
-    db["account_widgets"].update_one(
-        {"account_id": account_id, "widget_key": "tech_detections_reference"},
-        {"$set": detections_payload},
-        upsert=True
-    )
+    widget_store.put(account_id, "tech_detections_reference", detections_payload, db=db)
     results.append(detections_payload)
 
     # 4. Widget: webstack_breakdown
@@ -1206,11 +1201,7 @@ def extract_tech_landscape(account_id: str) -> list[dict]:  # noqa: PLR0912, PLR
             "updated_at": now
         }
 
-    db["account_widgets"].update_one(
-        {"account_id": account_id, "widget_key": "webstack_breakdown"},
-        {"$set": webstack_payload},
-        upsert=True
-    )
+    widget_store.put(account_id, "webstack_breakdown", webstack_payload, db=db)
     results.append(webstack_payload)
 
     # 5. Widget: technographic_hp_recommendations (Inferred).
@@ -1219,6 +1210,9 @@ def extract_tech_landscape(account_id: str) -> list[dict]:  # noqa: PLR0912, PLR
     # so the HP relationship and category status are already settled before any
     # product is proposed. Cached on a fingerprint that includes the HP
     # knowledge version, so re-extracting a corrected deck fact regenerates it.
+    if "recs" not in parts:
+        return results
+
     try:
         from app.services.hp.recommendations import generate_hp_recommendations
         rec_payload = generate_hp_recommendations(account_id)
@@ -1228,11 +1222,8 @@ def extract_tech_landscape(account_id: str) -> list[dict]:  # noqa: PLR0912, PLR
         rec_payload = None
 
     if rec_payload:
-        db["account_widgets"].update_one(
-            {"account_id": account_id, "widget_key": "technographic_hp_recommendations"},
-            {"$set": {k: v for k, v in rec_payload.items() if k != "_id"}},
-            upsert=True
-        )
+        widget_store.put(account_id, "technographic_hp_recommendations",
+                         {k: v for k, v in rec_payload.items() if k != "_id"}, db=db)
         results.append(rec_payload)
 
     return results

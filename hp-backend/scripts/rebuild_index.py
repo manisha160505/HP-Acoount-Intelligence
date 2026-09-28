@@ -11,11 +11,16 @@ retired index cannot be brought back any other way - `update_index` blocks an
 incremental refresh of one on purpose - so bringing one back meant standing up
 the whole stack.
 
-It drives the real job queue rather than calling `update_index` directly, so
-this takes the same path the worker takes in production: `run_job` builds the
-index AND then runs the registered generator, which is what re-writes the
-feature's widget. Calling `update_index` by hand would do the first half and
-silently skip the second, leaving a fresh index under a stale widget.
+It drives the regeneration engine's queue rather than calling `update_index`
+directly, so this takes the same path production takes: the index is a node in
+the engine's graph, and once it commits, the features built on it (priorities,
+the message house, the strategy index) are queued behind it by the same
+reconcile every other change goes through. Going through the queue also means
+this can never build a workspace the server's worker is already building -
+LightRAG cannot build one workspace from two live event loops, and two builds
+racing on its state have silently turned an incremental update into a full
+rebuild. This script runs the index job itself and leaves the dependents to the
+worker.
 
     --full   drop and rebuild in place. Mandatory for a RETIRED index.
              There is no rollback: the index is unavailable while it runs, and
@@ -33,7 +38,7 @@ import logging
 import os
 import sys
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 sys.path.insert(0, os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
@@ -49,7 +54,10 @@ for _noisy in ("lightrag", "httpx", "httpcore", "openai", "pymongo"):
 
 from app.config.settings import settings  # noqa: E402
 from app.database.mongodb import connect_to_mongo, get_db  # noqa: E402
-from app.services.retrieval import ingest, jobs, query, registry  # noqa: E402
+from bson import ObjectId  # noqa: E402
+
+from app.services.regen import jobs as regen_jobs  # noqa: E402
+from app.services.retrieval import query, registry  # noqa: E402
 
 logger = logging.getLogger("rebuild_index")
 
@@ -76,21 +84,17 @@ def _missing_dataset_files(db, account_id, index):
     return missing
 
 
-def jobs_release(db, account_id, index):
-    """Clear PENDING/RUNNING rows for one index so a fresh run can claim.
+def jobs_release(db, account_id: str, index: str) -> int:
+    """Expire the lease of an interrupted build of this index, so it can be
+    taken over now instead of in up to 30 minutes.
 
-    Scoped to this account and index, and it resets `attempts` too: an
-    interrupted run still incremented it, and three interruptions would
-    otherwise put the job past MAX_ATTEMPTS and make it permanently
-    unclaimable.
+    The engine then reclaims it like any lapsed lease - retried while attempts
+    remain, failed (never stuck) once they do.
     """
-    result = db[jobs.COLLECTION].update_many(
-        {"account_id": account_id, "index": index,
-         "status": {"$in": [jobs.PENDING, jobs.RUNNING]}},
-        {"$set": {"status": "FAILED", "lease_owner": None,
-                  "lease_expires_at": None, "attempts": 0,
-                  "finished_at": datetime.now(UTC),
-                  "last_error": "released by rebuild_index.py --release-stale-job"}})
+    result = db[regen_jobs.COLLECTION].update_many(
+        {"account_id": account_id, "node_id": "idx_%s" % index,
+         "status": regen_jobs.RUNNING},
+        {"$set": {"lease_expires_at": datetime.now(UTC) - timedelta(seconds=1)}})
     return result.modified_count
 
 
@@ -185,30 +189,43 @@ def main():
             raise SystemExit("aborted")
         print()
 
-    jobs.ensure_indexes()
+    from app.services.regen.engine import Engine
 
-    # A build killed with Ctrl+C leaves its row RUNNING and leased for
-    # LEASE_SECONDS (30 minutes), because nothing got the chance to release it.
-    # `claim()` will not touch a live lease - correctly, since it cannot tell a
-    # dead worker from a slow one - so the next run is locked out for half an
-    # hour. This releases it deliberately, and only when asked.
+    engine = Engine(db=db)
+    engine.ensure_indexes()
+
     if args.release_stale_job:
         released = jobs_release(db, account_id, args.index)
         print("released  : %d orphaned job row(s)" % released)
 
-    jobs.enqueue(account_id, args.index,
-                 reason="rebuild_index.py", full=args.full)
-    claimed = jobs.claim()
-    if not claimed:
-        raise SystemExit(
-            "could not claim the job - a worker or another run already holds "
-            "it. If a previous run was interrupted, its lease survives it for "
-            "up to 30 minutes; pass --release-stale-job to take it over now.")
+    node_id = "idx_%s" % args.index
+    queued = engine.regenerate_nodes(account_id, [node_id], "system:rebuild_index.py",
+                                     force=True, full=args.full,
+                                     detail="rebuild_index.py")
+    job_id = queued["nodes"][0]["job"]["id"]
+    print("queued    : %s (job %s)" % (node_id, job_id))
 
     print("building - an LLM call per chunk, so expect tens of minutes")
     started = time.time()
+    outcome = None
     try:
-        stats = ingest.run_job(claimed)
+        # Run jobs until this one is done. Anything the engine must build first
+        # (a stale upstream) runs ahead of it; the features downstream of the
+        # index are left queued for the server's worker.
+        for _ in range(50):
+            row = db[regen_jobs.COLLECTION].find_one({"_id": ObjectId(job_id)}) or {}
+            if row.get("status") in regen_jobs.TERMINAL:
+                outcome = row
+                break
+            if engine.run_once() is None:
+                row = db[regen_jobs.COLLECTION].find_one({"_id": ObjectId(job_id)}) or {}
+                if row.get("status") == regen_jobs.RUNNING:
+                    raise SystemExit(
+                        "another worker is building this index. If a previous "
+                        "run was interrupted, its lease survives for up to 30 "
+                        "minutes; pass --release-stale-job to take it over now.")
+                outcome = row
+                break
     except KeyboardInterrupt:
         print("\ninterrupted - finished documents are recorded, so re-running "
               "this resumes rather than starting over")
@@ -217,14 +234,11 @@ def main():
     print()
     print("=" * 72)
     print("finished in %.1f minute(s)" % ((time.time() - started) / 60.0))
-    if stats.get("blocked"):
-        print("  blocked: %s" % stats["blocked"])
-        return 1
-    for key in ("mode", "added", "changed", "removed", "unchanged", "skipped",
-                "damaged", "duration_seconds"):
-        if key in stats:
-            print("  %-18s %s" % (key, stats[key]))
-    print("  %-18s %s" % ("generator", stats.get("generated")))
+    print("  %-18s %s" % ("job", (outcome or {}).get("status")))
+    for key, value in ((outcome or {}).get("result") or {}).items():
+        print("  %-18s %s" % (key, value))
+    if (outcome or {}).get("error"):
+        print("  %-18s %s" % ("error", outcome["error"]))
 
     after = query.status(account_id, args.index)
     print()

@@ -9,6 +9,7 @@ declared with `enabled: False` so their preconditions are visible without
 pretending they can be built.
 """
 
+from app.services.regen import store as widget_store
 from app.services.retrieval import corpus
 
 CONTENT_MESSAGING = "content_messaging"
@@ -204,8 +205,7 @@ def preconditions(db, account_id: str, index: str) -> tuple:
 
     missing = []
     for key in entry.get("required_widgets") or []:
-        found = db["account_widgets"].find_one(
-            {"account_id": account_id, "widget_key": key})
+        found = widget_store.get(account_id, key, db=db)
         if not found or found.get("status") != "available":
             missing.append(key)
     if missing:

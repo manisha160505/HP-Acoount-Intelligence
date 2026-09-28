@@ -1,3 +1,4 @@
+import logging
 from datetime import UTC, datetime
 
 from bson import ObjectId
@@ -13,6 +14,20 @@ from app.schemas.account_config import (
 )
 
 router = APIRouter(prefix="/accounts/{account_id}", tags=["Account Configuration (Admin Only)"])
+
+logger = logging.getLogger(__name__)
+
+def _notify_regeneration(account_id: str, what: str, current_user: dict) -> None:
+    """Instructions and guardrails reach the Opportunity Map's prompt, so an edit
+    makes it stale. Queued, never run here; never fails the save."""
+    try:
+        from app.services.regen.engine import get_engine
+        from app.services.regen.graph import DEFAULT
+        get_engine().notify_input_changed(
+            account_id, what, "user:%s" % (current_user or {}).get("id", "?"),
+            nodes=[n for n, node in DEFAULT.nodes.items() if node.account_config])
+    except Exception:
+        logger.exception("could not queue regeneration after %s", what)
 
 @router.get("/instructions", response_model=AccountInstructionsResponse)
 def get_instructions(
@@ -76,6 +91,7 @@ def update_instructions(
         {"_id": ObjectId(account_id)},
         {"$set": {"updated_at": now}}
     )
+    _notify_regeneration(account_id, "account instructions edited", current_user)
 
     return {
         "account_id": account_id,
@@ -148,6 +164,7 @@ def update_guardrails(
         {"_id": ObjectId(account_id)},
         {"$set": {"updated_at": now}}
     )
+    _notify_regeneration(account_id, "account guardrails edited", current_user)
 
     return {
         "account_id": account_id,

@@ -10,6 +10,7 @@ from app.services.extractors.datasets import (
     read_dataset_records,
     requires_local_datasets,
 )
+from app.services.regen import store as widget_store
 
 logger = logging.getLogger(__name__)
 
@@ -51,8 +52,7 @@ def _cross_feature_counts(db, account_id: str) -> dict:
     100 job postings, against 8 real signals) survived on the dashboard.
     """
     def widget(key):
-        found = db["account_widgets"].find_one(
-            {"account_id": account_id, "widget_key": key})
+        found = widget_store.get(account_id, key, db=db)
         if not found or found.get("status") != "available":
             return None
         return found.get("data") or {}
@@ -164,11 +164,7 @@ def extract_executive_dashboard(account_id: str) -> list[dict]:
         }
 
     # Upsert exec_summary_card in MongoDB account_widgets
-    db["account_widgets"].update_one(
-        {"account_id": account_id, "widget_key": "exec_summary_card"},
-        {"$set": summary_payload},
-        upsert=True
-    )
+    widget_store.put(account_id, "exec_summary_card", summary_payload, db=db)
     results.append(summary_payload)
 
     # 2. exec_key_metrics
@@ -206,11 +202,7 @@ def extract_executive_dashboard(account_id: str) -> list[dict]:
             "updated_at": now
         }
 
-    db["account_widgets"].update_one(
-        {"account_id": account_id, "widget_key": "exec_key_metrics"},
-        {"$set": metrics_payload},
-        upsert=True
-    )
+    widget_store.put(account_id, "exec_key_metrics", metrics_payload, db=db)
     results.append(metrics_payload)
 
     # 3. exec_hiring_velocity
@@ -250,11 +242,7 @@ def extract_executive_dashboard(account_id: str) -> list[dict]:
             "updated_at": now
         }
 
-    db["account_widgets"].update_one(
-        {"account_id": account_id, "widget_key": "exec_hiring_velocity"},
-        {"$set": hiring_payload},
-        upsert=True
-    )
+    widget_store.put(account_id, "exec_hiring_velocity", hiring_payload, db=db)
     results.append(hiring_payload)
 
     # The urgency score. `build_urgency_score` computes and persists

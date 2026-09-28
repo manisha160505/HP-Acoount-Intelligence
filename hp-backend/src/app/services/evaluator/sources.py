@@ -43,6 +43,7 @@ from app.services.hp.guardrails import (
     SUPERLATIVE_BLOCK_COUNTRIES,
     normalize_country,
 )
+from app.services.regen import store as widget_store
 
 logger = logging.getLogger(__name__)
 
@@ -268,8 +269,7 @@ _NUMBER_RE = re.compile(r"\d[\d,\.]*")
 def _account_texts(db, account_id):
     """Evidence the account's own extracted widgets already hold."""
     def widget(key):
-        return (db["account_widgets"].find_one(
-            {"account_id": account_id, "widget_key": key}) or {}).get("data") or {}
+        return (widget_store.get(account_id, key, db=db) or {}).get("data") or {}
 
     exec_card = widget("exec_summary_card")
     texts = [exec_card.get("business_description") or "",
@@ -291,9 +291,7 @@ def _hp_fact_texts(db, account_id):
     account's country. Reading the raw decks here would hand the evaluator
     claims the guardrails withheld from the recommendation.
     """
-    widget = db["account_widgets"].find_one({
-        "account_id": account_id,
-        "widget_key": "technographic_hp_recommendations"}) or {}
+    widget = widget_store.get(account_id, "technographic_hp_recommendations", db=db) or {}
     texts = []
     for rec in ((widget.get("data") or {}).get("recommendations") or []):
         for fact in (rec.get("approved_facts") or []):

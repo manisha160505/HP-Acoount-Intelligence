@@ -9,6 +9,7 @@ from app.services.extractors.datasets import (
     read_dataset_records,
     requires_local_datasets,
 )
+from app.services.regen import store as widget_store
 
 
 def _read_dataset_records(account_id: str, dataset_key: str) -> list[dict]:
@@ -37,13 +38,11 @@ def _personas_from_contacts(db, account_id: str, contacts_records: list) -> list
     came from, so the UI can show provenance the way the reference app does
     instead of implying everything is account intelligence.
     """
-    grid = db["account_widgets"].find_one(
-        {"account_id": account_id, "widget_key": "stakeholder_contacts_grid"}) or {}
+    grid = widget_store.get(account_id, "stakeholder_contacts_grid", db=db) or {}
     scored = {str(c.get("contact_id")): c
               for c in ((grid.get("data") or {}).get("contacts") or [])}
 
-    talking = db["account_widgets"].find_one(
-        {"account_id": account_id, "widget_key": "stakeholder_talking_points"}) or {}
+    talking = widget_store.get(account_id, "stakeholder_talking_points", db=db) or {}
     talking_points = (talking.get("data") or {}).get("talking_points") or {}
 
     personas, seen = [], set()
@@ -254,11 +253,7 @@ def extract_message_evaluator(account_id: str) -> list[dict]:
         "updated_at": now
     }
 
-    db["account_widgets"].update_one(
-        {"account_id": account_id, "widget_key": "evaluator_persona_context"},
-        {"$set": persona_payload},
-        upsert=True
-    )
+    widget_store.put(account_id, "evaluator_persona_context", persona_payload, db=db)
     results.append(persona_payload)
 
     # `evaluator_feedback_score` is deliberately NOT written here.

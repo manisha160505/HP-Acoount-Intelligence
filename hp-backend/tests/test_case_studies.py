@@ -68,9 +68,19 @@ class FakeWidgets:
         return self.widgets.get(query.get("widget_key"))
 
 
+class EmptyCollection:
+    """A collection with nothing in it - here `node_state`, for an account the
+    regeneration engine has not generated yet, so widget reads fall back to
+    `account_widgets` exactly as they do on a real database."""
+
+    def find_one(self, _query, _projection=None):
+        return None
+
+
 def fake_db(studies, version=None, widgets=None):
     return {cs.COLLECTION: FakeCollection(studies, version),
-            "account_widgets": FakeWidgets(widgets)}
+            "account_widgets": FakeWidgets(widgets),
+            "node_state": EmptyCollection()}
 
 
 def cited(surface, *customers):

@@ -28,6 +28,7 @@ import logging
 import re
 
 from app.database.mongodb import get_db
+from app.services.regen import store as widget_store
 from app.services.retrieval.evidence import EvidenceBuilder
 
 logger = logging.getLogger(__name__)
@@ -117,8 +118,7 @@ def _doc_id(account_id, index, feature, unit_key) -> str:
 
 
 def _widget(db, account_id, widget_key) -> dict:
-    return (db["account_widgets"].find_one(
-        {"account_id": account_id, "widget_key": widget_key}) or {}).get("data") or {}
+    return (widget_store.get(account_id, widget_key, db=db) or {}).get("data") or {}
 
 
 def _build(account_id, index, feature, unit_key, title, source_payload, fill):

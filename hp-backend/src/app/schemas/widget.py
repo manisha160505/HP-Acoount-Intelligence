@@ -34,6 +34,11 @@ class WidgetResponse(BaseModel):
     source_fields: list[str]
     display_order: int
     updated_at: str | None = None
+    # Where this widget's producer stands in the regeneration engine: lifecycle
+    # (CURRENT / STALE / GENERATING / FAILED / NEVER_GENERATED), why it is
+    # stale, the last error and any live job. Separate from `status`, which
+    # says whether there is content to show and which the dashboard gates on.
+    generation: dict | None = None
     # When the ACCOUNT DATA behind this widget was loaded, which is not
     # `updated_at` - that is when the widget was last generated. The
     # Recommendation Tuning Logic section E asks for the former on every feature

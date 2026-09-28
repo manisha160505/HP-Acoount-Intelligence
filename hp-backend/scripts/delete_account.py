@@ -51,6 +51,10 @@ ACCOUNT_COLLECTIONS = (
     "retrieval_evidence",
     "retrieval_index_state",
     "retrieval_jobs",
+    # The regeneration engine: committed outputs, their audit history, jobs.
+    "node_state",
+    "node_history",
+    "regen_jobs",
 )
 
 SHARED_VECTOR_NAMESPACES = ("entities", "relationships", "chunks")

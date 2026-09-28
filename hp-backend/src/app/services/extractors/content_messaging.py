@@ -1,12 +1,12 @@
 from datetime import UTC, datetime
 
-from app.database.mongodb import get_db
 from app.observability import pipeline
 from app.services.extractors.datasets import (
     account_display_name,
     read_dataset_records,
     requires_local_datasets,
 )
+from app.services.regen import context as run_context, store as widget_store
 
 TECHNOGRAPHICS_CATEGORY_COLUMNS = [
     "Testing And Qa",
@@ -45,7 +45,6 @@ def _read_dataset_records(account_id: str, dataset_key: str) -> list[dict]:
 )
 @pipeline.feature("content_messaging")
 def extract_content_messaging(account_id: str) -> list[dict]:
-    db = get_db()
     now = datetime.now(UTC)
 
     # Read approved 5 datasets ONLY
@@ -206,12 +205,14 @@ def extract_content_messaging(account_id: str) -> list[dict]:
             "updated_at": now
         }
 
-    db["account_widgets"].update_one(
-        {"account_id": account_id, "widget_key": "messaging_context_card"},
-        {"$set": context_payload},
-        upsert=True
-    )
+    widget_store.put(account_id, "messaging_context_card", context_payload)
     results.append(context_payload)
+
+    # Under the regeneration engine the message house is its own producer, and
+    # a never-generated widget is reported as pending by the read path - so the
+    # placeholder below is only for the legacy direct-call paths.
+    if run_context.current() is not None:
+        return results
 
     # 2. Widget: messaging_pillars_output
     #
@@ -224,8 +225,7 @@ def extract_content_messaging(account_id: str) -> list[dict]:
     # with their evidence ids and sourced proof - with "Inferred TBD" every time
     # a CSV was re-uploaded. The generated widget is left alone; the retrieval
     # index update queued alongside this run is what refreshes it.
-    existing = db["account_widgets"].find_one(
-        {"account_id": account_id, "widget_key": "messaging_pillars_output"})
+    existing = widget_store.get(account_id, "messaging_pillars_output")
     already_generated = bool(
         ((existing or {}).get("data") or {}).get("pillars"))
 
@@ -247,11 +247,7 @@ def extract_content_messaging(account_id: str) -> list[dict]:
             "extracted_at": now,
             "updated_at": now
         }
-        db["account_widgets"].update_one(
-            {"account_id": account_id, "widget_key": "messaging_pillars_output"},
-            {"$set": pillars_payload},
-            upsert=True
-        )
+        widget_store.put(account_id, "messaging_pillars_output", pillars_payload)
         results.append(pillars_payload)
     else:
         results.append(existing)

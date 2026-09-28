@@ -36,6 +36,7 @@ from bson import ObjectId
 
 from app.database.mongodb import get_db
 from app.observability import pipeline
+from app.services.regen import store as widget_store
 
 MAX_SNAPSHOT_TOPICS = 5
 MAX_SNAPSHOT_VENDORS = 15
@@ -56,8 +57,7 @@ def _int(value):
 
 def _widget(db, account_id: str, widget_key: str) -> dict:
     """One widget's data, or {} when it has not been published."""
-    found = db["account_widgets"].find_one(
-        {"account_id": account_id, "widget_key": widget_key})
+    found = widget_store.get(account_id, widget_key, db=db)
     if not found or found.get("status") != "available":
         return {}
     return found.get("data") or {}
@@ -179,10 +179,7 @@ def extract_strategy_chat(account_id: str) -> list[dict]:
 
     results = [context_payload, interface_payload]
     for payload in results:
-        db["account_widgets"].update_one(
-            {"account_id": payload["account_id"],
-             "widget_key": payload["widget_key"]},
-            {"$set": payload}, upsert=True)
+        widget_store.put(account_id, payload["widget_key"], payload, db=db)
     return results
 
 

@@ -206,7 +206,12 @@ def fail_build(account_id: str, index: str, error: str, mode: str | None = None)
 
 def diff(account_id: str, index: str, fingerprints: dict) -> dict:
     """What changed since the last successful build."""
-    state = get(account_id, index)
+    return diff_state(get(account_id, index), fingerprints)
+
+
+def diff_state(state: dict, fingerprints: dict) -> dict:
+    """`diff` over a state already read - so a caller deciding several things
+    from one build's state reads it once, not once per question."""
     stored = state.get("documents") or {}
     return {
         "added": [k for k in fingerprints if k not in stored],
@@ -222,7 +227,10 @@ def diff(account_id: str, index: str, fingerprints: dict) -> dict:
 
 def has_index(account_id: str, index: str) -> bool:
     """Whether anything has ever been built and is still supposed to exist."""
-    state = get(account_id, index)
+    return has_index_state(get(account_id, index))
+
+
+def has_index_state(state: dict) -> bool:
     return bool(state.get("workspace")) and state.get("status") in (READY, STALE)
 
 
@@ -245,7 +253,10 @@ def is_resumable(account_id: str, index: str) -> bool:
     through the job queue, so two builds of the same index do not run at once.
     Resuming what is demonstrably present is the better failure mode.
     """
-    state = get(account_id, index)
+    return resumable_state(get(account_id, index))
+
+
+def resumable_state(state: dict) -> bool:
     return (state.get("status") == BUILDING
             and bool(state.get("workspace"))
             and bool(state.get("documents")))

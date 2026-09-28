@@ -21,6 +21,11 @@ from app.services.extractors.grounding import (
     build_corpus,
     check_text,
 )
+from app.services.regen import (
+    context as run_context,
+    manifest as regen_manifest,
+    store as widget_store,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -578,9 +583,8 @@ def _qualified_opportunities(account_id: str) -> list[str]:
     their checks, and offering them here would be the forced match the same
     prompt spends three rules forbidding.
     """
-    plays = (get_db()["account_widgets"].find_one(
-        {"account_id": account_id,
-         "widget_key": "opportunity_narrative_plays"}) or {}).get("data") or {}
+    plays = (widget_store.get(account_id, "opportunity_narrative_plays")
+             or {}).get("data") or {}
 
     lines = []
     for play in (plays.get("opportunity_plays") or []):
@@ -698,17 +702,16 @@ def generate_stakeholder_talking_points(account_id: str, contacts: list[dict],
     # Built before the fingerprint: it must be covered by it, or a news change
     # leaves the cached openers citing a trigger that is no longer current.
     account_context, evidence_labels = _build_account_context(account_id)
-    fingerprint = _contacts_fingerprint(contacts, account_context)
+    fingerprint = _contacts_fingerprint(contacts, account_context) + regen_manifest.cache_suffix()
 
-    existing = db["account_widgets"].find_one({
-        "account_id": account_id,
-        "widget_key": "stakeholder_talking_points",
-    })
+    existing = widget_store.get(account_id, "stakeholder_talking_points", db=db)
 
     # Cached: reuse while the contacts AND the account evidence are unchanged.
     if (existing and existing.get("status") == "available"
+            and existing.get("generation_quality") != "degraded"
             and existing.get("data", {}).get("contacts_fingerprint") == fingerprint):
         pipeline.cache_hit("stakeholder_talking_points")
+        widget_store.keep(account_id, "stakeholder_talking_points")
         return existing
 
     # Grounding corpus: every cell of the datasets this feature is allowed to
@@ -930,8 +933,12 @@ CRITICAL RULES:
             "updated_at": now,
         }
     else:
-        # Generation failed. Preserve the last valid result if one exists.
-        if existing and existing.get("status") == "available":
+        # Generation failed. Preserve the last valid result if one exists - on
+        # the legacy paths. Under the engine a model failure is already kept
+        # from replacing a complete result, and anything else is the truthful
+        # outcome for these inputs.
+        if (run_context.current() is None and existing
+                and existing.get("status") == "available"):
             pipeline.cache_hit("stakeholder_talking_points", "kept - this run produced nothing to replace it")
             return existing
         payload = {
@@ -952,11 +959,7 @@ CRITICAL RULES:
             "updated_at": now,
         }
 
-    db["account_widgets"].update_one(
-        {"account_id": account_id, "widget_key": "stakeholder_talking_points"},
-        {"$set": payload},
-        upsert=True
-    )
+    widget_store.put(account_id, "stakeholder_talking_points", payload, db=db)
     return payload
 
 
@@ -964,7 +967,13 @@ CRITICAL RULES:
     "firmographics", "google_news", "intent_score", "news_events", "prospect_contacts", "technographics",
 )
 @pipeline.feature("stakeholder_map")
-def extract_stakeholder_map(account_id: str) -> list[dict]:
+def extract_stakeholder_map(account_id: str,
+                            parts=("roster", "talking_points")) -> list[dict]:
+    """The Stakeholder Map. `parts` selects what is published: the regeneration
+    engine runs the roster (grid + influence map) and the talking points as two
+    producers, because the talking points read the Opportunity Map, which reads
+    the roster - as one unit the two features would depend on each other. The
+    contact list both need is recomputed from the same file either way."""
     db = get_db()
     now = datetime.now(UTC)
 
@@ -1146,12 +1155,9 @@ def extract_stakeholder_map(account_id: str) -> list[dict]:
             "updated_at": now,
         }
 
-    db["account_widgets"].update_one(
-        {"account_id": account_id, "widget_key": "stakeholder_contacts_grid"},
-        {"$set": contacts_payload},
-        upsert=True
-    )
-    results.append(contacts_payload)
+    if "roster" in parts:
+        widget_store.put(account_id, "stakeholder_contacts_grid", contacts_payload, db=db)
+        results.append(contacts_payload)
 
     # 2. Widget: stakeholder_influence_map (derived) - grouping, coverage, ranking
     if extracted_contacts:
@@ -1230,12 +1236,12 @@ def extract_stakeholder_map(account_id: str) -> list[dict]:
             "updated_at": now,
         }
 
-    db["account_widgets"].update_one(
-        {"account_id": account_id, "widget_key": "stakeholder_influence_map"},
-        {"$set": influence_payload},
-        upsert=True
-    )
-    results.append(influence_payload)
+    if "roster" in parts:
+        widget_store.put(account_id, "stakeholder_influence_map", influence_payload, db=db)
+        results.append(influence_payload)
+
+    if "talking_points" not in parts:
+        return results
 
     # 3. Widget: stakeholder_talking_points (inferred) - cached GPT-4o output
     if extracted_contacts:
@@ -1255,11 +1261,8 @@ def extract_stakeholder_map(account_id: str) -> list[dict]:
             "extracted_at": now,
             "updated_at": now,
         }
-        db["account_widgets"].update_one(
-            {"account_id": account_id, "widget_key": "stakeholder_talking_points"},
-            {"$set": talking_points_payload},
-            upsert=True
-        )
+        widget_store.put(account_id, "stakeholder_talking_points",
+                         talking_points_payload, db=db)
     results.append(talking_points_payload)
 
     return results
