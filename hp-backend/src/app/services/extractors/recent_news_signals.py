@@ -122,6 +122,11 @@ SCORE_WEIGHTS = signal_scoring.WEIGHTS
 # question that already has an exact answer.
 MODEL_SCORED_DIMS = ("relevance_impact",)
 TIER_THRESHOLDS = [list(r) for r in signal_scoring.TIER_THRESHOLDS]
+# How many signals go into one scoring call. The model returns about ten
+# entries however many are asked for, so eight leaves headroom rather than
+# discovering the limit in production. See _score_batches.
+SCORING_BATCH_SIZE = 8
+
 MIN_CONFIDENCE_TO_PUBLISH = signal_scoring.MIN_CONFIDENCE_TO_PUBLISH
 MAX_SIGNALS = signal_scoring.MAX_SIGNALS
 GATE_MAX_AGE_DAYS = 365
@@ -150,7 +155,12 @@ DEDUP_SIMILARITY = signal_scoring.DEDUP_SIMILARITY
 # 17 - the feeds' own Low/High relevance rating is no longer sent to the model
 #      (client, 23 Sep), the 2.0 publish floor is gone and the S/A/B/C letters
 #      are retired in favour of the 0-10 score.
-SIGNAL_SCORING_PROMPT_VERSION = 17
+# 18 - the ask is batched (see _score_batches), so a signal is no longer lost
+#      because the model stopped after ten entries; the recency basis names the
+#      event's date instead of an age that froze at extraction; the source line
+#      names its tier (T0-T3) and this signal's publisher. The version has to
+#      move or every existing account keeps serving the cached ten.
+SIGNAL_SCORING_PROMPT_VERSION = 18
 
 # Recommendation Tuning Logic, Live Signals: "Minimum 70 words; maximum 100
 # words." Enforced through the existing angle guard and its one retry, so a
@@ -586,33 +596,15 @@ def _grounded_angle(ground, report, sid: str, entry: dict) -> str | None:
     return angle
 
 
-def score_news_signals(account_id: str, signals: list[dict], company_name: str) -> dict:
-    """One cached GPT-4o call. The model returns the five D1-D5 dimension scores,
-    their rationales, a sales angle and a gate second-opinion. It is never asked
-    for the composite, the tier, the category, the dates or any source field."""
-    db = get_db()
-    now = datetime.now(UTC)
-    account_context = _account_context(account_id)
-    fingerprint = _signals_fingerprint(signals, account_context)
+def _score_one_batch(batch: list, company_name: str, account_context: str,
+                     now) -> list:
+    """One model call for one batch of signals. Returns the entries it sent back.
 
-    existing = db["account_widgets"].find_one({
-        "account_id": account_id,
-        "widget_key": "news_relevance_summary",
-    })
-    if (existing and existing.get("status") == "available"
-            and existing.get("data", {}).get("signals_fingerprint") == fingerprint):
-        pipeline.cache_hit("news_relevance_summary")
-        return existing
-
-    # Grounding corpus: the two news datasets this feature reads.
-    ground = build_corpus({
-        "google_news": _read_dataset_records(account_id, "google_news"),
-        "news_events": _read_dataset_records(account_id, "news_events"),
-    })
-    report = GroundingReport(ground, ["sales_angle", "rationales"])
-
+    Split out of `score_news_signals` so the ask can be kept small. The prompt
+    is rebuilt per batch because the roster is inside it.
+    """
     roster = []
-    for s in signals:
+    for s in batch:
         roster.append(
             f'- id={s["signal_id"]} | date={s["event_date"]} | category={s["category"]}'
             f' | publisher={s["source_publisher"] or "unknown"}'
@@ -719,11 +711,89 @@ Output JSON:
 """
 
     user_prompt = (
-        f"Score all {len(signals)} signals for {company_name}. "
+        f"Score all {len(batch)} signals for {company_name}. "
         f"Return exactly one entry per supplied id, in JSON matching the schema."
     )
 
     llm_res = generate_gpt4o_json_completion(system_prompt, user_prompt)
+    returned = (llm_res or {}).get("signals")
+    return returned if isinstance(returned, list) else []
+
+
+def _score_batches(signals: list, company_name: str, account_context: str,
+                   now, batch_size: int = SCORING_BATCH_SIZE) -> list:
+    """Every signal scored, in batches small enough to come back whole.
+
+    Asked to score 108 signals in one call the model does not refuse and does
+    not truncate: it returns valid JSON holding about ten entries and stops,
+    writing shorter angles as the ask grows - 133 words each at 9 signals, 72
+    at 65. Nothing noticed, because the call sets no max_tokens and the publish
+    filter read "not in the answer" as "drop". That is how 97 current,
+    deduplicated signals about Accenture were discarded by us rather than by
+    the 12-month gate.
+
+    Batches of eight sit below what it returns reliably. Anything still missing
+    is retried once, and anything missing after that is reported - never
+    silently lost.
+    """
+    entries: list = []
+    seen: set = set()
+
+    def collect(chunk):
+        for entry in _score_one_batch(chunk, company_name, account_context, now):
+            sid = str((entry or {}).get("signal_id") or "").strip()
+            if sid and sid not in seen:
+                seen.add(sid)
+                entries.append(entry)
+
+    batches = [signals[i:i + batch_size]
+               for i in range(0, len(signals), batch_size)]
+    for n, chunk in enumerate(batches, start=1):
+        collect(chunk)
+        pipeline.step("scoring", "batch %d/%d  %d sent, %d scored so far"
+                      % (n, len(batches), len(chunk), len(seen)))
+
+    missing = [sig for sig in signals if sig["signal_id"] not in seen]
+    if missing:
+        for chunk in [missing[k:k + batch_size]
+                      for k in range(0, len(missing), batch_size)]:
+            collect(chunk)
+        still = [sig["signal_id"] for sig in signals if sig["signal_id"] not in seen]
+        if still:
+            pipeline.guardrail(len(still),
+                               "signal(s) the model did not score, even on retry")
+            logger.warning("recent news signals: %d of %d signal(s) came back "
+                           "unscored after a retry: %s", len(still),
+                           len(signals), ", ".join(still[:5]))
+    return entries
+
+
+def score_news_signals(account_id: str, signals: list[dict], company_name: str) -> dict:
+    """One cached GPT-4o call. The model returns the five D1-D5 dimension scores,
+    their rationales, a sales angle and a gate second-opinion. It is never asked
+    for the composite, the tier, the category, the dates or any source field."""
+    db = get_db()
+    now = datetime.now(UTC)
+    account_context = _account_context(account_id)
+    fingerprint = _signals_fingerprint(signals, account_context)
+
+    existing = db["account_widgets"].find_one({
+        "account_id": account_id,
+        "widget_key": "news_relevance_summary",
+    })
+    if (existing and existing.get("status") == "available"
+            and existing.get("data", {}).get("signals_fingerprint") == fingerprint):
+        pipeline.cache_hit("news_relevance_summary")
+        return existing
+
+    # Grounding corpus: the two news datasets this feature reads.
+    ground = build_corpus({
+        "google_news": _read_dataset_records(account_id, "google_news"),
+        "news_events": _read_dataset_records(account_id, "news_events"),
+    })
+    report = GroundingReport(ground, ["sales_angle", "rationales"])
+
+    llm_entries = _score_batches(signals, company_name, account_context, now)
 
     valid_ids = {s["signal_id"] for s in signals}
     # The signal behind each id, so the computed drivers can read its date and
@@ -734,8 +804,8 @@ Output JSON:
     angle_faults: dict = {}
     # dim -> the unsourced tokens that got its rationale withheld, per signal.
     rationale_faults: dict = {}
-    if llm_res and isinstance(llm_res, dict) and isinstance(llm_res.get("signals"), list):
-        for entry in llm_res["signals"]:
+    if llm_entries:
+        for entry in llm_entries:
             if not isinstance(entry, dict):
                 continue
             sid = str(entry.get("signal_id") or "").strip()
@@ -772,14 +842,18 @@ Output JSON:
 
             # The computed drivers' bases are attached AFTER grounding, not
             # before. Grounding exists to stop the model asserting a number the
-            # account's own data does not carry - but "148 days old" is Python's
-            # arithmetic on a date this signal already holds, not a claim about
-            # the account, and the news corpus naturally contains no such
-            # figure. Running these through the check withheld every recency
-            # basis that mentioned an age, which is most of them, and left the
-            # score on screen with nothing explaining it.
+            # account's own data does not carry - but a date this signal
+            # already holds is not a claim about the account, and the news
+            # corpus naturally contains no such figure. Running these through
+            # the check withheld every recency basis, which is most of them,
+            # and left the score on screen with nothing explaining it.
+            #
+            # The source line names the tier (T0-T3, the client's own
+            # vocabulary) and this signal's publisher, not just the band.
             rationales["recency"] = bases["recency"]
-            rationales["source_reliability"] = bases["source_reliability"]
+            rationales["source_reliability"] = signal_scoring.describe_source(
+                dims.get("source_reliability"), bases["source_reliability"],
+                by_id[sid].get("source_publisher") or "")
             _pending_angle = _grounded_angle(ground, report, sid, entry)
             scored[sid] = {
                 "signal_id": sid,
@@ -1021,6 +1095,10 @@ def extract_recent_news_signals(account_id: str) -> list[dict]:
         sc = scores.get(s["signal_id"])
         s["confidence"] = sc["confidence"] if sc else None
         s["tier"] = sc["tier"] if sc else None
+        # Whether the model judged this signal's relevance. False means the two
+        # computed drivers still apply but there is no weighted total, and the
+        # card has to say so rather than showing a blank where a score goes.
+        s["relevance_assessed"] = bool(sc)
         # Unscored signals carry the honest default, so the card always has a
         # value to read and never renders a stale or missing status.
         s["event_status"] = (sc or {}).get("event_status") or DEFAULT_EVENT_STATUS
@@ -1039,17 +1117,31 @@ def extract_recent_news_signals(account_id: str) -> list[dict]:
         s.pop("_event_dt", None)
 
     if scores:
-        publishable = [s for s in deduped
-                       if scores.get(s["signal_id"])
-                       and scores[s["signal_id"]]["gate_pass"]
-                       and s["confidence"] >= MIN_CONFIDENCE_TO_PUBLISH]
+        # A signal the model scored and failed on its own gate_pass check is
+        # rejected - that is the model doing its job, usually on a competitor's
+        # story the feed attached to this account.
+        rejected_by_model = [s for s in deduped
+                             if scores.get(s["signal_id"])
+                             and not scores[s["signal_id"]]["gate_pass"]]
+        judged = [s for s in deduped
+                  if scores.get(s["signal_id"])
+                  and scores[s["signal_id"]]["gate_pass"]
+                  and s["confidence"] >= MIN_CONFIDENCE_TO_PUBLISH]
+        # A signal the model never returned is NOT a rejection. It is a current,
+        # deduplicated event about this account that nothing has judged, and
+        # dropping it is how 97 of Accenture's 108 signals disappeared. It is
+        # published with the two drivers Python computes, marked unassessed, and
+        # sorted below everything that carries a weighted score.
+        not_assessed = [s for s in deduped if not scores.get(s["signal_id"])]
+
         # Confidence descending, ties broken by newest event first. Sorting on
         # the parsed datetime rather than the raw event_date string keeps mixed
         # date formats ordering correctly; undated signals sort last.
         publishable = sorted(
-            publishable,
+            judged,
             key=lambda s: (-s["confidence"], -_sort_timestamp(s)),
-        )[:MAX_SIGNALS]
+        ) + sorted(not_assessed, key=lambda s: -_sort_timestamp(s))
+        publishable = publishable[:MAX_SIGNALS]
 
         # F9: a case study may strengthen the Implication for HP, and nowhere
         # else on this card. Applied after ranking so proof goes to the signals
@@ -1104,6 +1196,15 @@ def extract_recent_news_signals(account_id: str) -> list[dict]:
                 "gate_rejected_count": len(rejected),
                 "gate_rejection_summary": dict(Counter(
                     r.get("gate_reject_reason") or "unspecified" for r in rejected)),
+                # Three separate facts, because one number was doing the work of
+                # three and reading wrongly: `deduped_from` was the count BEFORE
+                # de-duplication, so Advantest published "69" while 65 distinct
+                # signals existed and 4 were shown.
+                "passed_gate_count": len(passed),
+                "deduped_count": len(deduped),
+                "not_assessed_count": sum(
+                    1 for s in publishable if not s.get("relevance_assessed")),
+                "model_rejected_count": len(rejected_by_model),
                 "deduped_from": len(passed),
                 "cap": MAX_SIGNALS,
                 "signals": publishable,

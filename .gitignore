@@ -142,6 +142,19 @@ Archive/
 
 # Project documentation kept locally rather than in the repository.
 project-documentation/
+# The 26 Sep re-drop arrived zipped and unpacked to "project-documentation (1)"
+# with a __MACOSX sidecar. Its contents have been moved back to the name above;
+# the wrapper is named here so a re-download cannot slip past the rule.
+project-documentation (1)/
+__MACOSX/
+
+# The 26 Sep contact and persona workbooks. Real client contact data - names,
+# work emails, direct phones, LinkedIn URLs for 2,959 people. Covered by the
+# *.xlsx rule above and named here as well, so no later negation can expose
+# them. prospect_contacts.csv and company_personas.csv in the split folder are
+# derived from these and are ignored with that folder.
+Apollo_220_Companies_Unique_Contacts.xlsx
+Company_Personas_Enriched.xlsx
 
 # Internal delivery planning for the 220-account run. Working document, kept
 # local rather than pushed.

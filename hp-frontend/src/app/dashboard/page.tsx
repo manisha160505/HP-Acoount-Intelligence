@@ -30,7 +30,6 @@ import {
   Cpu,
   ShieldAlert,
   Shield,
-  Clock,
   FileText,
   Package,
   MessageSquare,
@@ -65,7 +64,6 @@ import {
   ExternalLink,
   X,
   ChevronRight,
-  ArrowRight,
   RotateCcw,
   Copy,
   Download,
@@ -505,17 +503,13 @@ export default function UserDashboardPage() {
   const [hoveredBarTopic, setHoveredBarTopic] = useState<{ name: string; score: number } | null>(null);
   const [hoveredIntentCat, setHoveredIntentCat] = useState<string | null>(null);
 
-  // Stakeholder Map Filter & View Sub-Tab State
+  // Stakeholder Map Filter State. Influence, priority and HP relevance are no
+  // longer filterable - the client dropped all three on 27 Sep as scoring we
+  // cannot defend - and the Entry Path sub-tab went with them.
   const [stakeholderSearch, setStakeholderSearch] = useState('');
   const [stakeholderDeptFilter, setStakeholderDeptFilter] = useState('ALL');
-  const [stakeholderSubTab, setStakeholderSubTab] = useState<'grid' | 'entry_path'>('grid');
-  const [isEntryPathInfoOpen, setIsEntryPathInfoOpen] = useState(false);
   const [stakeholderSeniorityFilter, setStakeholderSeniorityFilter] = useState('ALL');
-  const [stakeholderInfluenceFilter, setStakeholderInfluenceFilter] = useState('ALL');
-  const [stakeholderPriorityFilter, setStakeholderPriorityFilter] = useState('ALL');
-  const [stakeholderRelevanceFilter, setStakeholderRelevanceFilter] = useState('ALL');
   const [expandedDepts, setExpandedDepts] = useState<Record<string, boolean>>({});
-  const [stakeholderViewMode, setStakeholderViewMode] = useState<'departments' | 'top_contacts'>('departments');
   const [expandedContacts, setExpandedContacts] = useState<Record<string, boolean>>({});
   const [revealedContacts, setRevealedContacts] = useState<Record<string, boolean>>({});
 
@@ -524,6 +518,9 @@ export default function UserDashboardPage() {
   const [opportunitiesOnly, setOpportunitiesOnly] = useState(false);
   const [techSearch, setTechSearch] = useState('');
   const [techCategoryFilter, setTechCategoryFilter] = useState('ALL');
+  // Full technology stack accordion - many groups open at once, the same
+  // shape the stakeholder departments use.
+  const [expandedTechGroups, setExpandedTechGroups] = useState<Record<string, boolean>>({});
 
   // Content Studio State
   const [selectedPersona, setSelectedPersona] = useState<string>('cio_it');
@@ -547,7 +544,6 @@ export default function UserDashboardPage() {
   const [generateError, setGenerateError] = useState<any>(null);
   const [copiedAssetId, setCopiedAssetId] = useState<string | null>(null);
   const [isGeneratingOppMap, setIsGeneratingOppMap] = useState<boolean>(false);
-  const [expandedCalc, setExpandedCalc] = useState<Record<string, boolean>>({});
 
   // Strategy Chat State
   //
@@ -1201,9 +1197,11 @@ export default function UserDashboardPage() {
                   // job postings shown as 100 urgent signals, against 8 real
                   // ones. A number with no source behind it is worse than a
                   // blank: it looks checked.
-                  const narrativeCount = summaryData?.solution_narratives_count ?? null;
-                  const stakeholderCount = summaryData?.stakeholders_mapped_count ?? null;
-                  const signalCount = summaryData?.recent_signals_count ?? null;
+                  // The company write-up as bullets, reorganised from the
+                  // same paragraph at extraction time. Empty when the
+                  // paragraph was too short to break up or the bullets failed
+                  // their figure check, and then the paragraph is shown.
+                  const descPoints: string[] = (summaryData?.business_description_points || []) as string[];
 
                   // Figures the company actually filed, as opposed to the
                   // firmographic bands beside them. Each carries its own period,
@@ -1239,10 +1237,21 @@ export default function UserDashboardPage() {
                               </h2>
                             </div>
 
-                            {/* Single Clean Description Render */}
-                            <p className="text-xs text-slate-600 leading-relaxed max-w-5xl">
-                              {displayDesc}
-                            </p>
+                            {/* The profile, as bullets where we have them. */}
+                            {descPoints.length > 0 ? (
+                              <ul className="space-y-1 max-w-5xl">
+                                {descPoints.map((point, i) => (
+                                  <li key={i} className="text-xs text-slate-600 leading-relaxed flex gap-2">
+                                    <span className="text-hp-navy flex-shrink-0">&bull;</span>
+                                    <span>{point}</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            ) : (
+                              <p className="text-xs text-slate-600 leading-relaxed max-w-5xl">
+                                {displayDesc}
+                              </p>
+                            )}
 
                             <div className="flex flex-wrap items-center gap-4 text-xs font-medium text-slate-500 pt-3 border-t border-slate-100">
                               {domainVal && (
@@ -1279,27 +1288,6 @@ export default function UserDashboardPage() {
                               )}
                             </div>
                           </div>
-                        </div>
-                      </div>
-
-                      {/* Section 2: Executive Briefing Video Card */}
-                      <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm flex items-center space-x-6">
-                        <div className="relative w-48 h-28 bg-slate-900 rounded-xl overflow-hidden flex items-center justify-center flex-shrink-0 shadow-md">
-                          <div className="w-10 h-10 rounded-full bg-hp-navy text-white flex items-center justify-center shadow-lg">
-                            <Play className="w-5 h-5 ml-0.5" />
-                          </div>
-                        </div>
-
-                        <div className="space-y-1">
-                          <span className="text-[10px] font-extrabold text-hp-blue uppercase tracking-wider block">
-                            WATCH THE EXECUTIVE BRIEFING
-                          </span>
-                          <h3 className="text-base font-extrabold text-slate-900">
-                            HP's Play for {displayName}
-                          </h3>
-                          <p className="text-xs text-slate-500 leading-relaxed">
-                            A personal executive briefing covering the strategic rationale, key triggers, and recommended engagement approach for this account.
-                          </p>
                         </div>
                       </div>
 
@@ -1428,17 +1416,6 @@ export default function UserDashboardPage() {
                             </div>
                           ))}
 
-                          {reportedMetrics.length === 0 && (
-                            <div className="bg-white p-4 rounded-2xl border border-dashed border-slate-200 shadow-xs flex flex-col justify-between min-h-[7rem] opacity-80 sm:col-span-2">
-                              <span className="text-[11px] text-slate-500 block">Reported financial figures</span>
-                              <span className="text-xs text-slate-400 italic leading-snug">
-                                No filed figure is available yet
-                              </span>
-                              <span className="text-[10px] text-slate-400 leading-snug">
-                                Upload the account&apos;s annual report or exchange filings under Compliance Filings.
-                              </span>
-                            </div>
-                          )}
 
                         </div>
 
@@ -1451,11 +1428,14 @@ export default function UserDashboardPage() {
                         )}
                       </div>
 
-                      {/* Section 4: URGENCY SCORE & QUICK STATS (Two-Column Layout) */}
-                      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                        
-                        {/* Urgency Score Breakdown Card */}
-                        <div className="lg:col-span-2 bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-4">
+                      {/* Section 4: URGENCY SCORE
+                          Quick Stats sat beside this in a three-column grid
+                          until the client dropped it on 27 Sep ("most figures
+                          in the Quick Stats are empty - let's drop this all
+                          together for all accounts"), so the card is now the
+                          full width rather than two thirds of a row with a
+                          hole in it. */}
+                        <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-4">
                           <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                             <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700 flex items-center gap-2">
                               <Flame className="w-4 h-4 text-amber-500" />
@@ -1493,7 +1473,7 @@ export default function UserDashboardPage() {
                                   ? `Not published: ${urgencyData?.coverage_percent}% of the weighted driver coverage is available, and the minimum is ${urgencyData?.coverage_minimum}%.`
                                   : undefined}
                               >
-                                {urgencyData?.score ?? '—'}
+                                {urgencyData?.score ?? '-'}
                               </span>
                               <span className="text-[10px] font-bold text-slate-400">/100</span>
                             </div>
@@ -1515,15 +1495,20 @@ export default function UserDashboardPage() {
                                   barColor: missing.length > 0 ? 'bg-amber-400' : 'bg-hp-navy',
                                   // The whole working, so a seller who
                                   // disagrees with the number can see which
-                                  // term to disagree with.
-                                  rationale: [
+                                  // term to disagree with. Built in the
+                                  // backend (urgency.rationale_lines) and kept
+                                  // as lines rather than glued into one
+                                  // paragraph - the client asked for bullets,
+                                  // and there is now one version of this text
+                                  // rather than one here and one there.
+                                  rationale: (d.rationale_lines ?? [
                                     `Weight ${Math.round(d.weight * 100)}% of the total.`,
                                     ...(d.terms ?? []).map((t: any) =>
-                                      `${t.label}: ${t.points}/${t.max_points} — ${t.basis}${
-                                        t.missing_input ? ' (no input on file — scores 0 by the missing-input rule)' : ''}.`),
+                                      `${t.label}: ${t.points}/${t.max_points} - ${t.basis}${
+                                        t.missing_input ? ' (no input on file - scores 0 by the missing-input rule)' : ''}`),
                                     ...(d.notes ?? []),
-                                    ...(d.caveats ?? []).map((c: string) => `⚠ ${c}`),
-                                  ].join(' '),
+                                    ...(d.caveats ?? []).map((c: string) => `Caveat: ${c}`),
+                                  ]) as string[],
                                 };
                                 }).map((driver: any) => (
                                 <div key={driver.id} className="relative">
@@ -1587,9 +1572,14 @@ export default function UserDashboardPage() {
                                           <X className="w-4 h-4" />
                                         </button>
                                       </div>
-                                      <p className="text-slate-600 leading-relaxed text-[11px]">
-                                        {driver.rationale}
-                                      </p>
+                                      <ul className="space-y-1.5">
+                                        {driver.rationale.map((line: string, i: number) => (
+                                          <li key={i} className="text-slate-600 leading-relaxed text-[11px] flex gap-2">
+                                            <span className="text-hp-navy flex-shrink-0">&bull;</span>
+                                            <span>{line}</span>
+                                          </li>
+                                        ))}
+                                      </ul>
                                     </div>
                                   )}
                                 </div>
@@ -1649,56 +1639,6 @@ export default function UserDashboardPage() {
                             </p>
                           )}
                         </div>
-
-                        {/* Quick Stats Card */}
-                        <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm flex flex-col justify-between space-y-4">
-                          <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700 border-b border-slate-100 pb-3">
-                            QUICK STATS
-                          </h3>
-
-                          <div className="space-y-3 text-xs font-bold text-slate-800">
-                            <div className="flex items-center space-x-3 p-2.5 rounded-xl bg-slate-50">
-                              <div className="p-2 bg-blue-100 text-hp-blue rounded-lg">
-                                <Lightbulb className="w-4 h-4" />
-                              </div>
-                              <div>
-                                <span className="text-base font-extrabold text-slate-900 block">
-                                  {narrativeCount ?? <span className="text-slate-300">&mdash;</span>}
-                                </span>
-                                <span className="text-[10px] text-slate-500 font-medium">Solution Narratives</span>
-                              </div>
-                            </div>
-
-                            <div className="flex items-center space-x-3 p-2.5 rounded-xl bg-slate-50">
-                              <div className="p-2 bg-purple-100 text-purple-700 rounded-lg">
-                                <Users className="w-4 h-4" />
-                              </div>
-                              <div>
-                                 <span className="text-base font-extrabold text-slate-900 block">
-                                   {stakeholderCount ?? <span className="text-slate-300">&mdash;</span>}
-                                 </span>
-                                <span className="text-[10px] text-slate-500 font-medium">Stakeholders Mapped</span>
-                              </div>
-                            </div>
-
-                            <div className="flex items-center space-x-3 p-2.5 rounded-xl bg-slate-50">
-                              <div className="p-2 bg-red-100 text-red-600 rounded-lg">
-                                <Flame className="w-4 h-4" />
-                              </div>
-                              <div>
-                                <span className="text-base font-extrabold text-slate-900 block">
-                                  {signalCount ?? <span className="text-slate-300">&mdash;</span>}
-                                </span>
-                                {/* "Urgent" was never computed - nothing ranks
-                                    these by urgency - so the label says what
-                                    the number actually counts. */}
-                                <span className="text-[10px] text-slate-500 font-medium">Recent Signals</span>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-
-                      </div>
 
                       {/* Section 5: STRATEGIC PRIORITIES
                           Catalyst cards grouped by theme, as in the northstar
@@ -1781,8 +1721,11 @@ export default function UserDashboardPage() {
                                                 the drawer. */}
                                             {p.evidence_strength && (
                                               <span
-                                                className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-blue-50 text-hp-navy border border-blue-200 flex-shrink-0 whitespace-nowrap cursor-help"
-                                                title={p.evidence_strength.formula}
+                                                className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full border flex-shrink-0 whitespace-nowrap cursor-help ${
+                                                  p.evidence_strength.zero_reason
+                                                    ? 'bg-slate-50 text-slate-500 border-slate-200'
+                                                    : 'bg-blue-50 text-hp-navy border-blue-200'}`}
+                                                title={p.evidence_strength.zero_reason || p.evidence_strength.formula}
                                               >
                                                 {p.evidence_strength.score}/{p.evidence_strength.max_score}
                                               </span>
@@ -1795,9 +1738,24 @@ export default function UserDashboardPage() {
                                               sentence is evidence, not prose,
                                               and now lives in the drawer where
                                               a reader goes to check a claim. */}
-                                          {p.description?.text && (
+                                          {(p.description?.points?.length ?? 0) > 0 ? (
+                                            <ul className="space-y-1">
+                                              {p.description.points.map((point: string, i: number) => (
+                                                <li key={i} className="text-xs text-slate-600 leading-relaxed flex gap-2">
+                                                  <span className="text-hp-navy flex-shrink-0">&bull;</span>
+                                                  <span>{point}</span>
+                                                </li>
+                                              ))}
+                                            </ul>
+                                          ) : p.description?.text ? (
                                             <p className="text-xs text-slate-600 leading-relaxed">
                                               {p.description.text}
+                                            </p>
+                                          ) : null}
+
+                                          {p.evidence_strength?.zero_reason && (
+                                            <p className="text-[10px] text-slate-500 leading-relaxed italic">
+                                              {p.evidence_strength.zero_reason}
                                             </p>
                                           )}
 
@@ -1990,7 +1948,7 @@ export default function UserDashboardPage() {
                                                 {(p.sources || []).map((s: any, si: number) => (
                                                   <div key={si} className="text-[10px] text-slate-600 leading-relaxed">
                                                     &ldquo;{s.source_text}&rdquo;
-                                                    <span className="text-slate-400"> — {s.label}</span>
+                                                    <span className="text-slate-400"> - {s.label}</span>
                                                   </div>
                                                 ))}
                                                 {p.description?.written_by === 'python' && (
@@ -2207,6 +2165,14 @@ export default function UserDashboardPage() {
                       {/* Summary bar */}
                       <div className="flex flex-wrap items-center gap-2 text-xs">
                         <span className="font-semibold text-slate-700">{filteredSignals.length} Signals</span>
+                        {feedData?.not_assessed_count ? (
+                          <span
+                            className="text-[11px] text-slate-500"
+                            title="Published with their date, source and computed drivers. The relevance model did not return a judgement for these."
+                          >
+                            &middot; {feedData.not_assessed_count} awaiting a relevance judgement
+                          </span>
+                        ) : null}
                         {['Critical', 'High', 'Medium', 'Low'].map(lvl => urgencyCounts[lvl] ? (
                           <span key={lvl} className={`px-2 py-0.5 rounded-full font-medium ${
                             lvl === 'Critical' ? 'bg-red-100 text-red-700'
@@ -2373,7 +2339,12 @@ export default function UserDashboardPage() {
                                       {s.confidence !== null && s.confidence !== undefined ? (
                                         <>{s.confidence.toFixed(1)}<span className="text-slate-400 font-normal">/10</span></>
                                       ) : (
-                                        <span className="text-slate-400 font-normal">unscored</span>
+                                        <span
+                                          className="text-slate-400 font-normal"
+                                          title="A current, de-duplicated signal about this account that the relevance model did not return. Its recency and source reliability are still computed; only the relevance judgement is missing."
+                                        >
+                                          relevance not assessed
+                                        </span>
                                       )}
                                       {s.tier && (
                                         <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">{s.tier}</span>
@@ -2510,7 +2481,12 @@ export default function UserDashboardPage() {
                                               </div>
                                               <span className="text-[10px] font-mono text-slate-400 w-9 text-right flex-shrink-0">{val}/10</span>
                                             </div>
-                                            {sc.rationales?.[dim] && (
+                                            {/* Recency has no line of its own: its
+                                                basis is the event's date, and the
+                                                card above already shows it. The
+                                                score and its weight still read
+                                                here. */}
+                                            {dim !== 'recency' && sc.rationales?.[dim] && (
                                               <p className="text-[10px] text-slate-400 pl-[8.5rem] leading-relaxed">{sc.rationales[dim]}</p>
                                             )}
                                           </div>
@@ -3416,9 +3392,6 @@ export default function UserDashboardPage() {
                           /* Render generated plays, matching the Northstar UI */
                           <div className="space-y-8">
                             {generatedPlays.map((play: any, pIdx: number) => {
-                              const pKey = play.play_key || `play_${pIdx}`;
-                              const isCalcExpanded = expandedCalc[pKey] || false;
-
                               return (
                                 <div key={pIdx} className="space-y-3">
                                   {/* Category Divider Bar */}
@@ -3552,150 +3525,13 @@ export default function UserDashboardPage() {
                                       </div>
                                     )}
 
-                                    <div className="border-t border-slate-100"></div>
-
-                                    {/* QUANTIFIED IMPACT - composed in Python from named
-                                        source fields. No source field, no box. */}
-                                    {(play.scale_statement || (play.quantified_impact && play.quantified_impact_state !== 'none')) && (
-                                      <div className="bg-indigo-50/70 border border-indigo-100 rounded-lg p-3.5 space-y-1.5">
-                                        <div className="flex flex-wrap items-center justify-between gap-2">
-                                          <div className="flex items-center gap-1.5 text-indigo-600 font-semibold text-[10px] uppercase tracking-wider">
-                                            <Target className="w-3.5 h-3.5 text-indigo-500" />
-                                            {/* Only two states exist: 'sourced_signal' and
-                                                'none'. There is no HP-modelled state - no
-                                                projection formula is defined, and inventing
-                                                one would be an unsourced number. */}
-                                            <span>Quantified impact - derived from account data</span>
-                                          </div>
-                                          <span className="text-[9px] font-medium text-indigo-700 bg-indigo-100/80 px-1.5 py-0.5 rounded">
-                                            Composed from named source fields - not an HP projection
-                                          </span>
-                                        </div>
-
-                                        {play.scale_statement && (
-                                          <p className="text-sm font-semibold text-slate-900 leading-snug">
-                                            {play.scale_statement}
-                                          </p>
-                                        )}
-
-                                        {play.quantified_impact && play.quantified_impact_state !== 'none' && (
-                                          <p className="text-xs text-indigo-900">
-                                            <span className="font-semibold">{play.quantified_impact}</span>
-                                            {play.quantified_impact_source && (
-                                              <span className="text-indigo-700/70"> &middot; {play.quantified_impact_source}</span>
-                                            )}
-                                          </p>
-                                        )}
-
-                                        {play.calculation_basis && (
-                                          <div className="pt-0.5">
-                                            <button
-                                              type="button"
-                                              onClick={() => setExpandedCalc(prev => ({ ...prev, [pKey]: !prev[pKey] }))}
-                                              className="text-[10px] font-semibold text-indigo-600 hover:underline flex items-center gap-1"
-                                            >
-                                              {isCalcExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                                              <span>How this was derived</span>
-                                            </button>
-                                            {isCalcExpanded && (
-                                              <p className="text-xs text-slate-600 font-normal leading-relaxed bg-white p-2.5 rounded-md border border-indigo-100 mt-1.5">
-                                                {play.calculation_basis}
-                                              </p>
-                                            )}
-                                          </div>
-                                        )}
-                                      </div>
-                                    )}
-
-                                    {/* SUPPORTING SIGNAL - SOURCED. Every item quotes a cell of this
-                                        account's own uploaded data, with the column it came from. */}
-                                    {(play.account_evidence?.length > 0 || play.proof_point) && (
-                                      <div className="bg-emerald-50/60 border border-emerald-200 rounded-lg p-3.5 space-y-2.5">
-                                        <div className="flex items-center gap-1.5 text-emerald-700 font-semibold text-[10px] uppercase tracking-wider">
-                                          <CheckCircle2 className="w-3.5 h-3.5" />
-                                          <span>Supporting signal - sourced</span>
-                                        </div>
-
-                                        {play.account_evidence?.map((ev: any, i: number) => (
-                                          <div key={i} className="space-y-1">
-                                            <div className="flex flex-wrap items-center gap-1.5">
-                                              <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-800 bg-white border border-emerald-200 px-1.5 py-0.5 rounded">
-                                                <FileText className="w-3 h-3" />
-                                                {ev.dataset} &rarr; {ev.field}
-                                              </span>
-                                              {ev.kind && (
-                                                <span className="text-[10px] text-emerald-700/70">{ev.kind}</span>
-                                              )}
-                                            </div>
-                                            <p className="text-[11px] text-emerald-900/90 font-mono leading-relaxed break-words">
-                                              &ldquo;{ev.quote}&rdquo;
-                                            </p>
-                                            {ev.statement && (
-                                              <p className="text-xs text-emerald-800 italic leading-relaxed">{ev.statement}</p>
-                                            )}
-                                          </div>
-                                        ))}
-
-                                        {play.proof_point && (
-                                          <p className="text-xs text-emerald-800 italic leading-relaxed">
-                                            &quot;{play.proof_point}&quot;
-                                          </p>
-                                        )}
-                                      </div>
-                                    )}
-
-                                    <div className="border-t border-slate-100"></div>
-
-                                    {/* ENTRY PATH */}
+                                    {/* The entry-path box - timeline, target
+                                        buyers and the recommended CTA - was
+                                        deleted on the client's instruction,
+                                        27 Sep, along with the quantified impact
+                                        and supporting signal boxes above it.
+                                        The checks row below is what remains. */}
                                     <div className="space-y-2.5">
-                                      <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 block">
-                                        ENTRY PATH
-                                      </span>
-
-                                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                                        <div className="flex items-start gap-2">
-                                          <Clock className="w-3.5 h-3.5 text-slate-400 flex-shrink-0 mt-0.5" />
-                                          <div>
-                                            <span className="text-[10px] text-slate-400 font-semibold uppercase block">TIMELINE</span>
-                                            <span className="font-semibold text-slate-800">{play.entry_path?.timeline || '0-90 days'}</span>
-                                          </div>
-                                        </div>
-
-                                        <div className="flex items-start gap-2">
-                                          <Users className="w-3.5 h-3.5 text-slate-400 flex-shrink-0 mt-0.5" />
-                                          <div className="min-w-0">
-                                            <span className="text-[10px] text-slate-400 font-semibold uppercase block">TARGET BUYERS</span>
-                                            {play.entry_path?.target_contacts?.length > 0 ? (
-                                              <div className="space-y-0.5">
-                                                {play.entry_path.target_contacts.map((c: any) => (
-                                                  <div key={c.contact_id}>
-                                                    <span className="font-semibold text-slate-800">{c.name}</span>
-                                                    <span className="text-slate-500"> &mdash; {c.title}</span>
-                                                  </div>
-                                                ))}
-                                              </div>
-                                            ) : (
-                                              <span className="text-slate-500 font-normal">
-                                                {SHOW_EMPTY_STATE_NOTICES
-                                                  ? (play.entry_path?.no_contact_note || 'No matching contact identified in supplied data.')
-                                                  : null}
-                                              </span>
-                                            )}
-                                          </div>
-                                        </div>
-                                      </div>
-
-                                      {play.entry_path?.recommended_cta && (
-                                        <div className="bg-sky-50/60 border border-sky-100 rounded-lg p-2.5 space-y-0.5">
-                                          <span className="text-[10px] font-semibold text-sky-800 uppercase tracking-wider block">
-                                            RECOMMENDED CTA
-                                          </span>
-                                          <p className="text-xs font-semibold text-sky-900 leading-relaxed">
-                                            {play.entry_path.recommended_cta}
-                                          </p>
-                                        </div>
-                                      )}
-
                                       {play.checks && (
                                         <div className="flex flex-wrap gap-x-4 gap-y-1 pt-1">
                                           {Object.entries(play.checks).map(([name, passed]: [string, any]) => (
@@ -3857,59 +3693,10 @@ export default function UserDashboardPage() {
                                 </div>
                               )}
 
-                              {(play.account_evidence || []).length > 0 && (
-                                <div className="space-y-1">
-                                  <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">
-                                    Why it matched &middot; this account&apos;s own data
-                                  </span>
-                                  {play.account_evidence.slice(0, 3).map((e: any, j: number) => (
-                                    <p key={j} className="text-[11px] text-slate-600 leading-relaxed">
-                                      <span className="font-mono text-slate-400">{e.dataset}</span>{' '}
-                                      {String(e.text || '').slice(0, 160)}
-                                    </p>
-                                  ))}
-                                  {/* Kept distinct from the box above: these put the
-                                      account in the right territory without the rule
-                                      naming them, which is a weaker claim. */}
-                                  {(play.indicative_only || []).length > 0 && (
-                                    <p className="text-[11px] text-slate-400">
-                                      indicative only &mdash; the rule does not name{' '}
-                                      {play.indicative_only.join(', ')}
-                                    </p>
-                                  )}
-                                </div>
-                              )}
-
-                              {/* The same entry path the product plays carry, so this
-                                  is something to act on rather than a rulebook readout.
-                                  The contacts are this account's own roster; the next
-                                  step is composed in Python and asks about what the
-                                  account already runs rather than pitching. */}
-                              {play.entry_path && (
-                                <div className="border-t border-slate-100 pt-3 grid grid-cols-1 md:grid-cols-3 gap-3">
-                                  <div>
-                                    <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">Timeline</span>
-                                    <p className="text-[12px] text-slate-700">{play.entry_path.timeline}</p>
-                                  </div>
-                                  <div>
-                                    <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">Target buyers</span>
-                                    {(play.entry_path.target_contacts || []).length > 0 ? (
-                                      play.entry_path.target_contacts.map((c: any, j: number) => (
-                                        <p key={j} className="text-[12px] text-slate-700 leading-snug">
-                                          <span className="font-semibold">{c.name}</span>
-                                          {c.title && <span className="text-slate-500"> &mdash; {c.title}</span>}
-                                        </p>
-                                      ))
-                                    ) : (
-                                      <p className="text-[12px] text-slate-400">{play.entry_path.no_contact_note}</p>
-                                    )}
-                                  </div>
-                                  <div>
-                                    <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">Next step</span>
-                                    <p className="text-[12px] text-slate-700 leading-snug">{play.entry_path.recommended_cta}</p>
-                                  </div>
-                                </div>
-                              )}
+                              {/* The supporting-signal block that stood here, and the
+                                  entry path below it, were deleted on the client's
+                                  instruction, 27 Sep. `account_evidence` is still what
+                                  admits the play - it is simply no longer read out. */}
                             </div>
                           ))}
 
@@ -4006,17 +3793,11 @@ export default function UserDashboardPage() {
 
                   const contactsList: any[] = gridData?.contacts || [];
                   const deptDist: Record<string, any> = gridData?.department_distribution || {};
-                  const sourceBreakdown: Record<string, any> = gridData?.source_breakdown || {};
-                  const relevanceBreakdown: any = gridData?.relevance_breakdown || { high: 0, medium: 0, low: 0 };
-                  const priorityCount: number = gridData?.priority_contacts_count ?? 0;
                   const departmentGroups: any[] = influenceData.department_groups || [];
-                  const rankedEntryPath: any[] = influenceData.ranked_entry_path || [];
 
                   // Filter option lists are derived from the data, never hardcoded.
                   const uniq = (vals: any[]) => Array.from(new Set(vals.filter(Boolean))).sort() as string[];
                   const seniorityOptions = uniq(contactsList.map(c => c.seniority_band));
-                  const influenceOptions = uniq(contactsList.map(c => c.influence_type));
-                  const priorityOptions = uniq(contactsList.map(c => c.priority));
                   const departmentOptions = uniq(contactsList.map(c => c.normalized_department));
 
                   const matchesFilters = (c: any) => {
@@ -4027,18 +3808,18 @@ export default function UserDashboardPage() {
                     }
                     if (stakeholderDeptFilter !== 'ALL' && c.normalized_department !== stakeholderDeptFilter) return false;
                     if (stakeholderSeniorityFilter !== 'ALL' && c.seniority_band !== stakeholderSeniorityFilter) return false;
-                    if (stakeholderInfluenceFilter !== 'ALL' && c.influence_type !== stakeholderInfluenceFilter) return false;
-                    if (stakeholderPriorityFilter !== 'ALL' && c.priority !== stakeholderPriorityFilter) return false;
-                    if (stakeholderRelevanceFilter !== 'ALL' && c.hp_relevance_band !== stakeholderRelevanceFilter) return false;
                     return true;
                   };
 
                   const filteredContacts = contactsList.filter(matchesFilters);
                   const filteredIds = new Set(filteredContacts.map(c => c.contact_id));
-                  const priorityContacts = filteredContacts.filter(c => c.is_priority_contact);
-                  const topContacts = filteredContacts
-                    .filter(c => c.is_priority_contact || c.hp_relevance_band === 'high')
-                    .sort((a, b) => b.stakeholder_score - a.stakeholder_score);
+                  // The detailed cards used to be the composite-score selection
+                  // ("Priority Contacts"). They are now the C-Suite and VP rows:
+                  // a seniority band read off the title in the uploaded file,
+                  // which is an answer we can give when asked how it was picked.
+                  // Python already returns the roster in seniority order.
+                  const seniorContacts = filteredContacts.filter(
+                    c => c.seniority_band === 'C-Suite' || c.seniority_band === 'VP');
                   const byId: Record<string, any> = {};
                   contactsList.forEach(c => { byId[c.contact_id] = c; });
 
@@ -4054,33 +3835,21 @@ export default function UserDashboardPage() {
                     'Manager': 'bg-yellow-100 text-yellow-700',
                     'Individual Contributor': 'bg-gray-100 text-gray-600',
                   };
-                  const influenceBadge: Record<string, string> = {
-                    'Decision Maker': 'bg-red-50 text-red-600 border border-red-200',
-                    'Budget Holder': 'bg-orange-50 text-orange-600 border border-orange-200',
-                    'Technical Evaluator': 'bg-purple-50 text-purple-600 border border-purple-200',
-                    'Influencer': 'bg-blue-50 text-blue-600 border border-blue-200',
-                  };
-                  const priorityBadge: Record<string, string> = {
-                    High: 'bg-red-100 text-red-700',
-                    Medium: 'bg-yellow-100 text-yellow-700',
-                    Low: 'bg-gray-100 text-gray-600',
-                  };
-                  const relevanceMeta: Record<string, { label: string; cls: string }> = {
-                    high: { label: 'High HP fit', cls: 'bg-emerald-50 text-emerald-700 border border-emerald-200' },
-                    medium: { label: 'Medium HP fit', cls: 'bg-blue-50 text-blue-600 border border-blue-200' },
-                    low: { label: 'Lower HP fit', cls: 'bg-slate-100 text-slate-400 border border-slate-200' },
-                  };
 
                   const handleExportCsv = () => {
-                    const cols = ['full_name', 'title', 'normalized_department', 'seniority_band', 'influence_type',
-                      'priority', 'hp_relevance_band', 'stakeholder_score', 'is_priority_contact',
-                      'email', 'email_status', 'phone', 'linkedin_url', 'source'];
+                    // No influence, priority, HP relevance, composite score or
+                    // priority flag: a sheet the client forwards must not carry
+                    // the numbers we agreed on 27 Sep not to stand behind.
+                    const cols = ['full_name', 'title', 'normalized_department', 'seniority_band',
+                      'email', 'email_status', 'phone', 'linkedin_url', 'source_label'];
                     const esc = (v: any) => `"${String(v ?? '').replace(/"/g, '""')}"`;
                     const rows = filteredContacts.map((c: any) => {
                       const tp = talkingPoints[c.contact_id] || {};
                       return [...cols.map(k => esc(c[k])), esc(tp.how_to_open), esc(tp.hp_play_focus), esc(tp.decision_power)].join(',');
                     });
-                    const csv = [[...cols, 'how_to_open', 'hp_play_focus', 'decision_power'].join(','), ...rows].join('\n');
+                    const header = [...cols.map(k => k === 'source_label' ? 'source' : k),
+                      'how_to_open', 'hp_play_focus', 'decision_power'];
+                    const csv = [header.join(','), ...rows].join('\n');
                     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement('a');
@@ -4098,17 +3867,15 @@ export default function UserDashboardPage() {
                     >
                       <option value="ALL">{label}</option>
                       {options.map(o => (
-                        <option key={o} value={o}>{relevanceMeta[o]?.label || o}</option>
+                        <option key={o} value={o}>{o}</option>
                       ))}
                     </select>
                   );
 
+                  // Seniority only. The influence and priority chips that sat
+                  // beside it are gone with their filters.
                   const renderBadges = (c: any) => (
-                    <>
-                      <span className={`text-[11px] font-medium px-2 py-0.5 rounded ${seniorityBadge[c.seniority_band] || 'bg-gray-100 text-gray-600'}`}>{c.seniority_band}</span>
-                      <span className={`text-[11px] font-medium px-2 py-0.5 rounded ${influenceBadge[c.influence_type] || 'bg-slate-50 text-slate-600 border border-slate-200'}`}>{c.influence_type}</span>
-                      <span className={`text-[11px] font-medium px-2 py-0.5 rounded ${priorityBadge[c.priority] || 'bg-gray-100 text-gray-600'}`}>{c.priority}</span>
-                    </>
+                    <span className={`text-[11px] font-medium px-2 py-0.5 rounded ${seniorityBadge[c.seniority_band] || 'bg-gray-100 text-gray-600'}`}>{c.seniority_band}</span>
                   );
 
                   // Email / phone block, shared by the expandable card once revealed.
@@ -4128,7 +3895,7 @@ export default function UserDashboardPage() {
                         {c.contact_location && (
                           <span className="text-[10px] font-medium text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">{c.contact_location}</span>
                         )}
-                        <span className="text-[10px] font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">{c.source}</span>
+                        <span className="text-[10px] font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">{c.source_label || c.source}</span>
                       </p>
                     </div>
                   );
@@ -4156,7 +3923,6 @@ export default function UserDashboardPage() {
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-1.5">
                               <span className="text-sm font-bold text-slate-900">{c.full_name}</span>
-                              {c.is_priority_contact && <Star className="w-3.5 h-3.5 text-hp-navy fill-hp-navy flex-shrink-0" />}
                             </div>
                             <p className="text-xs text-slate-500 font-normal leading-snug">
                               {c.title || 'Title unspecified'} &middot; <span className="text-slate-400">{c.normalized_department}</span>
@@ -4243,14 +4009,6 @@ export default function UserDashboardPage() {
                           <p className="text-sm text-slate-500 mt-0.5">
                             {contactsList.length} contact{contactsList.length === 1 ? '' : 's'} identified for {selectedAccount?.name}
                           </p>
-                          <p className="text-xs text-slate-400 mt-0.5">
-                            {priorityCount} Priority Contact{priorityCount === 1 ? '' : 's'} &middot; {relevanceBreakdown.high} High HP Fit &middot; {relevanceBreakdown.medium} Medium HP Fit &middot; {relevanceBreakdown.low} Lower HP Fit
-                          </p>
-                          {sourceBreakdown['Source A'] !== undefined && (
-                            <p className="text-[11px] text-slate-400 mt-0.5">
-                              Intent: {sourceBreakdown['Source A']} &middot; Contacts: {sourceBreakdown['Apollo']}
-                            </p>
-                          )}
                         </div>
                         <button
                           type="button"
@@ -4277,14 +4035,10 @@ export default function UserDashboardPage() {
                         </div>
                         {renderFilter('Seniority', stakeholderSeniorityFilter, setStakeholderSeniorityFilter, seniorityOptions)}
                         {renderFilter('Department', stakeholderDeptFilter, setStakeholderDeptFilter, departmentOptions)}
-                        {renderFilter('Influence', stakeholderInfluenceFilter, setStakeholderInfluenceFilter, influenceOptions)}
-                        {renderFilter('Priority', stakeholderPriorityFilter, setStakeholderPriorityFilter, priorityOptions)}
-                        {renderFilter('HP Relevance', stakeholderRelevanceFilter, setStakeholderRelevanceFilter, ['high', 'medium', 'low'])}
                         <button
                           type="button"
                           onClick={() => {
                             setStakeholderSearch(''); setStakeholderDeptFilter('ALL'); setStakeholderSeniorityFilter('ALL');
-                            setStakeholderInfluenceFilter('ALL'); setStakeholderPriorityFilter('ALL'); setStakeholderRelevanceFilter('ALL');
                           }}
                           className="text-xs font-medium text-slate-500 hover:text-slate-800 px-2 py-1.5"
                         >
@@ -4292,291 +4046,175 @@ export default function UserDashboardPage() {
                         </button>
                       </div>
 
-                      {/* Sub-tabs */}
-                      <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1 w-fit">
-                        <button
-                          type="button"
-                          onClick={() => setStakeholderSubTab('grid')}
-                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition ${
-                            stakeholderSubTab === 'grid' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'
-                          }`}
-                        >
-                          <Users className="w-3.5 h-3.5" />
-                          <span>Stakeholder Grid</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setStakeholderSubTab('entry_path')}
-                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition ${
-                            stakeholderSubTab === 'entry_path' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'
-                          }`}
-                        >
-                          <ArrowRight className="w-3.5 h-3.5" />
-                          <span>Entry Path</span>
-                        </button>
-                      </div>
+                      <div className="space-y-6">
 
-                      {stakeholderSubTab === 'grid' && (
-                        <div className="space-y-6">
-
-                          {/* Priority Contacts - three across */}
+                          {/* Senior contacts - three across */}
+                          {seniorContacts.length > 0 && (
                           <div className="space-y-3">
                             <div className="flex items-center gap-2 flex-wrap">
-                              <Star className="w-4 h-4 text-hp-navy fill-hp-navy" />
-                              <h4 className="text-base font-bold text-slate-900">Priority Contacts</h4>
+                              <h4 className="text-base font-bold text-slate-900">Senior contacts</h4>
                               <span className="text-[10px] font-semibold text-hp-navy bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-full">
-                                {priorityContacts.length} HP-relevant
+                                {seniorContacts.length} C-Suite &amp; VP
                               </span>
                               {getClassificationBadge('inferred')}
                             </div>
                             <p className="text-xs text-slate-500 font-normal">
-                              The stakeholders scored most relevant to driving HP&apos;s case at {selectedAccount?.name} &mdash; each with their own contact details and an opening angle, not just role and department counts.
+                              The C-Suite and VP contacts on the roster at {selectedAccount?.name} &mdash; each with their own contact details and an opening angle. Every other contact is in the departments below.
                             </p>
 
-                            {priorityContacts.length === 0 ? (
-                              <p className="text-xs text-slate-400 italic py-4">No priority contacts match the current filters.</p>
-                            ) : (
-                              <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
-                                {priorityContacts.map((c: any) => {
-                                  const tp = talkingPoints[c.contact_id] || {};
-                                  return (
-                                    <div key={c.contact_id} className="bg-white rounded-xl border border-slate-200 shadow-xs p-4 space-y-3">
+                            <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
+                              {seniorContacts.map((c: any) => {
+                                const tp = talkingPoints[c.contact_id] || {};
+                                return (
+                                  <div key={c.contact_id} className="bg-white rounded-xl border border-slate-200 shadow-xs p-4 space-y-3">
 
-                                      {/* Identity */}
-                                      <div className="flex items-start gap-3">
-                                        <div className="w-10 h-10 rounded-full bg-sky-50 text-hp-navy flex items-center justify-center text-xs font-bold flex-shrink-0">
-                                          {initialsOf(c.full_name)}
-                                        </div>
-                                        <div className="min-w-0 flex-1">
-                                          <div className="flex items-center gap-1.5">
-                                            <h5 className="text-sm font-bold text-slate-900 truncate">{c.full_name}</h5>
-                                            {c.linkedin_url && (
-                                              <a href={linkedinHref(c.linkedin_url)} target="_blank" rel="noreferrer"
-                                                 title="Open LinkedIn profile"
-                                                 className="text-slate-400 hover:text-hp-navy flex-shrink-0">
-                                                <Linkedin className="w-3.5 h-3.5" />
-                                              </a>
-                                            )}
-                                          </div>
-                                          <p className="text-xs text-slate-500 font-normal leading-snug">{c.title || 'Title unspecified'}</p>
-                                          <p className="text-[11px] text-slate-400 font-normal">{c.normalized_department}</p>
-                                        </div>
+                                    {/* Identity */}
+                                    <div className="flex items-start gap-3">
+                                      <div className="w-10 h-10 rounded-full bg-sky-50 text-hp-navy flex items-center justify-center text-xs font-bold flex-shrink-0">
+                                        {initialsOf(c.full_name)}
                                       </div>
-
-                                      {/* Badges */}
-                                      <div className="flex flex-wrap gap-1.5">
-                                        {renderBadges(c)}
-                                      </div>
-
-                                      {/* Contact details */}
-                                      <div className="border-t border-slate-100 pt-3 space-y-1.5 text-xs">
-                                        <div className="flex items-center gap-2">
-                                          <Mail className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
-                                          {c.email
-                                            ? <a href={`mailto:${c.email}`} className="text-hp-navy font-medium truncate hover:underline">{c.email}</a>
-                                            : <span className="text-slate-400 italic">Email not available</span>}
-                                        </div>
-                                        <div className="flex items-center gap-2 flex-wrap">
-                                          <Phone className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
-                                          {c.phone
-                                            ? <span className="text-slate-700 font-normal">{c.phone}</span>
-                                            : <span className="text-slate-400 italic">Phone not available</span>}
-                                          {c.contact_location && (
-                                            <span className="text-[10px] font-medium text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">{c.contact_location}</span>
+                                      <div className="min-w-0 flex-1">
+                                        <div className="flex items-center gap-1.5">
+                                          <h5 className="text-sm font-bold text-slate-900 truncate">{c.full_name}</h5>
+                                          {c.linkedin_url && (
+                                            <a href={linkedinHref(c.linkedin_url)} target="_blank" rel="noreferrer"
+                                               title="Open LinkedIn profile"
+                                               className="text-slate-400 hover:text-hp-navy flex-shrink-0">
+                                              <Linkedin className="w-3.5 h-3.5" />
+                                            </a>
                                           )}
-                                          <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">
-                                            {c.source}
-                                          </span>
                                         </div>
-                                        {c.email_status && (
-                                          <p className="text-[10px] text-slate-400 italic">Email status: {c.email_status}</p>
+                                        <p className="text-xs text-slate-500 font-normal leading-snug">{c.title || 'Title unspecified'}</p>
+                                        <p className="text-[11px] text-slate-400 font-normal">{c.normalized_department}</p>
+                                      </div>
+                                    </div>
+
+                                    {/* Badges */}
+                                    <div className="flex flex-wrap gap-1.5">
+                                      {renderBadges(c)}
+                                    </div>
+
+                                    {/* Contact details */}
+                                    <div className="border-t border-slate-100 pt-3 space-y-1.5 text-xs">
+                                      <div className="flex items-center gap-2">
+                                        <Mail className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+                                        {c.email
+                                          ? <a href={`mailto:${c.email}`} className="text-hp-navy font-medium truncate hover:underline">{c.email}</a>
+                                          : <span className="text-slate-400 italic">Email not available</span>}
+                                      </div>
+                                      <div className="flex items-center gap-2 flex-wrap">
+                                        <Phone className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+                                        {c.phone
+                                          ? <span className="text-slate-700 font-normal">{c.phone}</span>
+                                          : <span className="text-slate-400 italic">Phone not available</span>}
+                                        {c.contact_location && (
+                                          <span className="text-[10px] font-medium text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">{c.contact_location}</span>
                                         )}
+                                        <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">
+                                          {c.source_label || c.source}
+                                        </span>
                                       </div>
-
-                                      {/* How to open */}
-                                      {tp.how_to_open ? (
-                                        <div className="bg-sky-50/70 border border-sky-100 rounded-lg p-3 space-y-1">
-                                          <span className="text-[11px] font-semibold text-hp-navy uppercase tracking-wider block">How to open</span>
-                                          <p className="text-xs text-slate-700 font-normal leading-relaxed">{tp.how_to_open}</p>
-                                        </div>
-                                      ) : (
-                                        <p className="text-[11px] text-slate-400 italic">No opening angle generated for this contact.</p>
-                                      )}
-
-                                      {/* Label / value rows */}
-                                      {(tp.hp_play_focus || tp.decision_power) && (
-                                        <div className="space-y-1.5">
-                                          {tp.hp_play_focus && (
-                                            <div className="flex gap-2">
-                                              <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider w-24 flex-shrink-0 pt-0.5">HP play focus:</span>
-                                              <span className="text-xs text-slate-700 font-normal leading-relaxed">{tp.hp_play_focus}</span>
-                                            </div>
-                                          )}
-                                          {tp.decision_power && (
-                                            <div className="flex gap-2">
-                                              <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider w-24 flex-shrink-0 pt-0.5">Decision power:</span>
-                                              <span className="text-xs text-slate-700 font-normal leading-relaxed">{tp.decision_power}</span>
-                                            </div>
-                                          )}
-                                        </div>
-                                      )}
-
-                                      {Array.isArray(tp.pain_points) && tp.pain_points.length > 0 && (
-                                        <div className="space-y-1">
-                                          <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">Potential pain points <span className="normal-case font-normal">(inferred)</span></span>
-                                          <ul className="space-y-0.5">
-                                            {tp.pain_points.map((p: string, i: number) => (
-                                              <li key={i} className="text-[11px] text-slate-600 font-normal flex gap-1.5">
-                                                <span className="text-red-400 flex-shrink-0">&bull;</span>
-                                                <span>{p}</span>
-                                              </li>
-                                            ))}
-                                          </ul>
-                                        </div>
+                                      {c.email_status && (
+                                        <p className="text-[10px] text-slate-400 italic">Email status: {c.email_status}</p>
                                       )}
                                     </div>
-                                  );
-                                })}
-                              </div>
-                            )}
-                          </div>
 
-                          {/* All Departments | Top Contacts */}
+                                    {/* How to open */}
+                                    {tp.how_to_open ? (
+                                      <div className="bg-sky-50/70 border border-sky-100 rounded-lg p-3 space-y-1">
+                                        <span className="text-[11px] font-semibold text-hp-navy uppercase tracking-wider block">How to open</span>
+                                        <p className="text-xs text-slate-700 font-normal leading-relaxed">{tp.how_to_open}</p>
+                                      </div>
+                                    ) : (
+                                      <p className="text-[11px] text-slate-400 italic">No opening angle generated for this contact.</p>
+                                    )}
+
+                                    {/* Label / value rows */}
+                                    {(tp.hp_play_focus || tp.decision_power) && (
+                                      <div className="space-y-1.5">
+                                        {tp.hp_play_focus && (
+                                          <div className="flex gap-2">
+                                            <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider w-24 flex-shrink-0 pt-0.5">HP play focus:</span>
+                                            <span className="text-xs text-slate-700 font-normal leading-relaxed">{tp.hp_play_focus}</span>
+                                          </div>
+                                        )}
+                                        {tp.decision_power && (
+                                          <div className="flex gap-2">
+                                            <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider w-24 flex-shrink-0 pt-0.5">Decision power:</span>
+                                            <span className="text-xs text-slate-700 font-normal leading-relaxed">{tp.decision_power}</span>
+                                          </div>
+                                        )}
+                                      </div>
+                                    )}
+
+                                    {Array.isArray(tp.pain_points) && tp.pain_points.length > 0 && (
+                                      <div className="space-y-1">
+                                        <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">Potential pain points <span className="normal-case font-normal">(inferred)</span></span>
+                                        <ul className="space-y-0.5">
+                                          {tp.pain_points.map((p: string, i: number) => (
+                                            <li key={i} className="text-[11px] text-slate-600 font-normal flex gap-1.5">
+                                              <span className="text-red-400 flex-shrink-0">&bull;</span>
+                                              <span>{p}</span>
+                                            </li>
+                                          ))}
+                                        </ul>
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                          )}
+
+                          {/* Departments - the whole roster */}
                           <div className="border-t border-slate-200 pt-5 space-y-4">
                             <div className="flex items-center gap-2 flex-wrap">
-                              <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1 w-fit">
-                                <button
-                                  type="button"
-                                  onClick={() => setStakeholderViewMode('departments')}
-                                  className={`px-3 py-1.5 rounded-md text-xs font-semibold transition ${
-                                    stakeholderViewMode === 'departments' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'
-                                  }`}
-                                >
-                                  All Departments
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setStakeholderViewMode('top_contacts')}
-                                  className={`px-3 py-1.5 rounded-md text-xs font-semibold transition ${
-                                    stakeholderViewMode === 'top_contacts' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'
-                                  }`}
-                                >
-                                  Top Contacts
-                                </button>
-                              </div>
+                              <h4 className="text-base font-bold text-slate-900">All departments</h4>
+                              <span className="text-[10px] font-semibold text-slate-500 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-full">
+                                {filteredContacts.length} contact{filteredContacts.length === 1 ? '' : 's'}
+                              </span>
                               {getClassificationBadge('derived')}
                             </div>
 
-                            {stakeholderViewMode === 'departments' && (
-                              <div className="space-y-2">
-                                {departmentGroups.map((g: any) => {
-                                  const surfaced = (g.surfaced_contact_ids || []).map((id: string) => byId[id]).filter((c: any) => c && filteredIds.has(c.contact_id));
-                                  const lower = (g.lower_relevance_contact_ids || []).map((id: string) => byId[id]).filter((c: any) => c && filteredIds.has(c.contact_id));
-                                  if (surfaced.length === 0 && lower.length === 0) return null;
-                                  const isOpen = expandedDepts[g.department] || false;
-                                  const showLow = expandedDepts[`${g.department}__low`] || false;
-                                  return (
-                                    <div key={g.department} className="space-y-2">
-                                      <button
-                                        type="button"
-                                        onClick={() => setExpandedDepts(prev => ({ ...prev, [g.department]: !prev[g.department] }))}
-                                        className="flex items-center gap-2 text-left group"
-                                      >
-                                        <h5 className="text-sm font-bold text-slate-800 group-hover:text-hp-navy transition">{g.department}</h5>
-                                        <span className="text-[11px] font-normal text-slate-500 bg-slate-100 px-2 py-0.5 rounded"
-                                              title="HP-relevant contacts (Priority Contacts plus High/Medium HP fit) vs. total roster in this department">
-                                          {g.hp_relevant_count} HP-relevant &middot; {g.total_count} total
-                                        </span>
-                                        {isOpen
-                                          ? <ChevronUp className="w-4 h-4 text-slate-400" />
-                                          : <ChevronDown className="w-4 h-4 text-slate-400" />}
-                                      </button>
+                            <div className="space-y-2">
+                              {departmentGroups.map((g: any) => {
+                                // Python returns the department's roster most
+                                // senior first. Members used to be split into
+                                // "HP-relevant" and "lower relevance" here;
+                                // that judgement left the product on 27 Sep.
+                                const members = (g.contact_ids || [])
+                                  .map((id: string) => byId[id])
+                                  .filter((c: any) => c && filteredIds.has(c.contact_id));
+                                if (members.length === 0) return null;
+                                const isOpen = expandedDepts[g.department] || false;
+                                return (
+                                  <div key={g.department} className="space-y-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => setExpandedDepts(prev => ({ ...prev, [g.department]: !prev[g.department] }))}
+                                      className="flex items-center gap-2 text-left group"
+                                    >
+                                      <h5 className="text-sm font-bold text-slate-800 group-hover:text-hp-navy transition">{g.department}</h5>
+                                      <span className="text-[11px] font-normal text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
+                                        {members.length} contact{members.length === 1 ? '' : 's'}
+                                      </span>
+                                      {isOpen
+                                        ? <ChevronUp className="w-4 h-4 text-slate-400" />
+                                        : <ChevronDown className="w-4 h-4 text-slate-400" />}
+                                    </button>
 
-                                      {isOpen && (
-                                        <div className="space-y-2 pb-2">
-                                          {surfaced.length === 0 ? (
-                                            <p className="text-[11px] text-slate-400 italic">
-                                              No high or medium HP-relevance contacts in this department &mdash; see lower-relevance contacts below.
-                                            </p>
-                                          ) : (
-                                            surfaced.map((c: any) => renderExpandableCard(c))
-                                          )}
-
-                                          {lower.length > 0 && (
-                                            <div className="pt-1">
-                                              <button
-                                                type="button"
-                                                onClick={() => setExpandedDepts(prev => ({ ...prev, [`${g.department}__low`]: !prev[`${g.department}__low`] }))}
-                                                className="text-[11px] font-semibold text-slate-500 hover:text-slate-800 flex items-center gap-1"
-                                              >
-                                                {showLow ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                                                <span>{showLow ? 'Hide' : 'Show'} {lower.length} lower-relevance contact{lower.length === 1 ? '' : 's'}</span>
-                                                <span className="text-slate-400 font-normal">(limited fit for an HP hardware conversation)</span>
-                                              </button>
-                                              {showLow && (
-                                                <div className="opacity-80 space-y-2 mt-2">
-                                                  {lower.map((c: any) => renderExpandableCard(c))}
-                                                </div>
-                                              )}
-                                            </div>
-                                          )}
-                                        </div>
-                                      )}
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            )}
-
-                            {stakeholderViewMode === 'top_contacts' && (
-                              <div className="space-y-2">
-                                {topContacts.length === 0 ? (
-                                  <p className="text-xs text-slate-400 italic py-4">No high HP-relevance contacts match the current filters.</p>
-                                ) : (
-                                  topContacts.map((c: any) => renderExpandableCard(c))
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      )}
-
-                      {stakeholderSubTab === 'entry_path' && (
-                        <div className="space-y-3">
-                          <p className="text-xs text-slate-500 font-normal">
-                            Ranked by seniority (25%), HP relevance (25%), influence (20%), data completeness (15%) and priority (15%).
-                          </p>
-                          <div className="bg-white rounded-xl border border-slate-200 shadow-xs divide-y divide-slate-100">
-                            {rankedEntryPath.filter((s: any) => filteredIds.has(s.contact_id)).map((step: any) => (
-                              <div key={step.contact_id} className="p-4">
-                                <div className="flex items-start gap-3">
-                                  <div className="w-6 h-6 rounded-full bg-hp-navy text-white flex items-center justify-center text-[11px] font-semibold flex-shrink-0">
-                                    {step.order}
-                                  </div>
-                                  <div className="min-w-0 flex-1">
-                                    <p className="text-sm font-semibold text-slate-900">{step.full_name}</p>
-                                    <p className="text-xs text-slate-500 font-normal">{step.title} &middot; <span className="text-slate-400">{step.department}</span></p>
-                                  </div>
-                                  <span className="text-xs font-semibold text-slate-700 flex-shrink-0">
-                                    {step.stakeholder_score}<span className="text-slate-400 font-normal">/100</span>
-                                  </span>
-                                </div>
-                                <div className="mt-2.5 space-y-1.5 pl-9">
-                                  {Object.entries(step.score_components || {}).map(([dim, val]: [string, any]) => (
-                                    <div key={dim} className="flex items-center gap-2">
-                                      <span className="text-[10px] text-slate-400 font-medium w-32 capitalize flex-shrink-0">{dim.replace(/_/g, ' ')}</span>
-                                      <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                                        <div className="h-1.5 bg-hp-navy/60 rounded-full" style={{ width: `${val}%` }}></div>
+                                    {isOpen && (
+                                      <div className="space-y-2 pb-2">
+                                        {members.map((c: any) => renderExpandableCard(c))}
                                       </div>
-                                      <span className="text-[10px] font-mono text-slate-400 w-10 text-right flex-shrink-0">{val}/100</span>
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            ))}
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
                           </div>
                         </div>
-                      )}
 
                       {/* Department distribution, straight from the uploaded file */}
                       <div className="bg-white rounded-xl border border-slate-200 shadow-xs p-4 space-y-2">
@@ -4620,7 +4258,6 @@ export default function UserDashboardPage() {
                   });
 
                   const totalTechCount = matrixData.total_tech_count ?? 0;
-                  const categoryMatrix: Record<string, string[]> = matrixData.category_matrix || {};
                   const totalWebTechCount = webstackData.total_web_tech_count ?? 0;
                   const premiumTechCount = webstackData.premium_tech_count || '0';
                   const webSpendEst = webstackData.web_spend_estimate || 'N/A';
@@ -4628,16 +4265,43 @@ export default function UserDashboardPage() {
                   const totalDetectionsCount = detectionsData.total_detections_count ?? 0;
                   const detectionsList: any[] = detectionsData.detections || [];
 
-                  const rawCategories = Object.keys(categoryMatrix);
-                  const filteredRawCategories = rawCategories.filter(cat => {
-                    if (techCategoryFilter !== 'ALL' && cat !== techCategoryFilter) return false;
-                    if (!techSearch.trim()) return true;
-                    const query = techSearch.toLowerCase();
-                    const catMatches = cat.toLowerCase().includes(query);
-                    const items = categoryMatrix[cat] || [];
-                    const itemMatches = items.some(item => item.toLowerCase().includes(query));
-                    return catMatches || itemMatches;
-                  });
+                  // The whole estate, clubbed into the export's own categories.
+                  // Python settles the grouping and the order, including the
+                  // group for everything the export left uncategorised.
+                  const techGroups: any[] = matrixData.category_groups || [];
+                  const techSources: Record<string, string> = matrixData.technology_sources || {};
+                  const multiCategoryCount: number = matrixData.multi_category_technologies ?? 0;
+                  const techQuery = techSearch.trim().toLowerCase();
+                  const visibleTechGroups = techGroups
+                    .map((g: any) => {
+                      if (!techQuery) return g;
+                      if (String(g.category).toLowerCase().includes(techQuery)) return g;
+                      const hits = (g.technologies || [])
+                        .filter((t: string) => t.toLowerCase().includes(techQuery));
+                      return hits.length ? { ...g, technologies: hits, count: hits.length } : null;
+                    })
+                    .filter(Boolean);
+
+                  // One row per technology, not per group: the export files
+                  // NetSuite under five categories, and a sheet that repeated it
+                  // five times would not be "the whole techstack" any more.
+                  const downloadTechStack = () => {
+                    const esc = (v: any) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+                    const categoriesOf: Record<string, string[]> = {};
+                    techGroups.forEach((g: any) => (g.technologies || []).forEach((t: string) => {
+                      (categoriesOf[t] = categoriesOf[t] || []).push(g.category);
+                    }));
+                    const rows = (matrixData.full_tech_stack || []).map((t: string) =>
+                      [esc(t), esc((categoriesOf[t] || []).join('; ')), esc(techSources[t] || '')].join(','));
+                    const csv = [['technology', 'category', 'source_sheet'].join(','), ...rows].join('\n');
+                    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `tech_stack_${selectedAccount?.name || 'account'}.csv`.replace(/\s+/g, '_');
+                    a.click();
+                    URL.revokeObjectURL(url);
+                  };
 
                   return (
                     <div className="space-y-6 animate-fade-in">
@@ -4934,23 +4598,18 @@ export default function UserDashboardPage() {
 
                                         <div className="text-[9px] font-mono uppercase tracking-wider text-slate-400 border-t border-slate-100 pt-2 flex items-center justify-between">
                                           <span className="truncate pr-2">{vendor.provenance}</span>
-                                          {/* The client's Tech Landscape confidence, 0-100.
-                                              Compared against null explicitly: a card can
-                                              legitimately score 0, and a falsy check would
-                                              hide it. The tooltip carries both drivers so
-                                              the number can be traced to the rule and the
-                                              intent category that produced it. */}
+                                          {/* Was the Tech Landscape confidence percentage.
+                                              The client, 27 Sep: "I would stay away from
+                                              this, hence, let's drop the confidence score."
+                                              What is left is whether the export actually
+                                              named this vendor, which is the whitespace
+                                              card's footer too. The score is still computed
+                                              - it decides which cards exist at all. */}
                                           <span
                                             className="font-bold text-slate-500 whitespace-nowrap"
-                                            title={[
-                                              vendor.confidence_drivers?.technology_evidence?.basis,
-                                              vendor.confidence_drivers?.intent_support?.basis,
-                                              vendor.evidence_basis,
-                                            ].filter(Boolean).join(' · ')}
+                                            title={vendor.evidence_basis || undefined}
                                           >
-                                            {vendor.confidence != null
-                                              ? `${vendor.confidence}% confidence`
-                                              : vendor.detection_status}
+                                            {vendor.detection_status}
                                           </span>
                                         </div>
                                       </div>
@@ -5011,6 +4670,112 @@ export default function UserDashboardPage() {
 
                         </div>
 
+                      {/* ---------------------------------------------------------------
+                          The whole technology stack, clubbed into the export's own
+                          categories. The client, 27 Sep: "we mention about 281
+                          technologies detected - we need to club those in relevant
+                          categories and show here and also, have a download button to
+                          extract the whole techstack."
+
+                          It sits below the HP categories and changes nothing above it:
+                          those cards are the HP-relevant reading of the estate, this is
+                          the estate itself. Every group starts closed - the point of the
+                          section is that 281 names are reachable, not that they are all
+                          on screen. */}
+                      {techGroups.length > 0 && (
+                        <div className="bg-white rounded-xl border border-slate-200 shadow-xs p-4 space-y-3">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                            <div>
+                              <h4 className="text-sm font-bold text-slate-900">
+                                Full technology stack
+                                <span className="text-slate-400 font-normal"> &middot; {totalTechCount}</span>
+                              </h4>
+                              <p className="text-[11px] text-slate-500 mt-0.5">
+                                Every technology in {selectedAccount?.name || 'this account'}&apos;s
+                                technographics export, grouped by the export&apos;s own categories.
+                                {multiCategoryCount > 0 && (
+                                  <> {multiCategoryCount} of them are filed under more than one
+                                  category, so the group counts add up to more than {totalTechCount}.</>
+                                )}
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <div className="relative">
+                                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+                                <input
+                                  type="text"
+                                  value={techSearch}
+                                  onChange={(e) => setTechSearch(e.target.value)}
+                                  placeholder="Search technologies..."
+                                  className="w-full sm:w-56 pl-9 pr-3 py-2 text-xs font-medium bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-hp-navy"
+                                />
+                              </div>
+                              <button
+                                type="button"
+                                onClick={downloadTechStack}
+                                disabled={totalTechCount === 0}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-50 transition disabled:opacity-40 whitespace-nowrap"
+                              >
+                                <FileSpreadsheet className="w-3.5 h-3.5" />
+                                <span>Download</span>
+                              </button>
+                            </div>
+                          </div>
+
+                          {visibleTechGroups.length === 0 ? (
+                            <p className="text-xs text-slate-400 italic py-2">
+                              No technology matches that search.
+                            </p>
+                          ) : (
+                            <div className="divide-y divide-slate-100">
+                              {visibleTechGroups.map((g: any) => {
+                                // A search opens the groups it matched; otherwise closed.
+                                const isOpen = techQuery
+                                  ? true
+                                  : (expandedTechGroups[g.category] || false);
+                                return (
+                                  <div key={g.category} className="py-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => setExpandedTechGroups(prev => ({
+                                        ...prev, [g.category]: !prev[g.category],
+                                      }))}
+                                      className="w-full flex items-center gap-2 text-left group"
+                                    >
+                                      <span className="text-xs font-semibold text-slate-800 group-hover:text-hp-navy transition">
+                                        {g.category}
+                                      </span>
+                                      <span className="text-[11px] font-normal text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
+                                        {g.count}
+                                      </span>
+                                      <span className="flex-1" />
+                                      {isOpen
+                                        ? <ChevronUp className="w-4 h-4 text-slate-400" />
+                                        : <ChevronDown className="w-4 h-4 text-slate-400" />}
+                                    </button>
+                                    {g.note && (
+                                      <p className="text-[11px] text-slate-400 mt-0.5">{g.note}</p>
+                                    )}
+                                    {isOpen && (
+                                      <div className="flex flex-wrap gap-1.5 mt-2">
+                                        {(g.technologies || []).map((t: string) => (
+                                          <span
+                                            key={t}
+                                            title={techSources[t] || undefined}
+                                            className="text-[11px] font-medium text-slate-600 bg-slate-50 border border-slate-200 px-2 py-0.5 rounded-full"
+                                          >
+                                            {t}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      )}
 
                     </div>
                   );

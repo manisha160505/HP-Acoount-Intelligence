@@ -33,6 +33,15 @@ DATASET_REGISTRY = {
         "canonical_filename": "technographics.csv",
         "allowed_extensions": [".csv"]
     },
+    # Explorium's per-technology detail for the same estate. Named by the
+    # client (27 Sep) as a source to read where Technographics is thin, which
+    # it is on 13 of the 220 accounts.
+    "tech_breakdown": {
+        "display_name": "Technology Breakdown",
+        "type": "single_file_csv",
+        "canonical_filename": "tech_breakdown.csv",
+        "allowed_extensions": [".csv"]
+    },
     "webstack": {
         "display_name": "Webstack",
         "type": "single_file_csv",
@@ -90,6 +99,16 @@ DATASET_REGISTRY = {
         "display_name": "Prospect Contacts",
         "type": "single_file_csv",
         "canonical_filename": "prospect_contacts.csv",
+        "allowed_extensions": [".csv"]
+    },
+    # The client's buying committee for the account: one row per target
+    # persona, naming the contact who fills it or stating that none was found.
+    # An unfilled row is evidence of a gap, not a person - nothing downstream
+    # may turn it into one.
+    "company_personas": {
+        "display_name": "Company Personas",
+        "type": "single_file_csv",
+        "canonical_filename": "company_personas.csv",
         "allowed_extensions": [".csv"]
     },
     "company": {
@@ -173,3 +192,8 @@ class AccountDataFileResponse(BaseModel):
     status: Literal['active', 'replaced', 'archived', 'deleted']
     uploaded_at: str
     updated_at: str
+    # What the upload set off. Present so a bulk loader can see whether this
+    # file triggered a regeneration or was stored for one that comes later.
+    regenerated: list[str] = []
+    regeneration_failed: list[str] = []
+    extraction_deferred: bool = False

@@ -512,6 +512,24 @@ FORMULA = ("Evidence Strength = Filing Evidence (5 per relevant filing, max 25) 
            "+ Source Diversity (10 per distinct source category, max 50).")
 
 
+def zero_reason(terms: list) -> str:
+    """Why a card scored 0, in one line, from the terms themselves.
+
+    The client asked on 27 Sep why every Advantest priority reads 0/100. A bare
+    zero invites exactly that question, and the answer was already sitting in
+    the term bases - it just was not shown: the priorities rest on one undated
+    sentence from the business description, so filing evidence, recency and
+    diversity all floor at zero. Said plainly, a zero stops being a puzzle and
+    becomes what it is: a statement about the evidence, not about the account.
+    """
+    missing = [t.get("label") for t in (terms or []) if not t.get("points")]
+    if len(missing) != len(terms or []):
+        return ""
+    return ("No supporting source is a filed document, none carries a usable "
+            "date, and none is categorised - so every term scores 0. This "
+            "measures the evidence behind the priority, not the account.")
+
+
 def score(sources: list, scored_on: date, account_domain: str = "") -> dict:
     """Evidence Strength for one catalyst, with every term's working shown.
 
@@ -526,15 +544,19 @@ def score(sources: list, scored_on: date, account_domain: str = "") -> dict:
     diverse = diversity(sources, account_domain)
     total = filings["points"] + recent["points"] + diverse["points"]
 
+    terms = [
+        {"key": "filing_evidence", "label": "Filing evidence", **filings},
+        {"key": "recency", "label": "Recency", **recent},
+        {"key": "source_diversity", "label": "Source diversity", **diverse},
+    ]
     return {
         "score": total,
+        # Present only when the total is 0, and then it says which evidence was
+        # missing rather than leaving a bare zero on the card.
+        "zero_reason": zero_reason(terms) or None,
         "max_score": MAX_SCORE,
         "scored_on": scored_on.isoformat(),
-        "terms": [
-            {"key": "filing_evidence", "label": "Filing evidence", **filings},
-            {"key": "recency", "label": "Recency", **recent},
-            {"key": "source_diversity", "label": "Source diversity", **diverse},
-        ],
+        "terms": terms,
         "formula": FORMULA,
         "scoring_date_basis": (
             "Age is measured to the date this was generated, not to the date "

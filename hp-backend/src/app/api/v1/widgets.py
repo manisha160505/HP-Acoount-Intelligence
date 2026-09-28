@@ -214,7 +214,7 @@ WIDGET_REGISTRY = {
             "widget_key": "stakeholder_influence_map",
             "widget_name": "Buying Center & Influence Grouping",
             "feature_key": "stakeholder_map",
-            "description": "Departmental grouping with HP-relevance counts, buying-group coverage, and the stakeholder ranking used for the entry path. Scored 25% seniority + 25% HP relevance + 20% influence + 15% data completeness + 15% priority.",
+            "description": "Departmental grouping and buying-group coverage. Each department also carries its full roster in seniority order. The composite score behind it (25% seniority + 25% HP relevance + 20% influence + 15% data completeness + 15% priority) is internal: it selects Priority Contacts for Content Studio and is no longer published as a ranking.",
             "widget_type": "hierarchy_chart",
             "data_classification": "derived",
             "source_datasets": ["prospect_contacts"],

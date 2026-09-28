@@ -197,6 +197,13 @@ async def upload_account_data(
     account_id: str,
     dataset_key: str = Form(...),
     file_id_to_replace: str | None = Form(None),
+    # Bulk loading, one account at a time: a feature that declares seven
+    # datasets is otherwise re-run seven times as they arrive, six of them
+    # against data that is still incomplete. The loader sets this on every
+    # upload and then regenerates each feature once, at the end, which is both
+    # cheaper and the only way the first run sees the whole account.
+    # Default false, so a single upload from the UI behaves exactly as before.
+    defer_extraction: bool = Form(False),
     file: UploadFile = File(...),
     current_user: dict = Depends(require_admin_role)
 ):
@@ -348,11 +355,17 @@ async def upload_account_data(
     # Regenerate every feature that declares this dataset as a dependency. The
     # table is derived from FEATURE_MAPPINGS, so a feature that gains a dataset
     # cannot silently fall out of the trigger set the way two of them had.
-    regenerated, failed = _run_dependent_extractors(account_id, key_clean)
+    if defer_extraction:
+        pipeline.step("upload", "%s stored; extraction deferred to the caller"
+                      % key_clean)
+        regenerated, failed = [], []
+    else:
+        regenerated, failed = _run_dependent_extractors(account_id, key_clean)
 
     payload = serialize_data_file(new_metadata)
     payload["regenerated"] = regenerated
     payload["regeneration_failed"] = failed
+    payload["extraction_deferred"] = bool(defer_extraction)
     return payload
 
 @router.get("", response_model=list[AccountDataFileResponse])

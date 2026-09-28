@@ -32,18 +32,21 @@ more ground but is absent on fourteen named-customer studies and wrong on
 others - the study that finally surfaced the problem is tagged `HP EliteBook`
 and is entirely about HP Managed Device Services.
 
-So the line is computed per study by `canonical_line()`, reading the offering
-the model took from HP's own title and use case first and falling back to the
-tag. That is what recovered the corpus's only collaboration study, which had no
-product tag at all and was therefore invisible to a query on one.
+So the line is computed per study by `canonical_line()` - but from the file's
+own tags, in the order `product_featured` then `hp_route`. The client, 27 Sep:
+"we need to match the case studies via the tagging provided in the case studies
+file only." The offering the model read out of HP's title survives only for a
+row the file tagged in neither column, which is what keeps the corpus's one
+collaboration study reachable.
 
 ## Expect a lot of misses, and let them happen
 
-Most of the corpus is 3D printing, and the Opportunity Map has no 3D card for
-those studies to attach to. Collaboration has exactly one study and DaaS none of
-its own - device services stands in for it, because managing a fleet is the same
-conversation. On a typical account perhaps half the surfaces will carry a proof
-point and the rest will correctly carry none.
+Collaboration has exactly one study and DaaS none of its own - device services
+stands in for it, because managing a fleet is the same conversation. On a
+typical account perhaps half the surfaces will carry a proof point and the rest
+will correctly carry none. Most of the corpus is 3D printing; until 27 Sep none
+of it was reachable, because the platform had no 3D product line for a card to
+be tagged with.
 """
 
 import logging
@@ -57,17 +60,9 @@ VERSION_DOC_ID = "__knowledge_version__"
 
 # What a study is about, as one canonical line.
 #
-# Two fields could answer that and neither is dependable on its own.
-# `product_featured` is HP's own tag: absent on fourteen named-customer studies
-# and wrong on others - the Universidad Andrés Bello study is tagged
-# "HP EliteBook" and is entirely about HP Managed Device Services. `hp_offering`
-# is what the model read out of HP's own title and use case, which is right far
-# more often but is free text: "HP Z Workstations", "HP Z workstation" and
-# "HP Z Workstation" all appear.
-#
-# So the offering is preferred, the tag is the fallback, and both are reduced to
-# a canonical line by keyword. Ordered most specific first - a Metal Jet study
-# must be claimed by 3D before anything else reads "jet".
+# The file's tags decide (see `canonical_line`), reduced to a canonical line by
+# keyword. Ordered most specific first - a Metal Jet study must be claimed by 3D
+# before anything else reads "jet", and SitePrint before anything reads "print".
 LINE_3D = "3d"
 LINE_WORKSTATION = "workstation"
 LINE_PC = "pc"
@@ -101,12 +96,49 @@ OFFERING_KEYWORDS = (
 )
 
 
+# `hp_route`, the file's own routing column, spelled as the file spells it.
+# Mapped explicitly rather than by keyword: "Print" as a route would otherwise
+# claim the SitePrint studies, and SitePrint is a construction layout printer
+# that must never answer a managed-print recommendation.
+HP_ROUTE_TO_LINE = {
+    "3d printing": LINE_3D,
+    "workstations": LINE_WORKSTATION,
+    "print": LINE_PRINT,
+    "pc-notebook": LINE_PC,
+}
+
+
 def canonical_line(study: dict) -> str:
-    """The one line a study speaks to, or "" when nothing names an offering."""
-    for source in (study.get("hp_offering"), study.get("product_featured")):
-        text = _norm(source)
-        if not text:
-            continue
+    """The one line a study speaks to, or "" when the file says nothing.
+
+    The client, 27 Sep: "we need to match the case studies via the tagging
+    provided in the case studies file only." So the file's own two tags decide,
+    in this order:
+
+      1. `product_featured` - the most specific thing the file says, and the
+         only one that separates HP SitePrint from managed print.
+      2. `hp_route` - the file's routing column, mapped by name.
+
+    `hp_offering` - the model's reading of the study's title - is now a last
+    resort for a row the file tagged in neither column, and can no longer
+    override a tag. It costs the Universidad Andrés Bello study its
+    reclassification (tagged "HP EliteBook", written about managed device
+    services), which the tag-only rule accepts; the PC line reaches device
+    services anyway. It keeps Ulster University reachable, the one study with
+    no tag at all and the only collaboration study in the corpus.
+    """
+    tag = _norm(study.get("product_featured"))
+    if tag:
+        for line, keywords in OFFERING_KEYWORDS:
+            if any(word in tag for word in keywords):
+                return line
+
+    route = HP_ROUTE_TO_LINE.get(_norm(study.get("hp_route")))
+    if route:
+        return route
+
+    if not tag and not _norm(study.get("hp_route")):
+        text = _norm(study.get("hp_offering"))
         for line, keywords in OFFERING_KEYWORDS:
             if any(word in text for word in keywords):
                 return line
@@ -118,8 +150,8 @@ def canonical_line(study: dict) -> str:
 # `HP Anyware / DaaS` maps to device services: the corpus has no study tagged
 # DaaS, but it holds several about managing a device fleet, which is the same
 # conversation. Poly Collaboration reaches the collaboration line - the corpus
-# has exactly one such study, Ulster University, and it was invisible until the
-# offering was read from the text rather than the tag.
+# has exactly one such study, Ulster University, which carries no tag in either
+# of the file's columns and is reachable only through the untagged fallback.
 HP_LINE_TO_LINES = {
     "z by hp workstations": (LINE_WORKSTATION,),
     "hp elite / pro pcs": (LINE_PC, LINE_DEVICE_SERVICES),
@@ -128,6 +160,11 @@ HP_LINE_TO_LINES = {
     "poly collaboration": (LINE_COLLABORATION,),
     "hp anyware / daas": (LINE_DEVICE_SERVICES, LINE_WXP),
     "hp workforce experience platform": (LINE_WXP,),
+
+    # 3D. The platform had no 3D product line until 27 Sep, so this map had
+    # nothing to key on and 63 of the 90 studies were unreachable. With the
+    # line added in grounding.py, this is the door to them.
+    "hp multi jet fusion (3d)": (LINE_3D,),
 
     # The service lines the rulebook names. Added when the Objection Playbook
     # was wired to it: without them "Client Devices" reached no rule at all,
@@ -314,6 +351,15 @@ def normalise_industry(raw: str) -> str:
     return ""
 
 
+# Bump when the matching itself changes, not just the loaded corpus. A cached
+# card stores the proof point it was given, and the corpus is unchanged when
+# only the rules that read it move - so without this every account would keep
+# the Managed Print Services study on its 3D card.
+#
+#   1  27 Sep 2026: the file's tags decide a study's line; 3D reachable.
+MATCHER_VERSION = 1
+
+
 def knowledge_version(db) -> str:
     """The loaded corpus's version, for a feature's cache fingerprint.
 
@@ -331,7 +377,8 @@ def knowledge_version(db) -> str:
     except Exception:
         logger.exception("case studies: could not read the knowledge version")
         return ""
-    return str(doc.get("knowledge_version") or "")
+    stored = str(doc.get("knowledge_version") or "")
+    return "%s+m%s" % (stored, MATCHER_VERSION) if stored else ""
 
 
 def _norm(value) -> str:

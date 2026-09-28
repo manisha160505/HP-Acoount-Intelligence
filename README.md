@@ -5,14 +5,20 @@ for a target account; the backend extracts them into per-feature widgets that th
 dashboard renders. Eleven features are in scope — four have both a deterministic
 and an AI-inferred layer in production, the rest are deterministic-only.
 
-- **`project-documentation/07_Internal_Generated/Rules_and_Handover/HP-Account-Intelligence-Handover.docx`** — feature status and the
-  dataset → feature mapping.
-- **`project-documentation/02_Decision_Maker/HP-Account-Intelligence-Rules.docx`** — every rule, guardrail and scoring
-  decision the four complete features enforce, anchored to the line of code that
-  implements it. Read this before changing an extractor.
+The conventions this code enforces are in [`docs/engineering/`](docs/engineering/README.md):
+the response envelope, the error contract, linting, observability and branch
+protection.
 
-All project documentation (client requirements, logic documents, decisions, questions, data definitions) is indexed under
-`project-documentation/` — start at `project-documentation/README.md`. The former `docs/` and `NewDocs/` folders were consolidated there on 25 Sep 2026.
+Everything else — client requirements, logic documents, the decision log,
+question trackers, data definitions, delivery planning — is client material and
+is **not committed**. It lives locally under `project-documentation/`, indexed
+from `project-documentation/README.md`, and git ignores that folder. Two
+documents there are worth reading before changing an extractor:
+`07_Internal_Generated/Rules_and_Handover/HP-Account-Intelligence-Handover.docx`
+(feature status and the dataset → feature mapping) and
+`02_Decision_Maker/HP-Account-Intelligence-Rules.docx` (every rule, guardrail
+and scoring decision, anchored to the line of code that implements it). Ask a
+teammate for the folder if you do not have it.
 
 ---
 

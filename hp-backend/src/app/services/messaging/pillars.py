@@ -27,7 +27,6 @@ claim it supported and increments `invalid_evidence_count`. Same discipline as
 the Message Evaluator's phrase spans.
 """
 
-import asyncio
 import logging
 import re
 from datetime import UTC, datetime
@@ -45,7 +44,7 @@ from app.services.hp.guardrails import (
     SUPERLATIVE_BLOCK_COUNTRIES,
     normalize_country,
 )
-from app.services.retrieval import evidence as ev, index_state, query
+from app.services.retrieval import client as rag_client, evidence as ev, index_state, query
 
 logger = logging.getLogger(__name__)
 
@@ -958,7 +957,16 @@ def generate_messaging_pillars(account_id: str, mode: str | None = None) -> dict
     company = _text(context_card.get("company_name")
                     or business_context.get("company_name"))
 
-    candidates, _retrieval = asyncio.run(_candidate_challenges(account_id, mode))
+    # On the shared retrieval loop, not asyncio.run(). A LightRAG handle - and
+    # the Mongo client underneath it - binds to the loop it was created on, so
+    # a throwaway loop here leaves that cached client bound to a loop that no
+    # longer exists, and every later query OR index build in this process dies
+    # with "Cannot use AsyncMongoClient in different event loop". That is what
+    # failed 11 of 15 index jobs on the first account loaded through the API.
+    # query.ask() says the same thing for the simple call sites; these two await
+    # query.retrieve directly because they need the result object as well.
+    candidates, _retrieval = rag_client.run_on_query_loop(
+        _candidate_challenges(account_id, mode), timeout=600)
     challenges, _dropped, invalid_count = _resolve_challenges(account_id, candidates)
     if not challenges:
         raise PillarError(
