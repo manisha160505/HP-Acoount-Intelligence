@@ -55,6 +55,11 @@ services:
       # a laptop pointed at a shared database never regenerates against it.
       REGEN_WORKER_ENABLED: "1"
       REGEN_SWEEP_ENABLED: "1"
+      # Two accounts regenerate side by side; within one account jobs still
+      # run one at a time. More would outrun the Vertex quota (429s).
+      REGEN_WORKERS: "2"
+    # Time to hand running jobs back to the queue before Docker kills the app.
+    stop_grace_period: 30s
     depends_on:
       mongodb:
         condition: service_healthy
