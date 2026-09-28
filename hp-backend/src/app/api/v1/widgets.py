@@ -30,7 +30,6 @@ from app.services.evaluator import (
     scoring as evaluator_scoring,
     storage as evaluator_storage,
 )
-from app.services.extractors.content_messaging import extract_content_messaging
 from app.services.extractors.content_studio import (
     extract_content_studio,
     generate_content_asset,
@@ -47,7 +46,6 @@ from app.services.extractors.solution_narrative_opportunity_map import (
 from app.services.extractors.stakeholder_map import extract_stakeholder_map
 from app.services.extractors.strategy_chat import extract_strategy_chat
 from app.services.extractors.tech_landscape import extract_tech_landscape
-from app.services.messaging import pillars as messaging_pillars
 from app.services.retrieval import (
     ingest as retrieval_ingest,
     query as retrieval_query,
@@ -449,30 +447,9 @@ WIDGET_REGISTRY = {
             "display_order": 2
         }
     ],
-    "content_messaging": [
-        {
-            "widget_key": "messaging_context_card",
-            "widget_name": "Messaging Input Context",
-            "feature_key": "content_messaging",
-            "description": "Business description, tech stack, intent surge, and live event proof points",
-            "widget_type": "context_card",
-            "data_classification": "deterministic",
-            "source_datasets": ["firmographics", "technographics", "intent_score", "google_news", "news_events"],
-            "source_fields": ["business_description", "technology_stack", "intent_topic", "news_event_proof"],
-            "display_order": 1
-        },
-        {
-            "widget_key": "messaging_pillars_output",
-            "widget_name": "Core Messaging Pillars",
-            "feature_key": "content_messaging",
-            "description": "Inferred messaging pillars contract. Challenge, benefit, and proof point pillar synthesis are TBD for future AI generation.",
-            "widget_type": "pillar_cards",
-            "data_classification": "inferred",
-            "source_datasets": ["firmographics", "technographics", "intent_score"],
-            "source_fields": ["business_description", "technology_stack"],
-            "display_order": 2
-        }
-    ],
+    # "content_messaging" was removed on 28 Sep: the client dropped the module
+    # (Sahaj, 27 Sep - "We didn't promise Content Messaging module - we can drop
+    # this"). Its widgets are no longer built or served.
     "intent_demand_signals": [
         {
             "widget_key": "intent_topics_table",
@@ -520,7 +497,6 @@ FEATURE_EXTRACTORS = {
     "stakeholder_map": extract_stakeholder_map,
     "tech_landscape": extract_tech_landscape,
     "objection_playbook": extract_objection_playbook,
-    "content_messaging": extract_content_messaging,
     "content_studio": extract_content_studio,
     "strategy_chat": extract_strategy_chat,
     "message_evaluator": extract_message_evaluator,
@@ -1160,52 +1136,6 @@ def retrieval_run_now(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                             detail="%s: %s" % (type(exc).__name__, exc)) from exc
     return {"ran": _jsonable(results), "status": retrieval_query.status(account_id, index)}
-
-
-# --- Content Messaging -------------------------------------------------------
-
-
-@router.post("/accounts/{account_id}/widgets/content_messaging/generate",
-             response_model=WidgetResponse)
-def generate_content_messaging(
-    account_id: str,
-    current_user: dict = Depends(require_user_role)
-):
-    """Build the message house from the Content Messaging index."""
-    if not ObjectId.is_valid(account_id):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
-                            detail="Invalid account ID format")
-    db = get_db()
-    if not db["accounts"].find_one({"_id": ObjectId(account_id)}):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
-                            detail="Company account not found")
-
-    # Queued: the message house is rebuilt in the background once its index is
-    # current, and a failure keeps the previous house (see `generation`).
-    from app.services.regen.engine import get_engine
-    get_engine().regenerate_nodes(account_id, ["messaging_pillars"],
-                                  _actor(current_user), detail="generate message house")
-    doc = widget_store.get(account_id, messaging_pillars.WIDGET_KEY) or {}
-
-    contract = next(c for c in WIDGET_REGISTRY["content_messaging"]
-                    if c["widget_key"] == messaging_pillars.WIDGET_KEY)
-    updated = doc.get("updated_at")
-    return {
-        "account_id": account_id,
-        "feature_key": "content_messaging",
-        "widget_key": messaging_pillars.WIDGET_KEY,
-        "widget_name": contract["widget_name"],
-        "description": contract["description"],
-        "widget_type": contract["widget_type"],
-        "data_classification": contract["data_classification"],
-        "status": doc.get("status", "pending"),
-        "data": doc.get("data", {}),
-        "source_datasets": contract["source_datasets"],
-        "source_fields": contract["source_fields"],
-        "display_order": contract["display_order"],
-        "updated_at": updated.isoformat() if isinstance(updated, datetime) else str(updated or ""),
-        "generation": _generation_by_widget(account_id).get(messaging_pillars.WIDGET_KEY),
-    }
 
 
 @router.post("/accounts/{account_id}/widgets/strategy_chat/ask")

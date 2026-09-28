@@ -360,6 +360,19 @@ _EMAIL_SHAPE = ("A three-paragraph outreach email written as HP (\"At HP, we ...
                   "AT MOST 110 words in total. The salutation and sign-off are added automatically - do not "
                   "write 'Dear', 'Sincerely' or a signature.")
 
+# The five HP business units, named as the Opportunity Map and Intent & Demand
+# name their plays.
+HP_BU_TOPICS = (
+    "HP Elite & Pro PCs",
+    "Z by HP Workstations",
+    "Poly collaboration hardware",
+    "HP Enterprise Printing & Managed Print Services",
+    "HP Multi Jet Fusion (3D)",
+)
+LIVE_SIGNAL_TOPICS_MAX = 5
+# What the seller may pick (Sahaj, 27 Sep), in this order.
+OFFERED_CONTENT_TYPES = ("email", "linkedin_message", "one_pager")
+
 CONTENT_TYPE_CONTRACTS = {
     "email": {
         "title": "Email", "subtitle": "Personalized executive outreach email",
@@ -392,8 +405,24 @@ CONTENT_TYPE_CONTRACTS = {
                   "other generic tags - and keep hashtags OUT of every other field. "
                   "150-200 words in total."),
     },
+    # Sahaj, 27 Sep: "Formats that we need to support - email, linkedin
+    # message, One pager on how HP portfolio can deliver value for the
+    # customer". A direct message to one person, not a post: no headline, no
+    # hashtags, short enough to send as a connection note.
+    "linkedin_message": {
+        "title": "LinkedIn Message", "subtitle": "Short direct message to one contact",
+        "words": (None, 80),
+        "required": ["opening", "body_sections", "cta"],
+        "sections": (1, 1),
+        "shape": ("A direct LinkedIn message to one person - NOT a public post, so no headline and "
+                  "no hashtags. opening: one personalised line that references something real "
+                  "about their remit or the account's evidence. body_sections: exactly one short "
+                  "paragraph naming the one HP line and the ONE capability that meets it. cta: one "
+                  "specific, low-friction ask. AT MOST 80 words in total. Do not write a "
+                  "greeting or a sign-off."),
+    },
     "one_pager": {
-        "title": "One-Pager", "subtitle": "Single-page solution overview for the account",
+        "title": "One-Pager", "subtitle": "How HP's portfolio can deliver value for this customer",
         "words": (None, 400),
         "headings": True,
         "required": ["headline", "opening", "body_sections", "cta"],
@@ -1730,15 +1759,10 @@ def extract_content_studio(account_id: str) -> list[dict]:
     now = datetime.now(UTC)
 
     firmo_records = _read_dataset_records(account_id, "firmographics")
-    gnews_records = _read_dataset_records(account_id, "google_news")
-    events_records = _read_dataset_records(account_id, "news_events")
     job_records = _read_dataset_records(account_id, "job_openings")
-    intent_records = _read_dataset_records(account_id, "intent_score")
 
     pipeline.step("datasets", "", firmographics=len(firmo_records or []),
-                  news=len(gnews_records or []) + len(events_records or []),
-                  jobs=len(job_records or []),
-                  intent=len(intent_records or []))
+                  jobs=len(job_records or []))
 
     results = []
 
@@ -1764,40 +1788,24 @@ def extract_content_studio(account_id: str) -> list[dict]:
                   filled=sum(1 for p in client_personas if p["is_filled"]),
                   role_proxy=len(role_proxy_personas), archetype=len(archetypes))
 
-    # 2. Content Types - one entry per output contract
-    content_types = [{"id": k, "title": v["title"], "subtitle": v["subtitle"]}
-                     for k, v in CONTENT_TYPE_CONTRACTS.items()]
+    # 2. Content Types - the three the client asked for (Sahaj, 27 Sep). The
+    #    other contracts stay defined so assets already generated still render.
+    content_types = [{"id": k, "title": CONTENT_TYPE_CONTRACTS[k]["title"],
+                      "subtitle": CONTENT_TYPE_CONTRACTS[k]["subtitle"]}
+                     for k in OFFERED_CONTENT_TYPES]
 
-    # 3. Sourced Topic Pills (Product Lines + Intent Surge Topics + Live News Events from CSVs)
-    product_line_topics = [
-        "Z by HP Workstations",
-        "Poly collaboration hardware",
-        "HP Elite & Pro PCs",
-        "HP Enterprise Printing & Managed Print Services"
-    ]
-
-    intent_topics = []
-    for row in intent_records[:5]:
-        t = str(row.get("Topic") or row.get("topic_name") or "").strip()
-        if t:
-            intent_topics.append(t)
-
-    news_topics = []
-    seen_headlines = set()
-
-    for row in gnews_records:
-        headline = str(row.get("event_headline") or row.get("news_announcements") or row.get("title") or "").strip()
-        if headline and headline.lower() not in seen_headlines:
-            seen_headlines.add(headline.lower())
-            news_topics.append(headline)
-
-    for row in events_records:
-        headline = str(row.get("event_headline") or row.get("title") or "").strip()
-        if headline and headline.lower() not in seen_headlines:
-            seen_headlines.add(headline.lower())
-            news_topics.append(headline)
-
-    sourced_topics = product_line_topics + intent_topics + news_topics[:5]
+    # 3. Topic pills - Sahaj, 27 Sep: "on topics - let's keep only the 5 HP BUs
+    #    and live signals as topic". The live signals are the ones Live Signals
+    #    published (gated, deduplicated, ranked), not raw feed headlines; an
+    #    account with none published offers the five BUs only.
+    feed = (widget_store.get(account_id, "news_signals_feed", db=db) or {})
+    live_signal_topics = []
+    if feed.get("status") == "available":
+        for sig in (feed.get("data") or {}).get("signals") or []:
+            headline = " ".join(str(sig.get("headline") or "").split())
+            if headline and headline not in live_signal_topics:
+                live_signal_topics.append(headline)
+    sourced_topics = list(HP_BU_TOPICS) + live_signal_topics[:LIVE_SIGNAL_TOPICS_MAX]
 
     # 4. Business Context
     business_context = {}

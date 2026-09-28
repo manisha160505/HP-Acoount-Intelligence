@@ -19,7 +19,6 @@ from app.database.mongodb import get_db
 from app.schemas.account_data import DATASET_REGISTRY, AccountDataFileResponse
 
 logger = logging.getLogger(__name__)
-from app.services.extractors.content_messaging import extract_content_messaging
 from app.services.extractors.content_studio import extract_content_studio
 from app.services.extractors.executive_dashboard import extract_executive_dashboard
 from app.services.extractors.intent_demand_signals import extract_intent_demand_signals
@@ -95,7 +94,6 @@ FEATURE_EXTRACTORS = {
     "stakeholder_map": extract_stakeholder_map,
     "tech_landscape": extract_tech_landscape,
     "objection_playbook": extract_objection_playbook,
-    "content_messaging": extract_content_messaging,
     "content_studio": extract_content_studio,
     "strategy_chat": extract_strategy_chat,
     "message_evaluator": extract_message_evaluator,

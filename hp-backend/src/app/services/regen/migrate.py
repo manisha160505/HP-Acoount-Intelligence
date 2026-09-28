@@ -32,8 +32,9 @@ from app.services.regen.graph import DEFAULT, INDEX
 
 logger = logging.getLogger(__name__)
 
+# Content Messaging's index (idx_content_messaging) was removed with the
+# feature on 28 Sep.
 INDEX_OF_NODE = {"idx_executive_dashboard": "executive_dashboard",
-                 "idx_content_messaging": "content_messaging",
                  "idx_strategy": "strategy"}
 
 

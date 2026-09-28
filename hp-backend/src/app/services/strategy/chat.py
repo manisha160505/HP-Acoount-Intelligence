@@ -53,7 +53,10 @@ from app.services.retrieval import evidence as ev, index_state, query
 logger = logging.getLogger(__name__)
 
 INDEX = "strategy"
-PROMPT_VERSION = 1
+# 2: answer first, then the facts behind it, then next steps (Sahaj, 27 Sep:
+#    "we need to structure the answers here, currently the system is throwing a
+#    lot of gibberish and then the real answer comes out").
+PROMPT_VERSION = 2
 
 TOP_K = 25
 MAX_HISTORY_TURNS = 12
@@ -175,8 +178,19 @@ HP RULES:
 IF THE EVIDENCE DOES NOT ANSWER THE QUESTION: say plainly that the platform does not hold it, and
 name the closest thing it does hold. That is a correct answer, not a failure.
 
-FORMAT: plain text. UPPERCASE section headers, numbered lists. No markdown, no asterisks, no hashes.
-Keep it tight - a seller is reading this between meetings."""
+FORMAT - always these sections, in this order, and nothing before the first one:
+ANSWER:
+  Two or three sentences that answer the question directly. Lead with the answer itself, not with
+  background. A sentence here that states a fact about the account ends with its tag like any other.
+FACTS:
+  A numbered list of the evidence behind the answer - at most five points, one fact each, each
+  ending with its tag. Only the facts the answer rests on; not an inventory of everything known.
+RECOMMENDED NEXT STEPS:
+  A numbered list of two or three concrete actions for the seller.
+If the evidence does not answer the question, write ANSWER: saying so and naming the closest thing
+the platform holds, and leave out the other two sections.
+Plain text: no markdown, no asterisks, no hashes. Keep it tight - a seller is reading this between
+meetings."""
 
 
 def _answer_once(company: str, question: str, context: str, messages: list,
@@ -288,6 +302,11 @@ def _asserts_facts(answer: str) -> bool:
     both legitimate without citations. A FACTS section is not.
     """
     body = _text(answer).lower()
+    # A FACTS section anywhere is an assertion, whatever else the answer says.
+    # Checked first: the answer now leads with ANSWER:, so the section is no
+    # longer near the top, and a refusal phrase elsewhere must not excuse it.
+    if re.search(r"^\s*facts\s*:", str(answer or ""), re.I | re.M):
+        return True
     if any(phrase in body for phrase in
            ("does not hold", "not hold", "no information", "not available")):
         return False

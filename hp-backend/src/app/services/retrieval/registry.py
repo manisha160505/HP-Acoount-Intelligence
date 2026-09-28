@@ -19,7 +19,9 @@ STRATEGY = "strategy"
 INDEX_REGISTRY = {
     CONTENT_MESSAGING: {
         "label": "Content Messaging",
-        "enabled": True,
+        # Off since 28 Sep: the client dropped the module (Sahaj, 27 Sep - "We
+        # didn't promise Content Messaging module - we can drop this").
+        "enabled": False,
         "builder": corpus.content_messaging_documents,
         # The datasets the 11-features reference assigns this feature. Source A
         # `News_Events` is deliberately absent - the document records it as
@@ -144,8 +146,7 @@ INDEX_REGISTRY = {
                     "tech_stack_matrix", "tech_detections_reference",
                     "webstack_breakdown",
                     "intent_topics_table", "intent_category_summary",
-                    "intent_hiring_demand",
-                    "messaging_pillars_output", "messaging_context_card"],
+                    "intent_hiring_demand"],
         # Enough of an account to be worth asking questions about. Not the whole
         # list: a feature that has not run yet narrows the corpus, and the chat
         # says what it does not know rather than refusing to open.

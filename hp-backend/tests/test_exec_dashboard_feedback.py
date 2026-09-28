@@ -206,3 +206,10 @@ class TestThePriorityCardAsBullets:
     def test_an_empty_answer_is_empty(self):
         assert priorities._points({}) == []
         assert priorities._points({"points": []}) == []
+
+    def test_a_dash_quoted_from_the_data_is_made_plain(self):
+        from app.services.dashboard import urgency
+        lines = urgency.rationale_lines({"weight": 0.2, "terms": [
+            {"label": "Hiring", "points": 3, "max_points": 5,
+             "basis": "roles \u2014 engineering \u2013 design"}]})
+        assert chr(8212) not in " ".join(lines) and chr(8211) not in " ".join(lines)

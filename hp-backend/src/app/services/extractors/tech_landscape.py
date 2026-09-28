@@ -110,6 +110,113 @@ def category_groups(category_matrix: dict, full_tech_list: list) -> list[dict]:
                        "note": UNCATEGORISED_NOTE})
     return groups
 
+# --------------------------------------------------------------------------
+# The whole stack, one card per technology (Sahaj, 27 Sep: "club those in
+# relevant categories and show here ... Please refer to the Caterpillar - Tech
+# and Risk Landscape example")
+# --------------------------------------------------------------------------
+# The export's 20 category columns, folded into families a seller reads. A
+# technology the export files under several columns takes the FIRST family in
+# this order, so an HP-relevant family wins over a generic one; every column
+# it came from is still listed on the card.
+STACK_FAMILIES = (
+    ("Security", ("It Security",)),
+    ("Endpoints, OS & IT Management", ("It Management", "Platform And Storage")),
+    ("Collaboration & Communications", ("Collaboration", "Communications",
+                                        "Productivity And Operations")),
+    ("Engineering & Development", ("Devops And Development", "Prog Langs And Frameworks",
+                                   "Testing And Qa", "Product And Design")),
+    ("Data & Analytics", ("Bi And Analytics",)),
+    ("Networks & Infrastructure", ("Computer Networks",)),
+    ("Business Applications", ("Sales", "Marketing", "Customer Management",
+                               "Finance And Accounting", "Hr", "Ecommerce",
+                               "Operations Software", "Operations Management")),
+)
+STACK_OTHER = "Other"
+STACK_SOURCE_LABELS = {
+    "technographics": "Technographics",
+    "hp_category_intent": "Intent file",
+    "webstack": "Website stack",
+    "tech_breakdown": "Website stack",
+}
+
+
+def stack_view(category_matrix: dict, full_tech_list: list, tech_sources: dict,
+               hp_categories: list) -> dict:
+    """Every detected technology as a card, grouped into families, with the HP
+    play it supports where the map found one.
+
+    Nothing here is scored. The HP play, its approved risk label (DEC-058c) and
+    its one-line reason are copied from the category card whose vendor names
+    the technology; a technology no card names is listed without one. The
+    confidence score is not carried (Sahaj, 27 Sep: drop it).
+    """
+    columns_of: dict = {}
+    for column, names in (category_matrix or {}).items():
+        for name in names:
+            columns_of.setdefault(name.lower(), []).append(column)
+
+    hp_of: dict = {}
+    for cat in hp_categories or []:
+        for vendor in cat.get("vendors") or []:
+            play = vendor.get("hp_play") or {}
+            if not play.get("product"):
+                continue
+            for name in vendor.get("detected_as") or []:
+                hp_of.setdefault(str(name).lower(), {
+                    "hp_play": play.get("product"),
+                    "hp_category": cat.get("category_name"),
+                    "risk_level": vendor.get("risk_level"),
+                    "reason": play.get("play_text") or vendor.get("description"),
+                    "vendor": vendor.get("vendor_name"),
+                })
+
+    technologies, counts = [], {}
+    for name in full_tech_list or []:
+        key = name.lower()
+        cols = columns_of.get(key, [])
+        family = next((fam for fam, members in STACK_FAMILIES
+                       if any(c in members for c in cols)), STACK_OTHER)
+        counts[family] = counts.get(family, 0) + 1
+        source = (tech_sources or {}).get(key, "technographics")
+        technologies.append({
+            "name": name,
+            "family": family,
+            "export_categories": cols,
+            "source": STACK_SOURCE_LABELS.get(source, source),
+            "hp": hp_of.get(key),
+        })
+
+    order = [fam for fam, _ in STACK_FAMILIES] + [STACK_OTHER]
+    families = [{"family": fam, "count": counts[fam]} for fam in order if counts.get(fam)]
+
+    opportunities: dict = {}
+    for t in technologies:
+        if not t["hp"]:
+            continue
+        o = opportunities.setdefault(t["hp"]["hp_play"], {
+            "hp_play": t["hp"]["hp_play"], "hp_category": t["hp"]["hp_category"],
+            "risk_level": t["hp"]["risk_level"], "technologies": [], "families": []})
+        o["technologies"].append(t["name"])
+        if t["family"] not in o["families"]:
+            o["families"].append(t["family"])
+    opps = sorted(opportunities.values(), key=lambda o: -len(o["technologies"]))
+    for o in opps:
+        o["technology_count"] = len(o["technologies"])
+
+    sources: dict = {}
+    for t in technologies:
+        sources[t["source"]] = sources.get(t["source"], 0) + 1
+    return {
+        "families": families,
+        "technologies": technologies,
+        "opportunities": opps,
+        "sources": [{"label": k, "count": v} for k, v in sorted(sources.items())],
+        "hp_relevant_count": sum(1 for t in technologies if t["hp"]),
+        "total": len(technologies),
+    }
+
+
 def _read_dataset_records(account_id: str, dataset_key: str) -> list[dict]:
     """Rows for one dataset. Shared implementation - see datasets.py.
 
@@ -1391,6 +1498,10 @@ def extract_tech_landscape(account_id: str,  # noqa: PLR0912, PLR0915 - branch-h
                     (g["count"] for g in groups
                      if g["category"] == UNCATEGORISED_LABEL), 0),
                 "multi_category_technologies": multi_category_technologies(groups),
+                # The whole stack as cards, by family, with HP plays attached
+                # where the map found one - the Technographic Map's main view.
+                "stack_view": stack_view(category_matrix, full_tech_list,
+                                         tech_sources, hp_categories),
             },
             "source_datasets": ["technographics", "webstack", "tech_breakdown",
                                 "hp_category_intent"],

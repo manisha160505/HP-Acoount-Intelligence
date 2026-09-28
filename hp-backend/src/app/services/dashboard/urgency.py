@@ -487,7 +487,9 @@ def rationale_lines(driver: dict) -> list:
         lines.append(line)
     lines.extend(driver.get("notes") or [])
     lines.extend("Caveat: %s" % c for c in (driver.get("caveats") or []))
-    return lines
+    # A basis can quote the account's own data, which may carry typographic
+    # dashes; the client asked for none (27 Sep), so they become plain hyphens.
+    return [str(line).replace("\u2014", "-").replace("\u2013", "-") for line in lines]
 
 
 def _term(label, points, max_points, basis, missing=False) -> dict:
