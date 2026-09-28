@@ -28,7 +28,8 @@ def test_default_graph_is_acyclic_and_every_upstream_comes_first():
         for up in DEFAULT[nid].upstream:
             assert up in seen, "%s runs before its upstream %s" % (nid, up)
         seen.add(nid)
-    assert len(DEFAULT.order) == len(DEFAULT.nodes) == 19
+    # 16: Content Messaging's three nodes were removed on 28 Sep (client dropped it).
+    assert len(DEFAULT.order) == len(DEFAULT.nodes) == 16
 
 
 def test_every_registered_widget_has_exactly_one_owner_or_is_a_user_output():
@@ -78,8 +79,10 @@ def test_logic_refs_resolve_to_real_constants():
 
 def test_filings_upload_touches_only_the_dashboard_chain():
     affected = DEFAULT.affected_by_dataset("compliance_filings")
-    assert affected == ["idx_executive_dashboard", "exec_priorities",
-                        "strategy_snapshot", "idx_strategy"]
+    # exec_core lists the filings (the filings list CSV rides with the PDFs),
+    # so the exec chain below it re-runs too.
+    assert affected == ["exec_core", "tech_recs", "idx_executive_dashboard",
+                        "exec_priorities", "strategy_snapshot", "idx_strategy"]
     # And nothing unrelated.
     for untouched in ("objection", "intent", "tech_core", "news", "stakeholder_roster"):
         assert untouched not in affected

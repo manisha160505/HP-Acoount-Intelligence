@@ -27,7 +27,7 @@ jobs:
       # This check only sees main as it was when the job ran. If main moves
       # afterwards, the green result stays green - branch protection's
       # "Require branches to be up to date" is what catches that; see
-      # docs/branch-protection.md.
+      # docs/engineering/branch-protection.md.
       - name: Check the branch contains every commit on main
         env:
           BASE_REF: ${{ github.base_ref }}

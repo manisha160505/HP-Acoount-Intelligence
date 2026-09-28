@@ -10,7 +10,7 @@ from bson import ObjectId
 from app.core.llm import generate_gpt4o_json_completion
 from app.database.mongodb import get_db
 from app.observability import pipeline
-from app.services.extractors import grounding
+from app.services.extractors import grounding, personas
 from app.services.extractors.datasets import (
     find_file_path,
     read_dataset_records,
@@ -296,6 +296,27 @@ UNASSIGNED_DEPT = "Unassigned"
 
 HP_RELEVANCE_BAND_THRESHOLDS = [(70, "high"), (40, "medium")]
 PRIORITY_CONTACT_MIN_COMPOSITE = 60
+
+# What a reader is told the contact data came from. The client, 27 Sep:
+# "currently the source for Contact data is mentioned as Apollo - let's replace
+# it to Explorium + Contacts Waterfall Tools". One label for every contact.
+# The per-row "source" key beside it keeps its own value ("Apollo" /
+# "Source A"): Content Studio decides who may be named in copy from it.
+CONTACT_SOURCE_LABEL = "Explorium + Contacts Waterfall Tools"
+
+# Seniority order used wherever a roster is listed for a reader. The bands come
+# off the title in the uploaded file, so this is an ordering the data supports -
+# unlike the composite score, which the client asked us to stop showing.
+SENIORITY_ORDER = ["C-Suite", "VP", "Director", "Manager", "Individual Contributor"]
+SENIOR_BANDS = ("C-Suite", "VP")
+
+
+def seniority_rank(band: str) -> int:
+    """Position of a seniority band in SENIORITY_ORDER; unknown bands last."""
+    try:
+        return SENIORITY_ORDER.index(band)
+    except ValueError:
+        return len(SENIORITY_ORDER)
 
 # Bump when the talking-points prompt changes, so cached output is regenerated
 # rather than served stale against an older set of instructions.
@@ -951,7 +972,7 @@ CRITICAL RULES:
                 "contacts_fingerprint": None,
                 "generated_count": 0,
                 "talking_points": {},
-                "notice": "Stakeholder talking points require OPENAI_API_KEY. No content is generated without it.",
+                "notice": "Stakeholder talking points require an LLM API key. No content is generated without it.",
             },
             "source_datasets": ["prospect_contacts", "firmographics", "technographics",
                                 "intent_score", "google_news", "news_events"],
@@ -993,6 +1014,17 @@ def extract_stakeholder_map(account_id: str,
     contact_records, withheld_contacts = _drop_unmatched_contacts(contact_records)
     pipeline.step("contacts", "", usable=len(contact_records),
                   withheld_pending_review=withheld_contacts)
+
+    # The client's 32 target roles for this account, filled and unfilled. Read
+    # here rather than derived from the contacts: a role nobody fills has no
+    # contact row to be derived from, and that is the half worth reporting.
+    committee_roles = personas.read_roles(account_id)
+    committee_coverage = personas.coverage(committee_roles)
+    if committee_roles:
+        pipeline.step("committee", "%d of %d target role(s) filled, %d reachable"
+                      % (committee_coverage["filled_roles"],
+                         committee_coverage["target_roles"],
+                         committee_coverage["roles_with_a_contact_detail"]))
     if withheld_contacts:
         logger.info("stakeholder map: withheld %d contact row(s) marked "
                     "pending or needs-review for %s",
@@ -1008,13 +1040,11 @@ def extract_stakeholder_map(account_id: str,
     # 1. Widget: stakeholder_contacts_grid (deterministic)
     extracted_contacts = []
     dept_counter = Counter()
-    source_counter = Counter({"Source A": 0, "Apollo": 0})
 
     for idx, row in enumerate(contact_records):
         # --- existing deterministic fields, unchanged ---------------------------
         is_apollo = bool(resolve_field(row, ["apollo_requested_contact", "apollo_matched_contact"]))
         source = "Apollo" if is_apollo else "Source A"
-        source_counter[source] += 1
 
         full_name = resolve_field(row, ["Prospect full_name"])
         if not full_name:
@@ -1033,7 +1063,16 @@ def extract_stakeholder_map(account_id: str,
         email_status = resolve_field(row, ["Contact professional_email_status", "Email Status", "apollo_zerobounce_email_status"])
         phone = normalize_phone(resolve_field(row, ["Contact mobile_phone", "Mobile Phone", "apollo_direct_mobile_phone"]))
         linkedin_url = resolve_field(row, ["Prospect linkedin", "Prospect linkedin_url_array", "apollo_linkedin_url"])
-        buying_persona = resolve_field(row, ["Prospect buying_committee_personas"]) if source == "Source A" else None
+        # Shown when the row can say where its persona came from. The old rule
+        # was "Source A only", because Apollo carries no persona of its own and
+        # its "Requested Role" is the role we asked the vendor to find, not the
+        # person's. The client's own coverage sheet is a different thing: it
+        # states which target role a named person fills, and the refresh pass
+        # records that in persona_source. Without this the committee data is
+        # read, used for influence typing, and then hidden.
+        persona_provenance = resolve_field(row, ["persona_source"])
+        buying_persona = (resolve_field(row, ["Prospect buying_committee_personas"])
+                          if source == "Source A" or persona_provenance else None)
 
         # --- new derived keys (additive only) -----------------------------------
         contact_id = resolve_field(row, ["Prospect prospect_id"]) or f"contact_{idx + 1}"
@@ -1072,7 +1111,9 @@ def extract_stakeholder_map(account_id: str,
             "phone": phone,
             "linkedin_url": linkedin_url,
             "buying_committee_persona": buying_persona,
+            "buying_committee_persona_source": persona_provenance or None,
             "source": source,
+            "source_label": CONTACT_SOURCE_LABEL,
             # new derived keys
             "contact_id": contact_id,
             "normalized_department": norm_dept,
@@ -1110,8 +1151,11 @@ def extract_stakeholder_map(account_id: str,
             best = max(budget_holders, key=lambda c: c["stakeholder_score"])
             best["is_priority_contact"] = True
 
+    # Most senior first, then by name. The roster used to be ordered by the
+    # priority flag and the composite score; both still exist and still decide
+    # who Content Studio may name, but neither orders what a reader sees.
     extracted_contacts.sort(
-        key=lambda c: (not c["is_priority_contact"], -c["stakeholder_score"], c["full_name"])
+        key=lambda c: (seniority_rank(c["seniority_band"]), c["full_name"] or "")
     )
 
     relevance_counter = Counter(c["hp_relevance_band"] for c in extracted_contacts)
@@ -1126,7 +1170,6 @@ def extract_stakeholder_map(account_id: str,
             "status": "available",
             "data": {
                 "total_contacts_count": len(extracted_contacts),
-                "source_breakdown": dict(source_counter),
                 "department_distribution": dict(dept_counter.most_common()),
                 "contacts": extracted_contacts,
                 "priority_contacts_count": priority_count,
@@ -1176,32 +1219,32 @@ def extract_stakeholder_map(account_id: str,
                 "lower_relevance_count": len(lower),
                 "surfaced_contact_ids": [m["contact_id"] for m in surfaced],
                 "lower_relevance_contact_ids": [m["contact_id"] for m in lower],
+                # Every member of the department, most senior first. The two
+                # id lists above split the roster by HP relevance, which the
+                # client asked us to stop presenting on 27 Sep ("hard to
+                # defend"); this one is the whole department in an order the
+                # uploaded titles support. Ordering stays in Python.
+                "contact_ids": [
+                    m["contact_id"] for m in sorted(
+                        members,
+                        key=lambda m: (seniority_rank(m["seniority_band"]),
+                                       m["full_name"] or ""),
+                    )
+                ],
             })
-        # Order departments by HP-relevance weight, not headcount.
-        department_groups.sort(key=lambda g: (-g["hp_relevant_count"], -g["total_count"], g["department"]))
+        # Headcount order. It used to be HP-relevance weight, which is the same
+        # judgement the client dropped from the cards and the filters.
+        department_groups.sort(key=lambda g: (-g["total_count"], g["department"]))
 
         influence_breakdown = Counter(c["influence_type"] for c in extracted_contacts)
         seniority_breakdown = Counter(c["seniority_band"] for c in extracted_contacts)
 
-        entry_path = [
-            {
-                "order": i + 1,
-                "contact_id": c["contact_id"],
-                "full_name": c["full_name"],
-                "title": c["title"],
-                "department": c["normalized_department"],
-                "stakeholder_score": c["stakeholder_score"],
-                "score_components": c["score_components"],
-                "reason": ", ".join(
-                    f"{k.replace('_', ' ')} {v}"
-                    for k, v in sorted(c["score_components"].items(), key=lambda kv: -kv[1])[:2]
-                ),
-            }
-            for i, c in enumerate(
-                sorted(extracted_contacts, key=lambda c: -c["stakeholder_score"])[:10]
-            )
-        ]
-
+        # The ranked entry path is gone. The client, 27 Sep: "let's drop the
+        # entire Entry Path tab altogether for the reasons I feel it will be
+        # difficult to defend the scoring and provide logic for how we are
+        # scoring each." The composite score itself stays - it still decides
+        # which contacts Content Studio may name, and in what order - it is
+        # only no longer published as a ranking for a reader to act on.
         influence_payload = {
             "account_id": account_id,
             "feature_key": "stakeholder_map",
@@ -1216,22 +1259,32 @@ def extract_stakeholder_map(account_id: str,
                     role: influence_breakdown.get(role, 0)
                     for role in ["Decision Maker", "Budget Holder", "Technical Evaluator", "Influencer"]
                 },
-                "ranked_entry_path": entry_path,
                 "score_weights": COMPOSITE_WEIGHTS,
+                # The client's own buying committee: which of their target
+                # roles this account actually has a person for, and which it
+                # does not. "buying_group_coverage" above counts the influence
+                # types we derive from titles; this counts the roles the client
+                # asked us to reach, and an unfilled one stays a stated gap.
+                "client_buying_committee": committee_coverage,
             },
-            "source_datasets": ["prospect_contacts"],
+            "source_datasets": ["prospect_contacts", "company_personas"],
             "extracted_at": now,
             "updated_at": now,
         }
     else:
+        # No usable contact row. The client's target roles still apply, and on
+        # an account with no contacts at all the list of who is missing is the
+        # only thing this widget can honestly say - so it says it rather than
+        # rendering an empty panel.
         influence_payload = {
             "account_id": account_id,
             "feature_key": "stakeholder_map",
             "widget_key": "stakeholder_influence_map",
             "data_classification": "derived",
-            "status": "empty",
-            "data": {},
-            "source_datasets": ["prospect_contacts"],
+            "status": "available" if committee_roles else "empty",
+            "data": {"client_buying_committee": committee_coverage}
+                    if committee_roles else {},
+            "source_datasets": ["prospect_contacts", "company_personas"],
             "extracted_at": now,
             "updated_at": now,
         }

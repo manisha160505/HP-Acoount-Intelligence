@@ -20,11 +20,12 @@ FEATURE_MAPPINGS = {
         # filing rebuilt nothing. The client's file-usage mapping names this
         # feature as one of the five it feeds.
         #
-        # prospect_contacts: the summary card's `stakeholders_mapped_count` is
-        # read from it, so contacts uploaded after the account must re-run this
-        # feature or the count stays at 0.
+        # prospect_contacts was here for the summary card's
+        # `stakeholders_mapped_count`. The client dropped Quick Stats on 27 Sep
+        # ("most figures are empty - let's drop this all together"), the count
+        # went with it, and nothing this feature writes reads contacts now.
         "dependent_datasets": ["firmographics", "company_hierarchy", "job_openings",
-                               "prospect_contacts", "compliance_filings"],
+                               "compliance_filings"],
         "mapped_fields": [
             {
                 "field_key": "company_name",
@@ -237,9 +238,19 @@ FEATURE_MAPPINGS = {
         # The contact grid is prospect_contacts only, but the AI talking points
         # are generated against the account context as well, so a change to any
         # of these must retrigger the feature.
-        "dependent_datasets": ["prospect_contacts", "firmographics", "technographics",
-                               "intent_score", "google_news", "news_events"],
+        "dependent_datasets": ["prospect_contacts", "company_personas", "firmographics",
+                               "technographics", "intent_score", "google_news",
+                               "news_events"],
         "mapped_fields": [
+            {
+                "field_key": "client_target_role",
+                "display_name": "Client Target Role (buying committee)",
+                "purpose": "One of the client's 32 target roles for this account, and whether a contact was found for it. An unfilled role is reported as a gap, never filled in from a similar title.",
+                "dataset_key": "company_personas",
+                "source_sheet": "Persona coverage",
+                "source_column": "target_persona, buying_committee_angle, contact_name, contact_status",
+                "data_type": "DETERMINISTIC"
+            },
             {
                 "field_key": "full_name",
                 "display_name": "Full Name (ExtendedStakeholder.name)",
@@ -369,7 +380,7 @@ FEATURE_MAPPINGS = {
             {
                 "field_key": "stakeholder_score",
                 "display_name": "Stakeholder Score (derived)",
-                "purpose": "25% seniority + 25% HP relevance + 20% influence + 15% data completeness + 15% priority. Drives Priority Contact selection and the entry-path ranking",
+                "purpose": "25% seniority + 25% HP relevance + 20% influence + 15% data completeness + 15% priority. Drives Priority Contact selection, which orders the contacts Content Studio may name. Not shown to a reader",
                 "dataset_key": "prospect_contacts",
                 "source_sheet": "14_Prospect_Contacts",
                 "source_column": "All fields above",
@@ -435,15 +446,6 @@ FEATURE_MAPPINGS = {
                 "data_type": "DETERMINISTIC"
             },
             {
-                "field_key": "quantified_impact",
-                "display_name": "Quantified Signal",
-                "purpose": "A figure only where it appears verbatim in a supplied cell that this play itself cites and that is topically relevant to the play. Labelled a sourced account signal, never an HP projection. Where no such figure exists no card is rendered - an empty 'HP-modeled' card is never shown",
-                "dataset_key": "google_news, news_events, firmographics",
-                "source_sheet": "Google News RSS, news_events, 1_Firmographics",
-                "source_column": "event_headline, Business Description",
-                "data_type": "DETERMINISTIC"
-            },
-            {
                 "field_key": "target_contacts",
                 "display_name": "Entry Path Contacts",
                 "purpose": "Real contacts from this account's own roster whose title or department matches the play's remit, resolved on word boundaries against stakeholder_contacts_grid. Where none matches the card says so explicitly - a buyer persona is never invented",
@@ -503,7 +505,8 @@ FEATURE_MAPPINGS = {
         "feature_key": "tech_landscape",
         "display_name": "Technographic Map",
         "purpose": "Comprehensive mapping of installed hardware, software, cloud, security, and web technologies",
-        "dependent_datasets": ["technographics", "technology_detections", "webstack"],
+        "dependent_datasets": ["technographics", "technology_detections", "webstack",
+                               "tech_breakdown", "hp_category_intent"],
         "mapped_fields": [
             {
                 "field_key": "technology_category",
@@ -546,8 +549,8 @@ FEATURE_MAPPINGS = {
                 "display_name": "Website Tech Stack",
                 "purpose": "CMS, SSL, Web Server, Hosting, CDN, Framework, Analytics",
                 "dataset_key": "webstack",
-                "source_sheet": "5_Tech_Breakdown",
-                "source_column": "Cms, Ssl, Web Server, Hosting, Cdn, Framework, Analytics",
+                "source_sheet": "5_Tech_Breakdown (merged into webstack)",
+                "source_column": "Tech Breakdown - Cms, - Ssl, - Web Server, - Hosting, - Cdn, - Framework, - Analytics",
                 "data_type": "DETERMINISTIC"
             }
         ]
@@ -609,8 +612,18 @@ FEATURE_MAPPINGS = {
         "feature_key": "content_studio",
         "display_name": "Content Studio",
         "purpose": "Generates personalized sales collateral, emails, and pitch decks tailored to target personas",
-        "dependent_datasets": ["prospect_contacts", "job_openings", "firmographics"],
+        "dependent_datasets": ["prospect_contacts", "company_personas", "job_openings",
+                               "firmographics"],
         "mapped_fields": [
+            {
+                "field_key": "client_target_role",
+                "display_name": "Client Target Role (buying committee)",
+                "purpose": "Target personas come from the client's own buying committee before any generic archetype; a role with no contact is offered as a role and never given a name.",
+                "dataset_key": "company_personas",
+                "source_sheet": "Persona coverage",
+                "source_column": "target_persona, buying_committee_angle, contact_name, contact_status",
+                "data_type": "DETERMINISTIC"
+            },
             {
                 "field_key": "named_persona",
                 "display_name": "Named Persona Contact",
@@ -698,8 +711,8 @@ FEATURE_MAPPINGS = {
                 "display_name": "Webstack Context",
                 "purpose": "Web infrastructure stack",
                 "dataset_key": "webstack",
-                "source_sheet": "5_Tech_Breakdown",
-                "source_column": "Cms, Ssl, Web Server, Hosting, Cdn, Framework, Analytics",
+                "source_sheet": "5_Tech_Breakdown (merged into webstack)",
+                "source_column": "Tech Breakdown - Cms, - Ssl, - Web Server, - Hosting, - Cdn, - Framework, - Analytics",
                 "data_type": "DETERMINISTIC"
             },
             {
@@ -753,8 +766,17 @@ FEATURE_MAPPINGS = {
         "feature_key": "message_evaluator",
         "display_name": "Message Evaluator",
         "purpose": "Evaluates sales outreach messages against target persona requirements and guardrails",
-        "dependent_datasets": ["prospect_contacts", "job_openings"],
+        "dependent_datasets": ["prospect_contacts", "company_personas", "job_openings"],
         "mapped_fields": [
+            {
+                "field_key": "client_target_role",
+                "display_name": "Client Target Role (buying committee)",
+                "purpose": "Persona targets fall back to the client's target roles before the hiring proxy, so a role the client asked for outranks one inferred from job postings.",
+                "dataset_key": "company_personas",
+                "source_sheet": "Persona coverage",
+                "source_column": "target_persona, buying_committee_angle, contact_name, contact_status",
+                "data_type": "DETERMINISTIC"
+            },
             {
                 "field_key": "named_persona",
                 "display_name": "Named Persona Target",

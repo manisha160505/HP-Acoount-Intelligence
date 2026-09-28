@@ -45,6 +45,178 @@ TECHNOGRAPHICS_CATEGORY_COLUMNS = [
     "Bi And Analytics"
 ]
 
+# The export truncates every category cell: "Prog Langs And Frameworks" ends
+# "... Google Cloud APIs (+16 more)". The marker is a count of what the vendor
+# cut, not a technology, and it must never be rendered as one.
+CATEGORY_TRUNCATION_MARKER = re.compile(r"\s*\(\+\s*\d+\s+more\s*\)\s*$", re.I)
+
+# Where a technology named in Full Tech Stack reaches no category column. On
+# the loaded accounts that is 95 of 281 and 294 of 589 - not a gap in the file
+# but the other side of the truncation above, so the group says so rather than
+# quietly dropping a third of the estate.
+UNCATEGORISED_LABEL = "Not categorised in the export"
+UNCATEGORISED_NOTE = ("the export truncates each category list, so these "
+                      "technologies appear in Full Tech Stack with no category "
+                      "of their own")
+
+
+def _category_names(cell) -> list[str]:
+    """The technologies named in one category cell, truncation marker removed."""
+    out = []
+    for item in str(cell or "").split(","):
+        name = CATEGORY_TRUNCATION_MARKER.sub("", item).strip()
+        if name and name not in out:
+            out.append(name)
+    return out
+
+
+def multi_category_technologies(groups: list) -> int:
+    """How many technologies the export files under more than one category."""
+    seen: dict = {}
+    for group in groups:
+        for name in group["technologies"]:
+            seen[name.lower()] = seen.get(name.lower(), 0) + 1
+    return sum(1 for count in seen.values() if count > 1)
+
+
+def category_groups(category_matrix: dict, full_tech_list: list) -> list[dict]:
+    """The whole estate clubbed into the export's own categories.
+
+    The client, 27 Sep: "we mention about 281 technologies detected - we need to
+    club those in relevant categories and show here". The categories are the
+    file's own 20 columns, which is also what the card footers already name, so
+    nothing here is a taxonomy of ours.
+
+    A technology may appear in several groups, because the export puts it in
+    several columns: NetSuite is filed under BI, Sales, Finance, IT Management
+    and Customer Management, all five. That is the file's own reading and it is
+    not flattened here - so the group counts can sum to more than the number of
+    distinct technologies, and `multi_category_technologies` says how many rows
+    that affects rather than leaving a reader to wonder.
+
+    Ordered largest first, then by name, with the uncategorised group last
+    whatever its size. Ordering is settled here rather than in the browser.
+    """
+    groups = [{"category": name, "technologies": list(items), "count": len(items)}
+              for name, items in category_matrix.items() if items]
+    groups.sort(key=lambda g: (-g["count"], g["category"]))
+
+    placed = {name.lower() for g in groups for name in g["technologies"]}
+    rest = [name for name in full_tech_list if name.lower() not in placed]
+    if rest:
+        groups.append({"category": UNCATEGORISED_LABEL,
+                       "technologies": rest,
+                       "count": len(rest),
+                       "note": UNCATEGORISED_NOTE})
+    return groups
+
+# --------------------------------------------------------------------------
+# The whole stack, one card per technology (Sahaj, 27 Sep: "club those in
+# relevant categories and show here ... Please refer to the Caterpillar - Tech
+# and Risk Landscape example")
+# --------------------------------------------------------------------------
+# The export's 20 category columns, folded into families a seller reads. A
+# technology the export files under several columns takes the FIRST family in
+# this order, so an HP-relevant family wins over a generic one; every column
+# it came from is still listed on the card.
+STACK_FAMILIES = (
+    ("Security", ("It Security",)),
+    ("Endpoints, OS & IT Management", ("It Management", "Platform And Storage")),
+    ("Collaboration & Communications", ("Collaboration", "Communications",
+                                        "Productivity And Operations")),
+    ("Engineering & Development", ("Devops And Development", "Prog Langs And Frameworks",
+                                   "Testing And Qa", "Product And Design")),
+    ("Data & Analytics", ("Bi And Analytics",)),
+    ("Networks & Infrastructure", ("Computer Networks",)),
+    ("Business Applications", ("Sales", "Marketing", "Customer Management",
+                               "Finance And Accounting", "Hr", "Ecommerce",
+                               "Operations Software", "Operations Management")),
+)
+STACK_OTHER = "Other"
+STACK_SOURCE_LABELS = {
+    "technographics": "Technographics",
+    "hp_category_intent": "Intent file",
+    "webstack": "Website stack",
+    "tech_breakdown": "Website stack",
+}
+
+
+def stack_view(category_matrix: dict, full_tech_list: list, tech_sources: dict,
+               hp_categories: list) -> dict:
+    """Every detected technology as a card, grouped into families, with the HP
+    play it supports where the map found one.
+
+    Nothing here is scored. The HP play, its approved risk label (DEC-058c) and
+    its one-line reason are copied from the category card whose vendor names
+    the technology; a technology no card names is listed without one. The
+    confidence score is not carried (Sahaj, 27 Sep: drop it).
+    """
+    columns_of: dict = {}
+    for column, names in (category_matrix or {}).items():
+        for name in names:
+            columns_of.setdefault(name.lower(), []).append(column)
+
+    hp_of: dict = {}
+    for cat in hp_categories or []:
+        for vendor in cat.get("vendors") or []:
+            play = vendor.get("hp_play") or {}
+            if not play.get("product"):
+                continue
+            for name in vendor.get("detected_as") or []:
+                hp_of.setdefault(str(name).lower(), {
+                    "hp_play": play.get("product"),
+                    "hp_category": cat.get("category_name"),
+                    "risk_level": vendor.get("risk_level"),
+                    "reason": play.get("play_text") or vendor.get("description"),
+                    "vendor": vendor.get("vendor_name"),
+                })
+
+    technologies, counts = [], {}
+    for name in full_tech_list or []:
+        key = name.lower()
+        cols = columns_of.get(key, [])
+        family = next((fam for fam, members in STACK_FAMILIES
+                       if any(c in members for c in cols)), STACK_OTHER)
+        counts[family] = counts.get(family, 0) + 1
+        source = (tech_sources or {}).get(key, "technographics")
+        technologies.append({
+            "name": name,
+            "family": family,
+            "export_categories": cols,
+            "source": STACK_SOURCE_LABELS.get(source, source),
+            "hp": hp_of.get(key),
+        })
+
+    order = [fam for fam, _ in STACK_FAMILIES] + [STACK_OTHER]
+    families = [{"family": fam, "count": counts[fam]} for fam in order if counts.get(fam)]
+
+    opportunities: dict = {}
+    for t in technologies:
+        if not t["hp"]:
+            continue
+        o = opportunities.setdefault(t["hp"]["hp_play"], {
+            "hp_play": t["hp"]["hp_play"], "hp_category": t["hp"]["hp_category"],
+            "risk_level": t["hp"]["risk_level"], "technologies": [], "families": []})
+        o["technologies"].append(t["name"])
+        if t["family"] not in o["families"]:
+            o["families"].append(t["family"])
+    opps = sorted(opportunities.values(), key=lambda o: -len(o["technologies"]))
+    for o in opps:
+        o["technology_count"] = len(o["technologies"])
+
+    sources: dict = {}
+    for t in technologies:
+        sources[t["source"]] = sources.get(t["source"], 0) + 1
+    return {
+        "families": families,
+        "technologies": technologies,
+        "opportunities": opps,
+        "sources": [{"label": k, "count": v} for k, v in sorted(sources.items())],
+        "hp_relevant_count": sum(1 for t in technologies if t["hp"]),
+        "total": len(technologies),
+    }
+
+
 def _read_dataset_records(account_id: str, dataset_key: str) -> list[dict]:
     """Rows for one dataset. Shared implementation - see datasets.py.
 
@@ -338,6 +510,223 @@ def _hp_category_intent(account_id: str) -> dict:
             for name, entry in (parsed.get("categories") or {}).items()}
 
 
+# Explorium 5_Tech_Breakdown columns in the order the Website stack card shows
+# them: infrastructure a seller can talk about first, page metadata last. A
+# column not listed here is still shown, after these, so a new vendor column is
+# never dropped silently.
+TECH_BREAKDOWN_ORDER = (
+    "Cms", "Hosting", "Server", "Web Server", "Cdn", "Cdns", "Ns", "Mx", "Ssl",
+    "Framework", "Javascript", "Analytics", "Ads", "Payment", "Ecommerce",
+    "Mapping", "Widgets", "Media", "Mobile", "Language", "Feeds", "Link",
+    "Web Master", "Docinfo", "Robots", "Copyright", "Seo Headers", "Seo Meta",
+    "Seo Title",
+)
+# Columns that describe the page rather than a technology the company runs.
+TECH_BREAKDOWN_PAGE_METADATA = frozenset({
+    "Seo Headers", "Seo Meta", "Seo Title", "Copyright", "Docinfo", "Robots",
+    "Language", "Feeds", "Link", "Web Master",
+})
+_TB_EMPTY = {"", "nan", "none", "null", "no data available", "-", "\u2014"}
+_TB_ID_COLUMNS = {"business id", "company name", "company domain", "domain",
+                  "status", "db indexed", "established", "parked", "umbrella"}
+
+
+def _parse_tech_breakdown(records: list) -> list:
+    """The tech_breakdown row, category by category, for the Website stack card.
+
+    `"Enterprise: Adobe Experience Manager | Other: WordPress 5.3, Investis"`
+    -> {"category": "Cms", "groups": [{"group": "Enterprise", "technologies":
+    [...]}, ...], "technologies": [...]}, one per non-empty column.
+
+    Copied as delivered: groups and names are the vendor's, only split and
+    de-duplicated, so every item on the card can be found in the sheet.
+    `_breakdown_technologies` below reads the same row as a flat list for the
+    estate; this keeps the vendor's grouping for display.
+    """
+    if not records:
+        return []
+    row = {str(k).strip(): v for k, v in records[0].items()
+           if str(k).strip().lower() not in _TB_ID_COLUMNS}
+    columns = [c for c in TECH_BREAKDOWN_ORDER if c in row] + sorted(
+        c for c in row if c not in TECH_BREAKDOWN_ORDER)
+    out = []
+    for column in columns:
+        raw = " ".join(str(row.get(column) or "").split())
+        if raw.lower() in _TB_EMPTY:
+            continue
+        groups, flat = [], []
+        for part in raw.split("|"):
+            part = part.strip()
+            if not part:
+                continue
+            group, sep, rest = part.partition(":")
+            if not sep:
+                group, rest = "", part
+            names = []
+            for name in rest.split(","):
+                name = name.strip()
+                if name and name not in names:
+                    names.append(name)
+            if names:
+                groups.append({"group": group.strip(), "technologies": names})
+                flat.extend(n for n in names if n not in flat)
+        if flat:
+            out.append({"category": column, "groups": groups, "technologies": flat,
+                        "page_metadata": column in TECH_BREAKDOWN_PAGE_METADATA})
+    return out
+
+
+def _hp_category_file(account_id: str) -> dict:
+    """The parsed HP category intent file for this account, or `{}`.
+
+    `detected_technologies` reads Related Technologies out of
+    `category_file["categories"]`. `_hp_category_intent` returns only the
+    {category: score} map, so passing that meant no Related Technology was ever
+    added. Same `status == "matched"` gate: any other status means the row
+    belongs to somebody else.
+    """
+    from app.services.extractors.datasets import account_domain, read_dataset_rows
+    from app.services.extractors.intent_demand_signals import _parse_category_file
+
+    try:
+        parsed = _parse_category_file(
+            read_dataset_rows(account_id, "hp_category_intent"),
+            account_domain(account_id))
+    except Exception:
+        logger.exception("tech landscape: could not read hp_category_intent for %s",
+                         account_id)
+        return {}
+    return parsed if parsed.get("status") == "matched" else {}
+
+
+# --------------------------------------------------------------------------
+# What counts as a technology this account has
+# --------------------------------------------------------------------------
+# Four sheets carry technology, and the client named all four (Dhruvi, 27 Sep):
+# "Technographics: please also refer to the WebStack and Tech_Breakdown sheets
+# in Explorium. And Related Technologies column in hp_intent_results" - for
+# accounts where Technographics is thin or absent. It is absent on 13 of the
+# 220, where the Technographic Map showed nothing at all.
+#
+# They are not the same kind of evidence, and reading what is actually in them
+# settles how they may be used:
+#
+#   Technographics       the installed estate. 589 entries for Accenture.
+#   Related Technologies the client's own intent file naming the technology
+#                        behind a category it scored - HP-relevant by
+#                        construction, and the client asserting the account
+#                        has it.
+#   WebStack             what runs on the company's WEBSITE: AWS Cloudfront
+#                        edge nodes, Akamai DNS, ASP.NET, cookie banners. 429
+#                        entries for Astra, not one of them an installed
+#                        product.
+#   Tech_Breakdown       the same website technology, grouped into columns
+#                        (Hosting, Cdns, Analytics, Widgets, Ads).
+#
+# So the first two are pooled as the estate, and the website sheets are read
+# only when the estate has nothing - the client's "or not there" case. Pooling
+# all four always would have taken Astra from 220 detected technologies to 649
+# and let an HP category card rest on a CDN edge node. Either way every
+# technology keeps the sheet it came from, so a card built on website evidence
+# can say that is what it is.
+SOURCE_TECHNOGRAPHICS = "technographics"      # the installed estate
+SOURCE_INTENT_RELATED = "hp_category_intent"  # the client's own intent file
+SOURCE_WEBSTACK = "webstack"                  # website technology
+SOURCE_TECH_BREAKDOWN = "tech_breakdown"      # website technology, grouped
+
+# Columns of Tech_Breakdown that are not technology names.
+BREAKDOWN_SKIP_COLUMNS = {"business id", "status", "db indexed", "established",
+                          "parked", "umbrella", "docinfo", "seo meta",
+                          "seo headers", "seo title", "language", "mobile"}
+
+
+def _split_list(value) -> list:
+    """A comma-separated cell into its entries, blanks dropped."""
+    text = str(value or "").strip()
+    if not text or text.lower() in ("nan", "none", "null"):
+        return []
+    return [part.strip() for part in text.split(",") if part.strip()]
+
+
+def _breakdown_technologies(rows) -> list:
+    """Every technology named in Tech_Breakdown, column by column.
+
+    A cell reads "Other: Akamai Hosted, U.S. Server Location" - a vendor
+    grouping, a colon, then the technologies. The grouping labels the entries
+    rather than naming one, so it is dropped.
+    """
+    out = []
+    for row in rows or []:
+        for column, value in (row or {}).items():
+            if not value or str(column or "").strip().lower() in BREAKDOWN_SKIP_COLUMNS:
+                continue
+            cell = str(value)
+            if ":" in cell:
+                cell = cell.split(":", 1)[1]
+            out.extend(_split_list(cell))
+    return out
+
+
+def detected_technologies(techno_records, webstack_records, breakdown_records,
+                          category_file) -> tuple[list, dict, dict]:
+    """(technology names, name -> the sheet that named it, how it was sourced).
+
+    Deduplicated case-insensitively, first sheet wins, order preserved so the
+    installed estate still reads first on every card.
+    """
+    seen: dict[str, str] = {}
+    names: list[str] = []
+
+    def add(raw, source):
+        for entry in raw:
+            key = str(entry).strip().lower()
+            if not key or key in seen:
+                continue
+            seen[key] = source
+            names.append(str(entry).strip())
+
+    for row in (techno_records or [])[:1]:
+        add(_split_list(row.get("Full Tech Stack")), SOURCE_TECHNOGRAPHICS)
+    # Whether the website sheets are needed is decided on Technographics alone.
+    # The intent file's Related Technologies is a welcome addition but a thin
+    # one - Toyota has exactly one entry, "Fastly" - and letting it stand in for
+    # an estate would leave that account with a one-technology map while nine
+    # more sat unread in WebStack.
+    estate_count = len(names)
+    for entry in (category_file or {}).get("categories", {}).values():
+        add([t for t in (entry.get("related_technologies") or []) if str(t).strip()],
+            SOURCE_INTENT_RELATED)
+
+    if not estate_count:
+        # Nothing about the estate. The website sheets are what the client told
+        # us to read here, and they beat an empty card - as long as the card
+        # says what it is resting on.
+        for row in (webstack_records or [])[:1]:
+            add(_split_list(row.get("Technologies Used By Company Website")),
+                SOURCE_WEBSTACK)
+        add(_breakdown_technologies(breakdown_records), SOURCE_TECH_BREAKDOWN)
+
+    website_count = sum(1 for src in seen.values() if src in
+                        (SOURCE_WEBSTACK, SOURCE_TECH_BREAKDOWN))
+    meta = {
+        "estate_technologies": estate_count,
+        "website_technologies": website_count,
+        "website_sources_used": bool(website_count),
+        "basis": "installed estate" if estate_count else (
+            "website technology only - no Technographics row for this account"
+            if names else "no technology detected in any source"),
+    }
+    return names, seen, meta
+
+
+def _source_counts(tech_sources: dict) -> dict:
+    """How many technologies each sheet contributed, for the run log."""
+    counts: dict[str, int] = {}
+    for source in (tech_sources or {}).values():
+        counts[source] = counts.get(source, 0) + 1
+    return counts
+
+
 def _score_card_confidence(categories: list, intent_scores: dict) -> dict:
     """Attach the client's Tech Landscape confidence to every vendor card.
 
@@ -492,12 +881,17 @@ def extract_tech_landscape(account_id: str,  # noqa: PLR0912, PLR0915 - branch-h
 
     results = []
 
-    # Parse full tech stack list from account's technographics
-    full_tech_list = []
-    if techno_records and len(techno_records) > 0:
-        raw_full = str(techno_records[0].get("Full Tech Stack") or "").strip()
-        if raw_full:
-            full_tech_list = [s.strip() for s in raw_full.split(",") if s.strip()]
+    breakdown_records = _read_dataset_records(account_id, "tech_breakdown")
+    full_tech_list, tech_sources, tech_basis = detected_technologies(
+        techno_records, webstack_records, breakdown_records,
+        _hp_category_file(account_id))
+    pipeline.step("technology", "%d detected (%s)"
+                  % (len(full_tech_list), tech_basis["basis"]),
+                  **_source_counts(tech_sources))
+    if tech_basis["website_sources_used"]:
+        logger.info("tech landscape: %s has no Technographics row - the map is "
+                    "built from website technology, as the client directed on "
+                    "27 Sep", account_id)
 
     full_tech_lower = [t.lower() for t in full_tech_list]
 
@@ -1020,6 +1414,13 @@ def extract_tech_landscape(account_id: str,  # noqa: PLR0912, PLR0915 - branch-h
         "data": {
             "strategic_read": strategic_read_text,
             "total_detected_technologies": detected_tech_count,
+            # Detected technology is no longer one sheet. Technographics is the
+            # installed estate; the other three are what the client told us to
+            # read where it is thin (27 Sep). The split is published so a card
+            # resting on a website technology can be told from one resting on
+            # an installed product.
+            "technology_source_counts": _source_counts(tech_sources),
+            "technology_basis": tech_basis,
             # Sum of the per-category "N detected signals" lines, so the UI can
             # show coverage rather than implying the cards cover the full stack.
             "mapped_signal_count": mapped_signal_count,
@@ -1051,7 +1452,7 @@ def extract_tech_landscape(account_id: str,  # noqa: PLR0912, PLR0915 - branch-h
         # error, so an account without the file still gets a Tech Landscape -
         # every card simply scores Driver 2 = 0.
         "source_datasets": ["technographics", "technology_detections", "webstack",
-                            "hp_category_intent"],
+                            "tech_breakdown", "hp_category_intent"],
         "extracted_at": now,
         "updated_at": now
     }
@@ -1064,11 +1465,11 @@ def extract_tech_landscape(account_id: str,  # noqa: PLR0912, PLR0915 - branch-h
     if techno_records and len(techno_records) > 0:
         row = techno_records[0]
         for col in TECHNOGRAPHICS_CATEGORY_COLUMNS:
-            val = str(row.get(col) or "").strip()
-            if val:
-                items = [item.strip() for item in val.split(",") if item.strip()]
-                if items:
-                    category_matrix[col] = items
+            items = _category_names(row.get(col))
+            if items:
+                category_matrix[col] = items
+
+    groups = category_groups(category_matrix, full_tech_list)
 
     if full_tech_list or category_matrix:
         matrix_payload = {
@@ -1080,10 +1481,30 @@ def extract_tech_landscape(account_id: str,  # noqa: PLR0912, PLR0915 - branch-h
             "data": {
                 "total_tech_count": len(full_tech_list),
                 "full_tech_stack": full_tech_list,
+                # Which sheet named each technology. Software installed across
+                # an estate and a script on the company's website are not the
+                # same claim, so a reader can tell them apart rather than
+                # taking one list on trust.
+                "technology_sources": tech_sources,
+                "technology_source_counts": _source_counts(tech_sources),
+                "technology_basis": tech_basis,
                 "category_matrix": category_matrix,
-                "categories_count": len(category_matrix)
+                "categories_count": len(category_matrix),
+                # The same technologies, clubbed and ordered for a reader, with
+                # everything the export left uncategorised in a group of its
+                # own so the groups add up to total_tech_count.
+                "category_groups": groups,
+                "uncategorised_count": next(
+                    (g["count"] for g in groups
+                     if g["category"] == UNCATEGORISED_LABEL), 0),
+                "multi_category_technologies": multi_category_technologies(groups),
+                # The whole stack as cards, by family, with HP plays attached
+                # where the map found one - the Technographic Map's main view.
+                "stack_view": stack_view(category_matrix, full_tech_list,
+                                         tech_sources, hp_categories),
             },
-            "source_datasets": ["technographics"],
+            "source_datasets": ["technographics", "webstack", "tech_breakdown",
+                                "hp_category_intent"],
             "extracted_at": now,
             "updated_at": now
         }
@@ -1170,7 +1591,12 @@ def extract_tech_landscape(account_id: str,  # noqa: PLR0912, PLR0915 - branch-h
         if raw_cats:
             categories_summary = [c.strip() for c in raw_cats.split(",") if c.strip()]
 
-    if web_tech_list or premium_count_str or spend_est_str:
+    # Explorium 5_Tech_Breakdown, the client's second technographic sheet
+    # (DEC-019): the same website stack, grouped by what each technology does.
+    # Read from the tech_breakdown dataset, grouped for the Website stack card.
+    breakdown = _parse_tech_breakdown(breakdown_records)
+
+    if web_tech_list or premium_count_str or spend_est_str or breakdown:
         webstack_payload = {
             "account_id": account_id,
             "feature_key": "tech_landscape",
@@ -1182,9 +1608,11 @@ def extract_tech_landscape(account_id: str,  # noqa: PLR0912, PLR0915 - branch-h
                 "premium_tech_count": premium_count_str,
                 "web_spend_estimate": spend_est_str,
                 "categories_list": categories_summary,
-                "technologies": web_tech_list
+                "technologies": web_tech_list,
+                "breakdown": breakdown,
+                "breakdown_source": "Explorium 5_Tech_Breakdown" if breakdown else None,
             },
-            "source_datasets": ["webstack"],
+            "source_datasets": ["webstack", "tech_breakdown"] if breakdown else ["webstack"],
             "extracted_at": now,
             "updated_at": now
         }

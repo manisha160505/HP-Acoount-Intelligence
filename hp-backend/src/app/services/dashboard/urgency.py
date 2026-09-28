@@ -461,7 +461,35 @@ def _driver(key, points, terms, evidence_ids, notes=None, caveats=None) -> dict:
         out["notes"] = notes
     if caveats:
         out["caveats"] = caveats
+    out["rationale_lines"] = rationale_lines(out)
     return out
+
+
+def rationale_lines(driver: dict) -> list:
+    """Why this driver scored what it did, one line per reason.
+
+    The client, 27 Sep: the explanation behind the "i" button is "information
+    overload and hard to read, let's organize this into easy to read bullets.
+    Also, let's not use em-dashes please and replace with just simple '-'".
+
+    It was being glued together in the browser out of these same fields, into
+    one run-on string with two em dashes in it. Built here instead, as the list
+    it always was, so there is one version of it and the page only renders.
+
+    No model: every line below is a number this module already computed.
+    """
+    lines = ["Weight %s%% of the total." % _round_half_up(driver.get("weight", 0) * 100, 1)]
+    for term in driver.get("terms") or []:
+        line = "%s: %s/%s - %s" % (term.get("label"), term.get("points"),
+                                   term.get("max_points"), term.get("basis"))
+        if term.get("missing_input"):
+            line += " (no input on file - scores 0 by the missing-input rule)"
+        lines.append(line)
+    lines.extend(driver.get("notes") or [])
+    lines.extend("Caveat: %s" % c for c in (driver.get("caveats") or []))
+    # A basis can quote the account's own data, which may carry typographic
+    # dashes; the client asked for none (27 Sep), so they become plain hyphens.
+    return [str(line).replace("\u2014", "-").replace("\u2013", "-") for line in lines]
 
 
 def _term(label, points, max_points, basis, missing=False) -> dict:

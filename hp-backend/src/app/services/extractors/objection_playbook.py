@@ -1156,7 +1156,7 @@ def extract_objection_playbook(account_id: str) -> list[dict]:
                 "evidence_fingerprint": None,
                 "cards_count": 0,
                 "cards": [],
-                "notice": ("Objection generation requires OPENAI_API_KEY. The incumbent "
+                "notice": ("Objection generation requires an LLM API key. The incumbent "
                            "evidence below is shown as extracted; no objections are invented."),
             },
             "source_datasets": ["technographics", "firmographics", "prospect_contacts"],

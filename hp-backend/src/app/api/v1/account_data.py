@@ -19,7 +19,6 @@ from app.database.mongodb import get_db
 from app.schemas.account_data import DATASET_REGISTRY, AccountDataFileResponse
 
 logger = logging.getLogger(__name__)
-from app.services.extractors.content_messaging import extract_content_messaging
 from app.services.extractors.content_studio import extract_content_studio
 from app.services.extractors.executive_dashboard import extract_executive_dashboard
 from app.services.extractors.intent_demand_signals import extract_intent_demand_signals
@@ -95,7 +94,6 @@ FEATURE_EXTRACTORS = {
     "stakeholder_map": extract_stakeholder_map,
     "tech_landscape": extract_tech_landscape,
     "objection_playbook": extract_objection_playbook,
-    "content_messaging": extract_content_messaging,
     "content_studio": extract_content_studio,
     "strategy_chat": extract_strategy_chat,
     "message_evaluator": extract_message_evaluator,
@@ -143,6 +141,13 @@ async def upload_account_data(
     account_id: str,
     dataset_key: str = Form(...),
     file_id_to_replace: str | None = Form(None),
+    # Bulk loading, one account at a time: a feature that declares seven
+    # datasets is otherwise re-run seven times as they arrive, six of them
+    # against data that is still incomplete. The loader sets this on every
+    # upload and then regenerates each feature once, at the end, which is both
+    # cheaper and the only way the first run sees the whole account.
+    # Default false, so a single upload from the UI behaves exactly as before.
+    defer_extraction: bool = Form(False),
     file: UploadFile = File(...),
     current_user: dict = Depends(require_admin_role)
 ):
@@ -293,8 +298,15 @@ async def upload_account_data(
     )
 
     payload = serialize_data_file(new_metadata)
-    payload["regeneration"] = _notify_regeneration(
-        account_id, key_clean, "dataset %s uploaded" % key_clean, current_user)
+    if defer_extraction:
+        # A bulk loader storing an account's files one by one asks for the
+        # regeneration to wait until the last file is in, then triggers it once.
+        logger.info("upload: %s stored; regeneration deferred to the caller",
+                    key_clean)
+        payload["regeneration"] = {"queued": [], "features": [], "deferred": True}
+    else:
+        payload["regeneration"] = _notify_regeneration(
+            account_id, key_clean, "dataset %s uploaded" % key_clean, current_user)
     return payload
 
 @router.get("", response_model=list[AccountDataFileResponse])

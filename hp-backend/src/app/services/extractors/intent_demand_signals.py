@@ -53,7 +53,7 @@ from app.services.extractors.datasets import (
     read_dataset_rows,
     requires_local_datasets,
 )
-from app.services.hp import case_studies as cs, evidence_tier, intent_topic_map as tm
+from app.services.hp import evidence_tier, intent_topic_map as tm
 from app.services.hp.guardrails import tier_language_faults
 from app.services.regen import store as widget_store
 
@@ -481,16 +481,17 @@ SO_WHAT_MAX_WORDS = 90
 
 SO_WHAT_SYSTEM = """You write the "So What for HP" for one HP category's research intent.
 
-You are given, for each category, ONLY: its intent score out of 100, its trend,
-its buying stage, its research volume, the topics researched, and any supporting
-signal the account's own detected technology confirms. Nothing else is known.
+You are given, for each category, ONLY: its intent score out of 100, its buying
+stage, the topics researched, and any supporting signal the account's own
+detected technology confirms. Nothing else is known.
 
 Rules, all mandatory:
 1. Use ONLY the figures and terms given for that category. Never introduce a
    number, product, customer, date or technology that is not there.
-2. Preserve what each field means. "Trend = Increasing" means research activity
-   is increasing, NOT that purchasing is increasing. A detected technology means
-   it was detected, not that the account wants to replace it.
+2. Preserve what each field means. A detected technology means it was
+   detected, not that the account wants to replace it. Never describe intent as
+   increasing, decreasing, rising, falling, growing, stable, high-volume or
+   low-volume - no trend or volume is given, so there is nothing to compare it to.
 3. MATCH THE CLAIM TO THE TIER. Each category carries an evidence_tier and the
    permitted_language for it.
    - "Opportunity": may say the combined evidence supports an HP-addressable
@@ -558,9 +559,7 @@ def _so_what(company: str, categories: list) -> dict:
             "category": entry.get("category"),
             "hp_play": entry.get("hp_play"),
             "score_out_of_100": primary.get("score"),
-            "trend": primary.get("trend_label"),
             "buying_stage": primary.get("stage"),
-            "research_volume": primary.get("research_volume"),
             "topics_researched": primary.get("topics_researched") or [],
             "confirmed_supporting_technology": [
                 {"signal": sig.get("signal"), "technologies": sig.get("technologies") or []}
@@ -718,9 +717,9 @@ def _summarise(topics: list[dict], category_file: dict, inventory: list[dict]) -
     # detail, which is where it is read.
 
     hiring = _stats([t for t in included if t["hiring_linked"]])
-    if hiring["topic_count"]:
-        so_what.append(f"{hiring['topic_count']} Bombora topics relate to staffing (max "
-                       f"{hiring['max']}); they sit with the hiring-linked demand below.")
+    # The staffing-topics line that stood here pointed at the Hiring-Linked
+    # section, which the client dropped on 27 Sep ("drop this for now, BridgeAI
+    # will come back on this"); `hiring_linked` stays in the data for when it returns.
 
     return {"themes": themes, "hp_categories": categories,
             "categories_with_signal": sum(1 for c in categories
@@ -786,6 +785,53 @@ def _hiring_widget(account_id: str, job_records: list[dict], now) -> dict:
         "last_seen": last_seen[-1][:10] if last_seen else None,
     }
     return payload
+
+
+# How many topics a business unit's summary line names.
+BU_TOP_TOPICS = 3
+
+
+def _bu_summary(topics: list[dict], categories: list[dict]) -> dict:
+    """Intent across HP's five business units, one line each, for the top of
+    the tab (Sahaj, 27 Sep): "for the 173 accounts for which Bombora intent is
+    available, let's lead with those and add a broad summary at the start that
+    mentions intent around HP's key business units - Workstation, Print, 3D,
+    PC, Poly. For the accounts post the 173 accounts, please use the
+    Predictleads data for capturing intent."
+
+    Bombora leads where the account has topics: each unit gets the topics the
+    dictionary maps to it, their count and maximum, and the strongest names.
+    Otherwise the unit's line is the HP category intent file's score (the
+    PredictLeads-sourced file). Both are shown as received - nothing is blended
+    into a new score, so a reader can check every number against its source.
+    """
+    included = [t for t in topics if t.get("included")]
+    lead = "Bombora" if included else "PredictLeads"
+    by_name = {c.get("category"): c for c in categories}
+    units = []
+    for cat in tm.HP_CATEGORIES:
+        name = cat["category"]
+        mapped = sorted((t for t in included if t.get("hp_category") == name),
+                        key=lambda t: -(t.get("composite_score") or 0))
+        primary = (by_name.get(name) or {}).get("primary") or {}
+        units.append({
+            "category": name,
+            "hp_play": cat["hp_play"],
+            "bombora_topic_count": len(mapped),
+            "bombora_max": mapped[0].get("composite_score") if mapped else None,
+            "bombora_top_topics": [{"topic": t.get("topic_name"),
+                                    "score": t.get("composite_score")}
+                                   for t in mapped[:BU_TOP_TOPICS]],
+            "category_file_score": primary.get("score"),
+            "category_file_stage": primary.get("stage"),
+        })
+    if lead == "Bombora":
+        units.sort(key=lambda u: (-(u["bombora_max"] or -1), -u["bombora_topic_count"]))
+    else:
+        units.sort(key=lambda u: -(u["category_file_score"] or -1))
+    return {"lead_source": lead,
+            "source_label": "Bombora and PredictLeads",
+            "units": units}
 
 
 @requires_local_datasets(
@@ -912,43 +958,14 @@ def extract_intent_demand_signals(account_id: str) -> list[dict]:
             entry["so_what_word_count"] = len(text.split()) if text else None
             entry["relevance_rung"] = evidence_tier.relevance_for(tier_name)
 
-        # F9: a case study may strengthen "So What for HP", and nowhere else on
-        # this widget. Intent picks near-last of all the surfaces, so a category
-        # carries proof only where nothing that needs it more has taken it.
-        try:
-            db = get_db()
-            firmo = (read_dataset_records(account_id, "firmographics",
-                                          strict=False) or [{}])[0]
-            industry = cs.normalise_industry(
-                firmo.get("Linkedin Industry Category")
-                or firmo.get("Naics Description") or "")
-            taken = cs.cited_above(db, account_id, cs.SURFACE_INTENT)
-            here: set = set()
-            for entry in (summary.get("hp_categories") or []):
-                if not entry.get("so_what"):
-                    continue
-                # Proof strengthens a recommendation; it must never create one.
-                # A Context Only category is one the evidence does not support
-                # recommending against at all, so attaching a case study there
-                # manufactures an opportunity out of a customer story. On the
-                # first account that put a workstation case on a category
-                # scoring 2/100 and a print case on one the text itself calls
-                # "no signal of immediate interest".
-                if (entry.get("evidence_tier") or {}).get("tier") == evidence_tier.CONTEXT_ONLY:
-                    continue
-                lines = cs.lines_for_product_text(str(entry.get("hp_play") or ""))
-                if not lines:
-                    continue
-                point = cs.allocate(db, lines, industry=industry,
-                                    signals=cs.signals_for_opportunity(
-                                        entry.get("category"), entry.get("hp_play")),
-                                    taken=taken, used_here=here)
-                if point:
-                    entry["hp_proof_point"] = point
-                    if point.get("study_id"):
-                        here.add(point["study_id"])
-        except Exception:
-            logger.exception("intent: proof allocation failed for %s", account_id)
+        # No case study on this widget (Sahaj, 27 Sep: "highlighting only one
+        # case study for all intent topics doesn't make sense ... we have
+        # anyways highlighted case studies on other tabs"). The F9 allocation
+        # that used to sit here is gone, so its studies stay free for the tabs
+        # that still carry proof.
+
+        # The broad summary the client asked to lead with (Sahaj, 27 Sep).
+        summary["bu_summary"] = _bu_summary(topics, summary.get("hp_categories") or [])
 
         summary_payload["status"] = "available"
         summary_payload["data"] = {

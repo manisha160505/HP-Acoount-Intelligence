@@ -193,8 +193,10 @@ def test_contacts_rebuild_every_feature_that_reads_them_in_order():
     from app.api.v1.account_data import _features_for_dataset
 
     features = _features_for_dataset("prospect_contacts")
+    # executive_dashboard is deliberately absent: its only contact-derived
+    # field was the Quick Stats "Stakeholders Mapped" count, which the client
+    # dropped on 27 Sep along with the rest of that card.
     assert set(features) == {
-        "executive_dashboard",          # stakeholders_mapped_count
         "stakeholder_map",
         "solution_narrative_opportunity_map",
         "objection_playbook",

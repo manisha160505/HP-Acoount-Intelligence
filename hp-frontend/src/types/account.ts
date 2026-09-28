@@ -104,7 +104,7 @@ export const DATASET_REGISTRY_LIST: DatasetRegistryItem[] = [
   // number the company published. It was declared on the backend and read in
   // five places, but had no slot here, so the dashboard told sellers to upload
   // filings with no way to do it.
-  { key: 'compliance_filings', display_name: 'Compliance Filings', type: 'multi_file', group: 'Filed Documents', description: "The account's filed documents - annual reports, exchange filings, market reports. The source of reported financial figures, quoted with their period, unit and page (Multi-file PDF)", allowed_extensions: ['.pdf'] }
+  { key: 'compliance_filings', display_name: 'Compliance Filings', type: 'multi_file', group: 'Filed Documents', description: "The account's filed documents - annual reports, exchange filings, market reports - plus the filings list (_filings_index.csv: filings.csv + PredictLeads SEC filings). The source of reported financial figures, quoted with their period, unit and page (Multi-file PDF, one CSV list)", allowed_extensions: ['.pdf', '.csv'] }
 ];
 
 export interface AccountInstructions {

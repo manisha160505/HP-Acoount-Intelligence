@@ -79,8 +79,14 @@ MIN_EVIDENCE_PER_PRIORITY = 1
 # only thing below this function is a one-line deterministic fallback, and a
 # 90-word grounded paragraph beats "X is evidenced by 4 source sentences" every
 # time. A card that is still short after the retry publishes and says so.
-DESCRIPTION_MIN_WORDS = 100
-DESCRIPTION_MAX_WORDS = 120
+# The client, 27 Sep: the card text "is coming across as data dump, let's make
+# it easy to read by coming up with relevant bullets". Same evidence rules and
+# the same figure check as the paragraph it replaces - only the shape changed,
+# and the total is shorter because a bullet carries no connective tissue.
+DESCRIPTION_MIN_WORDS = 60
+DESCRIPTION_MAX_WORDS = 110
+DESCRIPTION_MIN_POINTS = 2
+DESCRIPTION_MAX_POINTS = 4
 MAX_SUMMARY_SENTENCES = 4
 
 ORDERING_BASIS = (
@@ -418,7 +424,7 @@ def _hp_facts(db, account_id: str, limit: int = 40) -> list:
     return facts
 
 
-DESCRIPTION_SYSTEM = """You write one short paragraph for an HP seller about an account's strategic priority.
+DESCRIPTION_SYSTEM = """You write a short set of bullets for an HP seller about an account's strategic priority.
 
 Structure, in this order:
 1. What the account is specifically doing, taken ONLY from the supporting evidence given to you.
@@ -437,10 +443,13 @@ Rules:
 - Never name an HP product that does not appear verbatim in the approved HP statements.
 - Never name a competitor, and never claim the account already uses HP.
 - Write in English even when the evidence is not.
-- Between 100 and 120 words. Plain declarative prose, no padding: use the extra room for the
-  account's own specifics, not for restating the point.
+- Plain hyphens only. Never use an em dash.
 
-Return JSON only: {"description": "..."}"""
+Return 2 to 4 bullets, not a paragraph. Each bullet is one complete sentence of at most 30 words,
+and together they run to between 60 and 110 words. The first bullet is what the account is doing;
+the last is what it implies for HP. Do not restate the same point twice to fill a bullet.
+
+Return JSON only: {"points": ["...", "..."]}"""
 
 
 _FIGURE_RE = re.compile(r"\d[\d.,]*%?")
@@ -541,6 +550,26 @@ def _proof_for(db, priority: dict, industry: str, taken: set, here: set):
         return None
 
 
+def _points(raw: dict) -> list:
+    """The bullets a description answer carries, cleaned.
+
+    Accepts the older single-paragraph shape too, so a cached answer written
+    before the bullets change still renders rather than falling back.
+    """
+    values = raw.get("points")
+    if isinstance(values, str):
+        values = [values]
+    if not values:
+        single = _text(raw.get("description"))
+        values = [single] if single else []
+    out = []
+    for value in values:
+        text = _text(value).lstrip("-\u2013\u2014 ").strip()
+        if text:
+            out.append(text)
+    return out
+
+
 def _describe(priority: dict, hp_facts: list, company: str = "") -> dict:
     """A short grounded paragraph for one priority, or a deterministic fallback.
 
@@ -565,7 +594,7 @@ def _describe(priority: dict, hp_facts: list, company: str = "") -> dict:
         "APPROVED HP CAPABILITY STATEMENTS (the only source for anything about HP):",
         hp_text or "(none approved for this account - omit the HP sentence)",
         "",
-        "Write the paragraph. Return JSON only.",
+        "Write the bullets. Return JSON only.",
     ])
 
     try:
@@ -574,8 +603,13 @@ def _describe(priority: dict, hp_facts: list, company: str = "") -> dict:
         logger.exception("executive_dashboard: description generation failed")
         raw = {}
 
-    body = _text(raw.get("description"))
+    points = _points(raw)
+    body = " ".join(points)
     ok, reason = _validate_description(body, evidence_text, hp_text)
+    if ok and not (DESCRIPTION_MIN_POINTS <= len(points) <= DESCRIPTION_MAX_POINTS):
+        ok, reason = False, ("returned %d bullet(s); the brief is %d to %d"
+                             % (len(points), DESCRIPTION_MIN_POINTS,
+                                DESCRIPTION_MAX_POINTS))
 
     # One retry for length alone. The first answer was valid - grounded,
     # correctly figured, no invented product - it was merely short, and
@@ -591,17 +625,22 @@ def _describe(priority: dict, hp_facts: list, company: str = "") -> dict:
                    "and no new claims."
                    % (len(body.split()), DESCRIPTION_MIN_WORDS,
                       DESCRIPTION_MAX_WORDS))) or {}
-            longer = _text(retry.get("description"))
+            longer_points = _points(retry)
+            longer = " ".join(longer_points)
             good, _why = _validate_description(longer, evidence_text, hp_text)
-            if good and len(longer.split()) > len(body.split()):
-                body = longer
+            if (good and len(longer.split()) > len(body.split())
+                    and DESCRIPTION_MIN_POINTS <= len(longer_points) <= DESCRIPTION_MAX_POINTS):
+                body, points = longer, longer_points
         except Exception:
             logger.exception("executive_dashboard: description retry failed")
 
     if ok:
         short = len(body.split()) < DESCRIPTION_MIN_WORDS
-        return {"text": body, "written_by": "model", "validated": True,
-                "word_count": len(body.split()),
+        # `text` stays: the retrieval corpus, Strategy Chat and the evaluator
+        # all read it. It is now the bullets joined, which reads as prose
+        # because each bullet is a complete sentence.
+        return {"text": body, "points": points, "written_by": "model",
+                "validated": True, "word_count": len(body.split()),
                 "below_brief": short or None}
 
     logger.info("executive_dashboard: description rejected for %r - %s",
@@ -611,8 +650,8 @@ def _describe(priority: dict, hp_facts: list, company: str = "") -> dict:
                 "of the account's filed documents."
                 % (priority["title"].rstrip("."), measures["support_count"],
                    measures["distinct_sections"]))
-    return {"text": fallback, "written_by": "python", "validated": True,
-            "rejected_reason": reason}
+    return {"text": fallback, "points": [fallback], "written_by": "python",
+            "validated": True, "rejected_reason": reason}
 
 
 # ---------------------------------------------------------------------------

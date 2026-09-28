@@ -5,11 +5,10 @@ never imports the library directly and never learns its constructor.
 
 Three things here are load-bearing and easy to get wrong:
 
-  * **The settings are the existing ones.** `OPENAI_API_KEY` and
-    `OPENAI_ENDPOINT` already point at the Azure deployment for every other
-    feature; the retrieval layer reuses them rather than introducing a second
-    OpenAI configuration that can drift. The only genuinely new setting is the
-    embedding model, because nothing embedded anything before.
+  * **The settings are the application's.** The provider, key, endpoint and
+    models are the resolved `settings.llm_*` / `chat_model` / `retrieval_model`
+    / `embedding_*` values every other feature uses (Gemini by default, Azure
+    OpenAI with LLM_PROVIDER=openai), so the two cannot drift.
 
   * **The Mongo backends read their own environment variables**, and they are
     not the names the published docs give. The installed 1.5.7 reads
@@ -89,27 +88,23 @@ def workspace_name(account_id: str, index: str) -> str:
 def _openai_client():
     from openai import OpenAI
 
-    api_key = (settings.OPENAI_API_KEY or "").strip()
+    api_key = settings.llm_api_key
     if not api_key:
         raise RetrievalConfigError(
-            "OPENAI_API_KEY is not set - the retrieval layer cannot embed or extract")
-    kwargs = {"api_key": api_key}
-    endpoint = (settings.OPENAI_ENDPOINT or "").strip()
-    if endpoint:
-        kwargs["base_url"] = endpoint
-    return OpenAI(**kwargs)
+            "%s is not set - the retrieval layer cannot embed or extract"
+            % settings.llm_api_key_name)
+    return OpenAI(**settings.llm_client_kwargs)
 
 
 def retrieval_model() -> str:
     """The model the retrieval layer runs on.
 
-    Falls back to the application-wide model, so setting
-    `OPENAI_RETRIEVAL_MODEL` moves ONLY the RAG layer - extraction and answer
+    Falls back to the application-wide model, so setting the provider's
+    `*_RETRIEVAL_MODEL` moves ONLY the RAG layer - extraction and answer
     synthesis - onto a different deployment while the other features stay where
     they are.
     """
-    return (settings.OPENAI_RETRIEVAL_MODEL or settings.OPENAI_MODEL_NAME
-            or "gpt-4o").strip()
+    return settings.retrieval_model
 
 
 # Models that reject a custom temperature, learned at runtime rather than
@@ -156,13 +151,45 @@ async def _llm_model_func(prompt, system_prompt=None, history_messages=None,
     return response.choices[0].message.content
 
 
+def _vertex_embed(texts: list) -> list:
+    """Embeddings from Vertex AI's native predict method.
+
+    Vertex's OpenAI-compatible endpoint serves chat to an express-mode API key
+    but refuses it on /embeddings ("API keys are not supported by this API"),
+    while `publishers/google/models/<model>:predict` accepts it. The output
+    dimension is pinned so it always matches settings.embedding_dim."""
+    import httpx
+
+    if not settings.llm_api_key:
+        raise RetrievalConfigError("%s is not set - the retrieval layer cannot embed"
+                                   % settings.llm_api_key_name)
+    location = (settings.VERTEX_EMBEDDING_LOCATION or "global").strip()
+    host = ("aiplatform.googleapis.com" if location == "global"
+            else "%s-aiplatform.googleapis.com" % location)
+    url = ("https://%s/v1/publishers/google/models/%s:predict"
+           % (host, settings.embedding_model))
+    vectors = []
+    for start in range(0, len(texts), EMBEDDING_BATCH_NUM):
+        batch = texts[start:start + EMBEDDING_BATCH_NUM]
+        response = httpx.post(
+            url, params={"key": settings.llm_api_key}, timeout=120,
+            json={"instances": [{"content": t} for t in batch],
+                  "parameters": {"outputDimensionality": settings.embedding_dim}})
+        response.raise_for_status()
+        vectors.extend(p["embeddings"]["values"] for p in response.json()["predictions"])
+    return vectors
+
+
 async def _embedding_func(texts):
     import numpy as np
+
+    if settings.llm_provider == "vertex":
+        return np.array(await asyncio.to_thread(_vertex_embed, list(texts)))
 
     client = _openai_client()
     response = await asyncio.to_thread(
         client.embeddings.create,
-        model=settings.OPENAI_EMBEDDING_MODEL,
+        model=settings.embedding_model,
         input=list(texts),
     )
     return np.array([item.embedding for item in response.data])
@@ -193,7 +220,7 @@ def query_model() -> str:
     nothing at query time changes it. Extraction stays on the retrieval model so
     the graph is built consistently; the question is parsed by the faster one.
     """
-    return (settings.OPENAI_MODEL_NAME or "gpt-4o").strip()
+    return settings.chat_model
 
 
 async def _query_llm_model_func(prompt, system_prompt=None, history_messages=None,
@@ -271,7 +298,7 @@ async def build_rag(account_id: str, index: str, for_query: bool = False):
         llm_model_name=query_model() if for_query else retrieval_model(),
         llm_model_max_async=LLM_MAX_ASYNC,
         embedding_func=EmbeddingFunc(
-            embedding_dim=settings.OPENAI_EMBEDDING_DIM,
+            embedding_dim=settings.embedding_dim,
             func=_embedding_func,
         ),
         embedding_batch_num=EMBEDDING_BATCH_NUM,

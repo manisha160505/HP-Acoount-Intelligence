@@ -4,6 +4,7 @@ from bson import ObjectId
 
 from app.database.mongodb import get_db
 from app.observability import pipeline
+from app.services.extractors import personas
 from app.services.extractors.datasets import (
     account_display_name,
     read_dataset_records,
@@ -45,7 +46,7 @@ def _personas_from_contacts(db, account_id: str, contacts_records: list) -> list
     talking = widget_store.get(account_id, "stakeholder_talking_points", db=db) or {}
     talking_points = (talking.get("data") or {}).get("talking_points") or {}
 
-    personas, seen = [], set()
+    found, seen = [], set()
     for row in contacts_records:
         name = _clean(row.get("Prospect full_name") or row.get("full_name"))
         title = _clean(row.get("Prospect job_title") or row.get("title"))
@@ -69,7 +70,7 @@ def _personas_from_contacts(db, account_id: str, contacts_records: list) -> list
             department = _clean(row.get("Prospect job_department_main"))
             department_column = "Prospect job_department_main" if department else None
 
-        personas.append({
+        found.append({
             "persona_id": "contact::%s" % (enriched.get("contact_id") or contact_id or name),
             "is_named_person": True,
             "name": name,
@@ -99,7 +100,55 @@ def _personas_from_contacts(db, account_id: str, contacts_records: list) -> list
                 "pain_points": "account_evidence" if points.get("pain_points") else "not_available",
             },
         })
-    return personas
+    return found
+
+
+def _personas_from_client_roles(account_id: str) -> list:
+    """Role personas from the client's own target list. A role, never a name.
+
+    This sits between the two paths that already existed. Source A contacts are
+    the best answer and hiring postings the weakest; the client naming the role
+    they want reached - and, for two thirds of them, who holds it - is better
+    than inferring a role from how many times a job title was advertised.
+
+    A filled role carries the person's name and title because the client
+    supplied them. An unfilled one carries neither, and says so.
+    """
+    out = []
+    for role in personas.read_roles(account_id):
+        filled = role["is_filled"]
+        out.append({
+            "persona_id": personas.role_id(role["target_persona"]),
+            "is_named_person": filled,
+            "name": role["contact_name"] or None,
+            "title": role["actual_job_title"] or role["target_persona"],
+            "target_persona": role["target_persona"],
+            "department": role["department"] or None,
+            "normalized_department": None,
+            "seniority_band": None,
+            "influence_type": role["buying_committee_angle"] or None,
+            "hp_relevance_band": None,
+            "opening_angle": None,
+            "pain_points": [],
+            "evidence_note": (
+                "the client's target buying committee; %s"
+                % (("filled by %s (%s)" % (role["contact_name"],
+                                           role["contact_status"] or "contact supplied"))
+                   if filled else
+                   "no contact identified for this role (%s)"
+                   % (role["contact_status"] or "none found"))),
+            "sources": {
+                "title": personas.DATASET_KEY,
+                "name": personas.DATASET_KEY if filled else "not_available",
+                "department": personas.DATASET_KEY if role["department"] else "not_available",
+                "influence_type": (personas.DATASET_KEY
+                                   if role["buying_committee_angle"] else "not_available"),
+                "seniority_band": "not_available",
+                "opening_angle": "not_available",
+                "pain_points": "not_available",
+            },
+        })
+    return out
 
 
 def _personas_from_hiring(job_records: list) -> list:
@@ -120,9 +169,9 @@ def _personas_from_hiring(job_records: list) -> list:
         if level and title not in seniority:
             seniority[title] = level
 
-    personas = []
+    found = []
     for title, count in sorted(counts.items(), key=lambda kv: -kv[1])[:8]:
-        personas.append({
+        found.append({
             "persona_id": "role::%s" % title.lower().replace(" ", "_"),
             "is_named_person": False,
             "name": None,
@@ -147,7 +196,7 @@ def _personas_from_hiring(job_records: list) -> list:
                 "pain_points": "not_available",
             },
         })
-    return personas
+    return found
 
 
 @requires_local_datasets(
@@ -191,16 +240,24 @@ def extract_message_evaluator(account_id: str) -> list[dict]:
     # "persona defaults to Source A (Stakeholder Map), falls back to the
     # Source B hiring field when no named contact exists". So there are two
     # paths and neither invents a person.
-    personas = _personas_from_contacts(db, account_id, contacts_records)
+    persona_list = _personas_from_contacts(db, account_id, contacts_records)
     persona_source = "prospect_contacts"
 
-    if not personas:
-        # No named contact in this account - build ROLE personas from open
+    if not persona_list:
+        # The client's target roles before the hiring proxy: a role they asked
+        # for beats a role inferred from how often a title was advertised.
+        persona_list = _personas_from_client_roles(account_id)
+        persona_source = personas.DATASET_KEY
+
+    if not persona_list:
+        # No named contact and no target list - build ROLE personas from open
         # postings. A role, never a name.
-        personas = _personas_from_hiring(_read_dataset_records(account_id, "job_openings"))
+        persona_list = _personas_from_hiring(
+            _read_dataset_records(account_id, "job_openings"))
         persona_source = "job_openings"
 
-    persona_archetypes = personas
+    pipeline.step("personas", "%d from %s" % (len(persona_list), persona_source))
+    persona_archetypes = persona_list
 
     # 2. Business Context
     business_context = {}

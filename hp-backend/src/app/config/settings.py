@@ -38,6 +38,39 @@ class Settings(BaseSettings):
     CORS_ORIGINS: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
     DATA_STORAGE_DIR: str = "data/accounts"
 
+    # --- Which LLM provider every model call goes to -------------------------
+    # "gemini" (Google AI Studio key, AIza...), "vertex" (Gemini on Vertex AI
+    # with an express-mode API key, AQ....) or "openai" (the Azure OpenAI
+    # deployment used until 28 Sep). Both are reached through the OpenAI SDK: Gemini exposes
+    # an OpenAI-compatible endpoint, so chat, streaming, JSON mode and
+    # embeddings keep one code path. Read the resolved values through the
+    # properties at the bottom of this class, never the provider fields directly.
+    LLM_PROVIDER: str = "gemini"
+
+    GEMINI_API_KEY: str = ""
+    GEMINI_ENDPOINT: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
+    # Every generated feature: plays, priorities, So What, signal scoring,
+    # Content Studio, Strategy Chat answers. Flash: stable, fast, reliable JSON.
+    GEMINI_MODEL_NAME: str = "gemini-2.5-flash"
+    # LightRAG entity extraction and synthesis. Empty = GEMINI_MODEL_NAME.
+    GEMINI_RETRIEVAL_MODEL: str = ""
+    # gemini-embedding-001 returns 3072 dimensions. Changing the embedding model
+    # or its dimension forces a full rebuild of every retrieval index
+    # (ingest._update_index compares it with what built the index).
+    GEMINI_EMBEDDING_MODEL: str = "gemini-embedding-001"
+    GEMINI_EMBEDDING_DIM: int = 3072
+    # Vertex AI (LLM_PROVIDER=vertex). The express-mode key is GEMINI_API_KEY.
+    # Chat goes to Vertex's OpenAI-compatible endpoint, which needs the project
+    # and location in its path; embeddings go to the native predict method,
+    # because that endpoint's embeddings route does not accept an API key.
+    VERTEX_PROJECT: str = ""
+    VERTEX_LOCATION: str = "global"
+    # Embeddings go to a regional host: on the global one every request waited
+    # ~12 s before its first byte (28 Sep, 1 or 16 texts alike), regional hosts
+    # answer in under a second. asia-south1 is where the GCP VM runs.
+    VERTEX_EMBEDDING_LOCATION: str = "asia-south1"
+
+    # --- Azure OpenAI (LLM_PROVIDER=openai) ----------------------------------
     OPENAI_API_KEY: str = ""
     OPENAI_ENDPOINT: str = "https://accurix-foundry-resource.cognitiveservices.azure.com/openai/v1/"
     OPENAI_MODEL_NAME: str = "gpt-4o"
@@ -103,6 +136,80 @@ class Settings(BaseSettings):
     # Cloud Monitoring rejects a custom metric written more often than once a
     # minute, so exporting faster only wastes calls.
     OTEL_METRIC_EXPORT_INTERVAL_MS: int = 60000
+
+    # --- The resolved LLM settings: the only place a caller should read -------
+    @property
+    def llm_provider(self) -> str:
+        return (self.LLM_PROVIDER or "gemini").strip().lower()
+
+    @property
+    def _is_google(self) -> bool:
+        return self.llm_provider in ("gemini", "vertex")
+
+    @property
+    def llm_api_key(self) -> str:
+        key = self.GEMINI_API_KEY if self._is_google else self.OPENAI_API_KEY
+        return (key or "").strip()
+
+    @property
+    def llm_api_key_name(self) -> str:
+        """The env var a missing key is reported under."""
+        return "GEMINI_API_KEY" if self._is_google else "OPENAI_API_KEY"
+
+    @property
+    def llm_endpoint(self) -> str:
+        if self.llm_provider == "vertex":
+            return ("https://aiplatform.googleapis.com/v1/projects/%s/locations/%s/"
+                    "endpoints/openapi" % (self.VERTEX_PROJECT.strip(),
+                                           (self.VERTEX_LOCATION or "global").strip()))
+        ep = self.GEMINI_ENDPOINT if self.llm_provider == "gemini" else self.OPENAI_ENDPOINT
+        return (ep or "").strip()
+
+    @property
+    def llm_client_kwargs(self) -> dict:
+        """Arguments for openai.OpenAI(...). A Vertex express key travels as
+        ?key=; sent as the Bearer token Vertex rejects it (401, wants OAuth)."""
+        if self.llm_provider == "vertex":
+            return {"base_url": self.llm_endpoint, "api_key": "vertex-express",
+                    "default_query": {"key": self.llm_api_key}}
+        return {"base_url": self.llm_endpoint or None, "api_key": self.llm_api_key}
+
+    def _google_model(self, name: str) -> str:
+        # Vertex's OpenAI-compatible endpoint names Google's models google/<id>.
+        name = name.strip()
+        if self.llm_provider == "vertex" and "/" not in name:
+            return "google/" + name
+        return name
+
+    @property
+    def chat_model(self) -> str:
+        if self._is_google:
+            return self._google_model(self.GEMINI_MODEL_NAME or "gemini-2.5-flash")
+        return (self.OPENAI_MODEL_NAME or "gpt-4o").strip()
+
+    @property
+    def retrieval_model(self) -> str:
+        own = (self.GEMINI_RETRIEVAL_MODEL if self._is_google
+               else self.OPENAI_RETRIEVAL_MODEL) or ""
+        if not own.strip():
+            return self.chat_model
+        return self._google_model(own) if self._is_google else own.strip()
+
+    @property
+    def embedding_model(self) -> str:
+        if self._is_google:
+            return (self.GEMINI_EMBEDDING_MODEL or "gemini-embedding-001").strip()
+        return (self.OPENAI_EMBEDDING_MODEL or "text-embedding-3-small").strip()
+
+    @property
+    def embedding_dim(self) -> int:
+        return int(self.GEMINI_EMBEDDING_DIM if self._is_google
+                   else self.OPENAI_EMBEDDING_DIM)
+
+    @property
+    def embedding_identity(self) -> str:
+        """What built a vector: an index made by another identity is rebuilt."""
+        return "%s:%s:%d" % (self.llm_provider, self.embedding_model, self.embedding_dim)
 
     class Config:
         env_file = ENV_FILES

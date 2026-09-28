@@ -11,6 +11,7 @@ from bson import ObjectId
 from app.core.llm import generate_gpt4o_json_completion
 from app.database.mongodb import get_db
 from app.observability import pipeline
+from app.services.extractors import personas
 from app.services.extractors.datasets import account_display_name, read_dataset_records
 from app.services.extractors.grounding import (
     HP_PRODUCT_LINES,
@@ -206,6 +207,48 @@ def _derive_named_personas(db, account_id: str) -> list[dict]:
     return personas
 
 
+def _derive_client_personas(account_id: str) -> list[dict]:
+    """Spec row 1b: the client's own target roles for this account.
+
+    The named tier above is Source A only, and the 220-account contact file is
+    Apollo, so on most accounts that tier is empty and the persona list fell
+    through to seven generic archetypes that say nothing about the account.
+    The client's buying committee is better than an archetype in both
+    directions: it is the role THEY want reached, and for two thirds of them it
+    carries the person who holds it.
+
+    A role nobody fills is still offered - writing to "the Head of Procurement
+    we have not identified yet" is a real task - but it is never given a name,
+    and the subtitle says plainly that no contact was found.
+    """
+    roles = personas.read_roles(account_id)
+    out = []
+    for role in roles:
+        angle = role["buying_committee_angle"]
+        if role["is_filled"]:
+            subtitle = " · ".join(p for p in (
+                role["contact_name"], role["actual_job_title"] or None,
+                angle or None) if p)
+        else:
+            subtitle = " · ".join(p for p in (
+                role["department"] or None, angle or None,
+                "no contact identified for this role") if p)
+        out.append({
+            "id": personas.role_id(role["target_persona"]),
+            "kind": "client_role",
+            "source": personas.DATASET_KEY,
+            "title": role["target_persona"],
+            "subtitle": subtitle,
+            "department": role["department"],
+            "buying_committee_persona": angle,
+            "full_name": role["contact_name"] or None,
+            "actual_job_title": role["actual_job_title"] or None,
+            "contact_status": role["contact_status"] or None,
+            "is_filled": role["is_filled"],
+        })
+    return out
+
+
 def _derive_role_proxy_personas(job_records: list[dict]) -> list[dict]:
     """Spec row 2. Role-type persona proxies from open hiring (Source B).
 
@@ -287,7 +330,7 @@ def _read_dataset_records(account_id: str, dataset_key: str) -> list[dict]:
 # takes seller input; the other four key on the account's data alone.
 
 # Bump when the prompt changes so cached assets are regenerated.
-CONTENT_PROMPT_VERSION = "2026-09-23.1"    # HP lines offered now match the enum that validates them
+CONTENT_PROMPT_VERSION = "2026-09-27.1"    # client target roles: their own header, evidence lines and rule
 
 # The one mandated section an HP case study belongs in. Named rather than
 # repeated, because the contract, the fallback template and the attach all have
@@ -316,6 +359,19 @@ _EMAIL_SHAPE = ("A three-paragraph outreach email written as HP (\"At HP, we ...
                   "meeting, project or prior conversation unless the evidence states one. "
                   "AT MOST 110 words in total. The salutation and sign-off are added automatically - do not "
                   "write 'Dear', 'Sincerely' or a signature.")
+
+# The five HP business units, named as the Opportunity Map and Intent & Demand
+# name their plays.
+HP_BU_TOPICS = (
+    "HP Elite & Pro PCs",
+    "Z by HP Workstations",
+    "Poly collaboration hardware",
+    "HP Enterprise Printing & Managed Print Services",
+    "HP Multi Jet Fusion (3D)",
+)
+LIVE_SIGNAL_TOPICS_MAX = 5
+# What the seller may pick (Sahaj, 27 Sep), in this order.
+OFFERED_CONTENT_TYPES = ("email", "linkedin_message", "one_pager")
 
 CONTENT_TYPE_CONTRACTS = {
     "email": {
@@ -349,8 +405,24 @@ CONTENT_TYPE_CONTRACTS = {
                   "other generic tags - and keep hashtags OUT of every other field. "
                   "150-200 words in total."),
     },
+    # Sahaj, 27 Sep: "Formats that we need to support - email, linkedin
+    # message, One pager on how HP portfolio can deliver value for the
+    # customer". A direct message to one person, not a post: no headline, no
+    # hashtags, short enough to send as a connection note.
+    "linkedin_message": {
+        "title": "LinkedIn Message", "subtitle": "Short direct message to one contact",
+        "words": (None, 80),
+        "required": ["opening", "body_sections", "cta"],
+        "sections": (1, 1),
+        "shape": ("A direct LinkedIn message to one person - NOT a public post, so no headline and "
+                  "no hashtags. opening: one personalised line that references something real "
+                  "about their remit or the account's evidence. body_sections: exactly one short "
+                  "paragraph naming the one HP line and the ONE capability that meets it. cta: one "
+                  "specific, low-friction ask. AT MOST 80 words in total. Do not write a "
+                  "greeting or a sign-off."),
+    },
     "one_pager": {
-        "title": "One-Pager", "subtitle": "Single-page solution overview for the account",
+        "title": "One-Pager", "subtitle": "How HP's portfolio can deliver value for this customer",
         "words": (None, 400),
         "headings": True,
         "required": ["headline", "opening", "body_sections", "cta"],
@@ -449,6 +521,7 @@ def _persona_by_id(db, account_id: str, job_records: list[dict], persona_id: str
     """Re-derived rather than read back from the context widget, so the persona
     the model is given is the one the account's data supports right now."""
     for p in (_derive_named_personas(db, account_id)
+              + _derive_client_personas(account_id)
               + _derive_role_proxy_personas(job_records)
               + ARCHETYPE_PERSONAS):
         if p["id"] == persona_id:
@@ -489,10 +562,42 @@ def _account_evidence(firmo_records: list[dict],
     return name, items
 
 
+def _is_named_person(persona: dict) -> bool:
+    """Is this persona a specific person, or a role?
+
+    Two kinds are: a Source A contact from the Stakeholder Map, and a client
+    target role the client has told us who fills. The second is not obvious -
+    a client role is a ROLE until the coverage sheet names someone in it, and
+    then it is that person. Everything downstream turns on the distinction:
+    which fields the model is given, which rule it is held to, whether it may
+    write a name, and how the email opens. One predicate, so those five answers
+    cannot disagree with each other.
+    """
+    kind = persona.get("kind")
+    return kind == "named" or (kind == "client_role" and bool(persona.get("is_filled")))
+
+
 def _persona_evidence(persona: dict) -> list[tuple[str, str]]:
     """What the model may know about the target, shaped by persona kind."""
     kind = persona["kind"]
     items = [("Role", persona["title"])]
+    if kind == "client_role":
+        # Each field on its own labelled line. Flattened into one "Description"
+        # blob, the department and the buying-committee angle were invisible to
+        # rule 7's citation check, and a filled role's contact name arrived as
+        # free text inside a persona the validator treated as a role type.
+        if persona.get("department"):
+            items.append(("Department", persona["department"]))
+        if persona.get("buying_committee_persona"):
+            items.append(("Buying-committee angle", persona["buying_committee_persona"]))
+        if persona.get("is_filled"):
+            items.append(("Name", persona.get("full_name") or "Unknown Contact"))
+            if persona.get("actual_job_title"):
+                items.append(("Actual job title", persona["actual_job_title"]))
+        else:
+            items.append(("Contact", "no contact identified for this role - "
+                          + (persona.get("contact_status") or "none found")))
+        return items
     if kind == "named":
         items.append(("Name", persona.get("full_name") or "Unknown Contact"))
         items.append(("Department", persona.get("department") or UNASSIGNED_DEPT))
@@ -503,7 +608,10 @@ def _persona_evidence(persona: dict) -> list[tuple[str, str]]:
             items.append(("Buying-committee persona", persona["buying_committee_persona"]))
     elif kind == "role_proxy":
         items.append(("Department", persona.get("department") or UNASSIGNED_DEPT))
-        items.append(("Seniority", persona.get("seniority") or ""))
+        # Only when there is one. "Seniority: " with nothing after it is a
+        # labelled line the model can cite and learn nothing from.
+        if persona.get("seniority"):
+            items.append(("Seniority", persona["seniority"]))
         n = persona.get("posting_count") or 0
         titles = persona.get("source_titles") or persona.get("sample_titles") or []
         items.append(("Open postings",
@@ -529,6 +637,24 @@ PERSONA_KIND_HEADERS = {
     "role_proxy": "ROLE-TYPE PROXY - inferred from open hiring (job_openings)",
     "archetype": "GENERIC ARCHETYPE - not sourced from account data",
 }
+# A client target role is two different things depending on whether the client
+# found someone for it, and the header has to say which - the model is told to
+# write to a person or to a role on the strength of this line.
+CLIENT_ROLE_HEADERS = {
+    True: "CLIENT TARGET ROLE - the client's buying committee (company_personas), "
+          "filled by a named contact",
+    False: "CLIENT TARGET ROLE - the client's buying committee (company_personas), "
+           "no contact identified yet",
+}
+
+
+def _persona_header(persona: dict) -> str:
+    """The line after "TARGET PERSONA" in the system prompt."""
+    kind = persona.get("kind")
+    if kind == "client_role":
+        return CLIENT_ROLE_HEADERS[bool(persona.get("is_filled"))]
+    return PERSONA_KIND_HEADERS.get(
+        kind, PERSONA_KIND_HEADERS["archetype"])
 
 
 # Placeholders in the schema are written <like this>, so an echoed placeholder is
@@ -565,7 +691,8 @@ def _output_schema(contract: dict) -> str:
     return '{\n  "asset": {\n' + ",\n".join(lines) + '\n  }\n}'
 
 
-def _persona_rule(kind: str, company_name: str, contract: dict) -> str:
+def _persona_rule(kind: str, company_name: str, contract: dict,
+                  persona_filled: bool = False) -> str:
     if contract.get("public"):
         return (
             "THIS IS A PUBLIC POST. The persona only tells you the AUDIENCE - people who hold this "
@@ -584,6 +711,33 @@ def _persona_rule(kind: str, company_name: str, contract: dict) -> str:
             "or Influencer -> ask for input or an evaluation conversation, never a decision; Budget "
             "Holder or Decision Maker -> a decision-oriented ask is acceptable; none supplied -> ask "
             "for a conversation."
+        )
+    if kind == "client_role":
+        if persona_filled:
+            return (
+                "THIS ROLE IS ONE THE CLIENT ASKED US TO REACH, AND THE CLIENT HAS NAMED THE "
+                "PERSON IN IT. Write to that person and to the remit their title implies. NEVER "
+                "state or imply who they report to, their private concerns, workload, opinions or "
+                "budget. Their buying-committee angle bounds the ask, and the client supplies "
+                "one of five:\n"
+                "   Economic Buyer -> a decision-oriented ask is acceptable.\n"
+                "   Technical Buyer -> ask for an evaluation, a technical review or a pilot; "
+                "never a decision or a commercial term.\n"
+                "   Finance - Budget Owner -> ask about cost, lifecycle and the shape of the "
+                "case; never quote a price or discount, and never imply a budget exists.\n"
+                "   Gatekeeper - Procurement & Legal -> ask about the process - how a vendor is "
+                "evaluated, what documentation is needed; never pitch a product to them and "
+                "never ask them to choose one.\n"
+                "   Influencer / Line-of-Business Champion -> ask what their teams need and "
+                "offer to show it; never a decision.\n"
+                "   none supplied -> ask for a conversation."
+            )
+        return (
+            "THIS IS A ROLE THE CLIENT ASKED US TO REACH, AND NO PERSON HAS BEEN IDENTIFIED IN "
+            f"IT AT {company_name}. The role is real - the client named it as a target - so you "
+            "may write to what it would be weighing. You may NOT name anyone, greet anyone, or "
+            "imply you know who holds it. Address the role itself (\"As the leader responsible "
+            "for ...\"), and hedge anything the evidence does not state."
         )
     if kind == "role_proxy":
         return (
@@ -644,7 +798,7 @@ def _build_system_prompt(company_name: str, contract: dict, account_block: str, 
 ACCOUNT EVIDENCE (use only this for any claim about {company_name}):
 {account_block or 'No account evidence supplied. Make no claim about the account.'}
 
-TARGET PERSONA ({PERSONA_KIND_HEADERS[kind]}):
+TARGET PERSONA ({_persona_header(persona)}):
 {persona_block}
 
 SELLER INPUT (the subject the seller chose - NOT evidence about the account):
@@ -666,7 +820,7 @@ CRITICAL RULES:
 4. AN HP PLAY MUST BE EARNED, NOT ASSIGNED. Before naming a product the chain has to hold: this persona's remit + the account evidence -> a plausible HP line. Do NOT start from the topic's product and work backwards. IF THE CHAIN DOES NOT HOLD: name no product, return "hp_products": [], and write a discovery-led piece that opens on the persona's own remit and what the seller wants to learn. That is a correct answer, not a failure. A forced product match IS a failure.
    HP lines you may name: {HP_LINES_FOR_PROMPT}.
    Name AT MOST ONE HP line - the one the chain earns. The topic names the line under discussion; do not add a second line as a bonus, and do not list a product's feature set. Say the one thing about it that matters to THIS persona.
-5. PERSONA RULE. {_persona_rule(kind, company_name, contract)}
+5. PERSONA RULE. {_persona_rule(kind, company_name, contract, _is_named_person(persona))}
 6. "opening" must name at least one item from the evidence above by its content, not by its label, and it must be the ONE item that matters for this persona and this topic - not a tour of the account. The first sentence a reader sees is the one that proves the seller knows this account.
 7. "evidence_used" lists the labels ([A1], [P2] ...) you actually drew on. Only labels written above. It is checked.
 8. VOICE. Write as HP - "At HP, we ..." - confident and specific, to a busy senior professional. Every paragraph must carry a concrete item from the evidence or a concrete thing the HP line gives their teams; a paragraph that could be sent to any company unchanged is a failed paragraph.
@@ -796,7 +950,10 @@ def _validate_asset(raw, contract: dict, persona: dict, labels: dict[str, str],
             soft.append(f"filler phrase \"{phrase}\"")
     if "!" in blob:
         soft.append("exclamation mark used")
-    if persona["kind"] != "named" or contract.get("public"):
+    # A filled client role is a person the client named, so its own contact may
+    # be addressed. Every other kind is a role type, and a public post names
+    # nobody whatever the kind.
+    if not _is_named_person(persona) or contract.get("public"):
         why = "a public post never names a contact" if contract.get("public") \
             else "copy written to a role type, not a person"
         for name in banned_names:
@@ -1079,10 +1236,10 @@ def _compose_greeting(persona: dict, contract: dict) -> str:
     on a plain email ("Dear [CIO Name],"). A placeholder for a hiring proxy, where
     no person is known."""
     kind = persona.get("kind")
-    if kind == "named":
+    if _is_named_person(persona):
         first = str(persona.get("full_name") or "").strip().split(" ")[0]
         return f"Dear {first}," if first and first.lower() != "unknown" else "Dear [Name],"
-    if kind == "archetype":
+    if kind in ("archetype", "client_role"):
         role = persona.get("salutation") or re.split(r"\s*[/(]\s*", str(persona.get("title") or ""))[0].strip()
         if not role:
             return "Dear [Name],"
@@ -1417,7 +1574,7 @@ def generate_content_asset(account_id: str, persona_id: str, content_type: str,
 
         llm_res = generate_gpt4o_json_completion(sys_prompt, user_prompt)
         if llm_res is None:
-            return None, ["model returned nothing - OPENAI_API_KEY missing or the call failed"], []
+            return None, ["model returned nothing - the LLM API key is missing or the call failed"], []
 
         a, f, sf = _validate_asset(llm_res, contract, persona, labels, ground, report, banned_names)
         attempts.append(f + sf)
@@ -1602,63 +1759,53 @@ def extract_content_studio(account_id: str) -> list[dict]:
     now = datetime.now(UTC)
 
     firmo_records = _read_dataset_records(account_id, "firmographics")
-    gnews_records = _read_dataset_records(account_id, "google_news")
-    events_records = _read_dataset_records(account_id, "news_events")
     job_records = _read_dataset_records(account_id, "job_openings")
-    intent_records = _read_dataset_records(account_id, "intent_score")
 
     pipeline.step("datasets", "", firmographics=len(firmo_records or []),
-                  news=len(gnews_records or []) + len(events_records or []),
-                  jobs=len(job_records or []),
-                  intent=len(intent_records or []))
+                  jobs=len(job_records or []))
 
     results = []
 
     # 1. Target Personas, in spec order: named (Source A, via Stakeholder Map)
     #    -> role-type proxy (Source B, job_openings) -> generic archetype.
     named_personas = _derive_named_personas(db, account_id)
+    client_personas = _derive_client_personas(account_id)
     role_proxy_personas = _derive_role_proxy_personas(job_records)
-    target_personas = named_personas + role_proxy_personas + ARCHETYPE_PERSONAS
+    # The archetypes are the last resort they were always meant to be: a
+    # generic "CIO / IT Leadership" is only worth offering when the account has
+    # no client target list to offer instead.
+    archetypes = [] if client_personas else ARCHETYPE_PERSONAS
+    target_personas = (named_personas + client_personas
+                       + role_proxy_personas + archetypes)
     persona_sources = {
         "named": len(named_personas),
+        "client_role": len(client_personas),
         "role_proxy": len(role_proxy_personas),
-        "archetype": len(ARCHETYPE_PERSONAS),
+        "archetype": len(archetypes),
     }
+    pipeline.step("personas", "", named=len(named_personas),
+                  client_roles=len(client_personas),
+                  filled=sum(1 for p in client_personas if p["is_filled"]),
+                  role_proxy=len(role_proxy_personas), archetype=len(archetypes))
 
-    # 2. Content Types - one entry per output contract
-    content_types = [{"id": k, "title": v["title"], "subtitle": v["subtitle"]}
-                     for k, v in CONTENT_TYPE_CONTRACTS.items()]
+    # 2. Content Types - the three the client asked for (Sahaj, 27 Sep). The
+    #    other contracts stay defined so assets already generated still render.
+    content_types = [{"id": k, "title": CONTENT_TYPE_CONTRACTS[k]["title"],
+                      "subtitle": CONTENT_TYPE_CONTRACTS[k]["subtitle"]}
+                     for k in OFFERED_CONTENT_TYPES]
 
-    # 3. Sourced Topic Pills (Product Lines + Intent Surge Topics + Live News Events from CSVs)
-    product_line_topics = [
-        "Z by HP Workstations",
-        "Poly collaboration hardware",
-        "HP Elite & Pro PCs",
-        "HP Enterprise Printing & Managed Print Services"
-    ]
-
-    intent_topics = []
-    for row in intent_records[:5]:
-        t = str(row.get("Topic") or row.get("topic_name") or "").strip()
-        if t:
-            intent_topics.append(t)
-
-    news_topics = []
-    seen_headlines = set()
-
-    for row in gnews_records:
-        headline = str(row.get("event_headline") or row.get("news_announcements") or row.get("title") or "").strip()
-        if headline and headline.lower() not in seen_headlines:
-            seen_headlines.add(headline.lower())
-            news_topics.append(headline)
-
-    for row in events_records:
-        headline = str(row.get("event_headline") or row.get("title") or "").strip()
-        if headline and headline.lower() not in seen_headlines:
-            seen_headlines.add(headline.lower())
-            news_topics.append(headline)
-
-    sourced_topics = product_line_topics + intent_topics + news_topics[:5]
+    # 3. Topic pills - Sahaj, 27 Sep: "on topics - let's keep only the 5 HP BUs
+    #    and live signals as topic". The live signals are the ones Live Signals
+    #    published (gated, deduplicated, ranked), not raw feed headlines; an
+    #    account with none published offers the five BUs only.
+    feed = (widget_store.get(account_id, "news_signals_feed", db=db) or {})
+    live_signal_topics = []
+    if feed.get("status") == "available":
+        for sig in (feed.get("data") or {}).get("signals") or []:
+            headline = " ".join(str(sig.get("headline") or "").split())
+            if headline and headline not in live_signal_topics:
+                live_signal_topics.append(headline)
+    sourced_topics = list(HP_BU_TOPICS) + live_signal_topics[:LIVE_SIGNAL_TOPICS_MAX]
 
     # 4. Business Context
     business_context = {}
@@ -1704,7 +1851,8 @@ def extract_content_studio(account_id: str) -> list[dict]:
             "business_context": business_context,
             "persona_sources": persona_sources
         },
-        "source_datasets": ["prospect_contacts", "job_openings", "firmographics", "google_news", "news_events"],
+        "source_datasets": ["prospect_contacts", "company_personas", "job_openings",
+                            "firmographics", "google_news", "news_events"],
         "extracted_at": now,
         "updated_at": now
     }

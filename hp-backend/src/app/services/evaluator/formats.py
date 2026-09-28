@@ -181,9 +181,39 @@ FORMATS = {
         "wants_next_step": False,
         "wants_subject": False,
     },
+    # Sahaj, 27 Sep: "In Message evaluator - we can limit to only 3 formats -
+    # Email, LinkedIn Message and One pager exec brief - on how HP can help the
+    # Customer". The same four sections, in the same order, as Content Studio's
+    # one-pager (HP_ABX_v3_final), so a draft written there evaluates here.
+    "one_pager": {
+        "rewrite": {
+            "required": ["headline", "opening", "body_sections", "cta"],
+            "sections": (4, 4),
+            "headings": True,
+            "shape": ("A one-page executive brief on how HP can help this customer. headline; "
+                      "opening summary paragraph; EXACTLY 4 body_sections, each WITH a heading, "
+                      "in this order: 'Account Challenge' (the situation the evidence shows); "
+                      "'How HP Helps' (what HP proposes); 'Proof Points' (the supporting "
+                      "evidence - if no HP proof point is available, say what the account "
+                      "evidence supports and no more); 'Next Step' (why now and the recommended "
+                      "action); cta is the recommended action. AT MOST 400 words. No "
+                      "subject_line."),
+        },
+        "label": "One-Pager Exec Brief",
+        "criteria": ("Evaluate whether it states the customer's challenge from evidence, how HP "
+                     "helps, credible proof, and one clear next step - in scannable sections."),
+        "max_words": 400,
+        "wants_headings": True,
+        "wants_next_step": True,
+        "wants_subject": False,
+    },
 }
 
 FORMAT_KEYS = sorted(FORMATS)
+
+# What a seller can pick (Sahaj, 27 Sep: three formats only), in this order.
+# The other formats stay defined so an evaluation saved under one still reads.
+OFFERED_FORMATS = ("email", "linkedin_message", "one_pager")
 
 
 class FormatError(Exception):
@@ -297,8 +327,8 @@ def structure_checks(message: str, fmt: str) -> dict:
 
 def catalogue() -> list:
     """Format list for the UI dropdown."""
-    return [{"id": key, "label": spec["label"], "criteria": spec["criteria"]}
-            for key, spec in sorted(FORMATS.items(), key=lambda kv: kv[1]["label"])]
+    return [{"id": key, "label": FORMATS[key]["label"], "criteria": FORMATS[key]["criteria"]}
+            for key in OFFERED_FORMATS]
 
 
 # ---------------------------------------------------------------------------

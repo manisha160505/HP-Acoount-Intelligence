@@ -74,18 +74,28 @@ class Node:
 
 _P = "app.services.regen.producers"
 
+# Content Messaging (messaging_context, idx_content_messaging, messaging_pillars)
+# was removed on 28 Sep: the client dropped the module (Sahaj, 27 Sep). Its
+# producers and corpus builder are still in the code, unscheduled.
 NODES = (
     Node("stakeholder_roster", "stakeholder_map",
          widgets=("stakeholder_contacts_grid", "stakeholder_influence_map"),
-         datasets=("prospect_contacts",),
+         # company_personas: the client's buying committee (Manisha, 28 Sep).
+         datasets=("prospect_contacts", "company_personas"),
          run=f"{_P}:stakeholder_roster"),
     Node("tech_core", "tech_landscape",
          widgets=("technographic_map", "tech_stack_matrix",
                   "tech_detections_reference", "webstack_breakdown"),
          datasets=("technographics", "technology_detections", "webstack",
-                   "firmographics", "hp_category_intent"),
+                   "tech_breakdown", "firmographics", "hp_category_intent"),
          config=("tech_confidence",), knowledge=("rulebook", "case_studies"),
          llm=True,
+         # 2: detected technology pools Technographics with the intent file's
+         # Related Technologies, falling back to WebStack + Tech_Breakdown
+         # when there is no estate; webstack_breakdown groups tech_breakdown.
+         # 3: tech_stack_matrix carries stack_view - every technology as a card
+         # in eight families with its HP play (Sahaj, 27 Sep; Caterpillar layout).
+         logic_version=3,
          logic_refs=("app.services.hp.map_narrative:MAP_NARRATIVE_PROMPT_VERSION",),
          run=f"{_P}:tech_core"),
     Node("objection", "objection_playbook",
@@ -103,12 +113,10 @@ NODES = (
                    "firmographics"),
          knowledge=("case_studies",), llm=True,
          logic_refs=("app.services.hp.intent_topic_map:DICTIONARY_VERSION",),
+         # 2: Sahaj 27 Sep - no trend or volume in the So What, no proof point,
+         # a business-unit summary led by Bombora.
+         logic_version=2,
          run=f"{_P}:intent"),
-    Node("messaging_context", "content_messaging",
-         widgets=("messaging_context_card",),
-         datasets=("firmographics", "technographics", "intent_score",
-                   "google_news", "news_events"),
-         run=f"{_P}:messaging_context"),
     Node("opp_core", "solution_narrative_opportunity_map",
          widgets=("opportunity_context_card", "opportunity_narrative_plays"),
          datasets=("firmographics", "technographics", "intent_score",
@@ -121,9 +129,12 @@ NODES = (
          run=f"{_P}:opp_core"),
     Node("content_persona", "content_studio",
          widgets=("content_persona_context",),
-         datasets=("firmographics", "google_news", "news_events", "job_openings",
-                   "intent_score"),
-         upstream=("stakeholder_roster",),
+         # Topics are the 5 HP BUs + the published Live Signals (Sahaj, 27 Sep),
+         # so the feed is read, not the raw news files or the Bombora topics.
+         datasets=("firmographics", "job_openings", "prospect_contacts",
+                   "company_personas"),
+         upstream=("stakeholder_roster", "news"),
+         logic_version=2,
          run=f"{_P}:content_persona"),
     Node("news", "recent_news_signals",
          widgets=("news_relevance_summary", "news_signals_feed"),
@@ -135,8 +146,8 @@ NODES = (
          run=f"{_P}:news"),
     Node("stakeholder_talking_points", "stakeholder_map",
          widgets=("stakeholder_talking_points",),
-         datasets=("prospect_contacts", "firmographics", "technographics",
-                   "intent_score", "google_news", "news_events"),
+         datasets=("prospect_contacts", "company_personas", "firmographics",
+                   "technographics", "intent_score", "google_news", "news_events"),
          upstream=("stakeholder_roster", "opp_core"),
          llm=True,
          logic_refs=("app.services.extractors.stakeholder_map:"
@@ -150,15 +161,24 @@ NODES = (
          widgets=("exec_summary_card", "exec_key_metrics", "exec_hiring_velocity",
                   "exec_urgency_score"),
          datasets=("firmographics", "company_hierarchy", "job_openings",
-                   "prospect_contacts", "technographics", "webstack",
+                   "technographics", "webstack",
                    "intent_score", "hp_category_intent", "extended_company",
-                   "google_news", "news_events"),
+                   "google_news", "news_events", "compliance_filings"),
          upstream=("news", "opp_core"),
          config=("urgency",),
+         # The company description is reorganised into bullets by one cached,
+         # grounded model call (client feedback 1.a, 27 Sep).
+         llm=True,
+         logic_refs=("app.services.extractors.executive_dashboard:SUMMARY_PROMPT_VERSION",),
+         # 2: exec_key_metrics lists the filings on record (the filings list
+         # CSV uploaded with the PDFs under compliance_filings); Quick Stats
+         # counts and the contacts read dropped (client feedback 1.e).
+         logic_version=2,
          run=f"{_P}:exec_core"),
     Node("evaluator_personas", "message_evaluator",
          widgets=("evaluator_persona_context",),
-         datasets=("firmographics", "prospect_contacts", "job_openings"),
+         datasets=("firmographics", "prospect_contacts", "company_personas",
+                   "job_openings"),
          upstream=("stakeholder_roster", "stakeholder_talking_points"),
          run=f"{_P}:evaluator_personas"),
     Node("tech_recs", "tech_landscape",
@@ -172,11 +192,10 @@ NODES = (
          datasets=("compliance_filings",),
          upstream=("exec_core", "news", "opp_triggers", "stakeholder_roster",
                    "tech_core", "intent"),
-         llm=True, run=f"{_P}:index_executive_dashboard"),
-    Node("idx_content_messaging", "content_messaging", kind=INDEX,
-         upstream=("messaging_context", "opp_core", "news", "tech_core",
-                   "tech_recs"),
-         llm=True, run=f"{_P}:index_content_messaging"),
+         llm=True,
+         # 2: PredictLeads filings (PDFs written from their text) join the
+         # narrative but not the financial claims.
+         logic_version=2, run=f"{_P}:index_executive_dashboard"),
     Node("exec_priorities", "executive_dashboard",
          widgets=("exec_strategic_priorities",),
          upstream=("idx_executive_dashboard", "exec_core", "tech_recs", "opp_core"),
@@ -184,13 +203,6 @@ NODES = (
          account_record=False, llm=True,
          logic_refs=("app.services.dashboard.priorities:PROMPT_VERSION",),
          run=f"{_P}:exec_priorities"),
-    Node("messaging_pillars", "content_messaging",
-         widgets=("messaging_pillars_output",),
-         upstream=("idx_content_messaging", "messaging_context",
-                   "stakeholder_roster", "exec_core", "opp_core"),
-         knowledge=("case_studies",), account_record=False, llm=True,
-         logic_refs=("app.services.messaging.pillars:PROMPT_VERSION",),
-         run=f"{_P}:messaging_pillars"),
     Node("strategy_snapshot", "strategy_chat",
          widgets=("strategy_snapshot_context", "strategy_chat_interface"),
          upstream=("exec_core", "stakeholder_roster", "opp_core", "tech_core",
@@ -199,8 +211,11 @@ NODES = (
     Node("idx_strategy", "strategy_chat", kind=INDEX,
          upstream=("exec_core", "exec_priorities", "stakeholder_roster",
                    "stakeholder_talking_points", "news", "opp_core", "objection",
-                   "tech_core", "tech_recs", "intent", "messaging_pillars"),
-         llm=True, run=f"{_P}:index_strategy"),
+                   "tech_core", "tech_recs", "intent"),
+         # 2: Content Messaging is no longer built (Sahaj, 27 Sep: "We didn't
+         # promise Content Messaging module - we can drop this"), so its
+         # message house is no longer part of the chat's corpus.
+         llm=True, logic_version=2, run=f"{_P}:index_strategy"),
 )
 
 

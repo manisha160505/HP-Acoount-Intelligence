@@ -1,14 +1,23 @@
-import contextlib
+import hashlib
 import logging
 from datetime import UTC, datetime
 
+from app.core.llm import generate_gpt4o_json_completion
 from app.database.mongodb import get_db
 from app.observability import pipeline
+from app.services.dashboard import filings_register
 from app.services.extractors.datasets import (
+    DatasetFileMissing,
     account_display_name,
+    dataset_file_paths,
     find_file_path,
     read_dataset_records,
     requires_local_datasets,
+)
+from app.services.extractors.grounding import (
+    GroundingReport,
+    build_corpus,
+    check_text,
 )
 from app.services.regen import store as widget_store
 
@@ -43,36 +52,94 @@ def _resolve_parent(hier_row: dict | None) -> str:
             or hier_row.get("parent_company_name") or "").strip()
 
 
-def _cross_feature_counts(db, account_id: str) -> dict:
-    """Counts owned by other features, for the dashboard's Quick Stats.
+# --------------------------------------------------------------------------
+# The company profile, as bullets
+# --------------------------------------------------------------------------
+# The client, 27 Sep: "Need to break the below write up in bullets, right now is
+# coming across as a dump of information and hard to read."
+#
+# The write-up is one vendor paragraph - Accenture's runs to 300 words in a
+# single sentence-stack - and no upstream field carries it as parts. So it is
+# reorganised here, once, at extraction: the bullets are stored on the widget
+# and cached on a fingerprint, the same way every other generated field in this
+# codebase is, rather than being made afresh on every page view where nothing
+# would check them before a reader saw them.
+#
+# The model may ONLY reorganise. The paragraph is the sole source, the output is
+# checked against it for invented figures, and a failed check publishes the
+# paragraph rather than a bullet nobody can stand behind.
+SUMMARY_PROMPT_VERSION = 1
 
-    Only a key that genuinely resolves is returned. A count that is missing stays
-    missing, so the card renders a dash - a wrong number here reads as though it
-    had been checked, which is exactly how "100 active urgent signals" (really
-    100 job postings, against 8 real signals) survived on the dashboard.
-    """
-    def widget(key):
-        found = widget_store.get(account_id, key, db=db)
-        if not found or found.get("status") != "available":
-            return None
-        return found.get("data") or {}
+DESCRIPTION_POINTS_MIN = 3
+DESCRIPTION_POINTS_MAX = 5
+# Below this there is nothing to break up, and a two-line description reads
+# worse as a bullet than as a sentence.
+DESCRIPTION_POINTS_MIN_WORDS = 40
 
-    out = {}
+POINTS_SYSTEM = """You reorganise one paragraph about a company into bullets for a sales reader.
 
-    plays = widget("opportunity_narrative_plays")
-    if plays is not None and isinstance(plays.get("opportunity_plays"), list):
-        out["solution_narratives_count"] = len(plays["opportunity_plays"])
+You are NOT writing anything new. Every fact in your bullets must be in the paragraph you are given.
 
-    signals = widget("news_signals_feed")
-    if signals is not None and signals.get("total_signals_count") is not None:
-        with contextlib.suppress(TypeError, ValueError):
-            out["recent_signals_count"] = int(signals["total_signals_count"])
+Rules:
+- Between 3 and 5 bullets. Each one a complete sentence, at most 25 words.
+- Lead each bullet with the specific thing - the business line, the market, the capability - not with the company name.
+- Group related items from the paragraph into one bullet rather than listing everything twice.
+- Copy every number, percentage and date exactly as written. Never add one, and never round.
+- Never add a judgement, an implication for HP, or anything the paragraph does not say.
+- Plain hyphens only. Do not use em dashes.
+- Write in English even when the paragraph is not.
 
-    return out
+Return JSON only: {"points": ["...", "..."]}"""
+
+
+def _description_fingerprint(description: str) -> str:
+    return hashlib.sha256(
+        ("%s|%s" % (SUMMARY_PROMPT_VERSION, description)).encode("utf-8")
+    ).hexdigest()
+
+
+def _description_points(db, account_id: str, description: str,
+                        firmo_row: dict) -> tuple[list, str]:
+    """(bullets, why it is what it is). Cached on the paragraph's fingerprint."""
+    words = len(description.split())
+    if words < DESCRIPTION_POINTS_MIN_WORDS:
+        return [], ("the description is %d words - short enough to read as it is"
+                    % words)
+
+    fingerprint = _description_fingerprint(description)
+    existing = widget_store.get(account_id, "exec_summary_card", db=db) or {}
+    stored = existing.get("data") or {}
+    if (stored.get("business_description_fingerprint") == fingerprint
+            and stored.get("business_description_points")):
+        pipeline.cache_hit("exec_summary_card business bullets")
+        return (stored["business_description_points"],
+                stored.get("business_description_points_basis") or "")
+
+    result = generate_gpt4o_json_completion(
+        POINTS_SYSTEM,
+        "Paragraph:\n%s\n\nReturn JSON only." % description)
+    raw = (result or {}).get("points") or []
+    points = [" ".join(str(p).split()) for p in raw if str(p).strip()]
+    points = points[:DESCRIPTION_POINTS_MAX]
+    if len(points) < DESCRIPTION_POINTS_MIN:
+        return [], "the model returned %d bullet(s); the paragraph is shown instead" % len(points)
+
+    # The paragraph is the only source. A figure that is not in it was invented.
+    ground = build_corpus({"firmographics": [firmo_row]})
+    report = GroundingReport(ground, ["business_description_points"])
+    bad_numbers, _bad_urls = check_text(ground, report, "business_description_points",
+                                        *points)
+    if bad_numbers:
+        pipeline.guardrail(len(bad_numbers), "bullet quotes an unsourced figure",
+                           figures=", ".join(bad_numbers[:3]))
+        return [], ("bullets held back - they quoted %s, which the description "
+                    "does not carry" % ", ".join(bad_numbers[:3]))
+
+    return points, "reorganised from the description; no fact added"
 
 
 @requires_local_datasets(
-    "company_hierarchy", "firmographics", "job_openings", "prospect_contacts",
+    "company_hierarchy", "firmographics", "job_openings",
 )
 @pipeline.feature("executive_dashboard")
 def extract_executive_dashboard(account_id: str) -> list[dict]:
@@ -82,11 +149,16 @@ def extract_executive_dashboard(account_id: str) -> list[dict]:
     firmo_rows = _read_dataset_csv(account_id, "firmographics")
     hier_rows = _read_dataset_csv(account_id, "company_hierarchy")
     job_rows = _read_dataset_csv(account_id, "job_openings")
-    contact_rows = _read_dataset_csv(account_id, "prospect_contacts")
+    # The filings list: the CSV uploaded with the PDFs under compliance_filings.
+    try:
+        filing_files = dataset_file_paths(account_id, "compliance_filings", strict=False)
+    except DatasetFileMissing:
+        filing_files = []
+    index_rows = filings_register.index_rows_from_files(filing_files)
 
     pipeline.step("datasets", "", firmographics=len(firmo_rows),
                   hierarchy=len(hier_rows), jobs=len(job_rows),
-                  contacts=len(contact_rows))
+                  filings_list=len(index_rows))
 
     results = []
 
@@ -109,6 +181,9 @@ def extract_executive_dashboard(account_id: str) -> list[dict]:
         industry_classification = " / ".join(list(dict.fromkeys(ind_parts))) if ind_parts else "N/A"
 
         business_description = (row.get("Business Description") or "").strip()
+        points, points_basis = _description_points(
+            db, account_id, business_description, row)
+        pipeline.step("summary", "%d bullet(s) - %s" % (len(points), points_basis))
 
         # Blank unless the hierarchy sheet names a parent - see _resolve_parent.
         parent_company = _resolve_parent(hier_rows[0] if hier_rows else None)
@@ -122,21 +197,11 @@ def extract_executive_dashboard(account_id: str) -> list[dict]:
             "industry_classification": industry_classification,
             "hq_location": hq_location,
             "parent_company": parent_company,
-            "stakeholders_mapped_count": len(contact_rows),
-            # Counts the dashboard's Quick Stats shows that belong to other
-            # features. They are resolved here, server-side, because the
-            # frontend loads widgets one feature at a time - asking it for
-            # another feature's widget returns nothing, which is how these two
-            # came to be a hardcoded 5 and a mislabelled job-postings count.
-            #
-            # Read from the owning widget rather than recomputed: both are
-            # derived outputs, and the signal count in particular is the result
-            # of a gate (55 raw, 45 rejected, deduped to 8). Recounting the CSV
-            # here would quietly disagree with the feature that owns it.
-            #
-            # Absent when that feature has not run yet, and the card shows a
-            # dash rather than a number.
-            **_cross_feature_counts(db, account_id),
+            # The company profile, as bullets. See _description_points.
+            "business_description_points": points,
+            "business_description_points_basis": points_basis,
+            "business_description_fingerprint":
+                _description_fingerprint(business_description),
         }
 
         summary_payload = {
@@ -146,7 +211,7 @@ def extract_executive_dashboard(account_id: str) -> list[dict]:
             "data_classification": "deterministic",
             "status": "available",
             "data": summary_data,
-            "source_datasets": ["firmographics", "company_hierarchy", "prospect_contacts"],
+            "source_datasets": ["firmographics", "company_hierarchy"],
             "extracted_at": now,
             "updated_at": now
         }
@@ -168,6 +233,13 @@ def extract_executive_dashboard(account_id: str) -> list[dict]:
     results.append(summary_payload)
 
     # 2. exec_key_metrics
+    # Filings on record: filings 1.csv + PredictLeads sec_filings, the client's
+    # definition (opens_1 answer 10), inside the 12-month window. Listed beside
+    # the bands, never in place of them - the reported figures themselves come
+    # from reading the documents (exec_strategic_priorities), not from here.
+    filings = filings_register.register(index_rows)
+    filings_sources = ["compliance_filings"] if index_rows else []
+
     if firmo_rows and len(firmo_rows) > 0:
         row = firmo_rows[0]
         emp_count = (row.get("Number Of Employees Range") or row.get("number_of_employees_range") or "").strip()
@@ -175,7 +247,8 @@ def extract_executive_dashboard(account_id: str) -> list[dict]:
 
         metrics_data = {
             "employee_count": emp_count if emp_count else "N/A",
-            "revenue": revenue if revenue else "N/A"
+            "revenue": revenue if revenue else "N/A",
+            "filings_on_record": filings,
         }
 
         metrics_payload = {
@@ -185,7 +258,7 @@ def extract_executive_dashboard(account_id: str) -> list[dict]:
             "data_classification": "deterministic",
             "status": "available",
             "data": metrics_data,
-            "source_datasets": ["firmographics"],
+            "source_datasets": ["firmographics", *filings_sources],
             "extracted_at": now,
             "updated_at": now
         }
