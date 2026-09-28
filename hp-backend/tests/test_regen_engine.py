@@ -164,6 +164,12 @@ class Harness:
 @pytest.fixture
 def h(db, tmp_path, monkeypatch):
     monkeypatch.setattr(jobs, "GATE_RETRY_SECONDS", 0)
+    # Anything a producer reads outside what the engine pinned (an undeclared
+    # dataset, deliberately, in one test) goes through the app's own
+    # connection. Point that at this test's database too - otherwise it reaches
+    # whatever MongoDB the machine has, and on CI, which has none, times out.
+    from app.database import mongodb
+    monkeypatch.setattr(mongodb.db_instance, "db", db)
     return Harness(db, tmp_path)
 
 
