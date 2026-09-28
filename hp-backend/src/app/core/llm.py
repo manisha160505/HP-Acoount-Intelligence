@@ -2,7 +2,7 @@ import json
 import logging
 import time
 
-from openai import OpenAI
+from openai import APIStatusError, OpenAI, RateLimitError
 
 from app.config.settings import settings
 from app.observability import pipeline
@@ -20,6 +20,34 @@ def get_openai_client() -> OpenAI | None:
         logger.warning("%s is not set in environment or settings.", settings.llm_api_key_name)
         return None
     return OpenAI(**settings.llm_client_kwargs)
+
+
+# Waits before each retry of a 429 or 5xx, after the SDK's own quick retries.
+# Vertex's shared quota answered 429 for minutes at a time during a full
+# regeneration (28 Sep); the SDK's retries give up within ~2 s, which turned a
+# busy minute into a DEGRADED widget.
+RATE_LIMIT_WAITS = (5, 15, 30, 60)
+
+
+def _retryable(exc) -> bool:
+    return isinstance(exc, RateLimitError) or (
+        isinstance(exc, APIStatusError) and exc.status_code >= 500)
+
+
+def create_completion(client, **kwargs):
+    """The SDK's chat completion call with the provider's request options and
+    rate-limit retries. Every model call goes through here."""
+    kwargs = {**settings.llm_request_extra, **kwargs}
+    for wait in RATE_LIMIT_WAITS:
+        try:
+            return client.chat.completions.create(**kwargs)
+        except Exception as exc:
+            if not _retryable(exc):
+                raise
+            logger.info("LLM answered %s - retrying in %ds",
+                        getattr(exc, "status_code", "error"), wait)
+            time.sleep(wait)
+    return client.chat.completions.create(**kwargs)
 
 
 def _parse_json(content: str) -> dict | None:
@@ -75,8 +103,8 @@ def generate_chat_completion(system_prompt: str, messages: list,
 
     model_name = settings.chat_model
     try:
-        response = client.chat.completions.create(
-            model=model_name, messages=turns, temperature=temperature)
+        response = create_completion(
+            client, model=model_name, messages=turns, temperature=temperature)
         text = (response.choices[0].message.content or "").strip() or None
         run_context.note_llm(failed=text is None)
         return text
@@ -118,8 +146,8 @@ def stream_chat_completion(system_prompt: str, messages: list,
 
     model_name = settings.chat_model
     try:
-        stream = client.chat.completions.create(
-            model=model_name, messages=turns, temperature=temperature,
+        stream = create_completion(
+            client, model=model_name, messages=turns, temperature=temperature,
             stream=True)
         for chunk in stream:
             if not chunk.choices:
@@ -143,7 +171,8 @@ def generate_gpt4o_json_completion(system_prompt: str, user_prompt: str) -> dict
     model_name = settings.chat_model
     started = time.monotonic()
     try:
-        response = client.chat.completions.create(
+        response = create_completion(
+            client,
             model=model_name,
             response_format={"type": "json_object"},
             messages=[

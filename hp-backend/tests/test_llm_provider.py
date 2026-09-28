@@ -105,3 +105,35 @@ def test_regen_cancels_job_for_removed_node(monkeypatch):
     monkeypatch.setattr(jobs, "finish", fake_finish)
     out = eng.run_job({"account_id": "a1", "node_id": "messaging_context", "fence": 1})
     assert out["outcome"] == "cancelled" and finished == [jobs.CANCELLED]
+
+
+def test_gemini_thinking_is_off_by_default_and_configurable():
+    extra = _settings(LLM_PROVIDER="vertex", VERTEX_PROJECT="1").llm_request_extra
+    assert extra["extra_body"]["extra_body"]["google"]["thinking_config"] == {"thinking_budget": 0}
+    assert _settings(GEMINI_THINKING_BUDGET=-1).llm_request_extra == {}
+    assert _settings(LLM_PROVIDER="openai").llm_request_extra == {}
+
+
+def test_create_completion_waits_out_rate_limits(monkeypatch):
+    import httpx
+    from openai import RateLimitError
+
+    from app.core import llm
+
+    monkeypatch.setattr(llm, "RATE_LIMIT_WAITS", (0, 0))
+    monkeypatch.setattr(llm.settings, "LLM_PROVIDER", "vertex")
+    sent = []
+
+    class _Completions:
+        def create(self, **kw):
+            sent.append(kw)
+            if len(sent) < 3:
+                raise RateLimitError("busy", response=httpx.Response(
+                    429, request=httpx.Request("POST", "http://x")), body=None)
+            return "ok"
+
+    class _Client:
+        chat = type("C", (), {"completions": _Completions()})()
+
+    assert llm.create_completion(_Client(), model="m", messages=[]) == "ok"
+    assert len(sent) == 3 and "extra_body" in sent[-1]

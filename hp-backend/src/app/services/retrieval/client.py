@@ -138,8 +138,8 @@ async def _llm_model_func(prompt, system_prompt=None, history_messages=None,
 
     def _call(with_temperature: bool):
         extra = {"temperature": 0} if with_temperature else {}
-        return client.chat.completions.create(
-            model=model, messages=messages, **extra)
+        from app.core.llm import create_completion
+        return create_completion(client, model=model, messages=messages, **extra)
 
     try:
         response = await asyncio.to_thread(_call, model not in _NO_TEMPERATURE)
