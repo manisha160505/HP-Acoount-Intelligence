@@ -523,7 +523,22 @@ def _filing_documents(account_id, index, company) -> list:
     `account_data_files` - never a path on one machine. An account with no
     filings simply contributes no documents here, and the dashboard falls back
     to what the CSVs carry.
+
+    The client's filings are filings 1.csv plus PredictLeads sec_filings
+    (opens_1 answer 10). Both are PDFs in this one dataset: the split writes
+    each PredictLeads filing's text as a PDF beside the downloaded ones, and
+    the list of all of them (`_filings_index.csv`) rides along as the one CSV,
+    which is skipped here and listed by the Executive Dashboard.
+
+    PredictLeads PDFs join the strategy narrative but NOT the financial claims.
+    The claims reader was built and checked on the companies' own PDF tables;
+    on PredictLeads' text of SEC HTML it binds sentence fragments as metrics
+    (KT Corp, ORIX) and reads a "change" column as a second value for the same
+    period (Sony). A reported figure on the dashboard must be one the company
+    printed for that period, so these stay out until the reader is validated
+    on that format.
     """
+    from app.services.dashboard import filings_register
     from app.services.extractors.datasets import DatasetFileMissing, dataset_file_paths
     from app.services.retrieval import financials, pdf
 
@@ -531,6 +546,8 @@ def _filing_documents(account_id, index, company) -> list:
         files = dataset_file_paths(account_id, "compliance_filings", strict=False)
     except DatasetFileMissing:
         return []
+    files = [(name, path) for name, path in files
+             if str(name).lower().endswith(".pdf")]
     if not files:
         return []
 
@@ -542,8 +559,12 @@ def _filing_documents(account_id, index, company) -> list:
             logger.exception("retrieval: cannot read filing %s", original_name)
             continue
         extracted["file"] = original_name
-        claims, stats = financials.document_claims(extracted)
         extractions.append(extracted)
+        if filings_register.is_predictleads_file(original_name):
+            logger.info("retrieval: %s - PredictLeads text filing, narrative only",
+                        original_name)
+            continue
+        claims, stats = financials.document_claims(extracted)
         all_claims.extend(claims)
         logger.info("retrieval: %s - %d page(s) kept, %d claim(s), %d page(s) "
                     "excluded", original_name, len(extracted["pages"]),

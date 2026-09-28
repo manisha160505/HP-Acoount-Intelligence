@@ -546,8 +546,8 @@ FEATURE_MAPPINGS = {
                 "display_name": "Website Tech Stack",
                 "purpose": "CMS, SSL, Web Server, Hosting, CDN, Framework, Analytics",
                 "dataset_key": "webstack",
-                "source_sheet": "5_Tech_Breakdown",
-                "source_column": "Cms, Ssl, Web Server, Hosting, Cdn, Framework, Analytics",
+                "source_sheet": "5_Tech_Breakdown (merged into webstack)",
+                "source_column": "Tech Breakdown - Cms, - Ssl, - Web Server, - Hosting, - Cdn, - Framework, - Analytics",
                 "data_type": "DETERMINISTIC"
             }
         ]
@@ -698,8 +698,8 @@ FEATURE_MAPPINGS = {
                 "display_name": "Webstack Context",
                 "purpose": "Web infrastructure stack",
                 "dataset_key": "webstack",
-                "source_sheet": "5_Tech_Breakdown",
-                "source_column": "Cms, Ssl, Web Server, Hosting, Cdn, Framework, Analytics",
+                "source_sheet": "5_Tech_Breakdown (merged into webstack)",
+                "source_column": "Tech Breakdown - Cms, - Ssl, - Web Server, - Hosting, - Cdn, - Framework, - Analytics",
                 "data_type": "DETERMINISTIC"
             },
             {

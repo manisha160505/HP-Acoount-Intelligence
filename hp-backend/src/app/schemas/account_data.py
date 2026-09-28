@@ -153,10 +153,16 @@ DATASET_REGISTRY = {
     # Multi-file because a filing history is several documents, and because
     # replacing one of them must not disturb the rest. Rows do not apply: it is
     # measured in pages, and `services/retrieval/pdf.py` does the reading.
+    #
+    # The one CSV allowed here is the filings list, `_filings_index.csv`: the
+    # client's filings are filings 1.csv plus PredictLeads sec_filings (opens_1
+    # answer 10), and the split writes both into that one list, in filings
+    # 1.csv's columns, with a PDF of each PredictLeads filing's text beside the
+    # downloaded PDFs. The Executive Dashboard lists it; the PDF reader skips it.
     "compliance_filings": {
         "display_name": "Compliance Filings",
         "type": "multi_file",
-        "allowed_extensions": [".pdf"]
+        "allowed_extensions": [".pdf", ".csv"]
     }
 }
 

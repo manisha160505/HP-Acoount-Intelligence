@@ -4,8 +4,11 @@ from datetime import UTC, datetime
 
 from app.database.mongodb import get_db
 from app.observability import pipeline
+from app.services.dashboard import filings_register
 from app.services.extractors.datasets import (
+    DatasetFileMissing,
     account_display_name,
+    dataset_file_paths,
     find_file_path,
     read_dataset_records,
     requires_local_datasets,
@@ -83,10 +86,16 @@ def extract_executive_dashboard(account_id: str) -> list[dict]:
     hier_rows = _read_dataset_csv(account_id, "company_hierarchy")
     job_rows = _read_dataset_csv(account_id, "job_openings")
     contact_rows = _read_dataset_csv(account_id, "prospect_contacts")
+    # The filings list: the CSV uploaded with the PDFs under compliance_filings.
+    try:
+        filing_files = dataset_file_paths(account_id, "compliance_filings", strict=False)
+    except DatasetFileMissing:
+        filing_files = []
+    index_rows = filings_register.index_rows_from_files(filing_files)
 
     pipeline.step("datasets", "", firmographics=len(firmo_rows),
                   hierarchy=len(hier_rows), jobs=len(job_rows),
-                  contacts=len(contact_rows))
+                  contacts=len(contact_rows), filings_list=len(index_rows))
 
     results = []
 
@@ -168,6 +177,13 @@ def extract_executive_dashboard(account_id: str) -> list[dict]:
     results.append(summary_payload)
 
     # 2. exec_key_metrics
+    # Filings on record: filings 1.csv + PredictLeads sec_filings, the client's
+    # definition (opens_1 answer 10), inside the 12-month window. Listed beside
+    # the bands, never in place of them - the reported figures themselves come
+    # from reading the documents (exec_strategic_priorities), not from here.
+    filings = filings_register.register(index_rows)
+    filings_sources = ["compliance_filings"] if index_rows else []
+
     if firmo_rows and len(firmo_rows) > 0:
         row = firmo_rows[0]
         emp_count = (row.get("Number Of Employees Range") or row.get("number_of_employees_range") or "").strip()
@@ -175,7 +191,8 @@ def extract_executive_dashboard(account_id: str) -> list[dict]:
 
         metrics_data = {
             "employee_count": emp_count if emp_count else "N/A",
-            "revenue": revenue if revenue else "N/A"
+            "revenue": revenue if revenue else "N/A",
+            "filings_on_record": filings,
         }
 
         metrics_payload = {
@@ -185,7 +202,7 @@ def extract_executive_dashboard(account_id: str) -> list[dict]:
             "data_classification": "deterministic",
             "status": "available",
             "data": metrics_data,
-            "source_datasets": ["firmographics"],
+            "source_datasets": ["firmographics", *filings_sources],
             "extracted_at": now,
             "updated_at": now
         }

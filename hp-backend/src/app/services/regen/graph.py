@@ -86,6 +86,10 @@ NODES = (
                    "firmographics", "hp_category_intent"),
          config=("tech_confidence",), knowledge=("rulebook", "case_studies"),
          llm=True,
+         # 2: webstack_breakdown reads the Tech_Breakdown columns merged into
+         # webstack; technographic_map lists hp_category_intent's Related
+         # Technologies as researched.
+         logic_version=2,
          logic_refs=("app.services.hp.map_narrative:MAP_NARRATIVE_PROMPT_VERSION",),
          run=f"{_P}:tech_core"),
     Node("objection", "objection_playbook",
@@ -152,9 +156,12 @@ NODES = (
          datasets=("firmographics", "company_hierarchy", "job_openings",
                    "prospect_contacts", "technographics", "webstack",
                    "intent_score", "hp_category_intent", "extended_company",
-                   "google_news", "news_events"),
+                   "google_news", "news_events", "compliance_filings"),
          upstream=("news", "opp_core"),
          config=("urgency",),
+         # 2: exec_key_metrics lists the filings on record (the filings list
+         # CSV uploaded with the PDFs under compliance_filings).
+         logic_version=2,
          run=f"{_P}:exec_core"),
     Node("evaluator_personas", "message_evaluator",
          widgets=("evaluator_persona_context",),
@@ -172,7 +179,10 @@ NODES = (
          datasets=("compliance_filings",),
          upstream=("exec_core", "news", "opp_triggers", "stakeholder_roster",
                    "tech_core", "intent"),
-         llm=True, run=f"{_P}:index_executive_dashboard"),
+         llm=True,
+         # 2: PredictLeads filings (PDFs written from their text) join the
+         # narrative but not the financial claims.
+         logic_version=2, run=f"{_P}:index_executive_dashboard"),
     Node("idx_content_messaging", "content_messaging", kind=INDEX,
          upstream=("messaging_context", "opp_core", "news", "tech_core",
                    "tech_recs"),

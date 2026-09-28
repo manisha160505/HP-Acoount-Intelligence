@@ -1449,6 +1449,51 @@ export default function UserDashboardPage() {
                             A period-on-period move is shown only where the earlier period was itself reported.
                           </p>
                         )}
+
+                        {/* Filings on record: filings.csv + PredictLeads
+                            sec_filings, the client's definition, inside the
+                            12-month window. A list of documents with their
+                            links - the figures above are what was read from
+                            them. */}
+                        {(() => {
+                          const fo: any = metricsData?.filings_on_record;
+                          const list: any[] = fo?.filings || [];
+                          if (!fo || (fo.total_on_record ?? 0) === 0) return null;
+                          const left = fo.total_on_record - fo.in_window;
+                          return (
+                            <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-4 space-y-2">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                                  Filings on record
+                                </span>
+                                <span className="text-[10px] text-slate-400">
+                                  {fo.in_window} in the last 12 months{left > 0 ? ` · ${left} older, undated or without a link` : ''}
+                                </span>
+                              </div>
+                              {list.length === 0 ? (
+                                <p className="text-xs text-slate-400 italic">No filing falls inside the last 12 months.</p>
+                              ) : (
+                                <ul className="divide-y divide-slate-100">
+                                  {list.slice(0, 12).map((f: any, i: number) => (
+                                    <li key={f.url || i} className="py-1.5 flex items-start justify-between gap-3 text-xs">
+                                      <a href={f.url} target="_blank" rel="noopener noreferrer"
+                                         className="text-slate-700 hover:text-hp-navy hover:underline break-words min-w-0">
+                                        {f.title || f.document_type || 'Filing'}
+                                        {f.reporting_period ? <span className="text-slate-400"> · {f.reporting_period}</span> : null}
+                                      </a>
+                                      <span className="text-[10px] text-slate-400 whitespace-nowrap flex-shrink-0">
+                                        {f.filed_on} · {f.source === 'filings.csv' ? 'Filings list' : 'PredictLeads'}
+                                      </span>
+                                    </li>
+                                  ))}
+                                </ul>
+                              )}
+                              {list.length > 12 && (
+                                <p className="text-[10px] text-slate-400">and {list.length - 12} more</p>
+                              )}
+                            </div>
+                          );
+                        })()}
                       </div>
 
                       {/* Section 4: URGENCY SCORE & QUICK STATS (Two-Column Layout) */}
@@ -4718,6 +4763,30 @@ export default function UserDashboardPage() {
                               </div>
                             )}
 
+                            {/* Related Technologies from the HP category
+                                intent file. Researched, not detected: never
+                                counted above or mapped into a card. Where the
+                                account has no technographics this is the only
+                                technology evidence, and the note says so. */}
+                            {(mapData.researched_technologies || []).length > 0 && (
+                              <div className="rounded-xl border border-dashed border-slate-300 bg-white px-4 py-3 space-y-1.5">
+                                <p className="text-[10px] font-mono font-extrabold uppercase tracking-widest text-slate-400">
+                                  Researched technologies &middot; intent, not detected
+                                </p>
+                                {(mapData.researched_technologies || []).map((r: any) => (
+                                  <p key={r.hp_category} className="text-xs text-slate-600 leading-relaxed">
+                                    <span className="font-semibold text-slate-700">{r.hp_category}:</span>{' '}
+                                    {(r.technologies || []).join(' · ')}
+                                  </p>
+                                ))}
+                                <p className="text-[10px] text-slate-400 leading-relaxed">
+                                  {mapData.researched_technologies_only
+                                    ? 'No technographics export is on file for this account, so these research signals are the only technology evidence. They show what was researched, not what is installed.'
+                                    : 'From the HP category intent file. They show what was researched, not what is installed, and are not counted in the figures above.'}
+                                </p>
+                              </div>
+                            )}
+
                             {/* 4 Stat Cards */}
                             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
                               <div className="bg-slate-50/80 p-3.5 rounded-xl border border-slate-200 space-y-1">
@@ -5008,6 +5077,58 @@ export default function UserDashboardPage() {
                             .map((b: any) => `rule ${b.rule_id} (${b.blocked})`).join('; ')}
                         </div>
                       )}
+
+                      {/* Website stack: Explorium WebStack (totals, spend) and
+                          Tech_Breakdown (the same stack grouped by what each
+                          technology does). Both are the client's named
+                          technographic sources; page metadata is folded away. */}
+                      {webstackWidget?.status === 'available' && (() => {
+                        const breakdown: any[] = webstackData.breakdown || [];
+                        const infra = breakdown.filter((c: any) => !c.page_metadata);
+                        const meta = breakdown.filter((c: any) => c.page_metadata);
+                        return (
+                          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 space-y-3">
+                            <div className="flex items-center justify-between gap-2 border-b border-slate-100 pb-2">
+                              <h4 className="text-xs font-extrabold uppercase tracking-wider text-slate-700">Website stack</h4>
+                              <span className="text-[10px] text-slate-400">
+                                {totalWebTechCount} web technologies · {premiumTechCount} premium · est. spend {webSpendEst}
+                              </span>
+                            </div>
+                            {infra.length > 0 ? (
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2">
+                                {infra.map((c: any) => (
+                                  <div key={c.category} className="text-xs">
+                                    <span className="font-semibold text-slate-700">{c.category}</span>
+                                    <span className="text-slate-400"> ({c.technologies.length})</span>
+                                    <p className="text-slate-600 leading-relaxed">
+                                      {c.technologies.slice(0, 10).join(' · ')}
+                                      {c.technologies.length > 10 ? ` · +${c.technologies.length - 10} more` : ''}
+                                    </p>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <p className="text-xs text-slate-600 leading-relaxed">
+                                {webstackTechs.slice(0, 40).join(' · ')}
+                                {webstackTechs.length > 40 ? ` · +${webstackTechs.length - 40} more` : ''}
+                              </p>
+                            )}
+                            {meta.length > 0 && (
+                              <details className="text-[11px] text-slate-500">
+                                <summary className="cursor-pointer select-none">Page metadata ({meta.length} categories)</summary>
+                                {meta.map((c: any) => (
+                                  <p key={c.category} className="mt-1">
+                                    <span className="font-semibold">{c.category}:</span> {c.technologies.join(' · ')}
+                                  </p>
+                                ))}
+                              </details>
+                            )}
+                            <p className="text-[10px] text-slate-400">
+                              Source: Explorium WebStack{breakdown.length > 0 ? ' and Tech_Breakdown' : ''}. Technologies detected on the company website.
+                            </p>
+                          </div>
+                        );
+                      })()}
 
                         </div>
 

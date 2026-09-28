@@ -78,8 +78,11 @@ def test_logic_refs_resolve_to_real_constants():
 
 def test_filings_upload_touches_only_the_dashboard_chain():
     affected = DEFAULT.affected_by_dataset("compliance_filings")
-    assert affected == ["idx_executive_dashboard", "exec_priorities",
-                        "strategy_snapshot", "idx_strategy"]
+    # exec_core lists the filings (the filings list CSV rides with the PDFs),
+    # so the exec chain below it re-runs too.
+    assert affected == ["exec_core", "tech_recs", "idx_executive_dashboard",
+                        "idx_content_messaging", "exec_priorities",
+                        "messaging_pillars", "strategy_snapshot", "idx_strategy"]
     # And nothing unrelated.
     for untouched in ("objection", "intent", "tech_core", "news", "stakeholder_roster"):
         assert untouched not in affected

@@ -83,6 +83,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import io
 import json
 import re
@@ -234,7 +235,15 @@ DATASET_PLAN = {
     "subsidiaries":         {"source": EXPLORIUM, "sheet": "2_Subsidiaries"},
     "funding":              {"source": EXPLORIUM, "sheet": "3_Funding_Overview"},
     "technographics":       {"source": EXPLORIUM, "sheet": "4_Technographics"},
-    "webstack":             {"source": EXPLORIUM, "sheet": "5_Webstack"},
+    # DEC-019 / opens_1 answer 10: WebStack AND Tech_Breakdown are the
+    # technographic sources. Both are one row per company about the same
+    # website, so Tech_Breakdown's category columns (Cms, Hosting, Ssl ...) are
+    # written onto the webstack row under TECH_BREAKDOWN_PREFIX rather than as
+    # a dataset of their own - the prefix keeps them apart from 5_Webstack's
+    # own columns (both sheets have "Parked").
+    "webstack":             {"source": EXPLORIUM, "sheet": "5_Webstack",
+                             "merge_sheet": "5_Tech_Breakdown",
+                             "merge_prefix": "Tech Breakdown - "},
     "workforce_trends":     {"source": EXPLORIUM, "sheet": "6_Workforce_Trends"},
     "company_ratings":      {"source": EXPLORIUM, "sheet": "7_Company_Ratings"},
     "website_traffic":      {"source": EXPLORIUM, "sheet": "8_Website_Traffic"},
@@ -299,7 +308,6 @@ REFERENCE_PLAN = {
     "explorium_funding_rounds":  {"source": EXPLORIUM, "sheet": "3_Funding_Rounds"},
     "explorium_advisors":        {"source": EXPLORIUM, "sheet": "3_Advisors"},
     "explorium_investors":       {"source": EXPLORIUM, "sheet": "3_Investors"},
-    "explorium_tech_breakdown":  {"source": EXPLORIUM, "sheet": "5_Tech_Breakdown"},
     # Explorium's own hiring signal: department-level hiring events, joins and
     # role changes. 45 accounts have no PredictLeads job openings at all; this
     # is the nearest thing we hold for them.
@@ -308,9 +316,6 @@ REFERENCE_PLAN = {
     # PredictLeads sheets the registry does not model
     "predictleads_financing_events":    {"source": PREDICTLEADS, "sheet": "financing_events"},
     "predictleads_products":            {"source": PREDICTLEADS, "sheet": "products"},
-    # Named in the client's C1 answer: filings = filings 1.csv plus these,
-    # merged on domain.
-    "predictleads_sec_filings":         {"source": PREDICTLEADS, "sheet": "sec_filings"},
     "predictleads_github_repositories": {"source": PREDICTLEADS, "sheet": "github_repositories"},
 
     # Vendor QA sheets, keyed by domain so they split per account: what the
@@ -1596,15 +1601,26 @@ def extract_dataset(account: Account, dataset_key: str, spec: dict,
             return None, None, f"sheet '{sheet}' not in the Explorium workbook"
         except Exception as exc:
             return None, None, f"could not read sheet '{sheet}': {exc}"
+        merge = _explorium_merge_sheet(account, spec)
         if df.empty:
             # Explorium writes a single "No data available" column instead of
             # the real header when it has nothing. Passing that through would
             # make the placeholder look like a schema, so the file is left
             # genuinely empty and the real columns fill in when data arrives.
             cols = list(df.columns)
+            if merge is not None:
+                # The merged sheet alone still describes the account.
+                return merge.reset_index(drop=True), list(merge.columns), ""
             if len(cols) == 1 and "no data" in str(cols[0]).lower():
                 return None, [], f"sheet '{sheet}' reports no data available"
             return None, cols, f"sheet '{sheet}' is present but empty"
+        if merge is not None:
+            if len(df) != 1 or len(merge) != 1:
+                raise ValueError(f"{account.slug}: cannot merge '{spec['merge_sheet']}' "
+                                 f"onto '{sheet}' - expected one row each, got "
+                                 f"{len(df)} and {len(merge)}")
+            df = pd.concat([df.reset_index(drop=True), merge.reset_index(drop=True)],
+                           axis=1)
         return df, list(df.columns), ""
 
     if source == PREDICTLEADS:
@@ -1655,6 +1671,22 @@ def extract_dataset(account: Account, dataset_key: str, spec: dict,
         return subset, header, ""
 
     return None, None, f"unknown source '{source}'"
+
+
+def _explorium_merge_sheet(account: Account, spec: dict) -> pd.DataFrame | None:
+    """The sheet `spec["merge_sheet"]` with its columns prefixed, or None when
+    the spec has none or the sheet holds nothing."""
+    extra = spec.get("merge_sheet")
+    if not extra or account.explorium_file is None:
+        return None
+    try:
+        frame = pd.read_excel(account.explorium_file, sheet_name=extra)
+    except ValueError:
+        return None
+    cols = list(frame.columns)
+    if frame.empty or (len(cols) == 1 and "no data" in str(cols[0]).lower()):
+        return None
+    return frame.rename(columns={c: f"{spec['merge_prefix']}{c}" for c in cols})
 
 
 def write_dataset(out_dir: Path, dataset_key: str, df, header,
@@ -1819,7 +1851,7 @@ def process_account(account: Account, sources: SourceData,
     if not dry_run:
         write_reference_readme(out_dir)
 
-    manifest["filings_index"] = write_filings_index(out_dir, account.slug, dry_run)
+    manifest["filings_index"] = write_filings_index(out_dir, account, sources, dry_run)
     manifest["account"] = account_identity(account)
 
     if not dry_run:
@@ -1923,26 +1955,177 @@ def write_reference_readme(out_dir: Path):
     (ref_dir / "README.txt").write_text("\n".join(lines) + "\n")
 
 
-def write_filings_index(out_dir: Path, slug: str, dry_run: bool) -> dict:
-    """This account's rows from filings 1.csv, into compliance_filings/."""
-    frame = FILINGS_BY_SLUG.get(slug)
+# The client's filings are filings 1.csv PLUS PredictLeads sec_filings
+# (opens_1 answer 10, opens_2 item 11). Both go into the one list,
+# compliance_filings/_filings_index.csv, in filings 1.csv's own columns, and
+# every PredictLeads filing's text (its `document` column) is written as a PDF
+# beside the downloaded ones - so compliance_filings is the single place for an
+# account's filings and the backend reads it the one way it reads any filing.
+PREDICTLEADS_FILING_PREFIX = "predictleads_sec_"
+PREDICTLEADS_DOWNLOAD_STATUS = "GENERATED_FROM_TEXT"
+PREDICTLEADS_CRAWL_ROUTE = "PREDICTLEADS_SEC_FILINGS"
+# Punctuation outside the PDF base font, mapped so no text is lost. These are
+# the only characters above U+00FF in the 122 filings delivered (28 Sep).
+_PDF_ASCII = str.maketrans({
+    "\u2014": "-", "\u2013": "-", "\u2015": "-", "\u2010": "-",
+    "\u2019": "'", "\u2018": "'", "\u201c": '"', "\u201d": '"',
+    "\u2610": "[ ]", "\u2612": "[X]", "\u2611": "[X]", "\u2022": "*",
+    "\u2020": "+", "\u220e": "", "\u203b": "*", "\u2192": "->", "\u30fb": "*",
+    "\u0308": "",
+})
+_PDF_LINES_PER_PAGE = 70
+_PDF_WRAP = 118
+
+
+def _filing_text_lines(markdown: str) -> list[str]:
+    """PredictLeads' markdown as plain lines: emphasis marks dropped, table
+    rows kept as cells separated by two spaces (how a PDF table row reads back
+    after text extraction), long lines wrapped."""
+    import textwrap
+    out = []
+    for line in str(markdown or "").translate(_PDF_ASCII).splitlines():
+        line = line.replace("**", "").replace("__", "")
+        if re.fullmatch(r"\s*\|?[\s:|-]+\|?\s*", line) and "-" in line:
+            continue
+        if "|" in line:
+            line = "  ".join(c.strip() for c in line.strip().strip("|").split("|") if c.strip())
+        line = re.sub(r"^#+\s*", "", line).rstrip()
+        line = "".join(ch if ord(ch) < 256 else "?" for ch in line)
+        out.extend(textwrap.wrap(line, _PDF_WRAP) or [""])
+    while out and not out[-1]:
+        out.pop()
+    return out
+
+
+def _filing_pdf(title: str, lines: list[str]) -> bytes:
+    """A plain text PDF. Fixed metadata and no random id, so the same text
+    always gives the same bytes - the split's idempotency check and the
+    backend's content-addressed storage both depend on that."""
+    import pymupdf
+    doc = pymupdf.open()
+    for i in range(0, max(len(lines), 1), _PDF_LINES_PER_PAGE):
+        page = doc.new_page(width=595, height=842)
+        page.insert_text((36, 40), "\n".join(lines[i:i + _PDF_LINES_PER_PAGE]),
+                         fontsize=8, fontname="helv")
+    doc.set_metadata({"title": title, "author": "PredictLeads sec_filings",
+                      "producer": "split_account_data.py",
+                      "creator": "split_account_data.py",
+                      "creationDate": "D:20260101000000", "modDate": "D:20260101000000"})
+    data = doc.tobytes(garbage=4, deflate=True, no_new_id=True)
+    doc.close()
+    return data
+
+
+def _predictleads_filing_rows(account: Account, sources: SourceData,
+                              columns: list[str]) -> tuple[list[dict], dict]:
+    """(index rows, {pdf filename: bytes}) for this account's sec_filings."""
+    df, _header, _reason = extract_dataset(
+        account, "sec_filings", {"source": PREDICTLEADS, "sheet": "sec_filings"}, sources)
+    if df is None or df.empty:
+        return [], {}
+    master = account.master or {}
+    rows, pdfs, used = [], {}, set()
+    for _, r in df.iterrows():
+        def v(key):
+            val = r.get(key, "")
+            return "" if pd.isna(val) else str(val).strip()
+        filed = v("filed_at")[:10]
+        form = v("form_type") or "filing"
+        url = v("url") or v("source_url")
+        name = f"{PREDICTLEADS_FILING_PREFIX}{slugify(form).lower()}_{filed or 'undated'}"
+        stem, n = name, 2
+        while name in used:
+            name = f"{stem}_{n}"
+            n += 1
+        used.add(name)
+        filename = f"{name}.pdf"
+        title = f"{account.name} Form {form}" + (f" filed {filed}" if filed else "")
+        sha, size = "", ""
+        lines = _filing_text_lines(v("document"))
+        if lines:
+            data = _filing_pdf(title, [title, url, ""] + lines)
+            pdfs[filename] = data
+            sha, size = hashlib.sha256(data).hexdigest(), str(len(data))
+        row = {c: "" for c in columns}
+        row.update({
+            "company": account.name,
+            "country": master.get("country", ""),
+            "sales_territory_name": master.get("sales_territory_name", ""),
+            "global_parent": master.get("global_parent", ""),
+            "account_type": master.get("account_type", ""),
+            "merge_group_id": master.get("merge_group_id", ""),
+            "domain": account.domain or "",
+            "listing_status": "LISTED",
+            "likely_exchange": "SEC EDGAR",
+            "crawl_route": PREDICTLEADS_CRAWL_ROUTE,
+            "document_title": title,
+            "document_type": f"SEC_FORM_{form}",
+            "publication_date": filed,
+            "source_type": "PREDICTLEADS",
+            "source_page_url": v("source_url"),
+            "document_url": url,
+            "local_path": filename if lines else "",
+            "file_size": size,
+            "sha256": sha,
+            "download_status": PREDICTLEADS_DOWNLOAD_STATUS if lines else "NO_TEXT",
+            "crawl_timestamp": v("retrieved_at"),
+            "notes": ("PredictLeads sec_filings; PDF written from its document text, "
+                      "which the vendor's Excel export caps at 32,767 characters"),
+        })
+        rows.append(row)
+    return rows, pdfs
+
+
+def write_filings_index(out_dir: Path, account: Account, sources: SourceData,
+                        dry_run: bool) -> dict:
+    """This account's filings: rows of filings 1.csv plus PredictLeads
+    sec_filings, into compliance_filings/_filings_index.csv, with a PDF of each
+    PredictLeads filing's text beside the downloaded PDFs."""
+    frame = FILINGS_BY_SLUG.get(account.slug)
+    base = sources.filings_index()
+    columns = list(base.columns) if base is not None else []
+    if frame is not None and "matched_by" in frame.columns and "matched_by" not in columns:
+        columns.append("matched_by")
+    pl_rows, pdfs = _predictleads_filing_rows(account, sources, columns)
+
     info = {"rows": 0, "documents_with_url": 0, "file": None,
-            "source": " + ".join(str(p.relative_to(REPO_ROOT)) for p in
-                                 [FILINGS_INDEX_FILE, *FILINGS_SUPPLEMENT_FILES]
-                                 if p.exists())}
-    target = out_dir / "compliance_filings" / "_filings_index.csv"
-    if frame is None or frame.empty:
+            "filings_csv_rows": 0 if frame is None else int(len(frame)),
+            "predictleads_rows": len(pl_rows), "predictleads_pdfs": len(pdfs),
+            "source": " + ".join([*(str(p.relative_to(REPO_ROOT)) for p in
+                                    [FILINGS_INDEX_FILE, *FILINGS_SUPPLEMENT_FILES]
+                                    if p.exists()),
+                                  "predictleads sec_filings"])}
+    folder = out_dir / "compliance_filings"
+    target = folder / "_filings_index.csv"
+
+    if not dry_run and folder.exists():
+        # A PredictLeads PDF from an earlier run whose filing is gone is removed,
+        # so the folder never holds a filing the sources no longer carry.
+        for old in folder.glob(f"{PREDICTLEADS_FILING_PREFIX}*.pdf"):
+            if old.name not in pdfs:
+                old.unlink()
+
+    parts = []
+    if frame is not None and not frame.empty:
+        parts.append(frame.reindex(columns=columns, fill_value=""))
+    if pl_rows:
+        parts.append(pd.DataFrame(pl_rows, columns=columns))
+    if not parts:
         if not dry_run and target.exists():
             target.unlink()
         return info
-    info["rows"] = int(len(frame))
-    if "document_url" in frame.columns:
-        info["documents_with_url"] = int(
-            frame["document_url"].astype(str).str.startswith("http").sum())
+    merged = pd.concat(parts, ignore_index=True)
+    info["rows"] = int(len(merged))
+    info["documents_with_url"] = int(
+        merged["document_url"].astype(str).str.startswith("http").sum())
     info["file"] = "compliance_filings/_filings_index.csv"
     if not dry_run:
-        target.parent.mkdir(exist_ok=True)
-        frame.to_csv(target, index=False, encoding=ENCODING)
+        folder.mkdir(exist_ok=True)
+        merged.to_csv(target, index=False, encoding=ENCODING)
+        for name, data in pdfs.items():
+            path = folder / name
+            if not path.exists() or path.read_bytes() != data:
+                path.write_bytes(data)
     return info
 
 
@@ -2174,8 +2357,8 @@ def write_root_indexes(manifests: list[dict], deps: dict, nobody_has: set[str]):
         "|---|---|---|---|",
     ]
     for key, spec in DATASET_PLAN.items():
-        source = (f"{spec['source']} / {spec['sheet']}" if spec.get("source")
-                  else "no feed yet (PDFs)")
+        source = (f"{spec['source']} / {spec.get('sheet') or 'filings 1.csv (+ supplement)'}"
+                  if spec.get("source") else "no feed yet (PDFs)")
         read_by = ", ".join(readers.get(key, [])) or "(no feature declares it)"
         md.append(f"| {key} | {source} | {have_count('datasets', key)} / {total} | {read_by} |")
     md += [

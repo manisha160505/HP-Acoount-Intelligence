@@ -338,6 +338,110 @@ def _hp_category_intent(account_id: str) -> dict:
             for name, entry in (parsed.get("categories") or {}).items()}
 
 
+def _hp_category_related_technologies(account_id: str) -> list:
+    """Related Technologies per HP category from the category intent file.
+
+    The client offers this column as the technographic fallback (opens_1
+    answer 10, D22): technologies the account RESEARCHED alongside the
+    category, not technologies found in its estate. It is listed apart from
+    the detected stack and never counted in it, never mapped into a card and
+    never drives a confidence score - whether it may be shown as detected is
+    still an open question to the client (06_Unresolved/11).
+
+    Same `status == "matched"` gate as `_hp_category_intent`: another status
+    means the row belongs to somebody else.
+    """
+    from app.services.extractors.datasets import account_domain, read_dataset_rows
+    from app.services.extractors.intent_demand_signals import _parse_category_file
+
+    try:
+        parsed = _parse_category_file(
+            read_dataset_rows(account_id, "hp_category_intent"),
+            account_domain(account_id))
+    except Exception:
+        logger.exception("tech landscape: could not read related technologies for %s",
+                         account_id)
+        return []
+    if parsed.get("status") != "matched":
+        return []
+
+    out = []
+    for name, entry in (parsed.get("categories") or {}).items():
+        techs = [t for t in (entry.get("related_technologies") or []) if t]
+        if techs:
+            out.append({"hp_category": name, "technologies": techs})
+    return out
+
+
+# Explorium 5_Tech_Breakdown columns in the order the card shows them:
+# infrastructure a seller can talk about first, page metadata last. A column
+# not listed here is still shown, after these, so a new vendor column is never
+# dropped silently.
+TECH_BREAKDOWN_ORDER = (
+    "Cms", "Hosting", "Server", "Web Server", "Cdn", "Cdns", "Ns", "Mx", "Ssl",
+    "Framework", "Javascript", "Analytics", "Ads", "Payment", "Ecommerce",
+    "Mapping", "Widgets", "Media", "Mobile", "Language", "Feeds", "Link",
+    "Web Master", "Docinfo", "Robots", "Copyright", "Seo Headers", "Seo Meta",
+    "Seo Title",
+)
+# Columns that describe the page rather than a technology the company runs.
+TECH_BREAKDOWN_PAGE_METADATA = frozenset({
+    "Seo Headers", "Seo Meta", "Seo Title", "Copyright", "Docinfo", "Robots",
+    "Language", "Feeds", "Link", "Web Master",
+})
+_TB_EMPTY = {"", "nan", "none", "null", "no data available", "-", "\u2014"}
+
+
+# The split writes 5_Tech_Breakdown's columns onto the webstack row with this
+# prefix (split_account_data.py DATASET_PLAN["webstack"]), keeping them apart
+# from 5_Webstack's own columns - both sheets have "Parked".
+TECH_BREAKDOWN_PREFIX = "Tech Breakdown - "
+
+
+def _parse_tech_breakdown(records: list) -> list:
+    """`"Enterprise: Adobe Experience Manager | Other: WordPress 5.3, Investis"`
+    -> {"category": "Cms", "groups": [{"group": "Enterprise", "technologies":
+    [...]}, ...], "technologies": [...]}, one per non-empty Tech_Breakdown
+    column of the webstack row.
+
+    Copied as delivered: groups and names are the vendor's, only split and
+    de-duplicated, so every item on the card can be found in the sheet.
+    """
+    if not records:
+        return []
+    row = {str(k)[len(TECH_BREAKDOWN_PREFIX):]: v for k, v in records[0].items()
+           if str(k).startswith(TECH_BREAKDOWN_PREFIX)}
+    if not row:
+        return []
+    columns = [c for c in TECH_BREAKDOWN_ORDER if c in row] + sorted(
+        c for c in row if c not in TECH_BREAKDOWN_ORDER)
+    out = []
+    for column in columns:
+        raw = " ".join(str(row.get(column) or "").split())
+        if raw.lower() in _TB_EMPTY:
+            continue
+        groups, flat = [], []
+        for part in raw.split("|"):
+            part = part.strip()
+            if not part:
+                continue
+            group, sep, rest = part.partition(":")
+            if not sep:
+                group, rest = "", part
+            names = []
+            for name in rest.split(","):
+                name = name.strip()
+                if name and name not in names:
+                    names.append(name)
+            if names:
+                groups.append({"group": group.strip(), "technologies": names})
+                flat.extend(n for n in names if n not in flat)
+        if flat:
+            out.append({"category": column, "groups": groups, "technologies": flat,
+                        "page_metadata": column in TECH_BREAKDOWN_PAGE_METADATA})
+    return out
+
+
 def _score_card_confidence(categories: list, intent_scores: dict) -> dict:
     """Attach the client's Tech Landscape confidence to every vendor card.
 
@@ -1011,6 +1115,8 @@ def extract_tech_landscape(account_id: str,  # noqa: PLR0912, PLR0915 - branch-h
         logger.exception("tech landscape: integration routes failed for %s", account_id)
         integration_lines = []
 
+    researched_technologies = _hp_category_related_technologies(account_id)
+
     techno_map_payload = {
         "account_id": account_id,
         "feature_key": "tech_landscape",
@@ -1038,6 +1144,13 @@ def extract_tech_landscape(account_id: str,  # noqa: PLR0912, PLR0915 - branch-h
             # become a recommendation on its own. Technology presence shows
             # compatibility, not need.
             "integration_routes": integration_lines,
+            # Related Technologies from the HP category intent file, per
+            # category. Researched, not detected: kept out of every count and
+            # every card above. On an account with no technographics it is
+            # the only technology evidence there is, which the flag says.
+            "researched_technologies": researched_technologies,
+            "researched_technologies_only": (bool(researched_technologies)
+                                             and detected_tech_count == 0),
             # The category/vendor narrative inside `categories` is generated;
             # everything else in this widget is computed. Recorded so the
             # classification stays honest even though both live here.
@@ -1170,7 +1283,12 @@ def extract_tech_landscape(account_id: str,  # noqa: PLR0912, PLR0915 - branch-h
         if raw_cats:
             categories_summary = [c.strip() for c in raw_cats.split(",") if c.strip()]
 
-    if web_tech_list or premium_count_str or spend_est_str:
+    # Explorium 5_Tech_Breakdown, the client's second technographic sheet
+    # (DEC-019): the same website stack, grouped by what each technology does.
+    # Its columns ride on the webstack row under TECH_BREAKDOWN_PREFIX.
+    breakdown = _parse_tech_breakdown(webstack_records)
+
+    if web_tech_list or premium_count_str or spend_est_str or breakdown:
         webstack_payload = {
             "account_id": account_id,
             "feature_key": "tech_landscape",
@@ -1182,7 +1300,9 @@ def extract_tech_landscape(account_id: str,  # noqa: PLR0912, PLR0915 - branch-h
                 "premium_tech_count": premium_count_str,
                 "web_spend_estimate": spend_est_str,
                 "categories_list": categories_summary,
-                "technologies": web_tech_list
+                "technologies": web_tech_list,
+                "breakdown": breakdown,
+                "breakdown_source": "Explorium 5_Tech_Breakdown" if breakdown else None,
             },
             "source_datasets": ["webstack"],
             "extracted_at": now,

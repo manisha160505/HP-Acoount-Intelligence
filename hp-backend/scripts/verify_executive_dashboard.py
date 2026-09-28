@@ -177,7 +177,8 @@ print()
 print("=" * 80)
 print("5. EXCLUSIONS ARE STRUCTURAL AND EXPLAINED")
 print("=" * 80)
-files = dataset_file_paths(AID, "compliance_filings", strict=False)
+files = [f for f in dataset_file_paths(AID, "compliance_filings", strict=False)
+         if f[0].lower().endswith(".pdf")]   # the filings list CSV rides along
 excluded_total = kept_total = 0
 leaked = []
 for original, path in files:
