@@ -59,6 +59,12 @@ class Settings(BaseSettings):
     # (ingest._update_index compares it with what built the index).
     GEMINI_EMBEDDING_MODEL: str = "gemini-embedding-001"
     GEMINI_EMBEDDING_DIM: int = 3072
+    # Gemini 2.5's "thinking" tokens, per call. 0 turns it off: measured 28 Sep
+    # on a news-scoring batch, 4.1 s and 685 tokens against 13.1 s and 1,673
+    # with the model's default - and those tokens count against the rate limit
+    # that was answering 429. Every prompt here spells out its rules and its
+    # JSON shape, so it has little to reason about. -1 = the model's default.
+    GEMINI_THINKING_BUDGET: int = 0
     # Vertex AI (LLM_PROVIDER=vertex). The express-mode key is GEMINI_API_KEY.
     # Chat goes to Vertex's OpenAI-compatible endpoint, which needs the project
     # and location in its path; embeddings go to the native predict method,
@@ -172,12 +178,18 @@ class Settings(BaseSettings):
         wants OAuth). Not ?key=: a URL lands in error messages and logs."""
         if self.llm_provider == "vertex":
             return {"base_url": self.llm_endpoint, "api_key": "vertex-express",
-                    "default_headers": {"x-goog-api-key": self.llm_api_key},
-                    # The SDK's default is 2; express-mode quota answers 429
-                    # under a full regeneration, and a retry is cheaper than a
-                    # DEGRADED widget.
-                    "max_retries": 5}
+                    "default_headers": {"x-goog-api-key": self.llm_api_key}}
         return {"base_url": self.llm_endpoint or None, "api_key": self.llm_api_key}
+
+    @property
+    def llm_request_extra(self) -> dict:
+        """Extra arguments for every chat.completions.create call."""
+        if not self._is_google or self.GEMINI_THINKING_BUDGET < 0:
+            return {}
+        # The OpenAI SDK's extra_body is merged into the request; Google reads
+        # its own options from a body field that is itself named extra_body.
+        return {"extra_body": {"extra_body": {"google": {"thinking_config": {
+            "thinking_budget": int(self.GEMINI_THINKING_BUDGET)}}}}}
 
     def _google_model(self, name: str) -> str:
         # Vertex's OpenAI-compatible endpoint names Google's models google/<id>.

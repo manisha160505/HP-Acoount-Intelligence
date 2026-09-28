@@ -59,7 +59,12 @@ PRIORITY_UPSTREAM = 10
 PRIORITY_SWEEP = 5
 PRIORITY_LEGACY = 0
 
-LEASE_SECONDS = 1800
+# Renewed by the engine's heartbeat every HEARTBEAT_SECONDS while a job runs,
+# so a live job never lapses however long it takes. It only bounds how long a
+# job whose worker died (a deploy, a crash, an OOM kill) stays RUNNING before
+# another worker takes it back: 30 minutes left Live Signals looking
+# "generating" for half an hour after every deploy (28 Sep).
+LEASE_SECONDS = 150
 MAX_ATTEMPTS = 3
 GATE_RETRY_SECONDS = 60
 
@@ -169,7 +174,11 @@ def reclaim_expired(db, now=None) -> list:
     col = db[COLLECTION]
     out = []
     for job in list(col.find({"status": RUNNING, "lease_expires_at": {"$lt": now}})):
-        exhausted = int(job.get("attempts") or 0) >= MAX_ATTEMPTS
+        # `reclaims` as well as `attempts`: a worker that dies before the run
+        # formally starts never counts an attempt, and without this cap its
+        # job would be reclaimed and die again forever.
+        exhausted = (int(job.get("attempts") or 0) >= MAX_ATTEMPTS
+                     or int(job.get("reclaims") or 0) + 1 >= MAX_ATTEMPTS)
         update = ({"$set": {"status": FAILED, "finished_at": now,
                             "error": {"code": "LEASE_EXPIRED",
                                       "message": "the worker stopped responding "
@@ -179,7 +188,8 @@ def reclaim_expired(db, now=None) -> list:
                   {"$set": {"status": PENDING, "fence": None, "lease_owner": None,
                             "lease_expires_at": None, "not_before": now,
                             "last_error": {"code": "LEASE_EXPIRED",
-                                           "message": "the worker stopped responding"}}})
+                                           "message": "the worker stopped responding"}},
+                   "$inc": {"reclaims": 1}})
         changed = col.find_one_and_update(
             {"_id": job["_id"], "status": RUNNING, "fence": job.get("fence"),
              "lease_expires_at": {"$lt": now}},
@@ -278,6 +288,27 @@ def release(db, job: dict, *, delay_seconds: float = 0, reason: str = "",
     result = db[COLLECTION].update_one(
         {"_id": job["_id"], "fence": job["fence"], "status": RUNNING}, update)
     return result.matched_count == 1
+
+
+def release_owned(db, worker_id: str = WORKER_ID, now=None) -> list:
+    """Hand back every job this worker is running, on shutdown.
+
+    Without it a deploy left the interrupted job RUNNING until its lease ran
+    out. The attempt it was on is given back too: being stopped is not a
+    failure, and three deploys in a row must not fail a job.
+    """
+    now = now or _now()
+    released = []
+    for job in list(db[COLLECTION].find({"status": RUNNING, "lease_owner": worker_id})):
+        result = db[COLLECTION].update_one(
+            {"_id": job["_id"], "fence": job.get("fence"), "status": RUNNING},
+            {"$set": {"status": PENDING, "fence": None, "lease_owner": None,
+                      "lease_expires_at": None, "not_before": now,
+                      "released_reason": "worker shut down"},
+             "$inc": {"attempts": -1 if int(job.get("attempts") or 0) > 0 else 0}})
+        if result.matched_count:
+            released.append(job)
+    return released
 
 
 def finish(db, job: dict, outcome: str, *, result: dict | None = None,

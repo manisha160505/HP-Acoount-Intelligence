@@ -21,6 +21,7 @@ STARTUP_SWEEP_DELAY = 30
 
 _stop = threading.Event()
 _threads: list = []
+_engine = None
 
 
 def worker_enabled() -> bool:
@@ -69,8 +70,10 @@ def start(engine=None) -> list:
         return []
 
     from app.services.regen.engine import get_engine
+    global _engine
     engine = engine or get_engine()
     engine.ensure_indexes()
+    _engine = engine
     _stop.clear()
     _threads.clear()
     workers = max(1, int(os.getenv("REGEN_WORKERS", "1")))
@@ -88,5 +91,26 @@ def start(engine=None) -> list:
 
 def stop(timeout: float = 5.0) -> None:
     _stop.set()
+    _release_running()
     for t in _threads:
         t.join(timeout=timeout)
+
+
+def _release_running() -> None:
+    """Give this process's running jobs back to the queue before it exits.
+
+    The producer threads are daemons and die with the process mid-job; handed
+    back now, the next backend picks those jobs up as soon as it starts instead
+    of when their leases lapse. Anything the old threads still try to commit is
+    fenced off, because the release cleared their fence.
+    """
+    if _engine is None or not worker_enabled():
+        return
+    from app.services.regen import jobs, state
+    try:
+        for job in jobs.release_owned(_engine.db, _engine.worker_id):
+            state.clear_running(_engine.db, job["account_id"], job["node_id"], job["_id"])
+            logger.info("regen: handed %s/%s back to the queue on shutdown",
+                        job["account_id"], job["node_id"])
+    except Exception:
+        logger.exception("regen: could not hand running jobs back on shutdown")
