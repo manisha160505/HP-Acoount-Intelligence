@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from app.core.llm import generate_gpt4o_json_completion
 from app.database.mongodb import get_db
 from app.observability import pipeline
-from app.services.dashboard import filings_register
+from app.services.dashboard import filings_financials, filings_register
 from app.services.extractors.datasets import (
     DatasetFileMissing,
     account_display_name,
@@ -239,6 +239,11 @@ def extract_executive_dashboard(account_id: str) -> list[dict]:
     # from reading the documents (exec_strategic_priorities), not from here.
     filings = filings_register.register(index_rows)
     filings_sources = ["compliance_filings"] if index_rows else []
+    financial_rows = _read_dataset_csv(account_id, "filings_financials")
+    reported = filings_financials.reported_metrics(financial_rows)
+    chief_executive = filings_financials.ceo(financial_rows)
+    if reported or chief_executive:
+        filings_sources.append(filings_financials.SOURCE)
 
     if firmo_rows and len(firmo_rows) > 0:
         row = firmo_rows[0]
@@ -250,6 +255,17 @@ def extract_executive_dashboard(account_id: str) -> list[dict]:
             "revenue": revenue if revenue else "N/A",
             "filings_on_record": filings,
         }
+        # Filed figures from the filings index (scripts/filings_to_csv.py), one
+        # value per metric chosen across every filing. Only set when the file
+        # is uploaded and shows something: otherwise the card keeps reading
+        # the figures on exec_strategic_priorities, as before.
+        if reported:
+            metrics_data["reported_metrics"] = reported
+            metrics_data["reported_metric_count"] = len(reported)
+            metrics_data["reported_source"] = filings_financials.SOURCE
+        # The header's CEO (Feature 1), from the newest filing naming one.
+        if chief_executive:
+            metrics_data["ceo"] = chief_executive
 
         metrics_payload = {
             "account_id": account_id,

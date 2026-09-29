@@ -56,7 +56,9 @@ FILINGS_DIR = REPO_ROOT / "project-documentation" / "04_Data_and_Source_Definiti
 FILINGS_CSV = FILINGS_DIR / "filings 1.csv"
 # Client-supplied rows in filings 1.csv's columns, appended after it (the
 # split reads the same list - FILINGS_SUPPLEMENT_FILES in split_account_data).
-FILINGS_SUPPLEMENTS = [FILINGS_DIR / "filings_client_supplement_2026-09-26.csv"]
+FILINGS_SUPPLEMENTS = [FILINGS_DIR / "filings_client_supplement_2026-09-26.csv",
+                      # 29 Sep list, see scripts/filings_new_to_supplement.py
+                      FILINGS_DIR / "filings_client_supplement_2026-09-29.csv"]
 UNPLACED_DIR = FILINGS_DIR / "pdfs" / "_unplaced"
 # PDFs downloaded by hand in a browser, for hosts that refuse scripts
 # (bankmandiri.co.id hangs; investor.cimbniaga.co.id serves an AWS WAF
@@ -158,6 +160,11 @@ def split_assignment(rows: list[dict], columns: list[str]) -> None:
     for path in sorted(SPLIT_DIR.glob("*/compliance_filings/_filings_index.csv")):
         slug = path.parent.parent.name
         for r in _read(path):
+            # PredictLeads sec_filings rows (added to the index by the split
+            # since 28 Sep) come from no filings CSV and have no PDF to fetch;
+            # the split writes their text as a PDF itself.
+            if r.get("crawl_route") == "PREDICTLEADS_SEC_FILINGS":
+                continue
             pending[key(r)].append(slug)
     unassigned = Counter(key(r) for r in _read(SPLIT_DIR / "_unassigned_filings.csv"))
     unassigned_reason = {key(r): r.get("reason", "") for r in
@@ -226,12 +233,56 @@ def _looks_pdf(head: bytes) -> bool:
     return b"%PDF-" in head[:1024]
 
 
+DART_VIEWER_RE = re.compile(r"dart\.fss\.or\.kr/dsaf001/main\.do\?rcpNo=(\d{14})")
+
+
+def dart_pdf_url(url: str) -> tuple[str, list, str]:
+    """(pdf url, extra curl args, error) for a DART viewer page
+    (dsaf001/main.do?rcpNo=...).
+
+    The viewer is HTML; DART serves the same filing as a PDF at
+    pdf/download/pdf.do, given the receipt number and the document number
+    (dcmNo) the viewer page states - but only inside the session its download
+    page opens (an empty 200 otherwise). So: viewer, then download page, then
+    the PDF, sharing one cookie jar. A malformed rcpNo is an error.
+    """
+    m = DART_VIEWER_RE.search(url)
+    if not m:
+        return "", [], "DART link without a 14-digit rcpNo"
+    rcp = m.group(1)
+    fd, jar = tempfile.mkstemp(suffix=".cookies", dir=UNPLACED_DIR.parent)
+    os.close(fd)
+    base = ["curl", "-sS", "-L", "-A", USER_AGENT, "--max-time", "60", "-c", jar, "-b", jar]
+    try:
+        _polite("dart.fss.or.kr")
+        viewer = subprocess.run(base + [url], capture_output=True, text=True, timeout=90)
+        dcm = re.search(r"dcmNo'\]\s*=\s*\"(\d+)\"", viewer.stdout or "")
+        if not dcm:
+            return "", [], "DART viewer page names no dcmNo"
+        page = ("https://dart.fss.or.kr/pdf/download/main.do?rcp_no=%s&dcm_no=%s"
+                % (rcp, dcm.group(1)))
+        _polite("dart.fss.or.kr")
+        subprocess.run(base + ["-o", os.devnull, page], capture_output=True, timeout=90)
+    except subprocess.TimeoutExpired:
+        return "", [], "DART did not answer"
+    return ("https://dart.fss.or.kr/pdf/download/pdf.do?rcp_no=%s&dcm_no=%s"
+            % (rcp, dcm.group(1)), ["-c", jar, "-b", jar, "-e", page], "")
+
+
 def fetch(url: str) -> dict:
     """One URL -> {ok, tmp, http_status, content_type, error, bytes, sha256}.
 
     curl rather than requests: --max-time is a hard wall clock, and some hosts
     hold a TLS connection open without sending, which no per-read timeout ends.
+    A DART viewer page is resolved to its PDF first (dart_pdf_url).
     """
+    extra: list = []
+    if "dart.fss.or.kr/dsaf001/main.do" in url:
+        pdf_url, extra, error = dart_pdf_url(url)
+        if error:
+            return {"ok": False, "tmp": None, "http_status": "", "content_type": "",
+                    "error": error, "bytes": 0, "sha256": ""}
+        url = pdf_url
     host = up.urlparse(url).netloc.lower()
     out = {"ok": False, "tmp": None, "http_status": "", "content_type": "", "error": "",
            "bytes": 0, "sha256": ""}
@@ -242,7 +293,8 @@ def fetch(url: str) -> dict:
            "-H", "Accept: " + HEADERS["Accept"], "-H", "Accept-Language: " + HEADERS["Accept-Language"],
            "--connect-timeout", "20", "--max-time", str(DEADLINE),
            "--retry", str(RETRIES), "--retry-delay", "3", "--retry-max-time", str(DEADLINE),
-           "--max-filesize", str(MAX_BYTES), "-o", tmp, "-w", "%{http_code}\t%{content_type}", url]
+           "--max-filesize", str(MAX_BYTES), *extra,
+           "-o", tmp, "-w", "%{http_code}\t%{content_type}", url]
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=3 * DEADLINE)
         code, _, ctype = proc.stdout.partition("\t")
@@ -254,6 +306,11 @@ def fetch(url: str) -> dict:
             out["error"] = f"HTTP {code}"
     except subprocess.TimeoutExpired:
         out["error"] = f"no answer within {3 * DEADLINE}s"
+    if extra:  # the DART session's cookie jar
+        try:
+            os.unlink(extra[1])
+        except OSError:
+            pass
     if out["error"]:
         os.unlink(tmp)
         return out

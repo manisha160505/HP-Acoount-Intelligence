@@ -194,6 +194,10 @@ FILINGS_INDEX_FILE = (REPO_ROOT / "project-documentation" / "04_Data_and_Source_
 # which the crawl never covered.
 FILINGS_SUPPLEMENT_FILES = [
     FILINGS_INDEX_FILE.parent / "filings_client_supplement_2026-09-26.csv",
+    # The client's 29 Sep list ("filings new.csv", one sales territory per
+    # account) - only its rows that add a document; row_id "N29-n". Built by
+    # scripts/filings_new_to_supplement.py.
+    FILINGS_INDEX_FILE.parent / "filings_client_supplement_2026-09-29.csv",
 ]
 # Client rulings that settle a filings row whose territory and domain disagree.
 # Checked before the conflict rule in assign_filings(), so a ruled row is filed
@@ -3514,6 +3518,26 @@ def upload_accounts(slugs: list[str], base_url: str, dry_run: bool,
                 failed += 1
                 print(f"    {key:<24} FAILED HTTP {status}: "
                       f"{(body or {}).get('detail')}")
+
+        # The verified filing figures, written after the split by
+        # scripts/filings_to_csv.py - so they are not in the manifest and would
+        # otherwise never be uploaded.
+        figures = folder / "filings_financials.csv"
+        if figures.exists() and "filings_financials" not in manifest["datasets"]:
+            if dry_run:
+                print(f"    would upload {'filings_financials':<24} (filing figures)")
+                uploaded += 1
+            else:
+                status, body = _api_upload(
+                    f"{base_url}/api/v1/accounts/{account_id}/data", token,
+                    "filings_financials", figures)
+                if status in (200, 201):
+                    uploaded += 1
+                    print(f"    {'filings_financials':<24} filing figures  OK")
+                else:
+                    failed += 1
+                    print(f"    filings_financials FAILED HTTP {status}: "
+                          f"{(body or {}).get('detail')}")
 
         # The filings are the multi-file key: one POST each - every PDF (the
         # downloaded ones and those written from PredictLeads' text) and the

@@ -805,6 +805,10 @@ def _publish_metrics(db, account_id: str, reported: list, now) -> dict:
     """
     existing = widget_store.get(account_id, METRICS_WIDGET_KEY, db=db) or {}
     data = dict(existing.get("data") or {})
+    # The filings index, when uploaded, is the Key Metrics cards' source
+    # (executive_dashboard.py); this path must not write over it.
+    if data.get("reported_source") == "filings_financials":
+        return data
     data["reported_metrics"] = reported
     data["reported_metric_count"] = len(reported)
     data["reported_source"] = "compliance_filings"

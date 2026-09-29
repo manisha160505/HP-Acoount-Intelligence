@@ -33,7 +33,8 @@ export type DatasetKey =
   | 'subpages'
   | 'similar_companies'
   | 'google_news'
-  | 'compliance_filings';
+  | 'compliance_filings'
+  | 'filings_financials';
 
 export interface AccountDataFile {
   id: string;
@@ -104,7 +105,12 @@ export const DATASET_REGISTRY_LIST: DatasetRegistryItem[] = [
   // number the company published. It was declared on the backend and read in
   // five places, but had no slot here, so the dashboard told sellers to upload
   // filings with no way to do it.
-  { key: 'compliance_filings', display_name: 'Compliance Filings', type: 'multi_file', group: 'Filed Documents', description: "The account's filed documents - annual reports, exchange filings, market reports - plus the filings list (_filings_index.csv: filings.csv + PredictLeads SEC filings). The source of reported financial figures, quoted with their period, unit and page (Multi-file PDF, one CSV list)", allowed_extensions: ['.pdf', '.csv'] }
+  { key: 'compliance_filings', display_name: 'Compliance Filings', type: 'multi_file', group: 'Filed Documents', description: "The account's filed documents - annual reports, exchange filings, market reports - plus the filings list (_filings_index.csv: filings.csv + PredictLeads SEC filings). The source of reported financial figures, quoted with their period, unit and page (Multi-file PDF, one CSV list)", allowed_extensions: ['.pdf', '.csv'] },
+  // The figures read out of those PDFs by scripts/filings_to_csv.py - one row
+  // per filing with revenue, net income, employees and CEO, each checked
+  // against the page it came from. The Executive Dashboard's Key Metrics
+  // cards read it (services/dashboard/filings_financials.py).
+  { key: 'filings_financials', display_name: 'Filings Financials (index)', canonical_filename: 'filings_financials.csv', type: 'single_file_csv', group: 'Filed Documents', description: "Verified figures from the account's filing PDFs - revenue, net income, employees and CEO per filing, with currency, unit, period and page. Feeds the Executive Dashboard Key Metrics (one CSV, from scripts/filings_to_csv.py)", allowed_extensions: ['.csv'] }
 ];
 
 export interface AccountInstructions {
