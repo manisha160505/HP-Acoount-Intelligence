@@ -27,6 +27,13 @@ Two rules replace them:
 Every write made on behalf of a running job is scoped by its `fence`, a token
 issued at claim. A worker whose lease expired and was reclaimed can wake up and
 try to heartbeat, finish or commit - and match nothing.
+
+**Only an explicit run creates work** (29 Sep). A job carries the ids of the
+regeneration runs that asked for it (`run_ids`), and `claim` takes nothing
+else: an upload, a deploy or a committed upstream can make a node stale but can
+never put a job in front of the worker. Two runs asking for the same node share
+one job. The queue can also be paused - by hand, or by the engine when the
+model provider's quota is exhausted - and nothing is claimed until it resumes.
 """
 
 import logging
@@ -41,6 +48,8 @@ from pymongo.errors import DuplicateKeyError
 logger = logging.getLogger(__name__)
 
 COLLECTION = "regen_jobs"
+CONTROL = "regen_control"
+QUEUE_DOC = "queue"
 
 PENDING = "PENDING"
 RUNNING = "RUNNING"
@@ -97,15 +106,19 @@ def trigger(kind: str, detail: str = "", actor: str = "", demand: bool = False) 
             "demand": bool(demand), "at": _now()}
 
 
-def enqueue(db, account_id: str, node_id: str, why: dict, *,
+def enqueue(db, account_id: str, node_id: str, why: dict, *,  # noqa: PLR0913 - every option is a queue field
             priority: int = PRIORITY_UPSTREAM, force: bool = False,
-            full: bool = False, rank: int = 0) -> dict:
+            full: bool = False, rank: int = 0, run_id=None) -> dict:
     """Ask for a node to be regenerated. Coalesces; never creates a second live row.
+
+    `run_id` is the explicit regeneration run asking for it. A job with no run
+    is never claimed, so every caller that means work passes one.
 
     Returns {"job_id", "status", "coalesced"}.
     """
     col = db[COLLECTION]
     demand = bool(why.get("demand"))
+    runs = [run_id] if run_id is not None else []
 
     for _ in range(3):
         # 1. The node is running: note that it must run again once finished.
@@ -113,6 +126,7 @@ def enqueue(db, account_id: str, node_id: str, why: dict, *,
             {"account_id": account_id, "node_id": node_id, "status": RUNNING},
             {"$set": {"rerun_requested": True},
              "$push": {"rerun_triggers": why},
+             "$addToSet": {"rerun_run_ids": {"$each": runs}},
              "$max": {"rerun_force": bool(force), "rerun_full": bool(full),
                       "rerun_priority": int(priority), "rerun_demand": demand}},
             projection={"_id": 1},
@@ -131,6 +145,7 @@ def enqueue(db, account_id: str, node_id: str, why: dict, *,
             before = col.find_one_and_update(
                 {"account_id": account_id, "node_id": node_id, "status": PENDING},
                 {"$push": {"triggers": why},
+                 "$addToSet": {"run_ids": {"$each": runs}},
                  "$max": {"force": bool(force), "full": bool(full),
                           "priority": int(priority), "demand": demand},
                  "$min": {"not_before": _now()},
@@ -221,11 +236,14 @@ def claim(db, worker_id: str = WORKER_ID, now=None, max_tries: int = 20) -> dict
             job = col.find_one_and_update(
                 {"status": PENDING, "not_before": {"$lte": now},
                  "account_id": {"$nin": sorted(busy)},
-                 "not_runnable_on": {"$ne": worker_id}},
+                 "not_runnable_on": {"$ne": worker_id},
+                 # Only work an explicit run asked for (see the module doc).
+                 "run_ids.0": {"$exists": True}},
                 {"$set": {"status": RUNNING, "fence": fence, "lease_owner": worker_id,
                           "lease_expires_at": now + timedelta(seconds=LEASE_SECONDS),
-                          "heartbeat_at": now, "started_at": now,
-                          "rerun_requested": False, "rerun_triggers": []}},
+                          "heartbeat_at": now, "started_at": now, "progress": None,
+                          "rerun_requested": False, "rerun_triggers": [],
+                          "rerun_run_ids": []}},
                 # Within a priority, ancestors first: a dependent claimed ahead
                 # of the ancestor it waits on is only gated and released again.
                 sort=[("priority", DESCENDING), ("rank", ASCENDING),
@@ -274,15 +292,21 @@ def start_attempt(db, job: dict, target: str, previous: str | None,
 
 def release(db, job: dict, *, delay_seconds: float = 0, reason: str = "",
             not_runnable_here: bool = False, error: dict | None = None,
-            now=None) -> bool:
-    """Put a RUNNING job back to PENDING without finishing it."""
+            refund_attempt: bool = False, now=None) -> bool:
+    """Put a RUNNING job back to PENDING without finishing it.
+
+    `refund_attempt` gives back the attempt `start_attempt` counted - for a run
+    stopped by something that is not its own failure (the quota).
+    """
     now = now or _now()
     update = {"$set": {"status": PENDING, "fence": None, "lease_owner": None,
-                       "lease_expires_at": None,
+                       "lease_expires_at": None, "progress": None,
                        "not_before": now + timedelta(seconds=delay_seconds),
                        "released_reason": str(reason)[:300]}}
     if error:
         update["$set"]["last_error"] = error
+    if refund_attempt:
+        update["$inc"] = {"attempts": -1}
     if not_runnable_here:
         update["$addToSet"] = {"not_runnable_on": job.get("lease_owner") or WORKER_ID}
     result = db[COLLECTION].update_one(
@@ -337,18 +361,24 @@ def finish(db, job: dict, outcome: str, *, result: dict | None = None,
 
 
 def _requeue_rerun(db, row: dict) -> None:
+    """A run asked for this node while it was running: run it again for them.
+    Only explicit runs set `rerun_requested`, so this is never automatic work;
+    with no run id recorded (a row from before 29 Sep) nothing is re-queued."""
+    run_ids = list(row.get("rerun_run_ids") or [])
+    if not run_ids:
+        return
     triggers = row.get("rerun_triggers") or [trigger("rerun", "changed while running")]
     enqueue(db, row["account_id"], row["node_id"],
             {**triggers[0], "demand": bool(row.get("rerun_demand"))},
             priority=int(row.get("rerun_priority") or PRIORITY_UPSTREAM),
             force=bool(row.get("rerun_force")), full=bool(row.get("rerun_full")),
-            rank=int(row.get("rank") or 0))
+            rank=int(row.get("rank") or 0), run_id=run_ids[0])
     extra = triggers[1:]
-    if extra:
-        db[COLLECTION].update_one(
-            {"account_id": row["account_id"], "node_id": row["node_id"],
-             "status": PENDING},
-            {"$push": {"triggers": {"$each": extra}}})
+    db[COLLECTION].update_one(
+        {"account_id": row["account_id"], "node_id": row["node_id"],
+         "status": PENDING},
+        {"$push": {"triggers": {"$each": extra}},
+         "$addToSet": {"run_ids": {"$each": run_ids}}})
 
 
 def live(db, account_id: str) -> dict:
@@ -361,3 +391,75 @@ def history(db, account_id: str, limit: int = 20) -> list:
     rows = db[COLLECTION].find({"account_id": account_id}).sort(
         "requested_at", DESCENDING).limit(max(1, min(int(limit), 100)))
     return list(rows)
+
+
+def attach_run(db, job_id, run_id) -> None:
+    """Record that another run is also waiting on this live job."""
+    db[COLLECTION].update_one({"_id": job_id, "status": {"$in": list(LIVE)}},
+                              {"$addToSet": {"run_ids": run_id}})
+
+
+def set_progress(db, job: dict, done: int, total: int, label: str = "") -> None:
+    db[COLLECTION].update_one(
+        {"_id": job["_id"], "fence": job["fence"], "status": RUNNING},
+        {"$set": {"progress": {"done": int(done), "total": int(total),
+                               "label": label, "at": _now()}}})
+
+
+def cancel_run(db, run_id) -> dict:
+    """Cancel what this run is still waiting for. A job another run also asked
+    for stays, without this run; RUNNING jobs are left to finish."""
+    col = db[COLLECTION]
+    cancelled = col.update_many(
+        {"run_ids": [run_id], "status": PENDING},
+        {"$set": {"status": CANCELLED, "finished_at": _now(),
+                  "result": {"outcome": "cancelled"}}}).modified_count
+    detached = col.update_many(
+        {"run_ids": run_id, "status": PENDING},
+        {"$pull": {"run_ids": run_id}}).modified_count
+    return {"cancelled": cancelled, "detached": detached}
+
+
+def cancel_unbound(db) -> int:
+    """Cancel queued jobs no run asked for - the automatic triggers of the
+    release before 29 Sep. Their nodes stay stale, which the admin page shows."""
+    return db[COLLECTION].update_many(
+        {"status": PENDING, "$or": [{"run_ids": {"$exists": False}},
+                                    {"run_ids": {"$size": 0}}]},
+        {"$set": {"status": CANCELLED, "finished_at": _now(),
+                  "result": {"outcome": "cancelled",
+                             "reason": "queued automatically before regeneration "
+                                       "became explicit"}}}).modified_count
+
+
+# ---------------------------------------------------------------------------
+# Queue control: paused by an admin, or by the engine on an exhausted quota.
+# Nothing resumes it except an admin.
+# ---------------------------------------------------------------------------
+
+def queue_state(db) -> dict:
+    doc = db[CONTROL].find_one({"_id": QUEUE_DOC}) or {}
+    return {"paused": bool(doc.get("paused")), "reason": doc.get("reason"),
+            "paused_at": doc.get("paused_at"), "paused_by": doc.get("paused_by"),
+            "resumed_at": doc.get("resumed_at")}
+
+
+def pause(db, reason: str, by: str = "system") -> bool:
+    """Pause the queue. False when it was already paused (the first reason is
+    kept - it is the one that explains the pause)."""
+    if queue_state(db)["paused"]:
+        return False
+    db[CONTROL].update_one(
+        {"_id": QUEUE_DOC},
+        {"$set": {"paused": True, "reason": str(reason)[:300], "paused_at": _now(),
+                  "paused_by": by}},
+        upsert=True)
+    logger.warning("regen: queue paused by %s - %s", by, reason)
+    return True
+
+
+def resume(db, by: str = "") -> None:
+    db[CONTROL].update_one(
+        {"_id": QUEUE_DOC},
+        {"$set": {"paused": False, "resumed_at": _now(), "resumed_by": by}},
+        upsert=True)

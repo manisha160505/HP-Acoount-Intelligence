@@ -3,6 +3,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { ProtectedRoute } from '@/components/common/ProtectedRoute';
+import PipelinePanel from '@/components/admin/PipelinePanel';
 import api from '@/services/api';
 import { 
   CompanyAccount, 
@@ -31,10 +32,11 @@ import {
   Check,
   Plus,
   Trash2,
-  FolderOpen
+  FolderOpen,
+  Workflow
 } from 'lucide-react';
 
-type TabType = 'details' | 'data' | 'instructions' | 'guardrails';
+type TabType = 'details' | 'data' | 'pipeline' | 'instructions' | 'guardrails';
 
 export default function ManageAccountPage() {
   const params = useParams();
@@ -273,7 +275,13 @@ export default function ManageAccountPage() {
       });
       
       const registryItem = DATASET_REGISTRY_LIST.find(c => c.key === selectedDatasetKey);
-      setUploadSuccess(`Uploaded dataset for "${registryItem?.display_name}" (${response.data.original_filename}). Stored as "${response.data.stored_filename}".`);
+      // Uploads only store the file; nothing regenerates until the account is
+      // submitted from the Pipeline tab.
+      const stale = (response.data as { regeneration?: { stale?: string[] } }).regeneration?.stale || [];
+      setUploadSuccess(`Stored "${registryItem?.display_name}" (${response.data.original_filename}). `
+        + (stale.length
+          ? `${stale.length} section(s) now need a run - nothing runs until you submit from the Pipeline tab.`
+          : 'Nothing runs until you submit from the Pipeline tab.'));
       setUploadedFileModal(response.data);
       
       setSelectedFile(null);
@@ -283,7 +291,7 @@ export default function ManageAccountPage() {
       }
 
       fetchAccountDataFiles();
-      setTimeout(() => setUploadSuccess(null), 4000);
+      setTimeout(() => setUploadSuccess(null), 9000);
     } catch (err: any) {
       const msg = err.response?.data?.detail || 'Failed to upload dataset.';
       setUploadError(msg);
@@ -465,6 +473,19 @@ export default function ManageAccountPage() {
 
                 <button
                   type="button"
+                  onClick={() => setActiveTab('pipeline')}
+                  className={`flex-1 flex items-center justify-center space-x-2 py-3.5 px-4 text-xs font-bold border-b-2 transition ${
+                    activeTab === 'pipeline'
+                      ? 'border-hp-navy text-hp-navy bg-white'
+                      : 'border-transparent text-gray-500 hover:text-gray-800 hover:bg-gray-100/50'
+                  }`}
+                >
+                  <Workflow className="w-4 h-4" />
+                  <span>Pipeline</span>
+                </button>
+
+                <button
+                  type="button"
                   onClick={() => setActiveTab('instructions')}
                   className={`flex-1 flex items-center justify-center space-x-2 py-3.5 px-4 text-xs font-bold border-b-2 transition ${
                     activeTab === 'instructions'
@@ -493,6 +514,8 @@ export default function ManageAccountPage() {
               {/* Tab Content Container */}
               <div className="p-8">
                 
+                {activeTab === 'pipeline' && <PipelinePanel accountId={accountId} />}
+
                 {/* Tab 1: Account Details Form */}
                 {activeTab === 'details' && (
                   <div className="max-w-2xl">

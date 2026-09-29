@@ -261,8 +261,21 @@ def expected(node, snapshot, versions) -> dict:
     if node.account_record:
         manifest["account_record"] = snapshot.account_record
     if node.llm:
-        manifest["model"] = versions.models()
+        manifest["model"] = model_inputs(node, versions.models())
     return manifest
+
+
+# Which model settings each kind of node actually uses. Until 29 Sep every
+# model-backed node carried all four, so an embedding change made the Objection
+# Playbook stale although it never embeds, and a chat-model change made every
+# index stale although indexes extract with the retrieval model.
+MODEL_KEYS = {"producer": ("provider", "chat"),
+              "index": ("provider", "retrieval", "embedding")}
+
+
+def model_inputs(node, models: dict) -> dict:
+    keys = MODEL_KEYS.get(node.kind, MODEL_KEYS["producer"])
+    return {k: models[k] for k in keys if k in models}
 
 
 def diff(old: dict | None, new: dict) -> list:

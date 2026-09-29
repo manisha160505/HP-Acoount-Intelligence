@@ -753,9 +753,11 @@ def _score_batches(signals: list, company_name: str, account_context: str,
     batches = [signals[i:i + batch_size]
                for i in range(0, len(signals), batch_size)]
     for n, chunk in enumerate(batches, start=1):
+        run_context.progress(n - 1, len(batches), "scoring batch %d/%d" % (n, len(batches)))
         collect(chunk)
         pipeline.step("scoring", "batch %d/%d  %d sent, %d scored so far"
                       % (n, len(batches), len(chunk), len(seen)))
+    run_context.progress(len(batches), len(batches), "scoring done")
 
     missing = [sig for sig in signals if sig["signal_id"] not in seen]
     if missing:

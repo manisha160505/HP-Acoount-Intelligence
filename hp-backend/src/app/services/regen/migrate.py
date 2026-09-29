@@ -18,6 +18,15 @@ release and back.
      carry no `rev`) that are newer than the node's committed generation are
      adopted again, so the newest content wins.
   6. Index nodes adopt a READY/STALE `retrieval_index_state` the same way.
+  7. Cancel queued jobs no explicit run asked for (29 Sep): the automatic
+     triggers of the earlier release queued them, and the worker no longer
+     claims them. Their nodes simply read as stale.
+  8. Narrow the model block of every committed manifest to the settings the
+     node uses (29 Sep, `manifest.MODEL_KEYS`) and re-derive its fingerprint.
+     Without this, the release that narrowed the fingerprint would itself make
+     every model-backed node of every account read as stale. Only the model
+     block changes, and only by dropping keys the node never used, so the new
+     fingerprint describes exactly the inputs the output was built from.
 """
 
 import hashlib
@@ -71,7 +80,8 @@ def run(db, graph=DEFAULT, dry_run: bool = True, file_path_for=None) -> dict:
     if file_path_for is None:
         from app.services.extractors.datasets import find_file_path as file_path_for
     report = {"dry_run": dry_run, "duplicates": [], "hashed": 0, "unhashed_missing": 0,
-              "adopted": 0, "rolled_forward": 0, "indexes_adopted": 0}
+              "adopted": 0, "rolled_forward": 0, "indexes_adopted": 0,
+              "unbound_jobs_cancelled": 0, "manifests_narrowed": 0}
 
     dups = list(db["account_widgets"].aggregate([
         {"$group": {"_id": {"a": "$account_id", "w": "$widget_key"}, "n": {"$sum": 1}}},
@@ -141,8 +151,39 @@ def run(db, graph=DEFAULT, dry_run: bool = True, file_path_for=None) -> dict:
                 if not dry_run:
                     _adopt(db, account_id, nid, _legacy_generation(widgets), replace=True)
 
+    report["manifests_narrowed"] = _narrow_model_manifests(db, graph, dry_run)
+    if not dry_run:
+        from app.services.regen import jobs
+        report["unbound_jobs_cancelled"] = jobs.cancel_unbound(db)
+
     logger.info("regen migrate%s: %s", " (dry run)" if dry_run else "", report)
     return report
+
+
+def _narrow_model_manifests(db, graph, dry_run: bool) -> int:
+    """Step 8 of the module docstring. Idempotent: a narrowed manifest is left."""
+    changed = 0
+    for doc in db[state.COLLECTION].find({"current.manifest.model": {"$exists": True}},
+                                         {"node_id": 1, "current.manifest": 1}):
+        nid = doc.get("node_id")
+        if nid not in graph:
+            continue
+        m = (doc.get("current") or {}).get("manifest") or {}
+        old = m.get("model")
+        if not isinstance(old, dict):
+            continue
+        new = manifest.model_inputs(graph[nid], old)
+        if new == old:
+            continue
+        changed += 1
+        if dry_run:
+            continue
+        m = {**m, "model": new}
+        db[state.COLLECTION].update_one(
+            {"_id": doc["_id"], "current.manifest.model": old},
+            {"$set": {"current.manifest": m,
+                      "current.fingerprint": manifest.fingerprint(m)}})
+    return changed
 
 
 def _adopt(db, account_id: str, node_id: str, generation: dict, replace: bool = False):

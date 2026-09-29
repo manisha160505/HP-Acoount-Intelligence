@@ -36,18 +36,36 @@ def _retryable(exc) -> bool:
 
 def create_completion(client, **kwargs):
     """The SDK's chat completion call with the provider's request options and
-    rate-limit retries. Every model call goes through here."""
+    rate-limit waits. Every model call goes through here, so this is also where
+    a regeneration run counts its requests and tokens.
+
+    The waits are inside ONE call - a busy few seconds at the provider - not a
+    retry of a failed pipeline. When the provider is still refusing for quota
+    after all of them, the quota signal is raised before giving up: the engine
+    then pauses the whole queue instead of failing job after job.
+    """
     kwargs = {**settings.llm_request_extra, **kwargs}
-    for wait in RATE_LIMIT_WAITS:
+    for wait in (*RATE_LIMIT_WAITS, None):
         try:
-            return client.chat.completions.create(**kwargs)
+            response = client.chat.completions.create(**kwargs)
         except Exception as exc:
             if not _retryable(exc):
+                raise
+            if wait is None:
+                if isinstance(exc, RateLimitError):
+                    run_context.note_quota_exhausted()
                 raise
             logger.info("LLM answered %s - retrying in %ds",
                         getattr(exc, "status_code", "error"), wait)
             time.sleep(wait)
-    return client.chat.completions.create(**kwargs)
+            continue
+        if not kwargs.get("stream"):
+            usage = getattr(response, "usage", None)
+            run_context.note_api_call(getattr(usage, "total_tokens", 0) or 0)
+        else:
+            run_context.note_api_call(0)
+        return response
+    raise AssertionError("unreachable")
 
 
 def _parse_json(content: str) -> dict | None:

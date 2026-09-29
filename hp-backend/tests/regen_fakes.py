@@ -27,6 +27,8 @@ def _get(doc, path):
     for part in path.split("."):
         if isinstance(node, dict) and part in node:
             node = node[part]
+        elif isinstance(node, list) and part.isdigit() and int(part) < len(node):
+            node = node[int(part)]
         else:
             return _MISSING
     return node
@@ -99,6 +101,9 @@ def matches(doc, query) -> bool:
                 elif op == "$ne":
                     if _eq(actual, val):
                         return False
+                elif op == "$size":
+                    if not isinstance(actual, list) or len(actual) != val:
+                        return False
                 elif op == "$exists":
                     if (actual is not _MISSING) != bool(val):
                         return False
@@ -135,9 +140,15 @@ def _apply(doc, update, inserting):
                 _set(doc, path, base + copy.deepcopy(items))
             elif op == "$addToSet":
                 base = [] if current is _MISSING or current is None else list(current)
-                if value not in base:
-                    base.append(value)
+                items = value["$each"] if isinstance(value, dict) and "$each" in value \
+                    else [value]
+                for item in items:
+                    if item not in base:
+                        base.append(copy.deepcopy(item))
                 _set(doc, path, base)
+            elif op == "$pull":
+                base = [] if current is _MISSING or current is None else list(current)
+                _set(doc, path, [v for v in base if v != value])
             elif op == "$max":
                 if current is _MISSING or current is None or _norm(value) > _norm(current):
                     _set(doc, path, value)

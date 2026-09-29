@@ -19,8 +19,49 @@ import {
   RefreshCw
 } from 'lucide-react';
 
+// Per-account pipeline counts from GET /regeneration/accounts-summary. Worked
+// out from fingerprints on the server - no model calls - so Refresh is cheap.
+interface PipelineSummaryRow {
+  account_id: string;
+  counts: Record<string, number>;
+  total: number;
+  needs_run: number;
+  running?: { label: string; progress?: { done: number; total: number } | null } | null;
+}
+
+function PipelineCell({ row }: { row?: PipelineSummaryRow }) {
+  if (!row) return <span className="text-gray-400">—</span>;
+  const c = row.counts || {};
+  const chips: [string, number, string][] = [
+    ['running', c.RUNNING || 0, 'bg-blue-100 text-blue-800'],
+    ['queued', c.QUEUED || 0, 'bg-indigo-100 text-indigo-800'],
+    ['failed', c.FAILED || 0, 'bg-red-100 text-red-800'],
+    ['stale', (c.STALE || 0) + (c.DEGRADED || 0), 'bg-amber-100 text-amber-800'],
+    ['never run', c.NEVER_RUN || 0, 'bg-slate-200 text-slate-700'],
+  ];
+  const shown = chips.filter(([, n]) => n > 0);
+  if (!shown.length) {
+    return <span className="inline-flex px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800">all current</span>;
+  }
+  const p = row.running?.progress;
+  return (
+    <div className="flex flex-wrap gap-1">
+      {shown.map(([label, n, tone]) => (
+        <span key={label} className={`inline-flex px-2 py-0.5 rounded-full text-[11px] font-bold ${tone}`}>{n} {label}</span>
+      ))}
+      {row.running && (
+        <span className="text-[11px] text-blue-800 w-full">
+          {row.running.label}{p ? ` ${Math.round((p.done / Math.max(1, p.total)) * 100)}%` : ''}
+        </span>
+      )}
+    </div>
+  );
+}
+
 export default function ManagePlatformPage() {
   const [accounts, setAccounts] = useState<CompanyAccount[]>([]);
+  const [pipeline, setPipeline] = useState<Record<string, PipelineSummaryRow>>({});
+  const [queuePaused, setQueuePaused] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -36,6 +77,17 @@ export default function ManagePlatformPage() {
   const [togglingId, setTogglingId] = useState<string | null>(null);
 
   const router = useRouter();
+
+  const fetchPipeline = useCallback(async () => {
+    try {
+      const res = await api.get<{ accounts: PipelineSummaryRow[]; queue: { paused: boolean; reason?: string } }>(
+        '/regeneration/accounts-summary');
+      setPipeline(Object.fromEntries(res.data.accounts.map(r => [r.account_id, r])));
+      setQueuePaused(res.data.queue?.paused ? (res.data.queue.reason || 'paused') : null);
+    } catch {
+      // The table still works without the column.
+    }
+  }, []);
 
   const fetchAccounts = useCallback(async (search = '') => {
     setIsLoading(true);
@@ -55,6 +107,10 @@ export default function ManagePlatformPage() {
   useEffect(() => {
     fetchAccounts(searchQuery);
   }, [searchQuery, fetchAccounts]);
+
+  useEffect(() => {
+    fetchPipeline();
+  }, [fetchPipeline]);
 
   const handleCreateAccount = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -232,6 +288,16 @@ export default function ManagePlatformPage() {
                   <tr className="bg-gray-50 border-b border-gray-200 text-[11px] font-bold uppercase tracking-wider text-gray-600">
                     <th className="py-3.5 px-6">Account Name</th>
                     <th className="py-3.5 px-6">Status</th>
+                    <th className="py-3.5 px-6">
+                      <span className="inline-flex items-center gap-1.5">
+                        Pipeline
+                        <button type="button" onClick={fetchPipeline} title="Refresh pipeline status"
+                          className="text-gray-500 hover:text-hp-navy">
+                          <RefreshCw className="w-3 h-3" />
+                        </button>
+                        {queuePaused && <span className="normal-case text-amber-700" title={queuePaused}>· queue paused</span>}
+                      </span>
+                    </th>
                     <th className="py-3.5 px-6">Last Updated</th>
                     <th className="py-3.5 px-6 text-right">Actions</th>
                   </tr>
@@ -260,6 +326,10 @@ export default function ManagePlatformPage() {
                             Hidden
                           </span>
                         )}
+                      </td>
+
+                      <td className="py-4 px-6">
+                        <PipelineCell row={pipeline[account.id]} />
                       </td>
 
                       <td className="py-4 px-6 text-gray-500">

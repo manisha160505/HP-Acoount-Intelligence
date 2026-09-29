@@ -1,7 +1,9 @@
-"""The HTTP surface of regeneration: nothing generates inside a request.
+"""The HTTP surface of regeneration: nothing generates inside a request, and
+nothing is queued unless a regeneration run was asked for (29 Sep).
 
-Upload, the page-view bootstrap and every regenerate endpoint queue work and
-return; the tests prove it by making every extractor raise if it is called.
+Upload and page views queue nothing; preview writes nothing; a run queues
+exactly its plan. Every extractor raises if it is called, so a test that
+generated anything inline would fail.
 
 Run: python -m pytest tests/test_regen_api.py -v
 """
@@ -60,16 +62,39 @@ def env(monkeypatch, tmp_path):
     return TestClient(app), db, account_id
 
 
-def test_regenerate_returns_202_with_the_jobs_and_repeats_coalesce(env):
+
+
+def _data(db, acct, *keys):
+    """Active dataset rows, so the planner sees data to generate from. The
+    files themselves are never read: nothing runs in these tests."""
+    for key in keys:
+        db["account_data_files"].insert_one({
+            "account_id": acct, "dataset_key": key, "status": "active",
+            "file_path": "data/accounts/%s/%s/x.csv" % (acct, key),
+            "original_filename": "%s.csv" % key,
+            "content_sha256": hashlib.sha256(key.encode()).hexdigest()})
+
+
+def _live(db):
+    return list(db[jobs.COLLECTION].find({"status": {"$in": list(jobs.LIVE)}}))
+
+
+def test_regenerate_feature_is_an_explicit_run_and_repeats_share_the_job(env):
     client, db, acct = env
+    _data(db, acct, "prospect_contacts", "firmographics", "technographics")
     first = client.post("/api/v1/accounts/%s/features/stakeholder_map/regenerate" % acct)
     assert first.status_code == 202
-    nodes = {n["node_id"]: n for n in first.json()["nodes"]}
-    assert set(nodes) == {"stakeholder_roster", "stakeholder_talking_points"}
-    assert all(n["job"]["status"] == jobs.PENDING for n in nodes.values())
+    body = first.json()
+    assert body["run_id"]
+    nodes = {n["node_id"]: n for n in body["nodes"]}
+    assert nodes["stakeholder_roster"]["action"] == "run"
+    queued = {j["node_id"] for j in _live(db)}
+    assert "stakeholder_roster" in queued
     second = client.post("/api/v1/accounts/%s/features/stakeholder_map/regenerate" % acct)
-    assert all(n["job"]["coalesced"] for n in second.json()["nodes"])
-    assert db[jobs.COLLECTION].count_documents({"status": jobs.PENDING}) == 2
+    assert all(n["job"]["coalesced"] for n in second.json()["nodes"] if n["job"])
+    assert {j["node_id"] for j in _live(db)} == queued
+    run = db["regen_runs"].find_one({"_id": ObjectId(body["run_id"])})
+    assert run["request"]["force"] is False
 
 
 def test_regenerate_validates_account_and_feature(env):
@@ -91,44 +116,115 @@ def test_status_lists_every_feature_with_a_lifecycle(env):
 
 
 def test_job_history_hides_lease_internals(env):
-    client, _db, acct = env
+    client, db, acct = env
+    _data(db, acct, "intent_score", "intent_topics", "job_openings", "firmographics")
     client.post("/api/v1/accounts/%s/features/intent_demand_signals/regenerate" % acct)
     rows = client.get("/api/v1/accounts/%s/regeneration/jobs" % acct).json()["jobs"]
     assert rows and "fence" not in rows[0] and "lease_owner" not in rows[0]
     assert rows[0]["triggers"][0]["actor"] == "user:u1"
+    assert rows[0]["run_ids"]
 
 
-def test_upload_queues_the_readers_of_the_dataset_and_returns_at_once(env):
+def test_upload_stores_the_file_and_queues_nothing(env):
     client, db, acct = env
     content = b"Company Name,Business Description\nAcme,Makes things\n"
     resp = client.post("/api/v1/accounts/%s/data" % acct,
                        data={"dataset_key": "firmographics"},
                        files={"file": ("firmographics.csv", io.BytesIO(content), "text/csv")})
     assert resp.status_code == 201, resp.text
-    body = resp.json()
-    readers = set(DEFAULT.readers_of_dataset("firmographics"))
-    assert set(body["regeneration"]["queued"]) == readers
+    regen = resp.json()["regeneration"]
+    assert regen["queued"] == []
+    assert set(DEFAULT.readers_of_dataset("firmographics")) <= set(regen["stale"])
+    assert _live(db) == []
     row = db["account_data_files"].find_one({"account_id": acct})
     assert row["content_sha256"] == hashlib.sha256(content).hexdigest()
     # Content-addressed, so the stored bytes can never be overwritten.
     assert row["stored_filename"].startswith(row["content_sha256"][:12])
-    # Nothing reads firmographics in these nodes, so they were not queued.
-    assert "stakeholder_roster" not in body["regeneration"]["queued"]
 
 
-def test_a_page_view_queues_a_never_generated_feature_instead_of_generating_it(env):
+def test_a_page_view_neither_generates_nor_queues(env):
     client, db, acct = env
+    _data(db, acct, "intent_score", "intent_topics")
     resp = client.get("/api/v1/accounts/%s/widgets/intent_demand_signals" % acct)
     assert resp.status_code == 200
     assert {w["status"] for w in resp.json()} == {"empty"}
-    assert db[jobs.COLLECTION].count_documents({"node_id": "intent",
-                                                "status": jobs.PENDING}) == 1
+    assert _live(db) == []
 
 
-def test_the_old_regenerate_endpoint_queues_and_returns_the_widgets(env):
+def test_the_old_regenerate_endpoint_runs_without_force(env):
     client, db, acct = env
+    _data(db, acct, "technographics", "technology_detections", "webstack",
+          "tech_breakdown", "firmographics")
     resp = client.post("/api/v1/accounts/%s/widgets/tech_landscape/regenerate" % acct)
     assert resp.status_code == 200
     assert len(resp.json()) == 5
-    queued = {j["node_id"] for j in db[jobs.COLLECTION].find({"status": jobs.PENDING})}
-    assert queued == {"tech_core", "tech_recs"}
+    queued = {j["node_id"]: j for j in _live(db)}
+    assert "tech_core" in queued and not queued["tech_core"].get("force")
+
+
+def test_preview_writes_nothing_and_run_queues_exactly_the_plan(env):
+    client, db, acct = env
+    _data(db, acct, "firmographics", "intent_score", "intent_topics")
+    body = {"accounts": [acct], "features": ["intent_demand_signals"]}
+    preview = client.post("/api/v1/regeneration/preview", json=body)
+    assert preview.status_code == 200, preview.text
+    plan = preview.json()
+    assert _live(db) == [] and db["regen_runs"].count_documents({}) == 0
+    planned = {i["node_id"] for i in plan["accounts"][0]["items"] if i["action"] == "run"}
+    assert "intent" in planned and plan["totals"]["run"] == len(planned)
+
+    run = client.post("/api/v1/regeneration", json=body)
+    assert run.status_code == 202, run.text
+    run_id = run.json()["_id"]
+    assert {j["node_id"] for j in _live(db)} == planned
+    got = client.get("/api/v1/regeneration/%s" % run_id).json()
+    assert got["status"] == "RUNNING" and got["progress"]["total"] == len(planned)
+    listed = client.get("/api/v1/regeneration/runs?account_id=%s" % acct).json()["runs"]
+    assert listed[0]["_id"] == run_id
+
+    cancelled = client.post("/api/v1/regeneration/%s/cancel" % run_id).json()
+    assert cancelled["cancelled"] == len(planned) and _live(db) == []
+
+
+def test_a_run_by_account_name_and_the_bad_requests(env):
+    client, db, acct = env
+    _data(db, acct, "firmographics")
+    ok = client.post("/api/v1/regeneration/preview", json={"accounts": ["Acme"]})
+    assert ok.status_code == 200 and ok.json()["accounts"][0]["account_id"] == acct
+    assert client.post("/api/v1/regeneration/preview", json={}).status_code == 400
+    assert client.post("/api/v1/regeneration/preview",
+                       json={"accounts": ["Nobody Inc"]}).status_code == 400
+    assert client.post("/api/v1/regeneration/preview",
+                       json={"accounts": "all", "features": ["nope"]}).status_code == 400
+
+
+def test_queue_pause_and_resume(env):
+    client, _db, _acct = env
+    assert client.get("/api/v1/regeneration/queue").json()["paused"] is False
+    paused = client.post("/api/v1/regeneration/queue/pause",
+                         json={"reason": "testing"}).json()
+    assert paused["paused"] is True and paused["reason"] == "testing"
+    assert client.post("/api/v1/regeneration/queue/resume").json()["paused"] is False
+
+
+def test_account_pipeline_groups_every_section_with_reasons(env):
+    client, db, acct = env
+    _data(db, acct, "firmographics")
+    body = client.get("/api/v1/accounts/%s/pipeline" % acct).json()
+    assert sum(body["counts"].values()) == len(DEFAULT.order)
+    never = body["groups"]["NEVER_RUN"]
+    assert never and never[0]["reasons"][0]["category"] == "never_run"
+    assert body["queue"]["paused"] is False and body["runs"] == []
+
+    summary = client.get("/api/v1/regeneration/accounts-summary").json()
+    row = next(a for a in summary["accounts"] if a["account_id"] == acct)
+    assert row["counts"]["NEVER_RUN"] == len(DEFAULT.order) and row["needs_run"] > 0
+
+
+def test_index_rebuild_preview_names_only_index_sections(env):
+    client, db, acct = env
+    _data(db, acct, "firmographics", "compliance_filings")
+    plan = client.post("/api/v1/indexes/rebuild/preview",
+                       json={"accounts": [acct], "indexes": ["executive_dashboard"]}).json()
+    requested = plan["requested_nodes"]
+    assert requested == ["idx_executive_dashboard"]

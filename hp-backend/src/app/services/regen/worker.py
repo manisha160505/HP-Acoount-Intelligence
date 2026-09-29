@@ -3,6 +3,9 @@
 In-process, like the retrieval worker it replaces: the queue is in Mongo, so
 moving this to its own service later is a deployment change, not a redesign.
 
+The worker only ever claims jobs an explicit regeneration run created; the
+"sweep" thread only reports how much is stale. Neither starts work on its own.
+
 Off unless switched on. `REGEN_WORKER_ENABLED=1` and `REGEN_SWEEP_ENABLED=1`
 are set by the compose files that run the real service; a laptop pointed at a
 shared database reads it without generating anything - otherwise two machines
@@ -48,15 +51,24 @@ def _work_loop(engine):
 
 
 def _sweep_loop(engine):
+    """Report, never run: how many accounts have outputs that need a run.
+
+    Until 29 Sep this reconciled every account and ENQUEUED every stale node -
+    so a deploy that changed one prompt regenerated that section for every
+    account, and a restart re-queued whatever was stale. Now it only logs the
+    count; the admin page shows the detail and Submit does the work.
+    """
     if _stop.wait(STARTUP_SWEEP_DELAY):
         return
     while not _stop.is_set():
         try:
-            summary = engine.sweep(int(os.getenv("REGEN_LEGACY_ACCOUNTS_PER_SWEEP", "5")))
-            logger.info("regen sweep: %d account(s), %d job(s) queued",
-                        summary["accounts"], summary["queued"])
+            summary = engine.stale_report()
+            logger.info("regen: %d of %d account(s) have outputs that need a run "
+                        "(nothing queued - submit from the admin page) %s",
+                        summary["accounts_needing_run"], summary["accounts"],
+                        summary["by_status"])
         except Exception:
-            logger.exception("regen sweep: failed")
+            logger.exception("regen stale report: failed")
         if _stop.wait(SWEEP_SECONDS):
             return
 

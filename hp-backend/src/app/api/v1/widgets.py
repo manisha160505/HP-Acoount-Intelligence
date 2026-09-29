@@ -553,18 +553,10 @@ def get_account_feature_widgets(
     stored = [w for w in widget_store.get_many(
         account_id, [c["widget_key"] for c in widget_contracts]).values() if w]
 
-    # Bootstrap: a fresh account, or a feature added since the last upload, has
-    # nothing stored yet. Queue it - never generate inline: a page view used to
-    # run the extractor, model calls included, inside the request. The widgets
-    # read as pending until the worker commits them.
-    if not stored:
-        try:
-            from app.services.regen.engine import get_engine
-            get_engine().regenerate_feature(account_id, key_clean,
-                                            _actor(current_user), force=False)
-        except Exception:
-            logger.exception("could not queue first-time generation of %s for %s",
-                             key_clean, account_id)
+    # A fresh account, or a feature added since the last run, has nothing
+    # stored yet. A page view neither generates it nor queues it (29 Sep):
+    # every expensive run is an admin's explicit Submit. The widgets read as
+    # pending with generation state NEVER_GENERATED until then.
 
     extracted_widgets_map = {w["widget_key"]: w for w in stored}
     generation = _generation_by_widget(account_id)
@@ -643,11 +635,11 @@ def regenerate_account_feature_widgets(
     feature_key: str,
     current_user: dict = Depends(require_user_role)
 ):
-    """Force a refresh for one feature.
+    """Regenerate one feature as an explicit run.
 
-    The supported way to re-run a feature on demand - including recovering a
-    widget left "pending" by a failed generation - now that a page view no
-    longer re-extracts.
+    Runs the feature's sections that are not current (and any stale section
+    they are built on). A current section is skipped: forcing one is
+    `POST /regeneration` with `force: true`, deliberately.
     """
     if not ObjectId.is_valid(account_id):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid account ID format")
@@ -668,7 +660,7 @@ def regenerate_account_feature_widgets(
     # call returning the job instead.
     from app.services.regen.engine import get_engine
     get_engine().regenerate_feature(account_id, key_clean, _actor(current_user),
-                                    force=True)
+                                    force=False)
     return get_account_feature_widgets(account_id, key_clean, current_user)
 
 
@@ -1061,9 +1053,11 @@ def retrieval_rebuild(
     # admin rebuild can never run beside the engine's own build of the same
     # workspace (LightRAG cannot build one workspace from two live loops).
     from app.services.regen.engine import get_engine
+    # An explicit admin rebuild: forced, so it runs even when the index is
+    # current.
     job = get_engine().regenerate_nodes(account_id, ["idx_%s" % index],
                                         _actor(current_user), detail="admin rebuild",
-                                        full=True)
+                                        force=True, full=True)
     return {"queued": bool(job.get("nodes")),
             "index": index,
             "warning": ("A full rebuild drops the index and rebuilds it in place. "
