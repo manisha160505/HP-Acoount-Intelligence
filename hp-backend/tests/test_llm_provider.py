@@ -7,6 +7,8 @@ Run: python -m pytest tests/test_llm_provider.py -v
 import os
 import sys
 
+import pytest
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from app.config.settings import Settings
@@ -64,7 +66,7 @@ def test_vertex_names_google_models_with_their_publisher():
     assert s.embedding_identity == "vertex:gemini-embedding-001:3072"
 
 
-def test_vertex_embeddings_send_key_in_header_and_retry_429(monkeypatch):
+def test_vertex_embeddings_send_key_in_header_and_wait_out_a_429(monkeypatch):
     import httpx
 
     from app.services.retrieval import client
@@ -114,11 +116,9 @@ def test_gemini_thinking_is_off_by_default_and_configurable():
     assert _settings(LLM_PROVIDER="openai").llm_request_extra == {}
 
 
-def test_create_completion_waits_out_rate_limits(monkeypatch):
+def test_create_completion_waits_out_a_brief_429(monkeypatch):
     import httpx
     from openai import RateLimitError
-
-    from app.core import llm
 
     monkeypatch.setattr(llm, "RATE_LIMIT_WAITS", (0, 0))
     monkeypatch.setattr(llm.settings, "LLM_PROVIDER", "vertex")
@@ -130,10 +130,34 @@ def test_create_completion_waits_out_rate_limits(monkeypatch):
             if len(sent) < 3:
                 raise RateLimitError("busy", response=httpx.Response(
                     429, request=httpx.Request("POST", "http://x")), body=None)
-            return "ok"
+            return type("R", (), {"usage": None})()
 
     class _Client:
         chat = type("C", (), {"completions": _Completions()})()
 
-    assert llm.create_completion(_Client(), model="m", messages=[]) == "ok"
+    llm.create_completion(_Client(), model="m", messages=[])
     assert len(sent) == 3 and "extra_body" in sent[-1]
+
+
+def test_a_429_that_outlasts_every_wait_flags_the_quota(monkeypatch):
+    import time
+
+    import httpx
+    from openai import RateLimitError
+
+    from app.services.regen import context as run_context
+
+    monkeypatch.setattr(llm, "RATE_LIMIT_WAITS", (0, 0))
+
+    class _Completions:
+        def create(self, **_kw):
+            raise RateLimitError("busy", response=httpx.Response(
+                429, request=httpx.Request("POST", "http://x")), body=None)
+
+    class _Client:
+        chat = type("C", (), {"completions": _Completions()})()
+
+    started = time.time()
+    with pytest.raises(RateLimitError):
+        llm.create_completion(_Client(), model="m", messages=[])
+    assert run_context.quota_exhausted_since(started)

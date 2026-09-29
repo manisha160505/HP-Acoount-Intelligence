@@ -29,7 +29,12 @@ USER = {"id": "u1", "email": "admin@example.com", "full_name": "Admin", "role": 
 def env(monkeypatch, tmp_path):
     db = FakeDb()
     monkeypatch.setattr(mongodb.db_instance, "db", db)
-    engine = engine_mod.Engine(db=db, graph=DEFAULT, versions=manifest.StaticVersions())
+    # The data rows these tests insert name files that are never opened -
+    # nothing runs here - so they count as present (one test says otherwise).
+    present = {"yes": True}
+    engine = engine_mod.Engine(db=db, graph=DEFAULT, versions=manifest.StaticVersions(),
+                               file_exists=lambda _row: present["yes"])
+    db.files_present = present
     engine.ensure_indexes()
     monkeypatch.setattr(engine_mod, "_default_engine", engine)
 
@@ -228,3 +233,15 @@ def test_index_rebuild_preview_names_only_index_sections(env):
                        json={"accounts": [acct], "indexes": ["executive_dashboard"]}).json()
     requested = plan["requested_nodes"]
     assert requested == ["idx_executive_dashboard"]
+
+
+def test_preview_reports_sections_whose_files_are_missing_on_the_server(env):
+    client, db, acct = env
+    _data(db, acct, "firmographics", "intent_score", "intent_topics")
+    db.files_present["yes"] = False
+    plan = client.post("/api/v1/regeneration/preview",
+                       json={"accounts": [acct], "features": ["intent_demand_signals"]}).json()
+    intent = next(i for i in plan["accounts"][0]["items"] if i["node_id"] == "intent")
+    assert intent["action"] == "cannot_run" and intent["missing_files"]
+    body = client.get("/api/v1/accounts/%s/pipeline" % acct).json()
+    assert any(n["node_id"] == "intent" for n in body["groups"]["FILES_MISSING"])

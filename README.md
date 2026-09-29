@@ -139,10 +139,15 @@ progress, errors and model usage; `GET /api/v1/accounts/{id}/pipeline` shows
 every section of an account grouped by status, with why each one is stale
 (data file, upstream section, code, prompt, rules, model or instructions).
 
-A failed section is not retried automatically: it keeps its previous output,
-shows its error on the Pipeline tab, and runs again on the next Submit. If the
-model provider's quota runs out, the queue pauses (nothing is failed) until an
-admin presses Resume.
+A section is never re-queued or restarted on its own. Whatever stops it - its
+own error, a model error that outlasts the short in-call waits, the quota
+running out, its data files missing on the server, the worker dying, or a
+restart/deploy - it goes straight to **Failed** with that reason on the
+Pipeline tab, keeps its previous output, and runs again only on the next
+Submit. A quota failure also pauses the queue, so the sections still waiting do
+not each fail on it; an admin presses Resume. Work done before the failure is
+kept and reused on the re-run: an index build continues from the documents it
+finished, and Live Signals from the batches it scored.
 
 AI output is cached on a SHA-256 fingerprint of the inputs plus a prompt
 version, so identical data costs zero model calls. Bump the module's

@@ -216,7 +216,8 @@ class FakeCollection:
         return self
 
     # -- indexes ----------------------------------------------------------
-    def create_index(self, keys, name=None, unique=False, partialFilterExpression=None):
+    def create_index(self, keys, name=None, unique=False, partialFilterExpression=None,
+                     **_options):
         with self._lock:
             fields = [k for k, _ in keys]
             name = name or "_".join("%s_1" % f for f in fields)

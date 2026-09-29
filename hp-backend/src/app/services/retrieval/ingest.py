@@ -157,6 +157,16 @@ async def _update_index(account_id: str, index: str, full: bool = False,
                                         or delta["removed"]):
         stats["skipped"] = True
         stats["unchanged"] = len(delta["unchanged"])
+        if resuming:
+            # An interrupted build whose every document had already finished:
+            # nothing to extract, but it never reached finish_build. Record the
+            # finish now, or the index stays BUILDING (not queryable) forever.
+            index_state.finish_build(account_id, index,
+                                     dict(snapshot.get("documents") or {}),
+                                     snapshot.get("last_build_mode") or index_state.FULL)
+            logger.info("retrieval: %s/%s interrupted build was already complete - "
+                        "marked finished, nothing to extract", account_id, index)
+            return stats
         logger.info("retrieval: %s/%s unchanged - nothing to do", account_id, index)
         return stats
 

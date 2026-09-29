@@ -101,6 +101,7 @@ def begin_build(account_id: str, index: str, mode: str) -> dict:
     the workspace is about to be dropped, so `BUILDING` means unavailable, not
     "serving the old copy".
     """
+    from app.config.settings import settings
     from app.services.retrieval.client import workspace_name
 
     state = get(account_id, index)
@@ -108,6 +109,13 @@ def begin_build(account_id: str, index: str, mode: str) -> dict:
     state["status"] = BUILDING
     state["last_build_mode"] = mode
     state["last_error"] = None
+    # Recorded at the START, not only at finish_build: the build is about to
+    # embed with this model (ingest forces a full rebuild before this point if
+    # the recorded one differed). A build stopped after its last document - the
+    # quota ran out during Westpac's strategy index, 29 Sep - otherwise left no
+    # record, the resume read "no embedding" as the old OpenAI one, and would
+    # have dropped all 166 finished documents to rebuild them.
+    state["embedding"] = settings.embedding_identity
     save(state)
     logger.info("retrieval: %s %s build started for account %s (workspace %s)",
                 index, mode, account_id, state["workspace"])

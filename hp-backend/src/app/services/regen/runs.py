@@ -37,6 +37,10 @@ def ensure_indexes(db) -> None:
     db[COLLECTION].create_index([("account_ids", 1), ("created_at", -1)],
                                 name="by_account")
     db[jobs.COLLECTION].create_index([("run_ids", 1)], name="by_run")
+    # Saved partial progress (Live Signals' scored batches): kept long enough
+    # for a failed section to be fixed and submitted again, then dropped.
+    db["llm_batch_progress"].create_index([("saved_at", 1)], name="expire_progress",
+                                          expireAfterSeconds=14 * 24 * 3600)
 
 
 def create(engine, *, accounts,  # noqa: PLR0913 - the request's fields
@@ -64,6 +68,9 @@ def create(engine, *, accounts,  # noqa: PLR0913 - the request's fields
                              priority=jobs.PRIORITY_MANUAL, force=item["forced"],
                              full=bool(full) and node.kind == INDEX,
                              rank=engine.graph.rank(item["node_id"]), run_id=run_id)
+                if item.get("handed_back"):
+                    # Its files are back: let every worker take it again.
+                    jobs.clear_not_runnable(db, entry["account_id"], item["node_id"])
                 queued += 1
             elif item["action"] == planner.IN_PROGRESS and item.get("job"):
                 jobs.attach_run(db, ObjectId(item["job"]["id"]), run_id)
@@ -110,10 +117,17 @@ def _job_summary(job: dict) -> dict:
             "error": job.get("error") or job.get("last_error"),
             "released_reason": job.get("released_reason"),
             "blocked_by": result.get("blocked_by"),
-            "usage": {"model_calls": int(result.get("api_calls") or 0),
-                      "tokens": int(result.get("tokens") or 0),
-                      "embedding_calls": int(result.get("embedding_calls") or 0),
-                      "embedded_texts": int(result.get("embedded_texts") or 0)}}
+            # Every attempt: the one that finished (result) plus any stopped by
+            # the quota before it (spent).
+            "usage": {"model_calls": _used(job, "api_calls"),
+                      "tokens": _used(job, "tokens"),
+                      "embedding_calls": _used(job, "embedding_calls"),
+                      "embedded_texts": _used(job, "embedded_texts")}}
+
+
+def _used(job: dict, key: str) -> int:
+    return (int((job.get("result") or {}).get(key) or 0)
+            + int((job.get("spent") or {}).get(key) or 0))
 
 
 def status_of(run: dict, job_rows: list) -> str:

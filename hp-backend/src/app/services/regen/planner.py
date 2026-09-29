@@ -40,6 +40,11 @@ STALE = "STALE"
 NEVER_RUN = "NEVER_RUN"
 DEGRADED = "DEGRADED"
 BLOCKED = "BLOCKED"
+# A section whose own data files are recorded in the database but not on this
+# server's disk. It cannot run here until they are uploaded again (28-29 Sep:
+# Accenture, Advantest and Astra's filings each showed as "queued" for hours
+# while the worker kept handing them back).
+FILES_MISSING = "FILES_MISSING"
 CURRENT = "CURRENT"
 NEEDS_RUN = (FAILED, STALE, NEVER_RUN, DEGRADED)
 
@@ -90,7 +95,18 @@ def account_view(engine, account_id: str) -> dict:
         doc = snapshot.states.get(nid) or {}
         current = doc.get("current") or {}
         job = live.get(nid)
-        status = node_status(entry, job)
+        # A queued job the worker handed back because files were missing. It
+        # is not going to run by waiting, so it does not count as queued.
+        handed_back = bool(job and job.get("status") == jobs.PENDING
+                           and job.get("not_runnable_on"))
+        status = node_status(entry, None if handed_back else job)
+
+        # The section's own files - the ones a run pins and opens. Checked on
+        # this server's disk, which is where the worker runs.
+        missing = [r for key in node.datasets for r in snapshot.rows.get(key) or []
+                   if not engine.file_exists(r)]
+        if missing and (handed_back or status in NEEDS_RUN):
+            status = FILES_MISSING
 
         why = []
         if status == NEVER_RUN:
@@ -107,6 +123,8 @@ def account_view(engine, account_id: str) -> dict:
                 str(err.get("message") or "")[:300]))
         if entry.get("blocked_by"):
             why.extend(reasons.waiting_on(entry["blocked_by"], derived))
+        if missing:
+            why.insert(0, reasons.files_missing(missing))
 
         # A section with no uploaded file anywhere in what it is built from
         # has nothing to generate from: running it would spend model calls on
@@ -136,6 +154,10 @@ def account_view(engine, account_id: str) -> dict:
             "upstream": list(node.upstream),
             "has_data": has_data,
             "datasets": sorted(closure),
+            "missing_files": [{"dataset": r.get("dataset_key") or r.get("category"),
+                               "file": r.get("original_filename") or r.get("stored_filename"),
+                               "path": r.get("file_path")} for r in missing],
+            "handed_back": handed_back,
         }
     return {"account_id": account_id, "nodes": nodes, "derived": derived,
             "fingerprints": fps}
@@ -208,6 +230,8 @@ def plan_account(engine, account_id: str, requested: list, *, force: bool = Fals
         n = nodes[nid]
         if n["status"] in (RUNNING, QUEUED):
             return IN_PROGRESS
+        if n["status"] == FILES_MISSING:
+            return CANNOT_RUN
         if needed_by is None and force:
             return RUN
         if n["status"] == BLOCKED or not n["has_data"]:
@@ -260,7 +284,9 @@ def plan_account(engine, account_id: str, requested: list, *, force: bool = Fals
                       "requested": nid in wanted,
                       "needed_by": sorted(set(d["needed_by"]), key=graph.rank),
                       "blocked_by": d.get("blocked_by") or n.get("blocked_by"),
-                      "has_data": n["has_data"]})
+                      "has_data": n["has_data"],
+                      "missing_files": n["missing_files"],
+                      "handed_back": n["handed_back"]})
     counts = {a: sum(1 for i in items if i["action"] == a)
               for a in (RUN, SKIP_CURRENT, IN_PROGRESS, CANNOT_RUN)}
     counts["llm_sections"] = sum(1 for i in items if i["action"] == RUN and i["llm"])

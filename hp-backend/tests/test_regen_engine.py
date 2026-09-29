@@ -35,7 +35,7 @@ from app.services.regen import (
     state,
     store as widget_store,
 )
-from app.services.regen.engine import Engine
+from app.services.regen.engine import Engine, load_snapshot
 from app.services.regen.graph import Graph, Node
 from regen_fakes import FakeDb
 
@@ -426,7 +426,7 @@ def test_a_failed_section_is_not_retried_and_dependents_do_not_build_on_it(h):
     assert [h.lifecycle(acct, n) for n in "ABC"] == [state.CURRENT] * 3
 
 
-def test_quota_exhaustion_pauses_the_queue_and_keeps_the_job(h):
+def test_quota_exhaustion_fails_the_section_and_pauses_the_queue(h):
     acct = _loaded(h)
 
     def quota(account_id, **_kw):
@@ -438,15 +438,17 @@ def test_quota_exhaustion_pauses_the_queue_and_keeps_the_job(h):
     h.upload(acct, "d3", "z\n6\n")
     h.submit(acct)
     out = h.drain()
-    assert [o["outcome"] for o in out] == ["paused"]
+    assert [o["outcome"] for o in out] == ["failed"]
+    assert out[0]["error"]["code"] == "QUOTA_EXHAUSTED"
     assert jobs.queue_state(h.db)["paused"] is True
-    [job] = h.live_jobs(acct)
-    assert job["status"] == jobs.PENDING and job["attempts"] == 0
-    assert h.drain() == []                               # paused: nothing claimed
-    assert h.status(acct, "D") == planner.QUEUED
-    # An admin resumes once the quota is back.
+    assert h.live_jobs(acct) == []                      # never back in the queue
+    node = planner.account_view(h.engine, acct)["nodes"]["D"]
+    assert node["status"] == planner.FAILED
+    assert node["reasons"][0]["label"] == "QUOTA_EXHAUSTED"
+    # The quota is back: an admin resumes and submits it again.
     h.engine.runners["D"] = h._runner("D")
     jobs.resume(h.db, "user:1")
+    h.submit(acct)
     h.drain()
     assert h.status(acct, "D") == planner.CURRENT
 
@@ -672,7 +674,7 @@ def test_queued_jobs_survive_a_restart(h):
     assert h.widget(acct, "dw")["data"]["rows"] == [{"z": "77"}]
 
 
-def test_file_missing_here_releases_without_spending_an_attempt(h):
+def test_a_file_missing_when_the_job_starts_fails_it_with_the_reason(h):
     acct = _loaded(h)
     h.upload(acct, "d3", "z\n8\n")
     h.submit(acct)
@@ -680,11 +682,11 @@ def test_file_missing_here_releases_without_spending_an_attempt(h):
                                                "status": "active"})
     os.remove(row["file_path"])
     out = h.engine.run_once()
-    assert out["outcome"] == "not_runnable_here"
-    job = h.db[jobs.COLLECTION].find_one({"account_id": acct, "node_id": "D",
-                                          "status": jobs.PENDING})
-    assert job["attempts"] == 0 and "w1" in job["not_runnable_on"]
-    assert h.engine.run_once() is None       # w1 will not take it again
+    assert out["outcome"] == "failed" and out["error"]["code"] == "FILES_MISSING"
+    assert h.live_jobs(acct) == []                      # never back in the queue
+    node = planner.account_view(h.engine, acct)["nodes"]["D"]
+    assert node["status"] == planner.FILES_MISSING
+    assert node["last_error"]["code"] == "FILES_MISSING"
 
 
 def test_cancelling_a_run_removes_its_queued_jobs(h):
@@ -757,26 +759,28 @@ def test_status_reports_every_lifecycle(h):
     assert features["fd"]["lifecycle"] == state.NEVER_GENERATED
 
 
-def test_shutdown_hands_running_jobs_back_without_spending_an_attempt(h):
+def test_a_restart_fails_the_running_job_as_interrupted(h):
     acct = _loaded(h)
-    _enqueue(h, acct, "D", force=True)
+    h.upload(acct, "d3", "z\n40\n")
+    h.submit(acct)
     job = jobs.claim(h.db, "old-backend")
-    jobs.start_attempt(h.db, job, "fp", None, [])
+    target = h.engine.expected_all(load_snapshot(h.db, acct))[1]["D"]
+    jobs.start_attempt(h.db, job, target, None, [])
     other = _loaded(h)
     _enqueue(h, other, "D", force=True)
     theirs = jobs.claim(h.db, "another-worker")
 
-    released = jobs.release_owned(h.db, "old-backend")
-    assert [r["_id"] for r in released] == [job["_id"]]
+    failed = jobs.fail_owned(h.db, "old-backend")
+    assert [r["_id"] for r in failed] == [job["_id"]]
+    h.engine.record_job_failure(failed[0], jobs.INTERRUPTED, jobs.INTERRUPTED_MESSAGE)
     row = h.db[jobs.COLLECTION].find_one({"_id": job["_id"]})
-    assert row["status"] == jobs.PENDING and row["attempts"] == 0
-    assert row["lease_owner"] is None and row["fence"] is None
+    assert row["status"] == jobs.FAILED and row["error"]["code"] == jobs.INTERRUPTED
+    assert h.status(acct, "D") == planner.FAILED
     # Another worker's job is not touched.
     assert h.db[jobs.COLLECTION].find_one({"_id": theirs["_id"]})["status"] == jobs.RUNNING
-    # The old worker's late commit is fenced out: its fence was cleared.
+    # The old worker's late commit is fenced out, and nothing re-queues it.
     assert not jobs.finish(h.db, job, jobs.SUCCEEDED)
-    # The next backend picks it straight up.
-    assert jobs.claim(h.db, "new-backend")["_id"] == job["_id"]
+    assert jobs.claim(h.db, "new-backend") is None
 
 
 def test_a_dead_workers_lease_lapses_within_minutes():
@@ -798,16 +802,80 @@ def test_an_engine_crash_fails_the_job_instead_of_looping(h, monkeypatch):
     assert h.live_jobs(acct) == []
 
 
-def test_a_job_whose_worker_keeps_dying_is_failed_after_three_lapses(h):
+def test_a_job_whose_worker_died_is_failed_not_requeued(h):
     acct = _loaded(h)
     _enqueue(h, acct, "D", force=True)
-    for lapse in range(jobs.MAX_ATTEMPTS):
-        job = jobs.claim(h.db, "dies-every-time")
-        assert job, "lapse %d" % lapse
-        # Dies before start_attempt: no attempt is ever counted.
-        h.db[jobs.COLLECTION].update_one(
-            {"_id": job["_id"]},
-            {"$set": {"lease_expires_at": datetime.now(UTC) - timedelta(seconds=1)}})
-        jobs.reclaim_expired(h.db)
+    job = jobs.claim(h.db, "dies")
+    h.db[jobs.COLLECTION].update_one(
+        {"_id": job["_id"]},
+        {"$set": {"lease_expires_at": datetime.now(UTC) - timedelta(seconds=1)}})
+    assert h.engine.run_once() is None
     row = h.db[jobs.COLLECTION].find_one({"_id": job["_id"]})
-    assert row["status"] == jobs.FAILED and row["error"]["code"] == "LEASE_EXPIRED"
+    assert row["status"] == jobs.FAILED and row["error"]["code"] == jobs.WORKER_STOPPED
+    assert h.live_jobs(acct) == []
+
+
+# --------------------------------------------------------------------------
+# Files recorded in the database but not on this server
+# --------------------------------------------------------------------------
+
+def test_a_section_whose_files_are_missing_cannot_run_and_says_why(h):
+    acct = _loaded(h)
+    path = h.upload(acct, "d3", "z\n21\n") and h.db["account_data_files"].find_one(
+        {"account_id": acct, "dataset_key": "d3", "status": "active"})["file_path"]
+    os.remove(path)
+    node = planner.account_view(h.engine, acct)["nodes"]["D"]
+    assert node["status"] == planner.FILES_MISSING
+    assert node["reasons"][0]["category"] == "files_missing"
+    assert len(node["missing_files"]) == 1
+    run = h.submit(acct)
+    item = next(i for i in run["plan"]["accounts"][0]["items"] if i["node_id"] == "D")
+    assert item["action"] == planner.CANNOT_RUN
+    assert h.live_jobs() == [] and h.drain() == []
+
+
+def test_a_section_failed_for_missing_files_runs_again_once_they_are_back(h):
+    acct = _loaded(h)
+    h.upload(acct, "d3", "z\n22\n")
+    h.submit(acct)
+    row = h.db["account_data_files"].find_one({"account_id": acct, "dataset_key": "d3",
+                                               "status": "active"})
+    os.remove(row["file_path"])
+    assert h.engine.run_once()["outcome"] == "failed"
+    assert h.status(acct, "D") == planner.FILES_MISSING
+    # Still missing: a submit does not run it.
+    assert h.submit(acct)["totals"]["queued"] == 0
+    with open(row["file_path"], "w") as fh:
+        fh.write("z\n22\n")
+    assert h.status(acct, "D") == planner.FAILED
+    assert h.submit(acct)["totals"]["queued"] == 1
+    h.drain()
+    assert h.ran(acct) == ["D"] and h.status(acct, "D") == planner.CURRENT
+
+
+def test_a_dataset_a_section_starts_reading_is_not_reported_as_deleted():
+    from app.services.regen import reasons
+    old = {"datasets": {"a": "v1"}}
+    new = {"datasets": {"a": "v1", "filings_financials": "none"}}
+    [r] = reasons.classify(old, new)
+    assert r["category"] == "data_file" and "newly read" in r["detail"]
+    assert "deleted" not in r["detail"]
+
+
+
+def test_usage_of_a_run_stopped_by_the_quota_is_recorded(h):
+    acct = _loaded(h)
+
+    def quota(account_id, **_kw):
+        run_context.note_api_call(100)
+        run_context.note_api_call(100)
+        run_context.note_quota_exhausted()
+        raise RuntimeError("429 RESOURCE_EXHAUSTED")
+
+    h.engine.runners["D"] = quota
+    h.upload(acct, "d3", "z\n31\n")
+    run = h.submit(acct)
+    h.drain()
+    got = runs.get(h.db, run["_id"])
+    assert got["status"] == runs.COMPLETED_WITH_FAILURES
+    assert got["usage"]["model_calls"] == 2 and got["usage"]["tokens"] == 200

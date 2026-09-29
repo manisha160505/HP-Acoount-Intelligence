@@ -187,9 +187,9 @@ def account_pipeline(account_id: str, current_user: dict = Depends(require_admin
     _check_account(account_id)
     db, engine = get_db(), get_engine()
     view = planner.account_view(engine, account_id)
-    groups = {s: [] for s in (planner.RUNNING, planner.QUEUED, planner.FAILED,
-                              planner.STALE, planner.DEGRADED, planner.BLOCKED,
-                              planner.NEVER_RUN, planner.CURRENT)}
+    groups = {s: [] for s in (planner.RUNNING, planner.QUEUED, planner.FILES_MISSING,
+                              planner.FAILED, planner.STALE, planner.DEGRADED,
+                              planner.BLOCKED, planner.NEVER_RUN, planner.CURRENT)}
     for n in view["nodes"].values():
         groups[n["status"]].append(n)
     return jsonable({"account_id": account_id, "groups": groups,
