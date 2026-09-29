@@ -345,9 +345,11 @@ def test_release_when_free_is_an_error():
 class FakeRag:
     def __init__(self):
         self.loops = []
+        self.params = []
 
     async def aquery_llm(self, question, param=None):
         self.loops.append(asyncio.get_running_loop())
+        self.params.append(param)
         return {"response": "ctx for %s" % question, "chunks": [
             {"file_path": "doc.pdf", "content": "some text acct#c1"}]}
 
@@ -386,3 +388,17 @@ def test_ask_and_retrieve_land_on_the_same_loop(fake_index):
     in_thread_loop(lambda: query.retrieve("a1", "strategy", "q2"))
     assert len(set(fake_index.loops)) == 1
     assert fake_index.loops[0] is client._query_loop
+
+
+def test_the_requested_top_k_sizes_the_chunk_search(fake_index):
+    """`top_k` alone does not reach a chunk search.
+
+    LightRAG sizes one as `chunk_top_k or top_k`, and `chunk_top_k` is not
+    None - it defaults to 20. In naive mode, which is what the Executive
+    Dashboard now uses, the chunk search IS the retrieval, so the 60 that
+    `priorities.py` asks for would have quietly become 20.
+    """
+    query.ask("a1", "strategy", "q?", top_k=60)
+    param = fake_index.params[-1]
+    assert param.top_k == 60
+    assert param.chunk_top_k == 60

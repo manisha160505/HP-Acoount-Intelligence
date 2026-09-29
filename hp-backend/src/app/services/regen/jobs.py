@@ -447,28 +447,61 @@ def cancel_unbound(db) -> int:
 
 # ---------------------------------------------------------------------------
 # Queue control: paused by an admin, or by the engine on an exhausted quota.
-# Nothing resumes it except an admin.
+#
+# An admin's pause holds until an admin lifts it. The engine's does not: a
+# quota refusal is a window that closes on its own, and a pause with no way out
+# meant one 429 overnight stopped every account until somebody opened the
+# Pipeline tab the next morning. So the engine's pause carries the time it
+# expires and the worker lifts it then - see `lift_expired_pause`.
 # ---------------------------------------------------------------------------
 
 def queue_state(db) -> dict:
     doc = db[CONTROL].find_one({"_id": QUEUE_DOC}) or {}
     return {"paused": bool(doc.get("paused")), "reason": doc.get("reason"),
             "paused_at": doc.get("paused_at"), "paused_by": doc.get("paused_by"),
-            "resumed_at": doc.get("resumed_at")}
+            "resumed_at": doc.get("resumed_at"),
+            "resume_after": doc.get("resume_after")}
 
 
-def pause(db, reason: str, by: str = "system") -> bool:
+def pause(db, reason: str, by: str = "system", seconds: int = 0) -> bool:
     """Pause the queue. False when it was already paused (the first reason is
-    kept - it is the one that explains the pause)."""
+    kept - it is the one that explains the pause).
+
+    `seconds` sets when it lifts by itself. 0 means never: that is an admin's
+    pause, and the one the engine falls back to when the window is configured
+    away.
+    """
     if queue_state(db)["paused"]:
         return False
+    until = _now() + timedelta(seconds=seconds) if seconds > 0 else None
+    if until:
+        reason = "%s - resumes by itself at %s unless resumed sooner" % (
+            str(reason)[:220], until.strftime("%H:%M UTC"))
     db[CONTROL].update_one(
         {"_id": QUEUE_DOC},
         {"$set": {"paused": True, "reason": str(reason)[:300], "paused_at": _now(),
-                  "paused_by": by}},
+                  "paused_by": by, "resume_after": until}},
         upsert=True)
     logger.warning("regen: queue paused by %s - %s", by, reason)
     return True
+
+
+def lift_expired_pause(db) -> bool:
+    """Resume a pause whose window has passed. True when this call lifted it.
+
+    Conditional on the same fields it reads, so two workers polling together
+    resume once between them rather than both writing `resumed_at`.
+    """
+    now = _now()
+    result = db[CONTROL].update_one(
+        {"_id": QUEUE_DOC, "paused": True,
+         "resume_after": {"$ne": None, "$lte": now}},
+        {"$set": {"paused": False, "resumed_at": now,
+                  "resumed_by": "engine:quota-window", "resume_after": None}})
+    if result.modified_count:
+        logger.warning("regen: queue resumed - the pause window has passed")
+        return True
+    return False
 
 
 def resume(db, by: str = "") -> None:

@@ -230,14 +230,10 @@ NODES = (
          upstream=("exec_core", "stakeholder_roster", "opp_core", "tech_core",
                    "intent", "news", "exec_priorities"),
          run=f"{_P}:strategy_snapshot"),
-    Node("idx_strategy", "strategy_chat", kind=INDEX,
-         upstream=("exec_core", "exec_priorities", "stakeholder_roster",
-                   "stakeholder_talking_points", "news", "opp_core", "objection",
-                   "tech_core", "tech_recs", "intent"),
-         # 2: Content Messaging is no longer built (Sahaj, 27 Sep: "We didn't
-         # promise Content Messaging module - we can drop this"), so its
-         # message house is no longer part of the chat's corpus.
-         llm=True, logic_version=2, run=f"{_P}:index_strategy"),
+    # No idx_strategy: Strategy Chat reads the account's committed widgets whole
+    # on every question (services/strategy/context.py), so there is no index to
+    # build. Jobs queued for it before the deploy are cancelled by the engine as
+    # "node_removed".
 )
 
 

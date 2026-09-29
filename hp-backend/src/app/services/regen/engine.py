@@ -38,6 +38,7 @@ The guarantees and where they come from:
 
 import importlib
 import logging
+import os
 import threading
 import time
 from dataclasses import dataclass, field
@@ -62,6 +63,14 @@ MAX_GENERATION_BYTES = 12 * 1024 * 1024
 HEARTBEAT_SECONDS = 30
 # How often a producer's progress is written to its job row, at most.
 PROGRESS_EVERY_SECONDS = 2.0
+# How long the queue stays paused after the provider refuses for quota. The
+# pause itself is right - without it the sections queued behind the refusal
+# each burn their attempts on the same exhausted quota and all end FAILED - but
+# it used to need an admin to lift it, so a 429 at 2am stopped every account
+# until somebody opened the Pipeline tab. A quota window closes on its own;
+# this is how long we assume that takes. 0 restores the old behaviour: paused
+# until a human resumes.
+QUOTA_PAUSE_SECONDS = max(0, int(os.getenv("REGEN_QUOTA_PAUSE_SECONDS", "900")))
 
 MANUAL = "manual"
 QUOTA = "QUOTA_EXHAUSTED"
@@ -315,6 +324,10 @@ class Engine:
         for job, _action in jobs.reclaim_expired(self.db):
             state.clear_running(self.db, job["account_id"], job["node_id"], job["_id"])
             self.record_job_failure(job, jobs.WORKER_STOPPED, jobs.WORKER_STOPPED_MESSAGE)
+        # A quota pause lifts itself once its window has passed; an admin's
+        # does not. Checked before the claim so the first poll after the
+        # window ends picks work up rather than waiting for a human.
+        jobs.lift_expired_pause(self.db)
         if jobs.queue_state(self.db)["paused"]:
             return None
         job = jobs.claim(self.db, self.worker_id)
@@ -527,12 +540,16 @@ class Engine:
         """The provider's quota ran out during this run. The job FAILS with that
         reason - nothing is committed, its output may be a fallback - and the
         queue pauses, so the sections still waiting do not each fail on the
-        same quota. An admin resumes the queue and submits this one again; an
-        index build then continues from the documents it finished."""
+        same quota. The pause lifts itself after QUOTA_PAUSE_SECONDS, so a
+        refusal overnight costs that window rather than the night; an admin can
+        resume sooner. This section stays FAILED either way and is submitted
+        again by hand - an index build then continues from the documents it
+        finished."""
         account_id, nid = job["account_id"], job["node_id"]
         jobs.pause(self.db, "model quota exhausted while %s/%s ran (%d model call(s), "
                    "%d token(s) before it stopped)" % (account_id, nid, ctx.api_calls,
-                                                       ctx.tokens), by="engine")
+                                                       ctx.tokens), by="engine",
+                   seconds=QUOTA_PAUSE_SECONDS)
         logger.warning("regen.quota %s/%s - quota exhausted; failed, queue paused "
                        "until resumed", account_id, nid)
         return self._fail(job, target, GenerationError(

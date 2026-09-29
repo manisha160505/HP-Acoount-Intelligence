@@ -1132,6 +1132,78 @@ def retrieval_run_now(
     return {"ran": _jsonable(results), "status": retrieval_query.status(account_id, index)}
 
 
+@router.get("/accounts/{account_id}/widgets/strategy_chat/personas")
+def strategy_chat_personas(
+    account_id: str,
+    current_user: dict = Depends(require_user_role)
+):
+    """Who this account's seller can rehearse against.
+
+    Served live rather than frozen into the `strategy_snapshot_context` widget,
+    and that is a decision rather than a convenience. That widget is written by
+    `extract_strategy_chat`, whose declared `dependent_datasets` do NOT include
+    `prospect_contacts` - so uploading a new roster regenerates the Stakeholder
+    Map and leaves the snapshot untouched. The menu would then offer people the
+    account no longer has, or miss the ones it just gained, at exactly the
+    moment the roster changed. Reading the same widget the chat itself reads
+    means the two can never disagree.
+
+    An account with no contacts returns an empty list. There is no default set
+    of roles: offering a CISO to an account that has none asserts an employment
+    status the data does not support, which is why the earlier archetype
+    approach was removed from Message Evaluator.
+    """
+    if not ObjectId.is_valid(account_id):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Invalid account ID format")
+    db = get_db()
+    account = db["accounts"].find_one({"_id": ObjectId(account_id)})
+    if not account:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="Company account not found")
+
+    from app.services.strategy import personas as strategy_personas
+
+    found = strategy_personas.options(account_id)
+    return {
+        "personas": [
+            {**row,
+             "starter_prompts": strategy_personas.suggested_prompts(
+                 strategy_personas.resolve(account_id, row["persona_id"]) or row)}
+            for row in found
+        ],
+        "persona_source": "stakeholder_contacts_grid",
+        "persona_count": len(found),
+    }
+
+
+def _check_chat_mode(account_id: str, body: StrategyChatRequest) -> None:
+    """The mode and persona a chat request asks for, or a 400/404.
+
+    Refused, never quietly downgraded. A seller who believes they are
+    rehearsing with the COO while actually talking to the advisor gets
+    confident strategy advice in answer to a pitch, and no signal that the
+    exercise is not happening. Shared by `/ask` and `/ask/stream` so the two
+    cannot drift apart.
+    """
+    from app.services.strategy import personas as strategy_personas
+
+    if body.mode == "roleplay" and not body.persona_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Roleplay needs a persona_id.")
+    if body.mode != "roleplay" and body.persona_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A persona_id only applies when mode is 'roleplay'.")
+    if body.persona_id and not strategy_personas.resolve(account_id,
+                                                         body.persona_id):
+        # 404 rather than 400: the id is well-formed, it simply is not one of
+        # this account's people. Same isolation the evidence ids had.
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="That persona does not belong to this account.")
+
+
 @router.post("/accounts/{account_id}/widgets/strategy_chat/ask")
 def strategy_chat_ask(
     account_id: str,
@@ -1158,11 +1230,14 @@ def strategy_chat_ask(
 
     from app.services.strategy import chat as strategy_chat_service
 
+    _check_chat_mode(account_id, body)
+
     try:
         return strategy_chat_service.answer(
             account_id=account_id,
             messages=[m.model_dump() for m in body.messages],
             mode=body.mode,
+            persona_id=body.persona_id,
         )
     except strategy_chat_service.ChatUnavailable as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
@@ -1179,7 +1254,7 @@ def strategy_chat_ask_stream(
 
     Server-sent events, one JSON object per `data:` line:
 
-        {"type": "stage", "stage": "retrieving"|"writing"|"rewriting"|"checking"}
+        {"type": "stage", "stage": "writing"|"rewriting"|"checking"}
         {"type": "delta", "text": "...the validated answer so far..."}
         {"type": "done",  ...the payload `/ask` returns...}
 
@@ -1203,6 +1278,10 @@ def strategy_chat_ask_stream(
 
     from app.services.strategy import chat as strategy_chat_service
 
+    # Checked before the stream opens, so a bad mode or persona is still a
+    # 400/404 here rather than an event inside a 200.
+    _check_chat_mode(account_id, body)
+
     messages = [m.model_dump() for m in body.messages]
 
     def events():
@@ -1212,7 +1291,8 @@ def strategy_chat_ask_stream(
         # it is.
         try:
             for event in strategy_chat_service.answer_stream(
-                    account_id=account_id, messages=messages, mode=body.mode):
+                    account_id=account_id, messages=messages, mode=body.mode,
+                    persona_id=body.persona_id):
                 yield "data: %s\n\n" % json.dumps(event)
         except strategy_chat_service.ChatUnavailable as exc:
             yield "data: %s\n\n" % json.dumps(

@@ -111,6 +111,18 @@ class Settings(BaseSettings):
     # cache grows with every account ever queried.
     QUERY_HANDLE_CACHE_SIZE: int = 20
 
+    # --- Strategy Chat: the whole account in one call ------------------------
+    # The chat reads every finished widget of the account at once (about
+    # 113,000 tokens) instead of retrieving fragments of it, through the same
+    # provider and client as everything else (core/gemini.py).
+    #
+    # Set explicitly because Gemini's default output cap is small. Too low
+    # truncates the answer mid-sentence, which strips its trailing citation,
+    # fails validation, and surfaces as a grounding error - a failure that
+    # looks like anything except a token limit.
+    GEMINI_MAX_OUTPUT_TOKENS: int = 16384
+    GEMINI_TEMPERATURE: float = 0.3
+
     # --- Observability -----------------------------------------------------
     # Stamped onto every log record, span and metric so that signals from the
     # backend stay distinguishable once other services share a project.

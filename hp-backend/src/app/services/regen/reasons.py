@@ -60,7 +60,6 @@ NODE_LABELS = {
     "idx_executive_dashboard": "Executive Dashboard - knowledge index",
     "evaluator_personas": "Message Evaluator",
     "strategy_snapshot": "Strategy Chat - snapshot",
-    "idx_strategy": "Strategy Chat - knowledge index",
 }
 
 FEATURE_LABELS = {

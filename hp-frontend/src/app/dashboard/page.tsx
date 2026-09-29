@@ -151,8 +151,22 @@ interface ProvenanceEntry {
 // shorthand a third. Each variant that the pattern did not anticipate rendered
 // the whole tag raw in the seller's face. Matching the bracket and extracting
 // what is inside it is indifferent to what sits between the ids.
-const CITATION_BRACKET_RE = /\[[^[\]]*?[A-Za-z0-9_]+#c\d+[^[\]]*\]/g;
-const EVIDENCE_ID_RE = /[A-Za-z0-9_]+#c\d+/g;
+// A citation now names the SECTION of the account payload it came from -
+// `[exec_urgency_score]`, `[stakeholder_contacts_grid, stakeholder_influence_map]`
+// - rather than a chunk of a retrieval index (`a6a997c3b_objection_a8e9..#c5`).
+// Strategy Chat reads the whole account in one pass, so there are no chunks left
+// to address.
+//
+// These two must stay the mirror of `_CITATION_RE` and `_SECTION_KEY_RE` in
+// services/strategy/chat.py. When they disagree the backend validates a tag the
+// frontend then fails to match, and the answer renders the raw bracket
+// mid-sentence - which is exactly what these markers exist to prevent.
+//
+// The underscore is required, not decorative: without it every bracketed aside
+// the model writes - `[see below]`, `[estimated]` - would be read as a citation,
+// match nothing, and be silently deleted from the sentence.
+const CITATION_BRACKET_RE = /\[[^[\]]*?[a-z][a-z0-9]*(?:_[a-z0-9]+)+[^[\]]*\]/g;
+const EVIDENCE_ID_RE = /[a-z][a-z0-9]*(?:_[a-z0-9]+)+/g;
 
 /**
  * The chat answer with its evidence tags turned into footnote markers.
@@ -160,7 +174,7 @@ const EVIDENCE_ID_RE = /[A-Za-z0-9_]+#c\d+/g;
  * Every factual sentence carries the address of the sentence it came from -
  * that traceability is the feature, and the validator rejects an answer whose
  * tags do not resolve. But a seller should not be reading database keys
- * mid-sentence: `[a6a997c3b_objection_a8e9508a48e5#c5]` says nothing to them
+ * mid-sentence: `[stakeholder_contacts_grid]` is a database key, not
  * and breaks the line.
  *
  * So the tag becomes a superscript number linking to its row in Sources below,
@@ -468,6 +482,14 @@ export default function UserDashboardPage() {
   const [activeFeatureKey, setActiveFeatureKey] = useState<string>('executive_dashboard');
   
   const [widgets, setWidgets] = useState<WidgetResponse[]>([]);
+  // Why a failed widget fetch needs its own state rather than an empty list:
+  // an empty list is indistinguishable from "this account has no data yet", and
+  // every panel renders that as its own polite placeholder. A 500 therefore
+  // looked exactly like a brand-new account - which is how a schema mismatch on
+  // ONE widget hid an entire generated Executive Dashboard, data intact in the
+  // database, behind "Upload firmographics.csv to view extracted company
+  // profile".
+  const [widgetsError, setWidgetsError] = useState<string>('');
   const [isLoadingAccounts, setIsLoadingAccounts] = useState(true);
   const [isLoadingWidgets, setIsLoadingLoadingWidgets] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -543,12 +565,15 @@ export default function UserDashboardPage() {
 
   // Strategy Chat State
   //
-  // No mode state: the advisor is the only mode implemented, and the selector
-  // that used to hold one was never wired to the request. It comes back with
-  // the roleplay personas, which is the point at which there is a second mode
-  // to hold.
+  // `chatPersonaId` empty means the advisor. Anything else is a rehearsal
+  // against that stakeholder's ROLE - the list is the account's own roster,
+  // served live by the backend, and is empty for an account with no contacts.
   const [chatInput, setChatInput] = useState<string>('');
-  const [chatMessages, setChatMessages] = useState<Array<{ id: string; sender: 'user' | 'assistant'; text: string; timestamp: string; citations?: any[]; available?: boolean }>>([]);
+  const [chatPersonaId, setChatPersonaId] = useState<string>('');
+  const [chatPersonas, setChatPersonas] = useState<any[]>([]);
+  // `personaTitle` is stamped on each message rather than read from the current
+  // selection, so a bubble keeps saying who said it after the selector moves.
+  const [chatMessages, setChatMessages] = useState<Array<{ id: string; sender: 'user' | 'assistant'; text: string; timestamp: string; citations?: any[]; available?: boolean; personaTitle?: string }>>([]);
   const [chatPending, setChatPending] = useState(false);
   // Which stage of the answer is running. An answer takes around fifteen
   // seconds and cannot be streamed - every fact is validated against the
@@ -656,11 +681,20 @@ export default function UserDashboardPage() {
   const fetchWidgetContracts = useCallback(async (accId: string, featureKey: string) => {
     if (!accId) return;
     setIsLoadingLoadingWidgets(true);
+    setWidgetsError('');
     try {
       const response = await api.get<WidgetResponse[]>(`/accounts/${accId}/widgets/${featureKey}`);
       setWidgets(response.data);
     } catch (err: any) {
-      // Non-blocking
+      // Surfaced, not swallowed. The previous version caught this and did
+      // nothing - "Non-blocking" - which meant a server error and an empty
+      // account produced the identical screen, and the only way to tell them
+      // apart was to query Mongo by hand.
+      setWidgets([]);
+      setWidgetsError(
+        err?.response?.data?.detail
+        || err?.message
+        || 'This feature could not be loaded.');
     } finally {
       setIsLoadingLoadingWidgets(false);
     }
@@ -683,7 +717,22 @@ export default function UserDashboardPage() {
   useEffect(() => {
     setChatMessages([]);
     setChatInput('');
+    setChatPersonaId('');
   }, [selectedAccountId]);
+
+  // Who this account's seller can rehearse against. Served live rather than
+  // read from a widget: the strategy_chat extractor does not depend on
+  // prospect_contacts, so a widget copy would go stale at exactly the moment a
+  // new roster was uploaded. Empty list is a valid answer - an account with no
+  // contacts gets no personas rather than a default set of roles.
+  useEffect(() => {
+    if (!selectedAccountId || activeFeatureKey !== 'strategy_chat') return;
+    let cancelled = false;
+    api.get(`/accounts/${selectedAccountId}/widgets/strategy_chat/personas`)
+      .then(res => { if (!cancelled) setChatPersonas(res.data?.personas || []); })
+      .catch(() => { if (!cancelled) setChatPersonas([]); });
+    return () => { cancelled = true; };
+  }, [selectedAccountId, activeFeatureKey]);
 
   const handleSelectAccount = (acc: CompanyAccount) => {
     setSelectedAccountId(acc.id);
@@ -1156,6 +1205,27 @@ export default function UserDashboardPage() {
                         </tbody>
                       </table>
                     </div>
+                  </div>
+                )}
+
+                {/* A feature that failed to load says so, once, above whatever
+                    it managed to render. Without this the panels below fall
+                    back to their own "no data yet" copy and a server error is
+                    indistinguishable from an account nobody has uploaded to -
+                    which is exactly how a generated dashboard stayed hidden
+                    behind "Upload firmographics.csv". */}
+                {widgetsError && (
+                  <div className="mb-6 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4">
+                    <p className="text-xs font-black text-amber-900">
+                      This feature could not be loaded
+                    </p>
+                    <p className="mt-1 text-xs text-amber-800 leading-relaxed">
+                      {widgetsError}
+                    </p>
+                    <p className="mt-1.5 text-[11px] text-amber-700">
+                      The panels below are showing empty states because nothing was
+                      returned - not because this account has no data.
+                    </p>
                   </div>
                 )}
 
@@ -7218,7 +7288,19 @@ export default function UserDashboardPage() {
 
                   const contextData = contextWidget?.data || {};
                   const groundingMeta = contextData.grounding_metadata || {};
-                  const suggestedPrompts: any[] = contextData.suggested_prompts || [
+                  // Who is being rehearsed with, if anyone. Looked up rather
+                  // than stored so it cannot drift from the selector.
+                  const activePersona = chatPersonaId
+                    ? chatPersonas.find((p: any) => p.persona_id === chatPersonaId)
+                    : null;
+                  // A rehearsal needs openers a seller would SAY, not questions
+                  // about the account. They are built per persona from that
+                  // person's own evidence, by the backend, deterministically.
+                  const suggestedPrompts: any[] = (
+                    activePersona?.starter_prompts?.length
+                      ? activePersona.starter_prompts
+                      : contextData.suggested_prompts
+                  ) || [
                     {
                       id: 'entry_point',
                       title: 'Best entry point',
@@ -7284,25 +7366,29 @@ export default function UserDashboardPage() {
                     setChatStage(0);
                     setChatStreamingText('');
                     const STAGES: Record<string, number> = {
-                      retrieving: 0, writing: 1, rewriting: 1, checking: 2,
+                      reading: 0, writing: 1, rewriting: 1, checking: 2,
                     };
 
                     let settled = false;
                     const publish = (
                       text: string, citations: any[], available: boolean,
+                      personaTitle?: string,
                     ) => {
                       settled = true;
                       setChatMessages(prev => [...prev, {
                         id: `asst_${Date.now()}`,
                         sender: 'assistant' as const,
                         text, timestamp: stamp(), citations, available,
+                        personaTitle,
                       }]);
                     };
 
                     try {
                       await postStream(
                         `/accounts/${selectedAccount.id}/widgets/strategy_chat/ask/stream`,
-                        { messages: history, mode: 'advisor' },
+                        chatPersonaId
+                          ? { messages: history, mode: 'roleplay', persona_id: chatPersonaId }
+                          : { messages: history, mode: 'advisor' },
                         (event) => {
                           if (event.type === 'stage') {
                             setChatStage(STAGES[event.stage ?? ''] ?? 0);
@@ -7319,6 +7405,13 @@ export default function UserDashboardPage() {
                               (event.answer as string) || 'No answer was returned.',
                               (event.citations as any[]) || [],
                               event.available !== false,
+                              // From the response, not the current selection:
+                              // a rejected rehearsal comes back out of
+                              // character and must not be labelled as the
+                              // role having said it.
+                              event.available === false
+                                ? undefined
+                                : (event.persona as any)?.title,
                             );
                           } else if (event.type === 'error') {
                             publish(
@@ -7378,9 +7471,40 @@ export default function UserDashboardPage() {
                             already carries `mode`, so restoring a real selector
                             is a UI change and not a contract change. */}
                         <div className="flex items-center gap-2">
-                          <span className="px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-extrabold text-slate-800 shadow-xs">
-                            🤖 Strategy Advisor
-                          </span>
+                          {/* Role first, name as provenance. "Chief Operating
+                              Officer - from Irvan Nr's record" says the seller
+                              is preparing for that person WITHOUT framing the
+                              dialogue as that person speaking, which is the
+                              distinction the whole feature rests on. */}
+                          <select
+                            value={chatPersonaId}
+                            onChange={(e) => {
+                              const next = e.target.value;
+                              if (next === chatPersonaId) return;
+                              // Switching ends the conversation, for the same
+                              // reason switching account does: the backend
+                              // rewrites a follow-up using the prior turns, so
+                              // "and what about the cost of that?" would be
+                              // resolved against a different role's answer.
+                              if (chatMessages.length > 0 &&
+                                  !window.confirm('Switching will clear this conversation. Continue?')) {
+                                return;
+                              }
+                              setChatPersonaId(next);
+                              setChatMessages([]);
+                              setChatInput('');
+                            }}
+                            className="px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-extrabold text-slate-800 shadow-xs focus:outline-none focus:ring-2 focus:ring-hp-blue/30"
+                          >
+                            <option value="">🤖 Strategy Advisor</option>
+                            {chatPersonas.length === 0 ? (
+                              <option value="" disabled>No contacts on this account</option>
+                            ) : chatPersonas.map((p: any) => (
+                              <option key={p.persona_id} value={p.persona_id}>
+                                🎭 {p.title}{p.name ? ` — from ${p.name}'s record` : ''}
+                              </option>
+                            ))}
+                          </select>
                         </div>
 
                         <div className="flex items-center gap-1.5 text-slate-500 font-medium">
@@ -7401,11 +7525,28 @@ export default function UserDashboardPage() {
                                 <MessageSquare className="w-7 h-7 text-hp-navy" />
                               </div>
                               <h4 className="text-lg font-black text-slate-900">
-                                ABM Strategy Assistant
+                                {activePersona ? `Rehearsal: ${activePersona.title}` : 'ABM Strategy Assistant'}
                               </h4>
-                              <p className="text-xs text-slate-600 leading-relaxed font-medium">
-                                Ask me anything about {companyName}, HP Inc. positioning, competitive strategy, or ABM campaign planning. I&apos;m grounded in {companyName}&apos;s actual data and strategic priorities.
-                              </p>
+                              {activePersona ? (
+                                /* The disclaimer is the Objection Playbook's,
+                                   verbatim, because it is the same claim about
+                                   the same data - these are anticipated
+                                   positions, not things anyone said. Naming the
+                                   record it was built from keeps the provenance
+                                   visible without framing the dialogue as that
+                                   person speaking. */
+                                <p className="text-xs text-slate-600 leading-relaxed font-medium">
+                                  You are practising against the <strong className="text-slate-800">{activePersona.title}</strong> role at {companyName}
+                                  {activePersona.name ? <> , built from {activePersona.name}&apos;s record</> : null}.
+                                  <span className="block mt-1.5 text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
+                                    A simulation of this role, built from the account&apos;s own evidence. Not statements made by any contact.
+                                  </span>
+                                </p>
+                              ) : (
+                                <p className="text-xs text-slate-600 leading-relaxed font-medium">
+                                  Ask me anything about {companyName}, HP Inc. positioning, competitive strategy, or ABM campaign planning. I&apos;m grounded in {companyName}&apos;s actual data and strategic priorities.
+                                </p>
+                              )}
                             </div>
 
                             {/* 6 Suggested Prompt Cards Grid */}
@@ -7447,7 +7588,7 @@ export default function UserDashboardPage() {
                                     <div className="flex items-center justify-between gap-2 border-b border-slate-200/80 pb-2">
                                       <span className="text-xs font-black text-hp-navy flex items-center gap-1.5">
                                         <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-                                        <span>ABM Strategy Assistant</span>
+                                        <span>{msg.personaTitle || 'ABM Strategy Assistant'}</span>
                                       </span>
                                       {msg.available === false && (
                                         <span className="text-[10px] font-bold text-amber-800 bg-amber-50 px-2.5 py-0.5 rounded-full border border-amber-200">
@@ -7564,7 +7705,7 @@ export default function UserDashboardPage() {
 
                                   <div className="space-y-2">
                                     {[
-                                      { label: `Searching ${companyName}'s account intelligence` },
+                                      { label: `Reading ${companyName}'s account intelligence` },
                                       { label: 'Writing your answer' },
                                       { label: 'Checking every fact against the evidence' },
                                     ].map((step, i) => {

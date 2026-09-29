@@ -140,5 +140,3 @@ def index_content_messaging(account_id: str, full: bool = False):
     return _index(account_id, "content_messaging", full)
 
 
-def index_strategy(account_id: str, full: bool = False):
-    return _index(account_id, "strategy", full)

@@ -879,3 +879,102 @@ def test_usage_of_a_run_stopped_by_the_quota_is_recorded(h):
     got = runs.get(h.db, run["_id"])
     assert got["status"] == runs.COMPLETED_WITH_FAILURES
     assert got["usage"]["model_calls"] == 2 and got["usage"]["tokens"] == 200
+
+
+# Quota pause: a window that closes on its own
+#
+# The pause is right - without it the sections queued behind a refusal each burn
+# their attempts on the same exhausted quota and all end FAILED. What was wrong
+# is that only an admin could lift it, so a 429 at 2am stopped every account
+# until somebody opened the Pipeline tab.
+
+def test_a_quota_pause_records_when_it_lifts(h):
+    acct = _loaded(h)
+
+    def quota(account_id, **_kw):
+        run_context.note_quota_exhausted()
+        raise RuntimeError("429 RESOURCE_EXHAUSTED")
+
+    h.engine.runners["D"] = quota
+    h.upload(acct, "d3", "z\n6\n")
+    h.submit(acct)
+    h.drain()
+
+    queue = jobs.queue_state(h.db)
+    assert queue["paused"] is True
+    assert queue["resume_after"] is not None
+    assert "resumes by itself" in queue["reason"]
+
+
+def test_the_queue_carries_on_once_the_window_has_passed(h):
+    """The rest of the queue is what the pause was protecting. It should not
+    need a human to get it back."""
+    acct = _loaded(h)
+
+    def quota(account_id, **_kw):
+        run_context.note_quota_exhausted()
+        raise RuntimeError("429 RESOURCE_EXHAUSTED")
+
+    h.engine.runners["D"] = quota
+    h.upload(acct, "d3", "z\n6\n")
+    h.submit(acct)
+    h.drain()
+    assert jobs.queue_state(h.db)["paused"] is True
+    assert h.engine.run_once() is None              # nothing runs while it stands
+
+    h.db[jobs.CONTROL].update_one(
+        {"_id": jobs.QUEUE_DOC},
+        {"$set": {"resume_after": datetime.now(UTC) - timedelta(seconds=1)}})
+
+    assert jobs.lift_expired_pause(h.db) is True
+    assert jobs.queue_state(h.db)["paused"] is False
+    doc = h.db[jobs.CONTROL].find_one({"_id": jobs.QUEUE_DOC})
+    assert doc["resumed_by"] == "engine:quota-window"    # not a human's resume
+
+
+def test_the_section_that_hit_the_quota_is_not_requeued_by_the_window(h):
+    """"Failed stays failed" is the branch's rule and the window does not bend
+    it: the pause lifting lets the OTHER sections run, nothing more."""
+    acct = _loaded(h)
+
+    def quota(account_id, **_kw):
+        run_context.note_quota_exhausted()
+        raise RuntimeError("429 RESOURCE_EXHAUSTED")
+
+    h.engine.runners["D"] = quota
+    h.upload(acct, "d3", "z\n6\n")
+    h.submit(acct)
+    h.drain()
+
+    h.db[jobs.CONTROL].update_one(
+        {"_id": jobs.QUEUE_DOC},
+        {"$set": {"resume_after": datetime.now(UTC) - timedelta(seconds=1)}})
+    jobs.lift_expired_pause(h.db)
+
+    assert h.live_jobs(acct) == []
+    assert planner.account_view(h.engine, acct)["nodes"]["D"]["status"] == planner.FAILED
+
+
+def test_a_pause_with_no_window_waits_for_a_human(h):
+    """REGEN_QUOTA_PAUSE_SECONDS=0, and an admin's pause, which never carries
+    one."""
+    jobs.pause(h.db, "paused by an admin", by="user:1")
+    assert jobs.queue_state(h.db)["resume_after"] is None
+    assert jobs.lift_expired_pause(h.db) is False
+    assert jobs.queue_state(h.db)["paused"] is True
+
+
+def test_an_admin_can_still_resume_inside_the_window(h):
+    jobs.pause(h.db, "model quota exhausted", by="engine", seconds=900)
+    assert jobs.lift_expired_pause(h.db) is False        # not yet
+    jobs.resume(h.db, "user:1")
+    assert jobs.queue_state(h.db)["paused"] is False
+
+
+def test_two_workers_lift_one_pause_between_them(h):
+    jobs.pause(h.db, "model quota exhausted", by="engine", seconds=900)
+    h.db[jobs.CONTROL].update_one(
+        {"_id": jobs.QUEUE_DOC},
+        {"$set": {"resume_after": datetime.now(UTC) - timedelta(seconds=1)}})
+    lifted = [jobs.lift_expired_pause(h.db), jobs.lift_expired_pause(h.db)]
+    assert lifted == [True, False]

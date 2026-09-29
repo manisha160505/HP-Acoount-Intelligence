@@ -12,8 +12,8 @@ promises:
 
     fingerprint diff
         unchanged  -> skipped, costs nothing
-        changed    -> adelete_by_doc_id(id) then ainsert(new, ids=[id])
-        added      -> ainsert
+        changed    -> adelete_by_doc_id(id) then insert_document(new, id)
+        added      -> insert_document
         removed    -> adelete_by_doc_id
 
     Only affected documents are touched. A single changed CSV never rebuilds
@@ -82,7 +82,10 @@ async def _ingest_document(rag, doc, replace: bool):
             # is defensive, because insert-without-delete is what strands old
             # chunks in the graph.
             logger.debug("retrieval: nothing to delete for %s", doc.doc_id)
-    await rag.ainsert(doc.text, ids=[doc.doc_id], file_paths=[doc.file_path])
+    # `client.insert_document` rather than `rag.ainsert`: the option that skips
+    # entity extraction is per-document and `ainsert` cannot carry it. Same
+    # chunking, same ids, same file paths - see `client.insert_document`.
+    await client.insert_document(rag, doc.text, doc.doc_id, doc.file_path)
 
 
 async def update_index(account_id: str, index: str, full: bool = False,
