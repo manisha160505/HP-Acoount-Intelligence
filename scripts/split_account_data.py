@@ -93,6 +93,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import quote
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import hp_api  # noqa: E402
+
 try:
     import pandas as pd
 except ImportError:
@@ -3334,139 +3337,29 @@ def print_refresh_summary(summary: dict):
 #     HP_TOKEN                 a bearer token from a browser session
 #     HP_EMAIL + HP_PASSWORD   a dashboard login, exchanged for a token here
 
+# The HTTP helpers live in scripts/hp_api.py: onboard_accounts.py needs the
+# same envelope handling, the same hand-built multipart body and the same login
+# exchange, and one copy of each is enough.
 def _unwrap(body):
-    """The API wraps every response as {"success": true, "data": ...}.
-
-    envelope_middleware does it for the whole v1 surface, so a caller that
-    reads body["access_token"] gets None and reports a login failure on an
-    HTTP 200. Unwrapped here, once, rather than at four call sites.
-    """
-    if isinstance(body, dict) and "success" in body and "data" in body:
-        return body["data"]
-    return body
+    return hp_api.unwrap(body)
 
 
 def _api(url: str, token: str = "", payload=None, method: str = "",
          timeout: int = 600):
-    import urllib.error
-    import urllib.request
-    data = json.dumps(payload).encode() if payload is not None else None
-    req = urllib.request.Request(
-        url, data=data, method=method or ("POST" if data is not None else "GET"))
-    if data is not None:
-        req.add_header("Content-Type", "application/json")
-    if token:
-        req.add_header("Authorization", f"Bearer {token}")
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            body = resp.read().decode()
-            return resp.status, (_unwrap(json.loads(body)) if body else None)
-    except urllib.error.HTTPError as exc:
-        body = exc.read().decode(errors="replace")
-        try:
-            return exc.code, _unwrap(json.loads(body))
-        except ValueError:
-            return exc.code, {"detail": body[:400]}
+    return hp_api.api(url, token, payload, method, timeout)
 
 
 def _api_upload(url: str, token: str, dataset_key: str, path: Path,
                 defer: bool = True, timeout: int = 900):
-    """One multipart POST of one file. Written out rather than pulled from
-    requests, which is not a dependency of this script.
-
-    `defer` asks the endpoint to store the file without re-running the features
-    that declare it. A feature with seven dependencies would otherwise run
-    seven times per account, six of them against a half-loaded account; the
-    caller regenerates each feature once when every dataset is in.
-    """
-    import urllib.error
-    import urllib.request
-    boundary = "----hpsplit" + datetime.now(UTC).strftime("%H%M%S%f")
-    sep = f"--{boundary}".encode()
-    body = b"".join([
-        sep, b"\r\n",
-        b'Content-Disposition: form-data; name="dataset_key"\r\n\r\n',
-        dataset_key.encode(), b"\r\n",
-        sep, b"\r\n",
-        b'Content-Disposition: form-data; name="defer_extraction"\r\n\r\n',
-        (b"true" if defer else b"false"), b"\r\n",
-        sep, b"\r\n",
-        f'Content-Disposition: form-data; name="file"; filename="{path.name}"\r\n'
-        .encode(),
-        b"Content-Type: application/octet-stream\r\n\r\n",
-        path.read_bytes(), b"\r\n",
-        sep, b"--\r\n",
-    ])
-    req = urllib.request.Request(url, data=body, method="POST")
-    req.add_header("Content-Type", f"multipart/form-data; boundary={boundary}")
-    if token:
-        req.add_header("Authorization", f"Bearer {token}")
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            text = resp.read().decode()
-            return resp.status, (_unwrap(json.loads(text)) if text else None)
-    except urllib.error.HTTPError as exc:
-        text = exc.read().decode(errors="replace")
-        try:
-            return exc.code, _unwrap(json.loads(text))
-        except ValueError:
-            return exc.code, {"detail": text[:400]}
+    return hp_api.api_upload(url, token, dataset_key, path, defer, timeout)
 
 
 def _api_token(base_url: str) -> str:
-    import os
-    token = (os.getenv("HP_TOKEN") or "").strip()
-    if token:
-        return token
-    email, password = os.getenv("HP_EMAIL"), os.getenv("HP_PASSWORD")
-    if not email or not password:
-        sys.exit("set HP_TOKEN, or HP_EMAIL and HP_PASSWORD, in the environment")
-    status, body = _api(f"{base_url}/api/v1/auth/login",
-                        payload={"email": email, "password": password})
-    if status != 200 or not body or "access_token" not in body:
-        sys.exit(f"login failed (HTTP {status})")
-    return body["access_token"]
+    return hp_api.api_token(base_url)
 
 
 def _find_or_create_account(base_url: str, token: str, name: str, dry_run: bool):
-    """The account id for this name, creating it when it does not exist."""
-    status, body = _api(f"{base_url}/api/v1/accounts?search={quote(name)}", token)
-    if status == 200 and isinstance(body, list):
-        for row in body:
-            if (row.get("name") or "").strip().lower() == name.strip().lower():
-                return row["id"], "existing"
-    if dry_run:
-        return "", "would create"
-    status, body = _api(f"{base_url}/api/v1/accounts", token, {"name": name})
-    if status not in (200, 201) or not body:
-        sys.exit(f"could not create account '{name}' (HTTP {status}): {body}")
-    return body["id"], "created"
-
-
-# The extractors, in the order the wave runs them. Dependencies first: the
-# opportunity map reads the tech landscape's cards, Content Studio reads the
-# Stakeholder Map's grid, and Strategy Chat reads what all of them wrote.
-FEATURE_RUN_ORDER = [
-    "executive_dashboard", "stakeholder_map", "tech_landscape",
-    "solution_narrative_opportunity_map", "recent_news_signals",
-    "intent_demand_signals", "objection_playbook", "content_messaging",
-    "content_studio", "message_evaluator", "strategy_chat",
-]
-
-
-def _regenerate_all(base_url: str, token: str, account_id: str):
-    """Run every feature once, now that the account's datasets are all in."""
-    print("  regenerating:")
-    for feature in FEATURE_RUN_ORDER:
-        status, body = _api(
-            f"{base_url}/api/v1/accounts/{account_id}/widgets/{feature}/regenerate",
-            token, payload={}, timeout=1800)
-        if status in (200, 201):
-            widgets = len(body) if isinstance(body, list) else 0
-            print(f"    {feature:<38} {widgets} widget(s)")
-        else:
-            detail = (body or {}).get("detail") or (body or {}).get("error")
-            print(f"    {feature:<38} FAILED HTTP {status}: {detail}")
+    return hp_api.find_or_create_account(base_url, token, name, dry_run)
 
 
 def upload_accounts(slugs: list[str], base_url: str, dry_run: bool):
@@ -3538,16 +3431,18 @@ def upload_accounts(slugs: list[str], base_url: str, dry_run: bool):
 
         print(f"  {uploaded} uploaded, {failed} failed, {skipped} skipped "
               f"(no rows)")
-        # Every dataset is in now, so each feature runs once, in dependency
-        # order, against the whole account.
-        if not dry_run and uploaded and not failed:
-            _regenerate_all(base_url, token, account_id)
         print()
     if dry_run:
         print("Dry run - nothing was uploaded.")
     else:
-        print("Each upload re-runs the features that declare the dataset; watch "
-              "the backend terminal for the per-feature lines.")
+        # Nothing has been generated. Files go up with defer_extraction=true,
+        # and triggering each feature and waiting for it is a job of its own:
+        #     python scripts/onboard_accounts.py --base-url ... --accounts SLUG
+        # which also creates the account, so it is the whole wave in one
+        # command. This path stays for uploading into an account by hand.
+        print("Uploaded with defer_extraction - nothing has been generated yet.")
+        print("Run scripts/onboard_accounts.py to create, upload and build in "
+              "one pass, or trigger each feature from the dashboard.")
 
 
 def main():
