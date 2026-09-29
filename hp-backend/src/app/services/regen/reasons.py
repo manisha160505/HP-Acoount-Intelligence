@@ -24,6 +24,7 @@ LEGACY = "legacy"
 NEVER = "never_run"
 FAILED = "failed"
 FORCED = "forced"
+FILES_MISSING = "files_missing"
 
 CATEGORY_LABELS = {
     DATA: "Data file changed",
@@ -38,6 +39,7 @@ CATEGORY_LABELS = {
     NEVER: "Never run",
     FAILED: "Last run failed",
     FORCED: "Forced re-run",
+    FILES_MISSING: "Files missing on server",
 }
 
 # What the admin page calls each node. Features are what sellers see; a node is
@@ -152,7 +154,17 @@ def classify(old_manifest, new_manifest: dict, *, rows=None, states=None) -> lis
     old_ds, new_ds = old_manifest.get("datasets") or {}, new_manifest.get("datasets") or {}
     for key in sorted(set(old_ds) | set(new_ds)):
         if old_ds.get(key) != new_ds.get(key):
-            out.append(_reason(DATA, key, _dataset_detail(key, rows.get(key) or []),
+            if key not in old_ds:
+                # A dataset the section started reading in a later release -
+                # not something that was uploaded or deleted.
+                detail = ("newly read by this section - "
+                          + (_dataset_detail(key, rows.get(key) or [])
+                             if rows.get(key) else "no file uploaded yet"))
+            elif key not in new_ds:
+                detail = "no longer read by this section"
+            else:
+                detail = _dataset_detail(key, rows.get(key) or [])
+            out.append(_reason(DATA, key, detail,
                                _short(old_ds.get(key)), _short(new_ds.get(key)),
                                "datasets.%s" % key))
 
@@ -201,6 +213,16 @@ def waiting_on(upstream_ids: list, derived: dict) -> list:
                     key="waiting.%s" % up),
              "category_label": "Waiting on upstream"}
             for up in upstream_ids]
+
+
+def files_missing(rows: list) -> dict:
+    """The section's files are in the database but not on this server's disk."""
+    names = [str(r.get("original_filename") or r.get("stored_filename")
+                 or r.get("file_path") or "?") for r in rows]
+    shown = ", ".join(names[:5]) + (" and %d more" % (len(names) - 5) if len(names) > 5 else "")
+    return _reason(FILES_MISSING, "%d file(s) not on this server" % len(rows),
+                   "upload them again before running: %s" % shown,
+                   key="files_missing")
 
 
 def categories(reasons: list) -> list:

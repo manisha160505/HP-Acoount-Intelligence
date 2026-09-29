@@ -33,7 +33,7 @@ import {
   XCircle,
 } from 'lucide-react';
 
-type Status = 'RUNNING' | 'QUEUED' | 'FAILED' | 'STALE' | 'DEGRADED' | 'BLOCKED' | 'NEVER_RUN' | 'CURRENT';
+type Status = 'RUNNING' | 'QUEUED' | 'FILES_MISSING' | 'FAILED' | 'STALE' | 'DEGRADED' | 'BLOCKED' | 'NEVER_RUN' | 'CURRENT';
 
 interface Reason {
   category: string;
@@ -66,6 +66,7 @@ interface Section {
   last_error?: { code?: string; message?: string; at?: string } | null;
   job?: JobView | null;
   has_data: boolean;
+  missing_files?: { dataset?: string; file?: string; path?: string }[];
 }
 
 interface RunRow {
@@ -96,6 +97,7 @@ interface PlanItem {
   status: Status;
   llm: boolean;
   kind: string;
+  missing_files?: { file?: string }[];
 }
 
 interface PlanResponse {
@@ -124,6 +126,7 @@ interface RunDetail {
 const GROUPS: { key: Status; title: string; tone: string; open: boolean }[] = [
   { key: 'RUNNING', title: 'Running', tone: 'text-blue-700 bg-blue-50 border-blue-200', open: true },
   { key: 'QUEUED', title: 'Queued', tone: 'text-indigo-700 bg-indigo-50 border-indigo-200', open: true },
+  { key: 'FILES_MISSING', title: 'Files missing on server - upload again before running', tone: 'text-rose-800 bg-rose-50 border-rose-300', open: true },
   { key: 'FAILED', title: 'Failed', tone: 'text-red-700 bg-red-50 border-red-200', open: true },
   { key: 'STALE', title: 'Stale', tone: 'text-amber-800 bg-amber-50 border-amber-200', open: true },
   { key: 'DEGRADED', title: 'Degraded (fallback output)', tone: 'text-orange-800 bg-orange-50 border-orange-200', open: true },
@@ -146,6 +149,7 @@ const CATEGORY_TONE: Record<string, string> = {
   legacy: 'bg-gray-200 text-gray-700',
   never_run: 'bg-slate-200 text-slate-700',
   failed: 'bg-red-100 text-red-800',
+  files_missing: 'bg-rose-200 text-rose-900',
 };
 
 function fmt(value?: string | null): string {
@@ -410,6 +414,9 @@ export default function PipelinePanel({ accountId }: { accountId: string }) {
                 </span>
                 <span className="font-semibold text-gray-800">{item.label}</span>
                 {item.forced && <span className="text-red-700 font-bold">forced</span>}
+                {item.action === 'cannot_run' && (item.missing_files?.length ?? 0) > 0 && (
+                  <span className="text-rose-800">{item.missing_files!.length} file(s) missing on server - upload again</span>
+                )}
                 {item.needed_by.length > 0 && (
                   <span className="text-gray-500">needed by {item.needed_by.join(', ')}</span>
                 )}
@@ -462,6 +469,11 @@ export default function PipelinePanel({ accountId }: { accountId: string }) {
                           {s.kind === 'index' && <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 font-bold">INDEX</span>}
                           {s.llm && <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 font-bold">MODEL</span>}
                           {!s.has_data && <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-200 text-gray-700 font-bold">NO DATA UPLOADED</span>}
+                          {(s.missing_files?.length ?? 0) > 0 && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-rose-200 text-rose-900 font-bold">
+                              {s.missing_files!.length} FILE(S) MISSING ON SERVER
+                            </span>
+                          )}
                           <span className="text-[11px] text-gray-500 ml-auto flex items-center gap-1">
                             <Clock className="w-3 h-3" /> {s.generated_at ? `built ${fmt(s.generated_at)}` : 'never built'}
                           </span>

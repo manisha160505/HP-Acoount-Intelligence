@@ -1334,7 +1334,10 @@ def strategy_documents(account_id: str, index: str = "strategy") -> list:
     docs.extend(_strategy_opportunity_documents(db, account_id, index, company))
     docs.extend(_strategy_technology_documents(db, account_id, index, company))
     docs.extend(_strategy_intent_documents(db, account_id, index, company))
-    docs.extend(_strategy_messaging_documents(db, account_id, index, company))
+    # No message house (29 Sep): Content Messaging was removed on 28 Sep, but
+    # accounts that had it still store its last messaging_pillars_output, and
+    # indexing that would put a dropped module's stale content into Strategy
+    # Chat. idx_strategy's logic_version 2 already assumed it was gone.
 
     return [d for d in docs if not d.is_empty()]
 
@@ -2198,7 +2201,10 @@ def _strategy_intent_documents(db, account_id, index, company) -> list:
 
 
 def _strategy_messaging_documents(db, account_id, index, company) -> list:
-    """The message house: the umbrella message and one document per pillar."""
+    """The message house: the umbrella message and one document per pillar.
+
+    Unused since Content Messaging was removed (see strategy_documents); kept
+    with the module's other unscheduled code in case it comes back."""
     house = _widget(db, account_id, "messaging_pillars_output")
     docs = []
 

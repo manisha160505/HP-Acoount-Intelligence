@@ -12,10 +12,12 @@ triggers enqueued, and the account-wide sweep ran every stale node of every
 account every ten minutes - one account uploaded file by file ran its sections
 41 times (28 Sep).
 
-A failed run is not retried. It stays FAILED, with its error, until the cause
-is fixed and someone submits again. The one exception is the model provider's
-quota: that is not the job's failure, so the job goes back to the queue with
-its attempt refunded and the whole queue pauses until an admin resumes it.
+A job that does not succeed never goes back to the queue (29 Sep). It ends
+FAILED with its reason - its own error, the model quota running out, its files
+missing on this server, the worker stopping under it, or a restart/deploy
+interrupting it - and stays that way, previous output kept, until someone
+submits it again. An exhausted quota also pauses the whole queue, so the
+sections still waiting do not each fail on it; an admin resumes it.
 
 The worker runs one job at a time per account:
 
@@ -63,6 +65,7 @@ PROGRESS_EVERY_SECONDS = 2.0
 
 MANUAL = "manual"
 QUOTA = "QUOTA_EXHAUSTED"
+FILES_MISSING = "FILES_MISSING"
 
 
 class NotRunnableHere(Exception):
@@ -309,16 +312,9 @@ class Engine:
     def run_once(self) -> dict | None:
         """Reclaim lapsed leases, then claim and run one job. None when idle
         or when the queue is paused."""
-        for job, action in jobs.reclaim_expired(self.db):
-            if action == "failed":
-                state.record_failure(self.db, job["account_id"], job["node_id"],
-                                     job["_id"], job.get("target_fingerprint") or "",
-                                     "LEASE_EXPIRED",
-                                     "the worker stopped responding and attempts "
-                                     "are exhausted")
-            else:
-                state.clear_running(self.db, job["account_id"], job["node_id"],
-                                    job["_id"])
+        for job, _action in jobs.reclaim_expired(self.db):
+            state.clear_running(self.db, job["account_id"], job["node_id"], job["_id"])
+            self.record_job_failure(job, jobs.WORKER_STOPPED, jobs.WORKER_STOPPED_MESSAGE)
         if jobs.queue_state(self.db)["paused"]:
             return None
         job = jobs.claim(self.db, self.worker_id)
@@ -342,6 +338,14 @@ class Engine:
         jobs.finish(self.db, job, jobs.FAILED, error=error,
                     result={"outcome": "engine_error"})
         state.clear_running(self.db, account_id, nid, job["_id"])
+        self.record_job_failure(job, "ENGINE_ERROR", error["message"])
+        return {"outcome": "failed", "node_id": nid, "error": error}
+
+    def record_job_failure(self, job: dict, code: str, message: str) -> None:
+        """Mark the node FAILED for the inputs this job was building, so the
+        admin page shows it under Failed with this reason. For a job that
+        stopped before it recorded its target, the target is worked out now."""
+        account_id, nid = job["account_id"], job["node_id"]
         target = job.get("target_fingerprint")
         if not target and nid in self.graph:
             try:
@@ -349,11 +353,8 @@ class Engine:
             except Exception:
                 target = None
         if target:
-            # FAILED for these inputs. Nothing retries it: the admin page shows
-            # the error, and a Submit after the fix runs it again.
             state.record_failure(self.db, account_id, nid, job["_id"], target,
-                                 "ENGINE_ERROR", error["message"])
-        return {"outcome": "failed", "node_id": nid, "error": error}
+                                 code, message)
 
     def run_job(self, job: dict) -> dict:  # noqa: PLR0911 - one return per outcome
         account_id, nid = job["account_id"], job["node_id"]
@@ -413,11 +414,11 @@ class Engine:
         missing = [r.get("file_path") for rows in pinned_rows.values() for r in rows
                    if not self.file_exists(r)]
         if missing:
-            jobs.release(self.db, job, not_runnable_here=True,
-                         reason="%d pinned file(s) not on this machine" % len(missing))
-            logger.warning("regen.not_runnable_here %s/%s - %s", account_id, nid,
-                           missing[:3])
-            return {"outcome": "not_runnable_here", "node_id": nid}
+            logger.warning("regen.files_missing %s/%s - %s", account_id, nid, missing[:3])
+            return self._fail(job, target, GenerationError(
+                FILES_MISSING, "%d data file(s) are not on this server - upload them "
+                "again, then submit: %s" % (len(missing), ", ".join(
+                    str(p).rsplit("/", 1)[-1] for p in missing[:5]))), started)
 
         previous = (current or {}).get("fingerprint")
         changed = manifest.diff((current or {}).get("manifest"), m)
@@ -440,15 +441,15 @@ class Engine:
                 result = self._runner(node)(account_id, **(
                     {"full": bool(job.get("full"))} if node.kind == INDEX else {}))
             if run_context.quota_exhausted_since(wall_started):
-                return self._quota_pause(job, ctx)
+                return self._quota_pause(job, target, ctx, started)
             generation = self._validate(node, ctx, result, current, target, m, job)
         except (NotRunnableHere, DatasetFileMissing) as exc:
-            jobs.release(self.db, job, not_runnable_here=True, reason=str(exc))
-            state.clear_running(self.db, account_id, nid, job["_id"])
-            return {"outcome": "not_runnable_here", "node_id": nid}
+            return self._fail(job, target, GenerationError(
+                FILES_MISSING, "a data file is not on this server - upload it again, "
+                "then submit: %s" % exc), started, ctx)
         except Exception as exc:
             if run_context.quota_exhausted_since(wall_started):
-                return self._quota_pause(job, ctx)
+                return self._quota_pause(job, target, ctx, started)
             return self._fail(job, target, exc, started, ctx)
 
         committed = state.commit(self.db, account_id, nid, job["fence"], generation)
@@ -522,24 +523,22 @@ class Engine:
             jobs.set_progress(self.db, job, done, total, label)
         return write
 
-    def _quota_pause(self, job, ctx) -> dict:
-        """The provider's quota ran out during this run. Not this job's failure:
-        nothing is committed (its output may be a fallback), the attempt is
-        given back, and the queue stops until an admin resumes it."""
+    def _quota_pause(self, job, target, ctx, started) -> dict:
+        """The provider's quota ran out during this run. The job FAILS with that
+        reason - nothing is committed, its output may be a fallback - and the
+        queue pauses, so the sections still waiting do not each fail on the
+        same quota. An admin resumes the queue and submits this one again; an
+        index build then continues from the documents it finished."""
         account_id, nid = job["account_id"], job["node_id"]
-        jobs.release(self.db, job, reason="model quota exhausted - queue paused",
-                     error={"code": QUOTA, "message": "the model provider refused "
-                            "for quota after every wait"},
-                     refund_attempt=True)
-        state.clear_running(self.db, account_id, nid, job["_id"])
         jobs.pause(self.db, "model quota exhausted while %s/%s ran (%d model call(s), "
                    "%d token(s) before it stopped)" % (account_id, nid, ctx.api_calls,
                                                        ctx.tokens), by="engine")
-        logger.warning("regen.quota %s/%s - quota exhausted; job back in the queue, "
-                       "queue paused until resumed", account_id, nid)
-        pipeline.step("regen", "%s paused - model quota exhausted" % nid,
-                      account=account_id)
-        return {"outcome": "paused", "node_id": nid, "reason": QUOTA}
+        logger.warning("regen.quota %s/%s - quota exhausted; failed, queue paused "
+                       "until resumed", account_id, nid)
+        return self._fail(job, target, GenerationError(
+            QUOTA, "the model provider refused for quota after every wait - resume "
+            "the queue when the quota is back and submit this section again"),
+            started, ctx)
 
     def _validate(self, node, ctx, result, current, target, m, job) -> dict:
         """Everything a run must satisfy before its output may be committed."""

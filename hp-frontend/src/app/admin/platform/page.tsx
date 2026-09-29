@@ -35,6 +35,7 @@ function PipelineCell({ row }: { row?: PipelineSummaryRow }) {
   const chips: [string, number, string][] = [
     ['running', c.RUNNING || 0, 'bg-blue-100 text-blue-800'],
     ['queued', c.QUEUED || 0, 'bg-indigo-100 text-indigo-800'],
+    ['files missing', c.FILES_MISSING || 0, 'bg-rose-200 text-rose-900'],
     ['failed', c.FAILED || 0, 'bg-red-100 text-red-800'],
     ['stale', (c.STALE || 0) + (c.DEGRADED || 0), 'bg-amber-100 text-amber-800'],
     ['never run', c.NEVER_RUN || 0, 'bg-slate-200 text-slate-700'],

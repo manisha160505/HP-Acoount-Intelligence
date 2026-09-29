@@ -724,6 +724,39 @@ Output JSON:
     return returned if isinstance(returned, list) else []
 
 
+# Each batch's answer is saved as soon as it comes back, so a run that fails
+# part-way (the quota, a restart) and is submitted again only scores the
+# batches it has not done: 12 of 14 finished stay finished. Keyed on exactly
+# what the prompt is built from - the batch's signals, the company, the account
+# context, the prompt version, the run's config/model versions and the date the
+# prompt states - so any change there scores the batch afresh.
+BATCH_PROGRESS = "llm_batch_progress"
+
+
+def _score_batch_saved(chunk: list, company_name: str, account_context: str,
+                       now) -> list:
+    # Only inside a regeneration run - the thing that fails and is submitted
+    # again. A direct call (a script, a test) scores as before and saves nothing.
+    if run_context.current() is None:
+        return _score_one_batch(chunk, company_name, account_context, now)
+    db = get_db()
+    key = regen_manifest.digest({
+        "kind": "news_scoring", "prompt": SIGNAL_SCORING_PROMPT_VERSION,
+        "company": company_name, "context": account_context, "signals": chunk,
+        "day": now.date().isoformat(), "versions": regen_manifest.cache_suffix()})
+    saved = db[BATCH_PROGRESS].find_one({"_id": key}, {"entries": 1})
+    if saved and saved.get("entries"):
+        pipeline.step("scoring", "batch already scored in an earlier attempt - reused")
+        return saved["entries"]
+    entries = _score_one_batch(chunk, company_name, account_context, now)
+    if entries:
+        db[BATCH_PROGRESS].update_one(
+            {"_id": key},
+            {"$set": {"entries": entries, "kind": "news_scoring", "saved_at": now}},
+            upsert=True)
+    return entries
+
+
 def _score_batches(signals: list, company_name: str, account_context: str,
                    now, batch_size: int = SCORING_BATCH_SIZE) -> list:
     """Every signal scored, in batches small enough to come back whole.
@@ -744,7 +777,7 @@ def _score_batches(signals: list, company_name: str, account_context: str,
     seen: set = set()
 
     def collect(chunk):
-        for entry in _score_one_batch(chunk, company_name, account_context, now):
+        for entry in _score_batch_saved(chunk, company_name, account_context, now):
             sid = str((entry or {}).get("signal_id") or "").strip()
             if sid and sid not in seen:
                 seen.add(sid)

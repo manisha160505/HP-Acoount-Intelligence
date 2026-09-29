@@ -75,6 +75,16 @@ PRIORITY_LEGACY = 0
 # "generating" for half an hour after every deploy (28 Sep).
 LEASE_SECONDS = 150
 MAX_ATTEMPTS = 3
+# A job whose worker died under it (crash, out of memory, a kill) or was
+# stopped by a restart or deploy. Not re-queued: it fails with this reason and
+# is submitted again by hand.
+WORKER_STOPPED = "WORKER_STOPPED"
+WORKER_STOPPED_MESSAGE = ("the worker running it stopped responding (crash or kill) "
+                          "- submit it again")
+INTERRUPTED = "INTERRUPTED"
+INTERRUPTED_MESSAGE = ("stopped by a backend restart or deploy while it ran - "
+                       "submit it again (an index build continues from where it "
+                       "stopped)")
 GATE_RETRY_SECONDS = 60
 
 WORKER_ID = "%s:%d:%s" % (socket.gethostname(), os.getpid(), uuid.uuid4().hex[:6])
@@ -178,44 +188,29 @@ def enqueue(db, account_id: str, node_id: str, why: dict, *,  # noqa: PLR0913 - 
 
 
 def reclaim_expired(db, now=None) -> list:
-    """Deal with RUNNING rows whose lease has lapsed.
+    """Fail RUNNING rows whose lease has lapsed - their worker is gone.
 
-    Below MAX_ATTEMPTS the row goes back to PENDING for another worker. At
-    MAX_ATTEMPTS it becomes FAILED - never left RUNNING, which is how a job used
-    to block its node forever. Returns [(job, "reclaimed"|"failed")] so the
-    engine can clear the node's `running` marker and record the failure.
+    Never back to PENDING (29 Sep): a job that did not finish shows as FAILED
+    with the reason, and is submitted again by hand. Before, it was re-queued
+    up to MAX_ATTEMPTS times. Returns [(job, "failed")] so the engine can clear
+    the node's `running` marker and record the failure on the node.
     """
     now = now or _now()
     col = db[COLLECTION]
     out = []
     for job in list(col.find({"status": RUNNING, "lease_expires_at": {"$lt": now}})):
-        # `reclaims` as well as `attempts`: a worker that dies before the run
-        # formally starts never counts an attempt, and without this cap its
-        # job would be reclaimed and die again forever.
-        exhausted = (int(job.get("attempts") or 0) >= MAX_ATTEMPTS
-                     or int(job.get("reclaims") or 0) + 1 >= MAX_ATTEMPTS)
-        update = ({"$set": {"status": FAILED, "finished_at": now,
-                            "error": {"code": "LEASE_EXPIRED",
-                                      "message": "the worker stopped responding "
-                                                 "and attempts are exhausted"},
-                            "lease_owner": None, "lease_expires_at": None}}
-                  if exhausted else
-                  {"$set": {"status": PENDING, "fence": None, "lease_owner": None,
-                            "lease_expires_at": None, "not_before": now,
-                            "last_error": {"code": "LEASE_EXPIRED",
-                                           "message": "the worker stopped responding"}},
-                   "$inc": {"reclaims": 1}})
         changed = col.find_one_and_update(
             {"_id": job["_id"], "status": RUNNING, "fence": job.get("fence"),
              "lease_expires_at": {"$lt": now}},
-            update, return_document=ReturnDocument.BEFORE)
+            {"$set": {"status": FAILED, "finished_at": now,
+                      "error": {"code": WORKER_STOPPED, "message": WORKER_STOPPED_MESSAGE},
+                      "result": {"outcome": "failed", "reason": WORKER_STOPPED},
+                      "lease_owner": None, "lease_expires_at": None}},
+            return_document=ReturnDocument.BEFORE)
         if changed:
-            action = "failed" if exhausted else "reclaimed"
-            logger.warning("regen: lease expired on %s/%s - %s",
-                           job["account_id"], job["node_id"], action)
-            out.append((changed, action))
-            if exhausted and changed.get("rerun_requested"):
-                _requeue_rerun(db, changed)
+            logger.warning("regen: lease expired on %s/%s - failed (worker stopped)",
+                           job["account_id"], job["node_id"])
+            out.append((changed, "failed"))
     return out
 
 
@@ -290,13 +285,17 @@ def start_attempt(db, job: dict, target: str, previous: str | None,
     return result.matched_count == 1
 
 
-def release(db, job: dict, *, delay_seconds: float = 0, reason: str = "",
+def release(db, job: dict, *, delay_seconds: float = 0, reason: str = "",  # noqa: PLR0913 - every option is a queue field
             not_runnable_here: bool = False, error: dict | None = None,
-            refund_attempt: bool = False, now=None) -> bool:
+            refund_attempt: bool = False, spent: dict | None = None,
+            now=None) -> bool:
     """Put a RUNNING job back to PENDING without finishing it.
 
     `refund_attempt` gives back the attempt `start_attempt` counted - for a run
-    stopped by something that is not its own failure (the quota).
+    stopped by something that is not its own failure (the quota). `spent` is
+    the usage of the attempt that stopped ({"api_calls": n, "tokens": n, ...}):
+    added to the job's `spent` totals, so what a stopped attempt cost is not
+    lost when the next attempt finishes.
     """
     now = now or _now()
     update = {"$set": {"status": PENDING, "fence": None, "lease_owner": None,
@@ -305,8 +304,14 @@ def release(db, job: dict, *, delay_seconds: float = 0, reason: str = "",
                        "released_reason": str(reason)[:300]}}
     if error:
         update["$set"]["last_error"] = error
+    inc = {}
     if refund_attempt:
-        update["$inc"] = {"attempts": -1}
+        inc["attempts"] = -1
+    for key, value in (spent or {}).items():
+        if value:
+            inc["spent.%s" % key] = int(value)
+    if inc:
+        update["$inc"] = inc
     if not_runnable_here:
         update["$addToSet"] = {"not_runnable_on": job.get("lease_owner") or WORKER_ID}
     result = db[COLLECTION].update_one(
@@ -314,25 +319,25 @@ def release(db, job: dict, *, delay_seconds: float = 0, reason: str = "",
     return result.matched_count == 1
 
 
-def release_owned(db, worker_id: str = WORKER_ID, now=None) -> list:
-    """Hand back every job this worker is running, on shutdown.
+def fail_owned(db, worker_id: str = WORKER_ID, now=None) -> list:
+    """Fail every job this worker is running, on shutdown.
 
-    Without it a deploy left the interrupted job RUNNING until its lease ran
-    out. The attempt it was on is given back too: being stopped is not a
-    failure, and three deploys in a row must not fail a job.
+    A restart or deploy stops the producer threads mid-job. The jobs are marked
+    FAILED ("interrupted") straight away - never left RUNNING for a lease to
+    lapse, never re-queued - so the admin page shows exactly what was cut off.
     """
     now = now or _now()
-    released = []
+    failed = []
     for job in list(db[COLLECTION].find({"status": RUNNING, "lease_owner": worker_id})):
         result = db[COLLECTION].update_one(
             {"_id": job["_id"], "fence": job.get("fence"), "status": RUNNING},
-            {"$set": {"status": PENDING, "fence": None, "lease_owner": None,
-                      "lease_expires_at": None, "not_before": now,
-                      "released_reason": "worker shut down"},
-             "$inc": {"attempts": -1 if int(job.get("attempts") or 0) > 0 else 0}})
+            {"$set": {"status": FAILED, "finished_at": now,
+                      "error": {"code": INTERRUPTED, "message": INTERRUPTED_MESSAGE},
+                      "result": {"outcome": "failed", "reason": INTERRUPTED},
+                      "lease_owner": None, "lease_expires_at": None}})
         if result.matched_count:
-            released.append(job)
-    return released
+            failed.append(job)
+    return failed
 
 
 def finish(db, job: dict, outcome: str, *, result: dict | None = None,
@@ -397,6 +402,14 @@ def attach_run(db, job_id, run_id) -> None:
     """Record that another run is also waiting on this live job."""
     db[COLLECTION].update_one({"_id": job_id, "status": {"$in": list(LIVE)}},
                               {"$addToSet": {"run_ids": run_id}})
+
+
+def clear_not_runnable(db, account_id: str, node_id: str) -> None:
+    """Forget which workers handed this node's queued job back for missing
+    files - called once the files are on disk again."""
+    db[COLLECTION].update_one(
+        {"account_id": account_id, "node_id": node_id, "status": PENDING},
+        {"$set": {"not_runnable_on": [], "released_reason": None}})
 
 
 def set_progress(db, job: dict, done: int, total: int, label: str = "") -> None:

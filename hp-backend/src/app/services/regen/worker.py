@@ -109,20 +109,22 @@ def stop(timeout: float = 5.0) -> None:
 
 
 def _release_running() -> None:
-    """Give this process's running jobs back to the queue before it exits.
+    """Fail this process's running jobs before it exits (restart or deploy).
 
-    The producer threads are daemons and die with the process mid-job; handed
-    back now, the next backend picks those jobs up as soon as it starts instead
-    of when their leases lapse. Anything the old threads still try to commit is
-    fenced off, because the release cleared their fence.
+    The producer threads are daemons and die with the process mid-job. Each job
+    is marked FAILED "interrupted" now, with the node's failure recorded, so the
+    admin page shows what was cut off - not a job stuck RUNNING, and not one
+    quietly re-queued. Anything the old threads still try to commit is fenced
+    off, because the job is no longer RUNNING.
     """
     if _engine is None or not worker_enabled():
         return
     from app.services.regen import jobs, state
     try:
-        for job in jobs.release_owned(_engine.db, _engine.worker_id):
+        for job in jobs.fail_owned(_engine.db, _engine.worker_id):
             state.clear_running(_engine.db, job["account_id"], job["node_id"], job["_id"])
-            logger.info("regen: handed %s/%s back to the queue on shutdown",
+            _engine.record_job_failure(job, jobs.INTERRUPTED, jobs.INTERRUPTED_MESSAGE)
+            logger.info("regen: %s/%s interrupted by shutdown - marked failed",
                         job["account_id"], job["node_id"])
     except Exception:
-        logger.exception("regen: could not hand running jobs back on shutdown")
+        logger.exception("regen: could not mark running jobs failed on shutdown")

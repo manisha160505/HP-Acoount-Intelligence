@@ -22,10 +22,10 @@ def get_openai_client() -> OpenAI | None:
     return OpenAI(**settings.llm_client_kwargs)
 
 
-# Waits before each retry of a 429 or 5xx, after the SDK's own quick retries.
-# Vertex's shared quota answered 429 for minutes at a time during a full
-# regeneration (28 Sep); the SDK's retries give up within ~2 s, which turned a
-# busy minute into a DEGRADED widget.
+# Waits inside ONE model call before sending it again, when the provider
+# answers 429 or 5xx for a moment. Not a retry of a failed pipeline: a section
+# that still fails after these fails with its reason and is never re-queued
+# (29 Sep). The SDK adds its own two quick retries before these.
 RATE_LIMIT_WAITS = (5, 15, 30, 60)
 
 
@@ -36,13 +36,12 @@ def _retryable(exc) -> bool:
 
 def create_completion(client, **kwargs):
     """The SDK's chat completion call with the provider's request options and
-    rate-limit waits. Every model call goes through here, so this is also where
-    a regeneration run counts its requests and tokens.
+    the short in-call waits above. Every model call goes through here, so this
+    is also where a regeneration run counts its requests and tokens.
 
-    The waits are inside ONE call - a busy few seconds at the provider - not a
-    retry of a failed pipeline. When the provider is still refusing for quota
-    after all of them, the quota signal is raised before giving up: the engine
-    then pauses the whole queue instead of failing job after job.
+    When the provider is still refusing for quota after every wait, the quota
+    signal is raised before giving up: the engine then fails the section as
+    QUOTA_EXHAUSTED and pauses the queue.
     """
     kwargs = {**settings.llm_request_extra, **kwargs}
     for wait in (*RATE_LIMIT_WAITS, None):
@@ -55,7 +54,7 @@ def create_completion(client, **kwargs):
                 if isinstance(exc, RateLimitError):
                     run_context.note_quota_exhausted()
                 raise
-            logger.info("LLM answered %s - retrying in %ds",
+            logger.info("LLM answered %s - waiting %ds before sending it again",
                         getattr(exc, "status_code", "error"), wait)
             time.sleep(wait)
             continue

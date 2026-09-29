@@ -41,7 +41,16 @@ logger = logging.getLogger(__name__)
 WORKSPACE_RE = re.compile(r"^[A-Za-z0-9_]+$")
 
 # Kept modest: these bound how much of the LLM budget one ingest can spend.
-LLM_MAX_ASYNC = 2
+# The extraction calls of one index build run this many at a time - the main
+# lever on how long a build takes (a Strategy Chat index is several hundred
+# calls, one after another in pairs at 2). Raising it finishes sooner but
+# spends the provider's per-minute quota faster; on a quota 429 the engine
+# pauses the queue rather than failing. Set RAG_LLM_MAX_ASYNC to change it.
+LLM_MAX_ASYNC = max(1, int(os.getenv("RAG_LLM_MAX_ASYNC", "2")))
+# LightRAG re-asks the model once per chunk for entities it missed ("gleaning")
+# - up to twice the extraction calls for a small gain in recall. 1 is
+# LightRAG's default; RAG_EXTRACT_GLEANING=0 skips the second pass.
+EXTRACT_GLEANING = max(0, int(os.getenv("RAG_EXTRACT_GLEANING", "1")))
 EMBEDDING_MAX_ASYNC = 8
 # Vertex express mode rate-limits far lower than Azure did: eight concurrent
 # batches drew 429s on the first production build (28 Sep).
@@ -180,15 +189,14 @@ def _vertex_embed(texts: list) -> list:
     return vectors
 
 
-# Waits before each retry of a 429/5xx. The express-mode quota answered 429 to
-# eight concurrent index builds' worth of requests on 28 Sep; a minute of
-# backing off lets a per-minute quota refill instead of failing the build.
+# Waits inside ONE embedding request before sending it again, when the
+# provider answers 429 or 5xx for a moment (not a retry of a failed build).
 VERTEX_RETRY_WAITS = (2, 5, 10, 20, 30)
 
 
 def _vertex_post(url: str, body: dict):
     """POST with the key in a header - never ?key=, which httpx puts in every
-    error message and so in the logs - retrying rate limits and server errors."""
+    error message and so in the logs - with the short waits above."""
     import httpx
 
     for wait in (*VERTEX_RETRY_WAITS, None):
@@ -201,8 +209,8 @@ def _vertex_post(url: str, body: dict):
                 from app.services.regen import context as run_context
                 run_context.note_quota_exhausted()
             break
-        logger.info("retrieval: embeddings answered %d, retrying in %ds",
-                    response.status_code, wait)
+        logger.info("retrieval: embeddings answered %d, waiting %ds before sending "
+                    "it again", response.status_code, wait)
         time.sleep(wait)
     response.raise_for_status()
     return response
@@ -327,6 +335,7 @@ async def build_rag(account_id: str, index: str, for_query: bool = False):
         llm_model_func=_query_llm_model_func if for_query else _llm_model_func,
         llm_model_name=query_model() if for_query else retrieval_model(),
         llm_model_max_async=LLM_MAX_ASYNC,
+        entity_extract_max_gleaning=EXTRACT_GLEANING,
         embedding_func=EmbeddingFunc(
             embedding_dim=settings.embedding_dim,
             func=_embedding_func,
