@@ -211,6 +211,15 @@ def _vertex_embed(texts: list) -> list:
 # Waits inside ONE embedding request before sending it again, when the
 # provider answers 429 or 5xx for a moment (not a retry of a failed build).
 VERTEX_RETRY_WAITS = (2, 5, 10, 20, 30)
+# What LightRAG allows one embedding call before killing it: it cuts the call
+# off at twice this (`priority_limit_async_func_call`). Its default of 30 s
+# gave 60 s, less than the 67 s of waits above, so a request that hit Vertex's
+# per-minute embedding limit was killed just before its last attempt - which is
+# the one that lands once the minute has passed. One killed call fails the whole
+# index build (Advantest, 29 Sep: document 12 of 14 every time, because the
+# first 11 used up the minute). 120 gives 240 s: all the waits plus the attempts
+# themselves. test_retrieval_embedding_timeout.py keeps it above the waits.
+EMBEDDING_TIMEOUT = 120
 
 
 def _vertex_post(url: str, body: dict):
@@ -363,6 +372,9 @@ async def build_rag(account_id: str, index: str, for_query: bool = False):
         embedding_func_max_async=(VERTEX_EMBEDDING_MAX_ASYNC
                                   if settings.llm_provider == "vertex"
                                   else EMBEDDING_MAX_ASYNC),
+        # Long enough for one request to sit out its own 429 waits. See
+        # EMBEDDING_TIMEOUT.
+        default_embedding_timeout=EMBEDDING_TIMEOUT,
         # Both caches live in KV storage, and that storage is prefixed by
         # workspace - so the cache is PER INDEX, not shared between them. A new
         # index therefore starts with an empty cache and extracts everything
