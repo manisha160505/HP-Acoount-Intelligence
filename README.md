@@ -118,20 +118,37 @@ python scripts/migrate_to_atlas.py --target "mongodb+srv://..." --apply
 
 ## Regeneration
 
-Extraction runs when data changes, not when a page is viewed:
+Nothing expensive runs on its own. Changes only mark outputs **stale**;
+regeneration happens when an admin submits it:
 
 | Event | Regenerates? |
 |---|---|
-| Upload or delete a dataset | Yes — the dependent features only |
-| Open a feature in the dashboard | No — stored widgets are served |
-| First view of a feature with nothing stored | Yes — one-time bootstrap |
-| `POST /accounts/{id}/widgets/{feature_key}/regenerate` | Yes — that feature |
+| Upload, replace or delete a dataset | No — the affected sections become stale |
+| Edit account instructions or guardrails | No — the Opportunity Map becomes stale |
+| Deploy / restart, prompt, rule or model change | No — affected sections become stale; startup logs how many accounts need a run |
+| Open a feature in the dashboard | No — stored widgets are served; nothing is queued |
+| **Submit** on the admin account page (Pipeline tab) | Yes — every stale, failed, degraded or never-run section of that account, once, in dependency order |
+| `POST /api/v1/regeneration` | Yes — exactly what the request asks for |
+
+`POST /api/v1/regeneration` takes `accounts` (ids, exact names or `"all"`),
+`features` (ids or `"all"`), optional `nodes` (single sections), `force`
+(default `false`: current sections are skipped) and `include_downstream`.
+`POST /api/v1/regeneration/preview` returns the same plan without running
+anything or calling a model. `GET /api/v1/regeneration/{run_id}` shows a run's
+progress, errors and model usage; `GET /api/v1/accounts/{id}/pipeline` shows
+every section of an account grouped by status, with why each one is stale
+(data file, upstream section, code, prompt, rules, model or instructions).
+
+A failed section is not retried automatically: it keeps its previous output,
+shows its error on the Pipeline tab, and runs again on the next Submit. If the
+model provider's quota runs out, the queue pauses (nothing is failed) until an
+admin presses Resume.
 
 AI output is cached on a SHA-256 fingerprint of the inputs plus a prompt
 version, so identical data costs zero model calls. Bump the module's
-`*_PROMPT_VERSION` to force regeneration.
+`*_PROMPT_VERSION` to mark the section stale.
 
-Without `OPENAI_API_KEY`, deterministic widgets populate normally and inferred
+Without an LLM API key, deterministic widgets populate normally and inferred
 widgets are stored as `pending` with a notice explaining why — shown in the UI.
 Nothing is fabricated to fill the gap.
 

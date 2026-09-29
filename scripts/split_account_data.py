@@ -194,6 +194,10 @@ FILINGS_INDEX_FILE = (REPO_ROOT / "project-documentation" / "04_Data_and_Source_
 # which the crawl never covered.
 FILINGS_SUPPLEMENT_FILES = [
     FILINGS_INDEX_FILE.parent / "filings_client_supplement_2026-09-26.csv",
+    # The client's 29 Sep list ("filings new.csv", one sales territory per
+    # account) - only its rows that add a document; row_id "N29-n". Built by
+    # scripts/filings_new_to_supplement.py.
+    FILINGS_INDEX_FILE.parent / "filings_client_supplement_2026-09-29.csv",
 ]
 # Client rulings that settle a filings row whose territory and domain disagree.
 # Checked before the conflict rule in assign_filings(), so a ruled row is filed
@@ -3443,34 +3447,33 @@ def _find_or_create_account(base_url: str, token: str, name: str, dry_run: bool)
     return body["id"], "created"
 
 
-# The extractors, in the order the wave runs them. Dependencies first: the
-# opportunity map reads the tech landscape's cards, Content Studio reads the
-# Stakeholder Map's grid, and Strategy Chat reads what all of them wrote.
-FEATURE_RUN_ORDER = [
-    "executive_dashboard", "stakeholder_map", "tech_landscape",
-    "solution_narrative_opportunity_map", "recent_news_signals",
-    "intent_demand_signals", "objection_playbook", "content_messaging",
-    "content_studio", "message_evaluator", "strategy_chat",
-]
+def _submit_run(base_url: str, token: str, account_id: str):
+    """One explicit regeneration run for the account, now that its files are in.
+
+    Uploads never run anything (29 Sep): the account's stale sections run once
+    each, in dependency order, only when a run is asked for. This is the same
+    call as the admin page's Submit - without force, so a section that is
+    already current is skipped.
+    """
+    status, body = _api(f"{base_url}/api/v1/regeneration", token,
+                        payload={"accounts": [account_id],
+                                 "reason": "bulk upload (split_account_data.py)"})
+    if status in (200, 201, 202):
+        totals = (body or {}).get("totals") or {}
+        print(f"  submitted run {(body or {}).get('_id')}: "
+              f"{totals.get('run', 0)} section(s) to run, "
+              f"{totals.get('skip_current', 0)} already current, "
+              f"{totals.get('cannot_run', 0)} without data")
+    else:
+        detail = (body or {}).get("detail") or (body or {}).get("error")
+        print(f"  submit FAILED HTTP {status}: {detail}")
 
 
-def _regenerate_all(base_url: str, token: str, account_id: str):
-    """Run every feature once, now that the account's datasets are all in."""
-    print("  regenerating:")
-    for feature in FEATURE_RUN_ORDER:
-        status, body = _api(
-            f"{base_url}/api/v1/accounts/{account_id}/widgets/{feature}/regenerate",
-            token, payload={}, timeout=1800)
-        if status in (200, 201):
-            widgets = len(body) if isinstance(body, list) else 0
-            print(f"    {feature:<38} {widgets} widget(s)")
-        else:
-            detail = (body or {}).get("detail") or (body or {}).get("error")
-            print(f"    {feature:<38} FAILED HTTP {status}: {detail}")
-
-
-def upload_accounts(slugs: list[str], base_url: str, dry_run: bool):
-    """Create each account and POST the datasets in its split folder."""
+def upload_accounts(slugs: list[str], base_url: str, dry_run: bool,
+                    regenerate: bool = False):
+    """Create each account and POST the datasets in its split folder. With
+    `regenerate`, submit one regeneration run per account afterwards;
+    otherwise nothing runs until someone submits it from the admin page."""
     import os
     if not slugs:
         sys.exit("--upload needs --accounts SLUG[,SLUG]")
@@ -3516,6 +3519,26 @@ def upload_accounts(slugs: list[str], base_url: str, dry_run: bool):
                 print(f"    {key:<24} FAILED HTTP {status}: "
                       f"{(body or {}).get('detail')}")
 
+        # The verified filing figures, written after the split by
+        # scripts/filings_to_csv.py - so they are not in the manifest and would
+        # otherwise never be uploaded.
+        figures = folder / "filings_financials.csv"
+        if figures.exists() and "filings_financials" not in manifest["datasets"]:
+            if dry_run:
+                print(f"    would upload {'filings_financials':<24} (filing figures)")
+                uploaded += 1
+            else:
+                status, body = _api_upload(
+                    f"{base_url}/api/v1/accounts/{account_id}/data", token,
+                    "filings_financials", figures)
+                if status in (200, 201):
+                    uploaded += 1
+                    print(f"    {'filings_financials':<24} filing figures  OK")
+                else:
+                    failed += 1
+                    print(f"    filings_financials FAILED HTTP {status}: "
+                          f"{(body or {}).get('detail')}")
+
         # The filings are the multi-file key: one POST each - every PDF (the
         # downloaded ones and those written from PredictLeads' text) and the
         # filings list, _filings_index.csv, which the Executive Dashboard reads.
@@ -3538,16 +3561,18 @@ def upload_accounts(slugs: list[str], base_url: str, dry_run: bool):
 
         print(f"  {uploaded} uploaded, {failed} failed, {skipped} skipped "
               f"(no rows)")
-        # Every dataset is in now, so each feature runs once, in dependency
-        # order, against the whole account.
         if not dry_run and uploaded and not failed:
-            _regenerate_all(base_url, token, account_id)
+            if regenerate:
+                _submit_run(base_url, token, account_id)
+            else:
+                print("  stored - nothing runs until the account is submitted "
+                      "(admin page, or rerun with --regenerate)")
         print()
     if dry_run:
         print("Dry run - nothing was uploaded.")
     else:
-        print("Each upload re-runs the features that declare the dataset; watch "
-              "the backend terminal for the per-feature lines.")
+        print("Uploads only store files. Submitted runs show progress on the "
+              "account's admin page (Pipeline).")
 
 
 def main():
@@ -3572,6 +3597,9 @@ def main():
                         help="Rewrite prospect_contacts.csv and company_personas.csv "
                              "in the existing split from Company_Personas_Enriched.xlsx, "
                              "then recompute readiness. Touches nothing else.")
+    parser.add_argument("--regenerate", action="store_true",
+                        help="With --upload: submit one regeneration run per "
+                             "account once its files are in.")
     parser.add_argument("--upload", action="store_true",
                         help="Create the account and POST its datasets to the API. "
                              "Use with --accounts.")
@@ -3594,7 +3622,7 @@ def main():
         print_refresh_summary(summary)
         return
     if args.upload:
-        upload_accounts(slugs, args.base_url, args.dry_run)
+        upload_accounts(slugs, args.base_url, args.dry_run, args.regenerate)
         return
 
     if not SOURCE_DIR.exists():

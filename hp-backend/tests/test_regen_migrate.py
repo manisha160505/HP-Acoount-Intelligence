@@ -142,3 +142,40 @@ def test_a_built_index_is_adopted_and_a_failed_one_is_not(db):
 def test_graph_is_the_default_one():
     assert migrate.INDEX_OF_NODE.keys() == {n for n in DEFAULT.nodes
                                             if DEFAULT[n].kind == "index"}
+
+
+def test_model_block_is_narrowed_to_what_each_node_uses(db):
+    """29 Sep: a producer's fingerprint covers the chat model only and an
+    index's the retrieval and embedding models. Existing generations are
+    re-fingerprinted in place, so the release that narrowed the fingerprint does
+    not itself make every model-backed node stale."""
+    from app.services.regen.graph import Graph, Node
+    graph = Graph((Node("P", "fp", widgets=("p",), llm=True),
+                   Node("I", "fi", kind="index", llm=True)))
+    four = {"provider": "vertex", "chat": "c1", "retrieval": "r1", "embedding": "e1"}
+    for nid in ("P", "I"):
+        m = {"node": nid, "logic": {"own": 1, "refs": {}, "total": 1},
+             "datasets": {}, "upstream": {}, "model": dict(four)}
+        db[state.COLLECTION].insert_one({
+            "_id": state.state_id("a1", nid), "account_id": "a1", "node_id": nid,
+            "current": {"fingerprint": manifest.fingerprint(m), "manifest": m}})
+    report = migrate.run(db, graph=graph, dry_run=False)
+    assert report["manifests_narrowed"] == 2
+    p = db[state.COLLECTION].find_one({"_id": state.state_id("a1", "P")})["current"]
+    i = db[state.COLLECTION].find_one({"_id": state.state_id("a1", "I")})["current"]
+    assert p["manifest"]["model"] == {"provider": "vertex", "chat": "c1"}
+    assert i["manifest"]["model"] == {"provider": "vertex", "retrieval": "r1",
+                                      "embedding": "e1"}
+    assert p["fingerprint"] == manifest.fingerprint(p["manifest"])
+    assert manifest.model_inputs(graph["P"], four) == p["manifest"]["model"]
+    assert migrate.run(db, graph=graph, dry_run=False)["manifests_narrowed"] == 0
+
+
+def test_jobs_queued_without_a_run_are_cancelled(db):
+    from app.services.regen import jobs
+    jobs.enqueue(db, "a1", "tech_core", jobs.trigger("sweep"))
+    jobs.enqueue(db, "a1", "news", jobs.trigger("manual"), run_id=ObjectId())
+    report = migrate.run(db, dry_run=False)
+    assert report["unbound_jobs_cancelled"] == 1
+    live = list(db[jobs.COLLECTION].find({"status": jobs.PENDING}))
+    assert [j["node_id"] for j in live] == ["news"]

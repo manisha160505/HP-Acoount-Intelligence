@@ -1,13 +1,26 @@
-"""Reconcile, run and commit: the whole regeneration path in one place.
+"""Plan, run and commit: the whole regeneration path in one place.
 
-Every trigger - an upload, a delete, a config edit, a manual click, a logic
-change picked up by the sweep, an upstream node committing - calls
-`reconcile(account)`. Reconcile works out the fingerprint each node would have
-if it ran now, compares it with what is committed, and enqueues the nodes that
-differ. The worker then runs one job at a time per account:
+**Nothing expensive happens on its own** (29 Sep). An upload, a delete, a config
+edit, a deploy, a restart, a rule, prompt or model change and a committed
+upstream node can all make nodes stale - staleness is derived from fingerprints
+on every read, so nothing needs to be written for it - but none of them queues
+work. Work exists only when someone asks for it: `runs.create` (behind
+`POST /regeneration` and the admin page's Submit) plans the request with
+`planner.plan` and enqueues exactly the nodes it names, each tagged with the
+run's id; the worker claims nothing else. Before this, every one of those
+triggers enqueued, and the account-wide sweep ran every stale node of every
+account every ten minutes - one account uploaded file by file ran its sections
+41 times (28 Sep).
+
+A failed run is not retried. It stays FAILED, with its error, until the cause
+is fixed and someone submits again. The one exception is the model provider's
+quota: that is not the job's failure, so the job goes back to the queue with
+its attempt refunded and the whole queue pauses until an admin resumes it.
+
+The worker runs one job at a time per account:
 
     claim -> gate -> pin -> skip? -> files here? -> run -> validate -> commit
-          -> finish -> mirror -> reconcile (dependents)
+          -> finish -> mirror -> nudge dependents already queued
 
 The guarantees and where they come from:
 
@@ -26,7 +39,7 @@ import logging
 import threading
 import time
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 import bson
 from bson import ObjectId
@@ -34,7 +47,7 @@ from pymongo.errors import DuplicateKeyError
 
 from app.observability import pipeline
 from app.services.extractors.datasets import DatasetFileMissing
-from app.services.regen import context as run_context, jobs, manifest, state
+from app.services.regen import context as run_context, jobs, manifest, planner, runs, state
 from app.services.regen.graph import DEFAULT, INDEX
 from app.services.regen.store import WIDGET_FIELDS, shape
 
@@ -45,25 +58,11 @@ CONTENT_STATUSES = frozenset({"available", "partial", "empty", "pending", "error
 MAX_GENERATION_BYTES = 12 * 1024 * 1024
 # Well inside jobs.LEASE_SECONDS, so a missed beat or two does not lapse a live job.
 HEARTBEAT_SECONDS = 30
-# Automatic retries of a node that failed (or published a degraded result) for
-# unchanged inputs: after 1 h, 6 h and 24 h, then only by hand.
-RETRY_SCHEDULE = (3600, 6 * 3600, 24 * 3600)
-LEGACY_ACCOUNTS_PER_SWEEP = 5
-
-# Failures that another attempt cannot fix. They fail the job at once instead of
-# spending the retry budget on the same outcome.
-DETERMINISTIC = frozenset({"VALIDATION", "UNDECLARED_INPUT", "FOREIGN_WRITE",
-                           "TOO_LARGE", "DEGRADED", "NO_RUNNER"})
+# How often a producer's progress is written to its job row, at most.
+PROGRESS_EVERY_SECONDS = 2.0
 
 MANUAL = "manual"
-INPUT = "input_changed"
-UPSTREAM = "upstream_committed"
-SWEEP = "sweep"
-PULLED = "pulled_by_dependent"
-
-_PRIORITY = {MANUAL: jobs.PRIORITY_MANUAL, INPUT: jobs.PRIORITY_INPUT,
-             UPSTREAM: jobs.PRIORITY_UPSTREAM, PULLED: jobs.PRIORITY_UPSTREAM,
-             SWEEP: jobs.PRIORITY_SWEEP}
+QUOTA = "QUOTA_EXHAUSTED"
 
 
 class NotRunnableHere(Exception):
@@ -177,6 +176,7 @@ class Engine:
     def ensure_indexes(self) -> None:
         jobs.ensure_indexes(self.db)
         state.ensure_indexes(self.db)
+        runs.ensure_indexes(self.db)
         if not self.mirror_enabled:
             return
         # The mirror's guarded upsert relies on a unique (account, widget) index:
@@ -224,105 +224,51 @@ class Engine:
                     for fid, nids in self.graph.features().items()}
         return {"account_id": account_id, "nodes": derived, "features": features}
 
-    # --------------------------------------------------------------- reconcile
+    # ------------------------------------------------------- stale, not queued
 
-    def reconcile(self, account_id: str, why: dict, *, sweep_legacy: bool = False,
-                  only=None, scope=None) -> list:
-        """Enqueue every node whose committed output no longer matches its inputs.
+    def stale_nodes(self, account_id: str, scope=None) -> list:
+        """The nodes of one account that are not current, with why.
 
-        `why` is a `jobs.trigger(...)`. Its type sets the priority and decides
-        which classes of node are enqueued (design section 6.4). `scope` limits
-        where a demand may start generating something that has never been built
-        (or re-verify legacy output): the readers of the dataset that changed,
-        or the direct dependents of the node that committed - never the whole
-        account. Nodes whose inputs actually changed are exact by fingerprint and
-        are queued wherever they are. Returns the plan
-        - one entry per node acted on - for logging and tests.
+        What an upload, a delete or a config edit reports back - and all it
+        does. `scope` narrows the answer to the nodes a change can reach.
         """
-        snapshot = load_snapshot(self.db, account_id)
-        manifests, fps = self.expected_all(snapshot)
-        live = jobs.live(self.db, account_id)
-        kind = why.get("type")
-        demand = bool(why.get("demand"))
-        priority = _PRIORITY.get(kind, jobs.PRIORITY_UPSTREAM)
-        now = datetime.now(UTC)
-        plan = []
-
-        for nid in self.graph.order:
-            if only is not None and nid not in only:
+        view = planner.account_view(self, account_id)
+        out = []
+        for nid, n in view["nodes"].items():
+            if scope is not None and nid not in scope:
                 continue
-            doc = snapshot.states.get(nid) or {}
-            current = doc.get("current") or None
-            failure = doc.get("last_failure") or None
-            fp = fps[nid]
-            job = live.get(nid)
-
-            if job and (job.get("status") == jobs.PENDING or
-                        (job.get("status") == jobs.RUNNING and
-                         (doc.get("running") or {}).get("target_fingerprint") == fp)):
-                continue                          # already queued for these inputs
-
-            cls, enqueue, prio = None, False, priority
-            if failure and failure.get("fingerprint") == fp and not (
-                    current and current.get("fingerprint") == fp
-                    and current.get("quality") == state.COMPLETE):
-                cls = "failed"
-                enqueue = kind == MANUAL or _due(failure.get("at"), failure.get("count"), now)
-            elif current and current.get("fingerprint") == fp:
-                if current.get("quality") == state.DEGRADED:
-                    cls = "degraded"
-                    enqueue = kind == MANUAL or _due(current.get("generated_at"),
-                                                     current.get("degraded_retries", 0) + 1,
-                                                     now)
-                else:
-                    cls = "fresh"
-            elif current and not current.get("fingerprint"):
-                cls = "legacy"
-                in_scope = scope is None or nid in scope
-                enqueue = ((demand or kind in (MANUAL, INPUT)) and in_scope) or sweep_legacy
-                if sweep_legacy and not (demand or kind in (MANUAL, INPUT)):
-                    prio = jobs.PRIORITY_LEGACY
-            elif current:
-                cls = "dirty"
-                enqueue = True
-            else:
-                cls = "never"
-                enqueue = (demand or kind == MANUAL) and (scope is None or nid in scope)
-
-            if not enqueue:
+            if n["status"] in (planner.CURRENT,):
                 continue
-            result = jobs.enqueue(self.db, account_id, nid,
-                                  {**why, "detail": why.get("detail") or cls},
-                                  priority=prio, force=bool(why.get("force")),
-                                  rank=self.graph.rank(nid))
-            plan.append({"node_id": nid, "class": cls, "job": result,
-                         "changed_inputs": manifest.diff((current or {}).get("manifest"),
-                                                         manifests[nid])})
-        if plan:
-            pipeline.step("regen", "%s -> queued %s" % (
-                kind, ", ".join("%s(%s)" % (p["node_id"], p["class"]) for p in plan)),
-                account=account_id)
-        return plan
+            out.append({"node_id": nid, "label": n["label"], "feature": n["feature"],
+                        "status": n["status"], "categories": n["categories"],
+                        "reasons": n["reasons"]})
+        return out
 
     def notify_input_changed(self, account_id: str, what: str, actor: str = "",
                              datasets=None, nodes=None) -> list:
-        """The one call an upload, delete or config edit makes.
+        """The one call an upload, delete or config edit makes. Queues NOTHING.
 
-        `datasets` / `nodes` name what changed, so nothing unrelated is built
-        for the first time on its account: a firmographics upload must not start
-        generating features that never read firmographics.
+        Returns the nodes the change left stale (readers of the dataset, the
+        named nodes, and everything downstream of them), so the caller can say
+        what a Submit would now run. Kept as a named call so every input change
+        still passes through one place.
         """
         scope = None
         if datasets is not None or nodes is not None:
-            scope = set(nodes or [])
+            direct = set(nodes or [])
             for key in datasets or []:
-                scope.update(self.graph.readers_of_dataset(key))
-        return self.reconcile(account_id, jobs.trigger(INPUT, what, actor, demand=True),
-                              scope=scope)
+                direct.update(self.graph.readers_of_dataset(key))
+            scope = set(direct)
+            for nid in direct:
+                scope |= self.graph.descendants(nid)
+        stale = self.stale_nodes(account_id, scope=scope)
+        logger.info("regen: %s on %s by %s - %d node(s) now need a run, none queued",
+                    what, account_id, actor or "system", len(stale))
+        return stale
 
     def regenerate_feature(self, account_id: str, feature_id: str, actor: str = "",
-                           force: bool = True) -> dict:
-        """Manual regeneration of one feature: its nodes, forced."""
+                           force: bool = False) -> dict:
+        """One feature of one account, as an explicit run. Not forced unless asked."""
         nids = self.graph.nodes_for_feature(feature_id)
         if not nids:
             raise KeyError(feature_id)
@@ -331,45 +277,38 @@ class Engine:
                 "feature_id": feature_id}
 
     def regenerate_nodes(self, account_id: str, nids, actor: str = "",
-                         force: bool = True, detail: str = "", full: bool = False,
+                         force: bool = False, detail: str = "", full: bool = False,
                          demand: bool = True) -> dict:
-        """Queue these nodes at manual priority.
+        """These nodes of one account, as an explicit run (see `runs.create`).
 
-        Ancestors that are stale are pulled in by the gate when these run.
-        Ancestors that FAILED would otherwise sit out their retry backoff and
-        leave this request waiting behind them, so they are forced too.
-        `demand=False` queues only nodes that already have output - a page view
-        must not start generating a feature nobody has loaded data for.
+        Kept for the per-feature endpoints; everything goes through the planner,
+        so stale ancestors are included, current nodes are skipped unless
+        forced, and a node already queued is not queued twice. `demand` is
+        accepted for compatibility and no longer means anything: nothing is
+        ever generated without being asked for.
         """
-        nids = [n for n in self.graph.order if n in set(nids)]
-        why = jobs.trigger(MANUAL, detail or "regenerate %s" % ", ".join(nids), actor,
-                           demand=demand)
-        snapshot = load_snapshot(self.db, account_id)
-        _manifests, fps = self.expected_all(snapshot)
-        derived = state.derive(self.graph, snapshot.states, fps,
-                               jobs.live(self.db, account_id))
-        failed_ancestors = sorted(
-            {a for nid in nids for a in self.graph.ancestors(nid)
-             if derived[a]["lifecycle"] == state.FAILED} - set(nids),
-            key=self.graph.rank)
-        queued = {}
-        for nid in failed_ancestors + nids:
-            queued[nid] = jobs.enqueue(self.db, account_id, nid, why,
-                                       priority=jobs.PRIORITY_MANUAL, force=force,
-                                       full=full and self.graph[nid].kind == INDEX,
-                                       rank=self.graph.rank(nid))
-        return {"account_id": account_id,
-                "nodes": [{"node_id": nid, "lifecycle": derived[nid]["lifecycle"],
-                           "job": {"id": str(queued[nid]["job_id"]),
-                                   "status": queued[nid]["status"],
-                                   "coalesced": queued[nid]["coalesced"]}}
-                          for nid in nids],
-                "forced_ancestors": failed_ancestors}
+        run = runs.create(self, accounts=[account_id], nodes=list(nids), force=force,
+                          full=full, actor=actor, reason=detail)
+        items = run["plan"]["accounts"][0]["items"] if run["plan"]["accounts"] else []
+        live = jobs.live(self.db, account_id)
+        by_node = {i["node_id"]: i for i in items}
+        out = []
+        for nid in [n for n in self.graph.order if n in set(nids)]:
+            job = live.get(nid)
+            item = by_node.get(nid) or {}
+            out.append({"node_id": nid, "lifecycle": item.get("status"),
+                        "action": item.get("action"),
+                        "job": ({"id": str(job["_id"]), "status": job["status"],
+                                 "coalesced": item.get("action") == planner.IN_PROGRESS}
+                                if job else None)})
+        return {"account_id": account_id, "run_id": str(run["_id"]), "nodes": out,
+                "totals": run["totals"]}
 
     # ------------------------------------------------------------------ worker
 
     def run_once(self) -> dict | None:
-        """Reclaim lapsed leases, then claim and run one job. None when idle."""
+        """Reclaim lapsed leases, then claim and run one job. None when idle
+        or when the queue is paused."""
         for job, action in jobs.reclaim_expired(self.db):
             if action == "failed":
                 state.record_failure(self.db, job["account_id"], job["node_id"],
@@ -380,6 +319,8 @@ class Engine:
             else:
                 state.clear_running(self.db, job["account_id"], job["node_id"],
                                     job["_id"])
+        if jobs.queue_state(self.db)["paused"]:
+            return None
         job = jobs.claim(self.db, self.worker_id)
         if not job:
             return None
@@ -408,13 +349,13 @@ class Engine:
             except Exception:
                 target = None
         if target:
-            # FAILED for these inputs: the sweep retries it on RETRY_SCHEDULE
-            # (1 h, 6 h, 24 h) and then leaves it, instead of every 10 minutes.
+            # FAILED for these inputs. Nothing retries it: the admin page shows
+            # the error, and a Submit after the fix runs it again.
             state.record_failure(self.db, account_id, nid, job["_id"], target,
                                  "ENGINE_ERROR", error["message"])
         return {"outcome": "failed", "node_id": nid, "error": error}
 
-    def run_job(self, job: dict) -> dict:
+    def run_job(self, job: dict) -> dict:  # noqa: PLR0911 - one return per outcome
         account_id, nid = job["account_id"], job["node_id"]
         if nid not in self.graph:
             # Queued before a deploy removed the node (Content Messaging, 28
@@ -432,23 +373,19 @@ class Engine:
         live = jobs.live(self.db, account_id)
         derived = state.derive(self.graph, snapshot.states, fps, live)
 
-        # Gate: build only on upstream output that is itself current.
+        # Gate: build only on upstream output that is itself current. An
+        # ancestor the run queued is waited for; one nobody queued (it failed
+        # earlier in this run, or the plan could not include it) will not
+        # become current by waiting, so the job ends here and the node stays
+        # stale with `blocked_by`. Nothing is pulled in: only a run adds work.
         bad = [up for up in node.upstream if derived[up]["lifecycle"] != state.CURRENT]
-        # An ancestor that cannot become current without an input changing -
-        # blocked, or failed and not being forced - would only be pulled, fail
-        # or block again, and gate this job again, every minute. Finish the job
-        # instead; the node stays STALE with `blocked_by`, and the reconcile
-        # after that ancestor next commits re-queues it.
-        stuck = [up for up in bad if up not in live and (
-            derived[up].get("blocked")
-            or (derived[up]["lifecycle"] == state.FAILED and not job.get("force")))]
+        stuck = [up for up in bad if up not in live]
         if stuck:
             jobs.finish(self.db, job, jobs.SKIPPED,
                         result={"outcome": "blocked_by", "blocked_by": stuck})
             logger.info("regen.blocked %s/%s by %s", account_id, nid, stuck)
             return {"outcome": "blocked", "node_id": nid, "blocked_by": stuck}
         if bad:
-            self._pull(account_id, bad, derived, live, job)
             jobs.release(self.db, job, delay_seconds=jobs.GATE_RETRY_SECONDS,
                          reason="waiting on %s" % ", ".join(bad))
             logger.info("regen.gated %s/%s waiting on %s", account_id, nid, bad)
@@ -494,19 +431,25 @@ class Engine:
             account_id=account_id, node_id=nid, pinned_rows=pinned_rows,
             pinned_widgets=self._pin_widgets(account_id, node, snapshot),
             owned=frozenset(node.widgets), force=bool(job.get("force")), manifest=m)
+        ctx.on_progress = self._progress_writer(job)
+        wall_started = time.time()
 
         try:
             with _Heartbeat(self.db, job, self.heartbeat_seconds), \
                     run_context.active(ctx):
                 result = self._runner(node)(account_id, **(
                     {"full": bool(job.get("full"))} if node.kind == INDEX else {}))
+            if run_context.quota_exhausted_since(wall_started):
+                return self._quota_pause(job, ctx)
             generation = self._validate(node, ctx, result, current, target, m, job)
         except (NotRunnableHere, DatasetFileMissing) as exc:
             jobs.release(self.db, job, not_runnable_here=True, reason=str(exc))
             state.clear_running(self.db, account_id, nid, job["_id"])
             return {"outcome": "not_runnable_here", "node_id": nid}
         except Exception as exc:
-            return self._fail(job, target, exc, started)
+            if run_context.quota_exhausted_since(wall_started):
+                return self._quota_pause(job, ctx)
+            return self._fail(job, target, exc, started, ctx)
 
         committed = state.commit(self.db, account_id, nid, job["fence"], generation)
         if committed is None:
@@ -520,8 +463,8 @@ class Engine:
         jobs.finish(self.db, job, jobs.SUCCEEDED, result={
             "outcome": "committed", "generation_id": generation["generation_id"],
             "fingerprint": target, "quality": generation["quality"],
-            "duration_ms": duration, "llm_calls": ctx.llm_calls,
-            "llm_failures": ctx.llm_failures, "changed_inputs": changed[:20]})
+            "duration_ms": duration, "changed_inputs": changed[:20],
+            **_usage(ctx)})
         logger.info("regen.committed %s/%s quality=%s %dms fp=%s", account_id, nid,
                     generation["quality"], duration, target[:12])
         pipeline.step("regen", "%s committed (%s, %.1fs)" % (
@@ -533,10 +476,9 @@ class Engine:
         if self.mirror_enabled and node.widgets:
             self._mirror(account_id, generation, int(committed.get("rev") or 0))
 
+        # Dependents a run already queued can go now. Dependents nobody asked
+        # for are left stale - derived, shown on the admin page - not queued.
         self._nudge_dependents(account_id, nid)
-        self.reconcile(account_id, jobs.trigger(UPSTREAM, nid,
-                                                demand=bool(job.get("demand"))),
-                       scope=set(self.graph.downstream.get(nid) or []))
         return {"outcome": "committed", "node_id": nid,
                 "generation_id": generation["generation_id"],
                 "quality": generation["quality"]}
@@ -568,29 +510,36 @@ class Engine:
                                if widget is not None else None)
         return pinned
 
-    def _pull(self, account_id, bad, derived, live, job):
-        """Enqueue the ancestors a gated job is waiting on, if nobody has.
+    def _progress_writer(self, job):
+        """A throttled writer of `job.progress`, for `run_context.progress`."""
+        last = [0.0]
 
-        Without this a job blocked by a stale ancestor that no trigger queued
-        (a legacy output, say) would wait forever.
-        """
-        for up in bad:
-            if up in live:
-                continue
-            lifecycle = derived[up]["lifecycle"]
-            if derived[up].get("blocked"):
-                continue
-            if lifecycle in (state.STALE, state.NEVER_GENERATED):
-                jobs.enqueue(self.db, account_id, up,
-                             jobs.trigger(PULLED, job["node_id"],
-                                          demand=bool(job.get("demand"))),
-                             priority=int(job.get("priority") or jobs.PRIORITY_UPSTREAM),
-                             rank=self.graph.rank(up))
-            elif lifecycle == state.FAILED and job.get("force"):
-                jobs.enqueue(self.db, account_id, up,
-                             jobs.trigger(PULLED, job["node_id"], demand=True),
-                             priority=int(job.get("priority") or jobs.PRIORITY_MANUAL),
-                             force=True, rank=self.graph.rank(up))
+        def write(done, total, label):
+            now = time.monotonic()
+            if done < total and now - last[0] < PROGRESS_EVERY_SECONDS:
+                return
+            last[0] = now
+            jobs.set_progress(self.db, job, done, total, label)
+        return write
+
+    def _quota_pause(self, job, ctx) -> dict:
+        """The provider's quota ran out during this run. Not this job's failure:
+        nothing is committed (its output may be a fallback), the attempt is
+        given back, and the queue stops until an admin resumes it."""
+        account_id, nid = job["account_id"], job["node_id"]
+        jobs.release(self.db, job, reason="model quota exhausted - queue paused",
+                     error={"code": QUOTA, "message": "the model provider refused "
+                            "for quota after every wait"},
+                     refund_attempt=True)
+        state.clear_running(self.db, account_id, nid, job["_id"])
+        jobs.pause(self.db, "model quota exhausted while %s/%s ran (%d model call(s), "
+                   "%d token(s) before it stopped)" % (account_id, nid, ctx.api_calls,
+                                                       ctx.tokens), by="engine")
+        logger.warning("regen.quota %s/%s - quota exhausted; job back in the queue, "
+                       "queue paused until resumed", account_id, nid)
+        pipeline.step("regen", "%s paused - model quota exhausted" % nid,
+                      account=account_id)
+        return {"outcome": "paused", "node_id": nid, "reason": QUOTA}
 
     def _validate(self, node, ctx, result, current, target, m, job) -> dict:
         """Everything a run must satisfy before its output may be committed."""
@@ -664,29 +613,23 @@ class Engine:
             "dataset_rows": {k: [str(r.get("_id")) for r in rows]
                              for k, rows in ctx.pinned_rows.items()},
             "llm": {"calls": ctx.llm_calls, "failures": ctx.llm_failures,
-                    "model": (m.get("model") or {}).get("chat")},
+                    "model": (m.get("model") or {}).get("chat"), **_usage(ctx)},
             "job_id": job["_id"],
             "generated_at": datetime.now(UTC),
         }
 
-    def _fail(self, job, target, exc, started) -> dict:
+    def _fail(self, job, target, exc, started, ctx=None) -> dict:
+        """The run failed. It stays FAILED - no automatic retry of any kind -
+        with its error on the job and the node, and the previous output kept.
+        Whoever fixes the cause submits it again."""
         account_id, nid = job["account_id"], job["node_id"]
         code = getattr(exc, "code", None) or "ERROR"
         message = "%s: %s" % (type(exc).__name__, exc) if code == "ERROR" else str(exc)
-        attempts = int(job.get("attempts") or 0) + 1
         error = {"code": code, "message": message[:500]}
-
-        if code not in DETERMINISTIC and attempts < jobs.MAX_ATTEMPTS:
-            delay = 60 * (4 ** attempts)
-            jobs.release(self.db, job, delay_seconds=delay, reason="retry", error=error)
-            state.clear_running(self.db, account_id, nid, job["_id"])
-            logger.warning("regen.retry %s/%s attempt %d in %ds - %s", account_id, nid,
-                           attempts, delay, message[:200])
-            return {"outcome": "retry", "node_id": nid, "error": error}
-
         jobs.finish(self.db, job, jobs.FAILED, error=error, result={
             "outcome": "failed", "fingerprint": target,
-            "duration_ms": int((time.monotonic() - started) * 1000)})
+            "duration_ms": int((time.monotonic() - started) * 1000),
+            **(_usage(ctx) if ctx is not None else {})})
         state.record_failure(self.db, account_id, nid, job["_id"], target, code, message)
         logger.warning("regen.failed %s/%s %s - %s (previous output kept)", account_id,
                        nid, code, message[:200])
@@ -721,53 +664,40 @@ class Engine:
             except Exception:
                 logger.exception("regen: mirror of %s/%s failed", account_id, key)
 
-    # ------------------------------------------------------------------- sweep
+    # ------------------------------------------------------------------ report
 
-    def sweep(self, legacy_accounts: int = LEGACY_ACCOUNTS_PER_SWEEP) -> dict:
-        """The safety net: reconcile every account.
+    def stale_report(self) -> dict:
+        """How many nodes of every account are not current. Queues nothing.
 
-        Catches every change nothing announced - a deploy with a new prompt
-        version, an edited scoring config, a reloaded rulebook - and every crash
-        window between a commit and the reconcile after it. A few accounts per
-        pass also get their legacy (pre-engine) outputs queued, at the lowest
-        priority, so they are verified progressively rather than all at once.
+        What startup and the periodic check log, so a deploy that changed a
+        prompt says "37 accounts have stale outputs" instead of regenerating
+        them.
         """
-        summary = {"accounts": 0, "queued": 0, "legacy_accounts": []}
-        legacy_budget = legacy_accounts
+        summary = {"accounts": 0, "accounts_needing_run": 0, "by_status": {}}
         for account in self.db["accounts"].find({}, {"_id": 1}):
             account_id = str(account["_id"])
             summary["accounts"] += 1
             try:
-                plan = self.reconcile(account_id, jobs.trigger(SWEEP, "periodic"))
-                summary["queued"] += len(plan)
-                if legacy_budget > 0 and self._has_legacy(account_id) \
-                        and not jobs.live(self.db, account_id):
-                    plan = self.reconcile(account_id, jobs.trigger(SWEEP, "legacy"),
-                                          sweep_legacy=True)
-                    if plan:
-                        legacy_budget -= 1
-                        summary["legacy_accounts"].append(account_id)
-                        summary["queued"] += len(plan)
+                view = planner.account_view(self, account_id)
             except Exception:
-                logger.exception("regen: sweep failed for account %s", account_id)
+                logger.exception("regen: stale report failed for account %s", account_id)
+                continue
+            statuses = [n["status"] for n in view["nodes"].values()]
+            for st in statuses:
+                summary["by_status"][st] = summary["by_status"].get(st, 0) + 1
+            if any(st in planner.NEEDS_RUN for st in statuses):
+                summary["accounts_needing_run"] += 1
         return summary
 
-    def _has_legacy(self, account_id: str) -> bool:
-        return self.db[state.COLLECTION].count_documents(
-            {"account_id": account_id, "current.fingerprint": None,
-             "current": {"$ne": None}}) > 0
+    def sweep(self, *_a, **_kw) -> dict:
+        """Formerly: reconcile and enqueue every account. Now only the report."""
+        return self.stale_report()
 
 
-def _due(since, count, now) -> bool:
-    """Whether an automatic retry is due under RETRY_SCHEDULE."""
-    count = int(count or 1)
-    if count > len(RETRY_SCHEDULE):
-        return False
-    if since is None:
-        return True
-    if since.tzinfo is None:
-        since = since.replace(tzinfo=UTC)
-    return now - since >= timedelta(seconds=RETRY_SCHEDULE[count - 1])
+def _usage(ctx) -> dict:
+    return {"llm_calls": ctx.llm_calls, "llm_failures": ctx.llm_failures,
+            "api_calls": ctx.api_calls, "tokens": ctx.tokens,
+            "embedding_calls": ctx.embedding_calls, "embedded_texts": ctx.embedded_texts}
 
 
 _default_engine = None

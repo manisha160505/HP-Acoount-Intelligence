@@ -170,9 +170,15 @@ async def _update_index(account_id: str, index: str, full: bool = False,
         # Dropped BEFORE the rebuild, because there is no room for a second
         # workspace. This is the window where nothing is queryable.
         workspace = client.workspace_name(account_id, index)
+        # The extraction cache survives only when the same model would write
+        # it: an index with no recorded model predates the record, so its cache
+        # is not trusted.
+        keep_cache = bool(snapshot.get("retrieval_model")) \
+            and snapshot.get("retrieval_model") == settings.retrieval_model
         logger.warning("retrieval: dropping workspace %s for a full rebuild - "
-                       "nothing is queryable until it completes", workspace)
-        client.drop_workspace(workspace)
+                       "nothing is queryable until it completes (extraction cache %s)",
+                       workspace, "kept" if keep_cache else "dropped")
+        client.drop_workspace(workspace, keep_llm_cache=keep_cache)
         evidence.purge(account_id, index)
         targets = list(documents)
         removals = []

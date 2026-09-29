@@ -178,6 +178,15 @@ DATASET_REGISTRY = {
     # answer 10), and the split writes both into that one list, in filings
     # 1.csv's columns, with a PDF of each PredictLeads filing's text beside the
     # downloaded PDFs. The Executive Dashboard lists it; the PDF reader skips it.
+    # The filings index: one value per headline metric and period, chosen
+    # across all of an account's filing PDFs by scripts/filings_to_csv.py. The
+    # Key Metrics cards read it (services/dashboard/filings_financials.py).
+    "filings_financials": {
+        "display_name": "Filings Financials (index)",
+        "type": "single_file_csv",
+        "canonical_filename": "filings_financials.csv",
+        "allowed_extensions": [".csv"]
+    },
     "compliance_filings": {
         "display_name": "Compliance Filings",
         "type": "multi_file",

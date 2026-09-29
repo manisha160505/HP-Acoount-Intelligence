@@ -102,29 +102,31 @@ FEATURE_EXTRACTORS = {
 
 def _notify_regeneration(account_id: str, dataset_key: str, what: str,
                          current_user: dict) -> dict:
-    """Tell the regeneration engine an input changed, and report what it queued.
+    """Report which sections the change left stale. Runs and queues NOTHING.
 
-    Replaces running every dependent extractor inside the request. The engine
-    works out which producers the change actually affects - from what each one
-    reads, not from a hand-kept list - queues them in dependency order, and a
-    background worker regenerates them. The upload returns at once.
+    Uploading, replacing or deleting a file only stores it (29 Sep): an account
+    uploaded file by file used to run its sections once per file. The admin
+    submits the account when its files are in, and one run regenerates each
+    stale section once. `queued` stays in the response, always empty, for
+    callers that read it.
 
-    Never raises: the file is stored either way, and the sweep that runs every
-    few minutes would pick the change up even if queueing failed here.
+    Never raises: the file is stored either way.
     """
     try:
         from app.services.regen.engine import get_engine
-        plan = get_engine().notify_input_changed(
+        stale = get_engine().notify_input_changed(
             account_id, what, "user:%s" % (current_user or {}).get("id", "?"),
             datasets=[dataset_key])
     except Exception:
-        logger.exception("could not queue regeneration after %s", what)
-        return {"queued": [], "features": [], "error": "queueing failed; the "
-                "periodic sweep will pick the change up"}
-    from app.services.regen.graph import DEFAULT
-    nodes = [p["node_id"] for p in plan]
-    return {"queued": nodes,
-            "features": sorted({DEFAULT[n].feature for n in nodes if n in DEFAULT})}
+        logger.exception("could not work out what %s left stale", what)
+        return {"queued": [], "stale": [], "features": []}
+    nodes = [n["node_id"] for n in stale]
+    return {"queued": [], "stale": nodes,
+            "stale_sections": [{"node_id": n["node_id"], "label": n["label"],
+                                "status": n["status"], "categories": n["categories"]}
+                               for n in stale],
+            "features": sorted({n["feature"] for n in stale}),
+            "note": "Stored. Nothing runs until the account is submitted."}
 
 
 def _features_for_dataset(dataset_key: str) -> list[str]:
@@ -299,11 +301,10 @@ async def upload_account_data(
 
     payload = serialize_data_file(new_metadata)
     if defer_extraction:
-        # A bulk loader storing an account's files one by one asks for the
-        # regeneration to wait until the last file is in, then triggers it once.
-        logger.info("upload: %s stored; regeneration deferred to the caller",
-                    key_clean)
-        payload["regeneration"] = {"queued": [], "features": [], "deferred": True}
+        # Kept for the bulk loader, which sets it: every upload is deferred now,
+        # and this only skips working out what became stale.
+        payload["regeneration"] = {"queued": [], "stale": [], "features": [],
+                                   "deferred": True}
     else:
         payload["regeneration"] = _notify_regeneration(
             account_id, key_clean, "dataset %s uploaded" % key_clean, current_user)

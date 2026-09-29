@@ -194,8 +194,12 @@ def _vertex_post(url: str, body: dict):
     for wait in (*VERTEX_RETRY_WAITS, None):
         response = httpx.post(url, headers={"x-goog-api-key": settings.llm_api_key},
                               json=body, timeout=120)
-        if wait is None or not (response.status_code == 429
-                                or response.status_code >= 500):
+        if not (response.status_code == 429 or response.status_code >= 500):
+            break
+        if wait is None:
+            if response.status_code == 429:
+                from app.services.regen import context as run_context
+                run_context.note_quota_exhausted()
             break
         logger.info("retrieval: embeddings answered %d, retrying in %ds",
                     response.status_code, wait)
@@ -207,6 +211,8 @@ def _vertex_post(url: str, body: dict):
 async def _embedding_func(texts):
     import numpy as np
 
+    from app.services.regen import context as run_context
+    run_context.note_embedding(len(texts))
     if settings.llm_provider == "vertex":
         return np.array(await asyncio.to_thread(_vertex_embed, list(texts)))
 
@@ -580,9 +586,15 @@ def forget_query_handle(workspace: str):
         logger.info("retrieval: released the cached query handle for %s", workspace)
 
 
-def drop_workspace(workspace: str) -> dict:
+def drop_workspace(workspace: str, keep_llm_cache: bool = False) -> dict:
     """Erase one workspace: its own collections, its rows in the shared ones,
     and its NanoVectorDB files.
+
+    `keep_llm_cache` spares `<workspace>_llm_response_cache`: LightRAG's record
+    of every extraction and summary call, keyed by the prompt. A full rebuild
+    with the same extraction model then re-reads identical chunks from it at no
+    model cost - an embedding change re-embeds, it does not need the graph
+    extracted again. Retiring an index drops it with everything else.
 
     Both halves are required, and the second is the one that is easy to forget.
     A workspace's KV, graph and doc-status collections carry its name as a
@@ -615,7 +627,8 @@ def drop_workspace(workspace: str) -> dict:
 
     # The workspace's own collections.
     for name in [c for c in db.list_collection_names()
-                 if c == workspace or c.startswith(workspace + "_")]:
+                 if (c == workspace or c.startswith(workspace + "_"))
+                 and not (keep_llm_cache and c == workspace + "_llm_response_cache")]:
         try:
             for idx in db[name].list_search_indexes():
                 try:

@@ -19,7 +19,8 @@ logger = logging.getLogger(__name__)
 
 def _notify_regeneration(account_id: str, what: str, current_user: dict) -> None:
     """Instructions and guardrails reach the Opportunity Map's prompt, so an edit
-    makes it stale. Queued, never run here; never fails the save."""
+    makes it stale. Nothing is queued: the admin submits the account to rerun
+    it. Never fails the save."""
     try:
         from app.services.regen.engine import get_engine
         from app.services.regen.graph import DEFAULT

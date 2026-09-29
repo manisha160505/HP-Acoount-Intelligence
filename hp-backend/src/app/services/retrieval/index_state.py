@@ -125,6 +125,9 @@ def finish_build(account_id: str, index: str, documents: dict, mode: str) -> dic
     # What embedded these vectors. A later build under another embedding model
     # or dimension must start from empty (see ingest._update_index).
     state["embedding"] = settings.embedding_identity
+    # What extracted its graph. A full rebuild keeps LightRAG's extraction cache
+    # only when this is unchanged (ingest._update_index).
+    state["retrieval_model"] = settings.retrieval_model
     state["last_error"] = None
     state["last_built_at"] = _now()
     state["last_build_mode"] = mode
@@ -176,6 +179,9 @@ def record_incremental(account_id: str, index: str, documents: dict,
     state["last_built_at"] = _now()
     state["last_build_mode"] = INCREMENTAL
     state["embedding"] = settings.embedding_identity
+    # What extracted its graph. A full rebuild keeps LightRAG's extraction cache
+    # only when this is unchanged (ingest._update_index).
+    state["retrieval_model"] = settings.retrieval_model
     state["build_count"] = int(state.get("build_count") or 0) + 1
     state["last_applied"] = applied
     state["damaged_documents"] = list(damaged or [])

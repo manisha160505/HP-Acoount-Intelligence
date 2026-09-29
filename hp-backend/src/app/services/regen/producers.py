@@ -117,7 +117,9 @@ def _index(account_id: str, index: str, full: bool) -> dict:
     from app.services.retrieval import index_state, ingest
 
     try:
-        stats = asyncio.run(ingest.update_index(account_id, index, full=full))
+        from app.services.regen import context as run_context
+        stats = asyncio.run(ingest.update_index(account_id, index, full=full,
+                                                progress=run_context.progress))
     except ingest.BuildBlocked as exc:
         state = index_state.get(account_id, index)
         return {"quality": "blocked", "corpus": {}, "reason": str(exc),

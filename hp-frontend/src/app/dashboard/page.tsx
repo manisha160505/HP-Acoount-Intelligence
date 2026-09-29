@@ -1208,6 +1208,8 @@ export default function UserDashboardPage() {
                   // client asked for the relationship to be ignored, so the
                   // line is hidden rather than shown as missing.
                   const parentVal = summaryData?.parent_company || null;
+                  // Feature 1's header CEO, read from the newest filing naming one.
+                  const ceoVal: any = metricsData?.ceo || null;
 
                   return (
                     <div className="space-y-6">
@@ -1267,6 +1269,13 @@ export default function UserDashboardPage() {
                                 <div className="flex items-center space-x-1.5 text-slate-700">
                                   <Building2 className="w-4 h-4 text-hp-navy" />
                                   <span className="truncate max-w-md">{industryVal}</span>
+                                </div>
+                              )}
+
+                              {ceoVal?.name && (
+                                <div className="flex items-center space-x-1.5 text-slate-700" title={`${ceoVal.title} · ${ceoVal.filing_label || ceoVal.source}`}>
+                                  <User className="w-4 h-4 text-hp-navy" />
+                                  <span>CEO: <strong className="font-bold text-slate-900">{ceoVal.name}</strong></span>
                                 </div>
                               )}
 
@@ -1403,6 +1412,14 @@ export default function UserDashboardPage() {
                                   <p className="text-[10px] text-slate-500 mt-2">
                                     {m.filing_label}{m.page ? `, page ${m.page}` : ''}
                                   </p>
+                                  {/* The latest filing lacked this figure, or the
+                                      filing is another entity's (Feature 1: label it). */}
+                                  {m.fallback_note && (
+                                    <p className="text-[10px] text-amber-700 mt-1.5">{m.fallback_note}</p>
+                                  )}
+                                  {m.entity_note && (
+                                    <p className="text-[10px] text-amber-700 mt-1.5">{m.entity_note}</p>
+                                  )}
                                   {m.quote && (
                                     <p className="text-[10px] text-slate-500 mt-2 border-t border-slate-100 pt-2 break-words">
                                       <span className="font-bold text-slate-600">Row as printed: </span>{m.quote}

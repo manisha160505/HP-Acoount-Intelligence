@@ -182,7 +182,8 @@ NODES = (
          datasets=("firmographics", "company_hierarchy", "job_openings",
                    "technographics", "webstack",
                    "intent_score", "hp_category_intent", "extended_company",
-                   "google_news", "news_events", "compliance_filings"),
+                   "google_news", "news_events", "compliance_filings",
+                   "filings_financials"),
          upstream=("news", "opp_core"),
          config=("urgency",),
          # The company description is reorganised into bullets by one cached,
@@ -192,7 +193,9 @@ NODES = (
          # 2: exec_key_metrics lists the filings on record (the filings list
          # CSV uploaded with the PDFs under compliance_filings); Quick Stats
          # counts and the contacts read dropped (client feedback 1.e).
-         logic_version=2,
+         # 3: exec_key_metrics carries reported_metrics from the filings index
+         # (filings_financials.csv) when it is uploaded.
+         logic_version=3,
          run=f"{_P}:exec_core"),
     Node("evaluator_personas", "message_evaluator",
          widgets=("evaluator_persona_context",),

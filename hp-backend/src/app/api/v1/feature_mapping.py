@@ -24,8 +24,9 @@ FEATURE_MAPPINGS = {
         # `stakeholders_mapped_count`. The client dropped Quick Stats on 27 Sep
         # ("most figures are empty - let's drop this all together"), the count
         # went with it, and nothing this feature writes reads contacts now.
+        # filings_financials: the filings index behind the Key Metrics cards.
         "dependent_datasets": ["firmographics", "company_hierarchy", "job_openings",
-                               "compliance_filings"],
+                               "compliance_filings", "filings_financials"],
         "mapped_fields": [
             {
                 "field_key": "company_name",
