@@ -35,8 +35,8 @@ def _hash(result):
 
 
 def test_a_complete_build_reports_its_corpus_and_version(stub):
-    result = producers.index_strategy("acct", full=True)
-    assert stub["args"] == ("acct", "strategy", True)
+    result = producers.index_executive_dashboard("acct", full=True)
+    assert stub["args"] == ("acct", "executive_dashboard", True)
     assert result["quality"] == "complete"
     assert result["corpus"] == {"d1": "f1"} and result["index_version"] == 3
 
@@ -55,12 +55,12 @@ def test_unmet_preconditions_are_blocked_not_failed(stub):
 def test_a_concurrent_build_is_a_retryable_failure(stub):
     stub["raise"] = ingest.BuildBusy("already building")
     with pytest.raises(ingest.BuildBusy):
-        producers.index_strategy("acct")
+        producers.index_executive_dashboard("acct")
 
 
 def test_an_unchanged_corpus_reports_an_unchanged_output(stub):
-    first = _hash(producers.index_strategy("acct"))
+    first = _hash(producers.index_executive_dashboard("acct"))
     stub["stats"] = {"damaged": [], "skipped": True}
-    assert _hash(producers.index_strategy("acct")) == first
+    assert _hash(producers.index_executive_dashboard("acct")) == first
     stub["state"] = {"version": 4, "documents": {"d1": {"fingerprint": "f1"}}}
-    assert _hash(producers.index_strategy("acct")) != first   # a rebuild moves it
+    assert _hash(producers.index_executive_dashboard("acct")) != first   # a rebuild moves it

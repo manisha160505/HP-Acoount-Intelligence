@@ -22,13 +22,10 @@ clock inside it, so the caller validates only when a new bracket closes.
 
 ## Two things this file gets right that an earlier version did not
 
-**It runs without a database.** `_validated_prefix` resolves citation ids
-through `evidence.resolve`, which opens a Mongo connection. The first version
-let that call through to a real database, so the suite passed on a developer's
-machine and failed on CI with `localhost:27017: Connection refused` - which is
-how `main` went red. `ev.resolve` is stubbed here, which is also the only way
-to control WHICH ids resolve and therefore the only way to test the boundary at
-all.
+**It runs without a database.** Citations name a section of the account payload
+the chat was given, and are resolved against that payload - so a test builds
+the payload and needs nothing else. (Under retrieval they resolved through
+Mongo, and a suite that let that call through passed locally and failed on CI.)
 
 **It asserts that text IS released.** Every assertion in the first version was
 negative - `text == ""`, `"42.7" not in text` - and every one of them was
@@ -45,49 +42,28 @@ Run: python -m pytest tests/test_streaming_safety.py -v
 import os
 import sys
 
-import pytest
-
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from app.services.strategy import chat as sc
 
-ACCOUNT = "000000000000000000000000"
-PASSAGES = [
-    "Astra reported net revenue of IDR 323,392 billion for FY2025. "
-    "Mochamad Triawan is Department Head of Technology Development."
-]
-
-# The ids that resolve for this account, and the source line behind each. A
-# real `ev.resolve` reads these from Mongo scoped by account; stubbing it keeps
-# the suite hermetic AND makes "this id resolves, that one does not" a property
-# of the test rather than of whatever happens to be in a developer's database.
-EVIDENCE = {
-    "a_reported_financials#c1":
-        "Astra reported net revenue of IDR 323,392 billion for FY2025.",
-    "a_contact_mochamad#c1":
-        "Mochamad Triawan is Department Head of Technology Development.",
-}
+# The account as the chat sees it: two sections, each introduced by the header
+# a citation names. Only these two section keys resolve.
+PAYLOAD = "\n\n".join([
+    "===== exec_key_metrics (feature: executive_dashboard) =====",
+    '{"revenue":"Astra reported net revenue of IDR 323,392 billion for FY2025."}',
+    "===== stakeholder_contacts_grid (feature: stakeholder_map) =====",
+    '{"contacts":[{"name":"Mochamad Triawan",'
+    '"title":"Department Head of Technology Development"}]}',
+])
 
 
-@pytest.fixture(autouse=True)
-def resolver(monkeypatch):
-    """`evidence.resolve`, without a database.
+def _turn(persona=None):
+    return {"payload": PAYLOAD, "persona": persona, "banned": [],
+            "widget_keys": ["exec_key_metrics", "stakeholder_contacts_grid"]}
 
-    Autouse because every test in this file goes through `_validated_prefix`,
-    and one that forgot the fixture would reach for Mongo and fail on CI only -
-    the exact failure this fixture exists to end.
-    """
-    def fake_resolve(_account_id, _index, ids):
-        resolved, invalid = [], []
-        for eid in ids:
-            if eid in EVIDENCE:
-                resolved.append({"evidence_id": eid, "source_text": EVIDENCE[eid],
-                                 "dataset": "compliance_filings"})
-            else:
-                invalid.append(eid)
-        return resolved, invalid
 
-    monkeypatch.setattr(sc.ev, "resolve", fake_resolve)
+def _prefix(buffer):
+    return sc._validated_prefix(_turn(), buffer)
 
 
 class TestValidTextIsReleased:
@@ -99,23 +75,21 @@ class TestValidTextIsReleased:
     """
 
     def test_a_fully_cited_prefix_is_released(self):
-        text, ok = sc._validated_prefix(
-            ACCOUNT,
+        text, ok = _prefix(
             "FACTS: 1. Astra reported net revenue of IDR 323,392 billion "
-            "[a_reported_financials#c1].",
-            PASSAGES)
+            "[exec_key_metrics].")
         assert ok is True
         assert "323,392" in text
-        assert "a_reported_financials#c1" in text
+        assert "exec_key_metrics" in text
 
     def test_release_extends_as_further_citations_close(self):
         """A second bracket releases more than the first did."""
         one = ("FACTS: 1. Astra reported net revenue of IDR 323,392 billion "
-               "[a_reported_financials#c1].")
+               "[exec_key_metrics].")
         two = one + (" 2. Mochamad Triawan is Department Head of Technology "
-                     "Development [a_contact_mochamad#c1].")
-        first, ok_one = sc._validated_prefix(ACCOUNT, one, PASSAGES)
-        second, ok_two = sc._validated_prefix(ACCOUNT, two, PASSAGES)
+                     "Development [stakeholder_contacts_grid].")
+        first, ok_one = _prefix(one)
+        second, ok_two = _prefix(two)
         assert ok_one and ok_two
         assert len(second) > len(first)
         assert "Mochamad" in second and "Mochamad" not in first
@@ -125,8 +99,7 @@ class TestNothingIsReleasedEarly:
     """The tail of the buffer is withheld until its citation arrives."""
 
     def test_text_with_no_citation_yet_releases_nothing(self):
-        text, ok = sc._validated_prefix(
-            ACCOUNT, "FACTS: 1. Astra reported net revenue of IDR 323,392", PASSAGES)
+        text, ok = _prefix("FACTS: 1. Astra reported net revenue of IDR 323,392")
         assert text == ""
         assert ok is False
 
@@ -140,14 +113,25 @@ class TestNothingIsReleasedEarly:
         passes when nothing is released at all, which is what it used to do.
         """
         buffer = ("FACTS: 1. Astra reported IDR 323,392 billion "
-                  "[a_reported_financials#c1]. 2. Growth was 42.7%")
-        text, ok = sc._validated_prefix(ACCOUNT, buffer, PASSAGES)
+                  "[exec_key_metrics]. 2. Growth was 42.7%")
+        text, ok = _prefix(buffer)
         assert ok is True
         assert text, "the cited prefix should have been released"
         assert "42.7" not in text
 
     def test_an_empty_buffer_releases_nothing(self):
-        assert sc._validated_prefix(ACCOUNT, "", PASSAGES) == ("", False)
+        assert _prefix("") == ("", False)
+
+
+class TestRoleplayIsHeldToItsOwnValidator:
+    """A rehearsal streams too, and its prefix goes through the roleplay gate."""
+
+    def test_a_real_persons_name_is_not_released_in_character(self):
+        turn = dict(_turn(persona={"title": "COO"}), banned=["Mochamad Triawan"])
+        text, ok = sc._validated_prefix(
+            turn, "Talk to Mochamad Triawan about that [stakeholder_contacts_grid].")
+        assert ok is False
+        assert text == ""
 
 
 class TestReleaseIsAlwaysAPrefix:
@@ -155,8 +139,8 @@ class TestReleaseIsAlwaysAPrefix:
 
     def test_released_text_is_a_prefix_of_the_buffer(self):
         buffer = ("FACTS: 1. Mochamad Triawan is Department Head of Technology "
-                  "[a_contact_mochamad#c1]. 2. Still being written")
-        text, ok = sc._validated_prefix(ACCOUNT, buffer, PASSAGES)
+                  "[stakeholder_contacts_grid]. 2. Still being written")
+        text, ok = _prefix(buffer)
         assert ok is True
         assert text, "the cited prefix should have been released"
         # Markdown stripping can rewrite the released text, so the assertion is
@@ -169,16 +153,16 @@ class TestTheValidatorIsNotBypassed:
     """Streaming reuses `_validate`; it does not reimplement it."""
 
     def test_an_unresolvable_citation_is_not_released(self):
-        buffer = "FACTS: 1. Astra reported growth [a_ghost_document#c99]."
-        text, ok = sc._validated_prefix(ACCOUNT, buffer, PASSAGES)
+        buffer = "FACTS: 1. Astra reported growth [exec_ghost_section]."
+        text, ok = _prefix(buffer)
         assert ok is False
         assert text == ""
 
     def test_facts_asserted_with_no_citation_are_not_released(self):
         """Matches `_validate`'s uncited-facts rule, reached through a bracket
-        that resolves to nothing."""
+        that is not a section key at all."""
         buffer = "FACTS: 1. Mochamad Triawan is the Department Head [not_a_citation]."
-        text, ok = sc._validated_prefix(ACCOUNT, buffer, PASSAGES)
+        text, ok = _prefix(buffer)
         assert ok is False
         assert text == ""
 
@@ -189,7 +173,7 @@ class TestTheValidatorIsNotBypassed:
         whether the check bites.
         """
         buffer = ("FACTS: 1. Astra reported IDR 999,111 billion "
-                  "[a_reported_financials#c1].")
-        text, ok = sc._validated_prefix(ACCOUNT, buffer, PASSAGES)
+                  "[exec_key_metrics].")
+        text, ok = _prefix(buffer)
         assert ok is False
         assert text == ""

@@ -127,7 +127,8 @@ def test_mirror_rows_are_not_mistaken_for_rollback_writes(db):
 def test_a_built_index_is_adopted_and_a_failed_one_is_not(db):
     acct = _account(db)
     db["retrieval_index_state"].insert_one({
-        "account_id": acct, "index": "strategy", "status": "READY", "version": 4,
+        "account_id": acct, "index": "executive_dashboard", "status": "READY",
+        "version": 4,
         "documents": {"d1": {"fingerprint": "f1"}},
         "last_built_at": datetime.now(UTC)})
     db["retrieval_index_state"].insert_one({
@@ -135,7 +136,7 @@ def test_a_built_index_is_adopted_and_a_failed_one_is_not(db):
     report = migrate.run(db, dry_run=False, file_path_for=lambda _p: None)
     assert report["indexes_adopted"] == 1
     states = state.load_account(db, acct)
-    assert states["idx_strategy"]["current"]["index"]["index_version"] == 4
+    assert states["idx_executive_dashboard"]["current"]["index"]["index_version"] == 4
     assert "idx_content_messaging" not in states
 
 
