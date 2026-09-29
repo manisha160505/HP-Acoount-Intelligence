@@ -406,3 +406,101 @@ def test_a_cited_claim_without_a_facts_header_still_passes():
         ["stakeholder_contacts_grid"])
     assert ok is True, reason
     assert cited == ["stakeholder_contacts_grid"]
+
+
+# ---------------------------------------------------------------------------
+# One citation used to validate a whole answer
+#
+# The gate below `_validate`'s citation check was `if not resolved and
+# _asserts_facts(answer)`: a single resolvable tag anywhere in the reply, or a
+# single refusal phrase anywhere in it, switched the uncited-facts check off for
+# everything else. Both were confirmed against the branch by running `_validate`
+# on the answers below - all three published.
+#
+# The unit is now the sentence, which is the unit the prompt states the rule in
+# ("EVERY sentence that states a fact about the account ... must end with the
+# section it came from") and the unit `_validate_roleplay` has always used.
+# ---------------------------------------------------------------------------
+
+STAKEHOLDER_PAYLOAD = (
+    '===== stakeholder_contacts_grid (feature: stakeholder_map) =====\n'
+    '{"name":"Irvan Nr","title":"Chief Operating Officer"}')
+STAKEHOLDER_KEYS = ["stakeholder_contacts_grid"]
+
+
+def _advisor(answer):
+    from app.services.strategy.chat import _validate
+
+    return _validate(answer, STAKEHOLDER_PAYLOAD, STAKEHOLDER_KEYS)
+
+
+def test_one_cited_sentence_does_not_validate_the_ones_around_it():
+    """The hole, in the shape it actually appears in.
+
+    None of the three invented sentences carries a digit, so the figure check
+    never sees them. Before this, the answer published and a seller read
+    "locked into a three-year agreement" as something the account data said.
+    """
+    ok, reason, _, _ = _advisor(
+        "ANSWER:\n"
+        "Irvan Nr is Chief Operating Officer [stakeholder_contacts_grid].\n"
+        "FACTS:\n"
+        "1. He owns the endpoint refresh budget.\n"
+        "2. The team evaluated Lenovo last year.\n"
+        "3. They are locked into a three-year agreement.")
+    assert ok is False
+    assert "without citing" in reason
+    assert "3 thing" in reason
+
+
+def test_a_refusal_phrase_does_not_excuse_the_rest_of_the_answer():
+    """A refusal about one thing is not a licence to invent another."""
+    ok, reason, _, _ = _advisor(
+        "ANSWER:\n"
+        "The platform does not hold a mobile number for him.\n"
+        "FACTS:\n"
+        "1. Irvan Nr is the Chief Operating Officer and owns the refresh.")
+    assert ok is False
+    assert "without citing" in reason
+
+
+def test_a_refusal_on_its_own_still_needs_no_citation():
+    """Per-sentence must not make the one legitimate uncited answer fail."""
+    ok, reason, cited, _ = _advisor(
+        "ANSWER:\n"
+        "The platform does not hold a personal mobile number for the CEO.")
+    assert ok is True, reason
+    assert cited == []
+
+
+def test_recommended_next_steps_need_no_citation():
+    """A next step is the seller's action, not a claim about the account.
+
+    Requiring a tag on it would reject every correctly written answer - the
+    prompt asks for tags under ANSWER: and FACTS: only.
+    """
+    ok, reason, cited, _ = _advisor(
+        "ANSWER:\n"
+        "Irvan Nr is Chief Operating Officer [stakeholder_contacts_grid].\n"
+        "FACTS:\n"
+        "1. Irvan Nr is Chief Operating Officer [stakeholder_contacts_grid].\n"
+        "RECOMMENDED NEXT STEPS:\n"
+        "1. Open with the refresh cycle.\n"
+        "2. Bring a workstation demo to the first meeting.")
+    assert ok is True, reason
+    assert cited == ["stakeholder_contacts_grid"]
+
+
+def test_headers_and_list_markers_are_not_treated_as_claims():
+    """"FACTS:" and "1." assert nothing and must not be asked to cite."""
+    from app.services.strategy.chat import _claim_sentences
+
+    assert _claim_sentences("ANSWER:\nFACTS:\n1.\n2)\n- \n") == []
+
+
+def test_a_glue_sentence_asserts_nothing():
+    from app.services.strategy.chat import _asserts_facts
+
+    assert _asserts_facts("Irvan Nr owns the refresh") is True
+    assert _asserts_facts("Understood.") is False
+    assert _asserts_facts("The platform does not hold that.") is False

@@ -51,6 +51,25 @@ LLM_MAX_ASYNC = max(1, int(os.getenv("RAG_LLM_MAX_ASYNC", "2")))
 # - up to twice the extraction calls for a small gain in recall. 1 is
 # LightRAG's default; RAG_EXTRACT_GLEANING=0 skips the second pass.
 EXTRACT_GLEANING = max(0, int(os.getenv("RAG_EXTRACT_GLEANING", "1")))
+# Whether an insert extracts entities and relationships at all.
+#
+# Off, because the only enabled index does not read the graph it was paying
+# for. The Executive Dashboard answers in `naive` mode and `priorities.py`
+# consumes `RetrievalResult.context` - the chunk text - and nothing else; the
+# entity and relationship text `mix` assembles never reached it. Extraction is
+# the dominant cost of a build (one model call per chunk, doubled by gleaning)
+# and the main thing a wave of accounts spends its quota on.
+#
+# RAG_BUILD_GRAPH=true puts it back, for an index whose `default_mode` is a
+# graph mode. Both halves have to move together - see
+# `test_retrieval_graph_off.py`, which fails if one does and the other does not.
+BUILD_GRAPH = (os.getenv("RAG_BUILD_GRAPH", "false").strip().lower()
+               in ("1", "true", "yes", "on"))
+# LightRAG's `PROCESS_OPTION_SKIP_KG`, written out rather than imported from
+# `lightrag.constants`: this module is imported at startup, and a library that
+# has renamed the constant should fail a test rather than fail the import.
+# `test_retrieval_graph_off.py` checks it against the installed package.
+SKIP_GRAPH_OPTION = "!"
 EMBEDDING_MAX_ASYNC = 8
 # Vertex express mode rate-limits far lower than Azure did: eight concurrent
 # batches drew 429s on the first production build (28 Sep).
@@ -364,6 +383,47 @@ async def build_rag(account_id: str, index: str, for_query: bool = False):
     quieten_noisy_loggers()
     logger.info("retrieval: opened workspace %s", workspace)
     return rag
+
+
+async def insert_document(rag, text: str, doc_id: str, file_path: str) -> None:
+    """Index one document, with or without building the graph from it.
+
+    This is `rag.ainsert(text, ids=[doc_id], file_paths=[file_path])` with one
+    thing added, and it is here rather than in `ingest.py` for the reason the
+    module docstring gives: one place knows the library.
+
+    **Why not `ainsert`.** The switch that skips entity extraction is a
+    per-DOCUMENT option, not a constructor flag - 1.5.7 has no
+    `skip_kg`/`enable_graph` field on `LightRAG` at all. It is the character
+    `"!"` in `process_options` (`lightrag/constants.py`,
+    `PROCESS_OPTION_SKIP_KG`), read in `pipeline.process_single_document`:
+
+        # Stage 2: entity/relation extraction (after text_chunks are saved).
+        # When the user opted out via process_options '!', skip extraction
+        # entirely; chunks remain in the vector store so naive / mix
+        # retrieval still works.
+
+    `ainsert` does not take `process_options` and its own docstring says to
+    call the two pipeline methods directly when you need it. It is a wrapper
+    around exactly those two, so this reproduces it rather than reimplementing
+    anything.
+
+    **Chunking must not change.** `ainsert` resolves a fixed-token (F) chunk
+    snapshot before enqueueing, and so does this. A different chunker would
+    re-chunk every document and invalidate nothing visibly - the stored
+    fingerprints hash the corpus text, not the chunks - so it would simply
+    change what is retrieved, quietly.
+    """
+    from lightrag.parser.routing import resolve_chunk_options
+
+    await rag.apipeline_enqueue_documents(
+        text,
+        [doc_id],
+        [file_path],
+        chunk_options=resolve_chunk_options(rag.addon_params),
+        process_options=None if BUILD_GRAPH else SKIP_GRAPH_OPTION,
+    )
+    await rag.apipeline_process_enqueue_documents()
 
 
 VECTOR_BACKENDS = ("atlas", "nano")

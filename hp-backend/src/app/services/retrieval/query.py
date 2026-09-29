@@ -229,6 +229,12 @@ async def _retrieve(account_id: str, index: str, question: str, mode: str | None
         param = QueryParam(
             mode=mode,
             top_k=top_k,
+            # `top_k` alone does NOT size a chunk search. LightRAG resolves it
+            # as `chunk_top_k or top_k`, and `chunk_top_k` is not None - it
+            # defaults to 20. So a caller asking for 60 got 20 chunks and no
+            # indication of it, which in naive mode is the whole retrieval.
+            # One number, meaning what the caller wrote.
+            chunk_top_k=top_k,
             only_need_context=only_context,
             include_references=True,
             # Defaults to True, but no rerank model is configured - LightRAG

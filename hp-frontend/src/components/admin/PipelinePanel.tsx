@@ -84,7 +84,8 @@ interface PipelineResponse {
   groups: Record<Status, Section[]>;
   counts: Record<Status, number>;
   needs_run: number;
-  queue: { paused: boolean; reason?: string | null; paused_at?: string | null };
+  queue: { paused: boolean; reason?: string | null; paused_at?: string | null;
+           resume_after?: string | null };
   runs: RunRow[];
 }
 
@@ -357,7 +358,14 @@ export default function PipelinePanel({ accountId }: { accountId: string }) {
             <div>
               <div className="font-bold">Queue paused</div>
               <div>{data.queue.reason || 'Paused by an admin'} · {fmt(data.queue.paused_at)}</div>
-              <div className="mt-0.5">Nothing runs for any account until it is resumed.</div>
+              {/* A quota pause lifts itself once its window passes; an admin's
+                  waits for an admin. Saying which is the difference between
+                  waiting and going to look for someone. */}
+              <div className="mt-0.5">
+                {data.queue.resume_after
+                  ? <>Nothing runs for any account until {fmt(data.queue.resume_after)}, when it resumes by itself. Resume now to start sooner.</>
+                  : <>Nothing runs for any account until it is resumed.</>}
+              </div>
             </div>
           </div>
           <button type="button" onClick={resume} disabled={busy === 'resume'}

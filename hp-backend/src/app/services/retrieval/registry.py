@@ -90,7 +90,16 @@ INDEX_REGISTRY = {
                     "technographic_map", "intent_topics_table",
                     "intent_hiring_demand"],
         "required_widgets": ["exec_summary_card"],
-        "default_mode": "mix",
+        # Chunks only - no graph walk, and none to walk. `mix` retrieved
+        # entities and relationships that this feature never saw: `priorities.py`
+        # reads `RetrievalResult.context`, which is the chunk text, and ignores
+        # both `answer` and `graph_context`. So the graph was extracted at build
+        # time and assembled at query time for nothing.
+        #
+        # Paired with `client.BUILD_GRAPH` being off: an insert no longer
+        # extracts entities, so a graph mode would have nothing to read on a
+        # freshly built index. Move one and you must move the other.
+        "default_mode": "naive",
         # `exec_strategic_priorities` is what this index produces, so it is
         # absent from `widgets` above: a generated widget feeding its own corpus
         # would change the corpus on every build and trigger the next one.

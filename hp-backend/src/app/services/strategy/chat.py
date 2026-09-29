@@ -390,42 +390,89 @@ _SECTION_REF_RE = _SectionFinder()
 # above is the whole mechanism.
 
 
-# A refusal is the one answer that legitimately cites nothing: it asserts
-# nothing about the account, so there is nothing to ground.
+# A refusal is the one thing a sentence can say that legitimately cites
+# nothing: it asserts nothing about the account, so there is nothing to ground.
 _REFUSAL_PHRASES = ("does not hold", "not hold", "no information",
                     "not available", "does not have", "does not include",
                     "is not in the account data", "no data")
 
 
-def _asserts_facts(answer: str) -> bool:
-    """Whether this answer claims something about the account.
+def _asserts_facts(sentence: str) -> bool:
+    """Whether this SENTENCE claims something about the account.
 
-    Everything except a refusal does. That is deliberately the wide reading.
+    Everything except a refusal and a piece of filler does. That is deliberately
+    the wide reading.
 
-    This used to return True only when the literal word "fact" appeared in the
-    first 400 characters - effectively trusting the model to have written a
-    "FACTS:" header before the citation requirement applied to it. An answer
-    that opened straight into prose ("PT Astra International Tbk's revenue is
-    in the range...") asserted the account's figures while this returned False,
-    and the uncited-facts check below never ran on it. The figure gate still
-    bit, but an uncited NAME or TITLE - the thing this feature must never
-    invent - had nothing standing in its way.
+    Two earlier versions of this were both too narrow, in different ways.
 
-    The prompt now requires the labels, but a gate that a model can talk past by
-    omitting a header is not a gate. So the label is no longer what decides it.
+    It first returned True only when the literal word "fact" appeared in the
+    first 400 characters - trusting the model to have written a "FACTS:" header
+    before the citation requirement applied to it. An answer that opened
+    straight into prose ("PT Astra International Tbk's revenue is in the
+    range...") asserted the account's figures while this returned False. A gate
+    a model can disable by omitting a header is not a gate, so the label stopped
+    deciding it.
 
-    The cost of the wide reading is that an answer which is purely advice, with
-    no account facts at all, must still cite what the advice rests on. The
-    prompt already asks for exactly that, and erring this way rejects an answer
-    that was fine rather than publishing one that was not.
+    It then read the WHOLE answer: one refusal phrase anywhere - "the platform
+    does not hold a mobile number" as an aside - switched the citation
+    requirement off for every other sentence in the reply, including a FACTS
+    list of invented names below it. The unit is now the sentence, which is also
+    the unit the prompt states the rule in and the unit `_validate_roleplay`
+    has always used.
+
+    (`_GLUE_RE` and `_content_tokens` live with the dialogue validator below.
+    Both units of validation share them; they are defined once, there.)
     """
-    # A FACTS section anywhere is an assertion, whatever else the answer says:
-    # the answer leads with ANSWER:, and a refusal phrase in it must not excuse
-    # a FACTS list further down.
-    if re.search(r"^\s*facts\s*:", str(answer or ""), re.I | re.M):
-        return True
-    body = _text(answer).lower()
-    return not any(phrase in body for phrase in _REFUSAL_PHRASES)
+    text = _text(sentence)
+    if not text or _GLUE_RE.match(text):
+        return False
+    if not _content_tokens(_CITATION_RE.sub("", text)):
+        # Punctuation, a list marker, a bare label. Says nothing to source.
+        return False
+    lowered = text.lower()
+    return not any(phrase in lowered for phrase in _REFUSAL_PHRASES)
+
+
+# Where an advisor answer stops asserting and starts advising. A next step is
+# the seller's action, not a claim about the account - "Open with the refresh
+# cycle" cites nothing because it asserts nothing - and the prompt asks for a
+# tag only under ANSWER: and FACTS:. Figures are still checked over the whole
+# answer, so an invented number in a next step is still caught.
+_ADVICE_HEADER_RE = re.compile(
+    r"(?:recommended|suggested)?\s*next\s+steps\s*:|recommendations?\s*:", re.I)
+
+# A header line the format asks for, whole ("FACTS:") or opening a line
+# ("FACTS: 1. ..."), plus the list markers the numbered sections use.
+_HEADER_LINE_RE = re.compile(r"^[A-Z][A-Z \t/&-]{1,40}:\s*$")
+_LABEL_PREFIX_RE = re.compile(
+    r"^\s*(?:answer|facts?|context|evidence|so what(?:\s+for\s+hp)?)\s*:\s*",
+    re.I)
+_LIST_MARKER_RE = re.compile(r"^\s*(?:[-*•]|\(?\d{1,2}[.)])\s*")
+
+
+def _claim_sentences(body: str) -> list:
+    """Every sentence of an advisor answer that could be asserting something.
+
+    Headers, list markers and the RECOMMENDED NEXT STEPS block are dropped here
+    rather than argued about in the validator: none of them is a claim about the
+    account, and leaving them in would reject a correctly written answer for
+    failing to cite the word "FACTS".
+    """
+    text = _text_block(body)
+    advice = _ADVICE_HEADER_RE.search(text)
+    region = text[:advice.start()] if advice else text
+
+    out = []
+    for raw_line in region.split("\n"):
+        line = raw_line.strip()
+        if not line or _HEADER_LINE_RE.match(line):
+            continue
+        line = _LABEL_PREFIX_RE.sub("", line)
+        for chunk in _DIALOGUE_SENTENCE_RE.split(line):
+            sentence = _LIST_MARKER_RE.sub("", chunk).strip()
+            if sentence:
+                out.append(sentence)
+    return out
 
 
 # --- validating dialogue ----------------------------------------------------
@@ -655,9 +702,23 @@ def _validate(answer: str, payload: str, widget_keys: list) -> tuple:
     # people with not a single tag. ABX is explicit that "every factual answer
     # sentence must map to retrieved evidence", so an uncited factual answer is
     # sent back rather than published.
-    if not resolved and _asserts_facts(answer):
+    #
+    # Checked per SENTENCE, which is the unit the rule is written in - "EVERY
+    # sentence that states a fact about the account ... must end with the
+    # section it came from". It used to be checked per answer: ONE resolvable
+    # citation anywhere validated the whole reply, so a model could tag one
+    # sentence and invent three around it. None of the three carries a digit, so
+    # the figure check below never saw them, and a seller read them as evidence.
+    # `_validate_roleplay` was written with this loop because dialogue made the
+    # hole obvious; advisor answers had exactly the same hole.
+    uncited = [s for s in _claim_sentences(answer)
+               if _asserts_facts(s)
+               and not any(key in valid for key in _section_refs(s))]
+    if uncited:
         return (False,
-                "it states facts about the account without citing any evidence",
+                "it states %d thing(s) about the account without citing any "
+                "evidence: %s"
+                % (len(uncited), " / ".join(s[:70] for s in uncited[:2])),
                 [], "")
 
     corpus = grounding.corpus_from_texts([payload])
@@ -858,6 +919,22 @@ def _answer_once_stream(company: str, question: str, context: str, messages: lis
         _answer_turns(question, messages, correction), timer=timer)
 
 
+def _last_citation_end(buffer: str) -> int:
+    """Where the last closed CITATION ends in the buffer, or -1 if there is none.
+
+    The release point for streaming, and it is `_CITATION_RE` rather than the
+    last `]` for a reason. Any closing bracket used to extend the released
+    prefix, and the model writes brackets that are not citations - "[see
+    below]", "[1]", "[TBD]". A claim followed by one of those was published as
+    though it had been sourced, which is the opposite of what the rule exists
+    for. A bracket that holds no section key now moves nothing.
+    """
+    end = -1
+    for match in _CITATION_RE.finditer(buffer or ""):
+        end = match.end()
+    return end
+
+
 def _validated_prefix(turn: dict, buffer: str) -> tuple:
     """(text safe to publish, whether it validated). Never a partial sentence.
 
@@ -875,10 +952,10 @@ def _validated_prefix(turn: dict, buffer: str) -> tuple:
     The prefix goes through the same validator the final answer does. Nothing
     is relaxed for streaming - it is the identical function, run earlier.
     """
-    end = buffer.rfind("]")
+    end = _last_citation_end(buffer)
     if end == -1:
         return "", False
-    ok, _reason, _cited, cleaned = _check(turn, buffer[:end + 1])
+    ok, _reason, _cited, cleaned = _check(turn, buffer[:end])
     return (cleaned, True) if ok else ("", False)
 
 
@@ -935,7 +1012,7 @@ def answer_stream(account_id: str, messages: list, mode: str | None = None,
                         turn["company"], turn["question"], turn["payload"],
                         messages, correction, turn["persona"], timer):
                     buffer += chunk
-                    end = buffer.rfind("]")
+                    end = _last_citation_end(buffer)
                     if end == last_end:
                         continue
                     last_end = end

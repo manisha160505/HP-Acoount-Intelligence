@@ -177,3 +177,46 @@ class TestTheValidatorIsNotBypassed:
         text, ok = _prefix(buffer)
         assert ok is False
         assert text == ""
+
+
+class TestOnlyACitationMovesTheReleasePoint:
+    """The release point is the last CITATION, not the last `]`.
+
+    It used to be `buffer.rfind("]")`. The model writes brackets that are not
+    citations - "[see below]", "[1]", "[TBD]" - and each one extended the text
+    handed to the validator. The claim in front of it was then published as
+    though something had sourced it, which is the exact opposite of what the
+    release rule exists for.
+
+    `_validate` rejects those prefixes today, so nothing unsourced was reaching
+    the seller - but only because the whole-answer gate happened to catch them.
+    Anchoring the cut to `_CITATION_RE` means a non-citation bracket moves
+    nothing in the first place, and the two mechanisms are independent.
+    """
+
+    def test_a_bracket_that_is_not_a_citation_releases_nothing(self):
+        text, ok = _prefix("Astra is refreshing its estate [see below]")
+        assert ok is False
+        assert text == ""
+
+    def test_a_numbered_footnote_does_not_release_the_claim_before_it(self):
+        text, ok = _prefix("Astra reported IDR 999,111 billion [1]")
+        assert ok is False
+        assert text == ""
+
+    def test_release_stops_at_the_last_real_citation(self):
+        """A footnote after a citation must not drag the tail into the prefix."""
+        buffer = ("FACTS: 1. Astra reported net revenue of IDR 323,392 billion "
+                  "[exec_key_metrics]. 2. Growth was 42.7% [1]")
+        text, ok = _prefix(buffer)
+        assert ok is True
+        assert "323,392" in text
+        assert "42.7" not in text
+
+    def test_the_end_of_the_release_point_is_the_bracket_itself(self):
+        assert sc._last_citation_end("") == -1
+        assert sc._last_citation_end("no brackets here") == -1
+        assert sc._last_citation_end("[see below]") == -1
+        buffer = "a [exec_key_metrics] b [stakeholder_contacts_grid] c"
+        assert buffer[:sc._last_citation_end(buffer)].endswith(
+            "[stakeholder_contacts_grid]")
