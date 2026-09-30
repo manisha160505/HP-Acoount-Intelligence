@@ -17,9 +17,11 @@ from app.services.hp import intent_topic_map as tm
 from app.services.strategy import chat
 
 
-def _topic(name, score, category, included=True):
+def _topic(name, score, category, included=True, theme=tm.THEME_DEVICES):
+    """A scored Bombora topic. `theme` is what groups it into a card now; the
+    HP category is kept for the tests that still assert on the category view."""
     return {"topic_name": name, "composite_score": score, "hp_category": category,
-            "included": included}
+            "theme": theme, "included": included}
 
 
 def _cat(name, score, stage="Awareness"):
@@ -34,26 +36,31 @@ class TestTheBusinessUnitSummary:
 
     PC, WS = tm.CAT_PC, tm.CAT_WORKSTATION
 
-    def test_all_five_units_are_listed(self):
+    def test_all_five_units_are_listed_without_bombora(self):
+        """The PredictLeads path is unchanged: no Bombora, so HP's own five."""
         out = ids._bu_summary([], [])
         assert len(out["units"]) == 5
         assert {u["category"] for u in out["units"]} == {c["category"] for c in tm.HP_CATEGORIES}
 
-    def test_bombora_leads_where_the_account_has_topics(self):
+    def test_bombora_leads_and_groups_by_theme(self):
+        """The units on a Bombora account are the account's own research
+        themes (Sahaj, 30 Sep). The topics below all map to Devices &
+        Endpoints, so that is the card they make - one card, three topics,
+        rather than three of HP's five units."""
         topics = [_topic("Desktop: End User Digital", 73, self.PC),
                   _topic("Personal Computer: 2-In-1 Pcs", 72, self.PC),
                   _topic("Hpc Investment", 89, self.WS)]
         out = ids._bu_summary(topics, [_cat(self.PC, 5), _cat(self.WS, 38)])
         assert out["lead_source"] == "Bombora"
-        first = out["units"][0]
-        assert first["category"] == self.WS and first["bombora_max"] == 89
-        pc = next(u for u in out["units"] if u["category"] == self.PC)
-        # The PC 5/100 case: the Bombora research is shown beside the file's
-        # score, neither replacing the other.
-        assert pc["bombora_topic_count"] == 2 and pc["bombora_max"] == 73
-        assert pc["category_file_score"] == 5
-        assert pc["bombora_top_topics"][0] == {"topic": "Desktop: End User Digital",
-                                               "score": 73}
+        assert out["unit_kind"] == "theme"
+        assert {u["category"] for u in out["units"]} <= set(tm.THEMES)
+        strongest = out["units"][0]
+        assert strongest["bombora_max"] == 89
+        assert strongest["bombora_top_topics"][0] == {"topic": "Hpc Investment",
+                                                      "score": 89}
+        # A theme is not an HP line, so it carries no play and no file score.
+        assert all(u["hp_play"] is None for u in out["units"])
+        assert all(u["category_file_score"] is None for u in out["units"])
 
     def test_the_category_file_leads_without_bombora(self):
         out = ids._bu_summary([], [_cat(self.PC, 5), _cat(self.WS, 38)])
@@ -61,9 +68,12 @@ class TestTheBusinessUnitSummary:
         assert out["units"][0]["category"] == self.WS
 
     def test_excluded_topics_do_not_count(self):
+        """An excluded topic is not research, so it makes no theme and does not
+        turn the account into a Bombora one."""
         out = ids._bu_summary([_topic("noise", 99, self.PC, included=False)], [])
-        pc = next(u for u in out["units"] if u["category"] == self.PC)
-        assert pc["bombora_topic_count"] == 0 and out["lead_source"] == "PredictLeads"
+        assert out["lead_source"] == "PredictLeads"
+        assert out["unit_kind"] == "hp_category"
+        assert all(u["bombora_topic_count"] == 0 for u in out["units"])
 
 
 class TestContentStudioFormatsAndTopics:
@@ -213,7 +223,7 @@ class TestTheBusinessUnitReads:
         number inside the prose is either a repetition or an invention."""
         monkeypatch.setattr(ids, "generate_gpt4o_json_completion", lambda *_a, **_k: {
             "overview": "The research leans towards print and desktop conversations here.",
-            "units": [{"category": ids.tm.CAT_PC,
+            "themes": [{"theme": ids.tm.CAT_PC,
                        "read": "Four topics point to a desktop refresh conversation "
                                "worth opening on with the workplace team."}]})
         out = ids._bu_reads("A Co", [{"category": ids.tm.CAT_PC, "hp_play": "HP Elite",
@@ -228,7 +238,7 @@ class TestTheBusinessUnitReads:
                 "desktop apps may indicate an opening to discuss how the fleet "
                 "supports modern work.")
         monkeypatch.setattr(ids, "generate_gpt4o_json_completion", lambda *_a, **_k: {
-            "overview": "", "units": [{"category": ids.tm.CAT_PC, "read": text}]})
+            "overview": "", "themes": [{"theme": ids.tm.CAT_PC, "read": text}]})
         out = ids._bu_reads("A Co", [{"category": ids.tm.CAT_PC,
                                       "hp_play": "HP Elite & Pro PCs",
                                       "bombora_top_topics": [
@@ -238,7 +248,7 @@ class TestTheBusinessUnitReads:
 
     def test_a_percentage_is_still_a_figure(self, monkeypatch):
         monkeypatch.setattr(ids, "generate_gpt4o_json_completion", lambda *_a, **_k: {
-            "overview": "", "units": [{"category": ids.tm.CAT_PC,
+            "overview": "", "themes": [{"theme": ids.tm.CAT_PC,
                                        "read": "Interest is up 20% this quarter, which "
                                                "suggests a fleet conversation is worth "
                                                "opening with the workplace team."}]})
@@ -252,9 +262,9 @@ class TestTheBusinessUnitReads:
         text = ("For 3D, no researched topic maps to this unit, so the opening "
                 "conversation would have to start from somewhere else entirely.")
         monkeypatch.setattr(ids, "generate_gpt4o_json_completion", lambda *_a, **_k: {
-            "overview": "", "units": [{"category": ids.tm.CAT_3D, "read": text}]})
+            "overview": "", "themes": [{"theme": ids.tm.CAT_3D, "read": text}]})
         out = ids._bu_reads("A Co", [{"category": ids.tm.CAT_3D,
-                                      "hp_play": "HP Multi Jet Fusion (3D)",
+                                      "hp_play": None,
                                       "bombora_top_topics": [{"topic": "2-in-1 pcs", "score": 72}]}])
         assert out["reads"][ids.tm.CAT_3D] == text
 
@@ -262,14 +272,14 @@ class TestTheBusinessUnitReads:
         text = ("Research on two-in-one desktops suggests a fleet conversation "
                 "could be worth opening on with the workplace team soon.")
         monkeypatch.setattr(ids, "generate_gpt4o_json_completion", lambda *_a, **_k: {
-            "overview": "", "units": [{"category": ids.tm.CAT_PC, "read": text}]})
+            "overview": "", "themes": [{"theme": ids.tm.CAT_PC, "read": text}]})
         out = ids._bu_reads("A Co", [{"category": ids.tm.CAT_PC, "hp_play": "HP Elite",
                                       "bombora_top_topics": [{"topic": "2-in-1 pcs", "score": 72}]}])
         assert out["reads"][ids.tm.CAT_PC] == text
 
     def test_a_read_outside_the_word_band_is_dropped(self, monkeypatch):
         monkeypatch.setattr(ids, "generate_gpt4o_json_completion", lambda *_a, **_k: {
-            "overview": "", "units": [{"category": ids.tm.CAT_PC, "read": "Worth a look."}]})
+            "overview": "", "themes": [{"theme": ids.tm.CAT_PC, "read": "Worth a look."}]})
         out = ids._bu_reads("A Co", [{"category": ids.tm.CAT_PC, "hp_play": "HP Elite",
                                       "bombora_top_topics": [{"topic": "2-in-1 pcs", "score": 72}]}])
         assert out["reads"] == {}
@@ -289,3 +299,109 @@ class TestTheBusinessUnitReads:
         monkeypatch.setattr(ids, "generate_gpt4o_json_completion", boom)
         assert ids._bu_reads("A Co", [{"category": ids.tm.CAT_PC, "hp_play": "HP Elite",
                                        "bombora_top_topics": [{"topic": "x", "score": 1}]}]) == {}
+
+
+# ---------------------------------------------------------------------------
+# Intent & Demand: the account's own themes, not HP's five units
+#
+# Sahaj, 30 Sep. Three changes, all on a Bombora account:
+#   * the cards and the chart group by the RESEARCH THEME the dictionary
+#     assigns, not by HP business unit - Advantest researches across eight
+#     themes and folding them into five discarded most of the export;
+#   * "Other / Low Relevance" is not one of them: it is the residue, and it has
+#     its own section;
+#   * the HP Category Intent file's scores leave "So what for HP" entirely -
+#     that is the PredictLeads answer to the same question, and an account with
+#     Bombora leads with Bombora.
+# ---------------------------------------------------------------------------
+
+# `ids` and `tm` are imported at the top of this file; `itm` is the same module
+# as `tm`, named here because these tests read as being about the dictionary.
+itm = tm
+
+
+def _mapped_topic(name, score):
+    """A topic carrying whatever theme the dictionary actually assigns it.
+
+    Named apart from the `_topic` helper at the top of this file, which takes
+    an HP category: these tests are about the theme the dictionary chooses, so
+    nothing here may name one.
+    """
+    return {"topic_name": name, "composite_score": score, "included": True,
+            "hiring_linked": False, **itm.map_topic(name)}
+
+
+BOMBORA_TOPICS = [
+    _mapped_topic("security: endpoint protection", 97),
+    _mapped_topic("cloud: kubernetes", 93),
+    _mapped_topic("collaboration: video conferencing", 90),
+    _mapped_topic("print: managed print services", 84),
+    _mapped_topic("general: unmapped oddity", 70),
+]
+FILE_CATEGORIES = [{"category": c["category"],
+                    "primary": {"score": 35, "stage": "Awareness",
+                                "has_signal": False}}
+                   for c in itm.HP_CATEGORIES]
+CATEGORY_FILE = {"status": "matched", "categories": {
+    "3D": {"score": 35, "stage": "Awareness", "has_signal": False},
+    "Print": {"score": 13, "stage": "No Signal", "has_signal": False}}}
+
+
+class TestTheUnitsAreTheAccountsOwnThemes:
+    def test_a_bombora_account_is_grouped_by_theme(self):
+        bu = ids._bu_summary(BOMBORA_TOPICS, FILE_CATEGORIES)
+        assert bu["lead_source"] == "Bombora"
+        assert bu["unit_kind"] == "theme"
+        assert bu["source_label"] == "Bombora"
+        names = [u["category"] for u in bu["units"]]
+        assert names, "a Bombora account must produce theme units"
+        assert set(names) <= set(itm.THEMES)
+        assert not set(names) & {c["category"] for c in itm.HP_CATEGORIES
+                                 if c["category"] != "Print"}
+
+    def test_the_residue_is_not_a_theme_card(self):
+        """"Other / Low Relevance" is what the dictionary did not place. It has
+        its own section further down and is not one of the cards."""
+        bu = ids._bu_summary(BOMBORA_TOPICS, FILE_CATEGORIES)
+        assert itm.THEME_OTHER not in [u["category"] for u in bu["units"]]
+
+    def test_a_theme_never_carries_an_hp_play(self):
+        """The dictionary gives its context themes no HP category on purpose.
+        Inventing one here would put an HP play behind "E-commerce &
+        Logistics"."""
+        bu = ids._bu_summary(BOMBORA_TOPICS, FILE_CATEGORIES)
+        assert all(u["hp_play"] is None for u in bu["units"])
+
+    def test_an_empty_theme_gets_no_card(self):
+        bu = ids._bu_summary(BOMBORA_TOPICS, FILE_CATEGORIES)
+        assert all(u["bombora_topic_count"] > 0 for u in bu["units"])
+
+    def test_the_strongest_theme_leads(self):
+        bu = ids._bu_summary(BOMBORA_TOPICS, FILE_CATEGORIES)
+        maxes = [u["bombora_max"] for u in bu["units"]]
+        assert maxes == sorted(maxes, reverse=True)
+
+    def test_an_account_without_bombora_still_gets_hps_five_units(self):
+        """The other half of the client's rule: no Bombora, so the category
+        file leads and the units are HP's own."""
+        bu = ids._bu_summary([], FILE_CATEGORIES)
+        assert bu["lead_source"] == "PredictLeads"
+        assert bu["unit_kind"] == "hp_category"
+        assert {u["category"] for u in bu["units"]} == {
+            c["category"] for c in itm.HP_CATEGORIES}
+
+
+class TestOneSourceLeadsTheSoWhat:
+    def test_a_bombora_account_does_not_print_the_category_file_scores(self):
+        """The line the client pointed at: "HP Category Intent file scores: 3D
+        35/100 (Awareness); Print 13/100 (No Signal)..." on an account whose
+        intent comes from Bombora."""
+        out = ids._summarise(BOMBORA_TOPICS, CATEGORY_FILE, [])
+        assert not any("HP Category Intent file scores" in line
+                       for line in out["so_what"])
+        assert not any("category file" in line.lower() for line in out["so_what"])
+
+    def test_an_account_without_bombora_still_shows_them(self):
+        out = ids._summarise([], CATEGORY_FILE, [])
+        assert any("HP Category Intent file scores" in line
+                   for line in out["so_what"])

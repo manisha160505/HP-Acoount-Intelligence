@@ -689,7 +689,19 @@ def _summarise(topics: list[dict], category_file: dict, inventory: list[dict]) -
     so_what = []
     scored = [c for c in categories if c["primary"] and c["primary"].get("score") is not None]
     signalled = [c for c in scored if c["primary"].get("has_signal")]
-    if scored:
+    # One source leads, and it is never both at once. Sahaj, 27 Sep: lead with
+    # Bombora on the accounts that have it, and use the PredictLeads category
+    # file only on the accounts that do not. So on a Bombora account the
+    # category file's scores are left out of "So what for HP" entirely - they
+    # are the other source's answer to the same question, and printing both
+    # invites a reader to reconcile two numbers that were never comparable.
+    leads_with_bombora = bool(included)
+    if leads_with_bombora:
+        # Bombora leads, so the category file says nothing here - not its
+        # scores, and not the absence of them either. The themes above are this
+        # account's answer.
+        pass
+    elif scored:
         so_what.append("HP Category Intent file scores: " + "; ".join(
             f"{c['category']} {c['primary'].get('score')}/100 "
             f"({c['primary'].get('stage') or 'no stage'})" for c in scored) + ".")
@@ -798,25 +810,32 @@ BU_TOP_TOPICS = 3
 # the topic count, the maximum, the topic names - is Python's, and the read is
 # checked for any figure the account's own files do not carry before it is
 # published.
-BU_READ_PROMPT_VERSION = 1
+# 2: one read per RESEARCH THEME rather than per HP business unit (Sahaj,
+#    30 Sep), and the read may not name an HP product - a theme says what the
+#    account is looking at, and most of them are context HP does not sell into.
+#    This one has to regenerate: the reads are new text about different groups,
+#    so there is nothing stored to re-render.
+BU_READ_PROMPT_VERSION = 2
 BU_READ_MIN_WORDS = 18
 BU_READ_MAX_WORDS = 40
 
-BU_READ_SYSTEM = """You write one short read per HP business unit from a company's Bombora research topics.
+BU_READ_SYSTEM = """You write one short read per research theme from a company's Bombora intent topics.
 
-You are given, for each unit, the topics this company's people have been researching and the composite score of each. Those numbers are computed and are not yours to change.
+You are given, for each theme, the topics this company's people have been researching and the composite score of each. Those numbers are computed and are not yours to change.
+
+A theme is what this company is researching. It is NOT an HP product line. Several of these themes - cloud and infrastructure, security, financial services, e-commerce and logistics - are context: they say what the account is working on, and HP may have nothing to sell into them at all.
 
 RULES - these are failures, not preferences:
-1. ONE sentence per unit, BETWEEN {min_words} AND {max_words} WORDS.
-2. Say what the RESEARCH suggests a seller could open on. Research is not buying intent: use "suggests", "points to", "may indicate", "could be worth opening on". NEVER "is ready to", "needs", "requires", "is in market", "plans to buy".
-3. Name the unit's own topics from the list. Do NOT name a topic that is not listed for that unit.
-4. NEVER write a number, a score, a percentage or a date. The card already carries them; a figure you write is a figure you invented.
-5. Where a unit has no topics, say plainly that no researched topic maps to it and that the conversation would have to start elsewhere. Do not pad it.
-6. Each unit reads differently. Do not reuse one sentence shape across the five.
-7. Also write one "overview" sentence, {min_words} to {max_words} words, naming the two or three units the research leans towards across the whole account.
+1. ONE sentence per theme, BETWEEN {min_words} AND {max_words} WORDS.
+2. Say what the RESEARCH in that theme suggests. Research is not buying intent: use "suggests", "points to", "may indicate", "could be worth opening on". NEVER "is ready to", "needs", "requires", "is in market", "plans to buy".
+3. Name the theme's own topics from the list. Do NOT name a topic that is not listed for that theme.
+4. NEVER name an HP product, and never say what HP should sell, pitch or position. You are describing what the company is looking at, not what to do about it. The HP plays live elsewhere on this page and are not yours to write.
+5. NEVER write a number, a score, a percentage or a date. The card already carries them; a figure you write is a figure you invented.
+6. Each theme reads differently. Do not reuse one sentence shape across them.
+7. Also write one "overview" sentence, {min_words} to {max_words} words, naming the two or three themes the research leans towards across the whole account.
 
 Output JSON:
-{{"overview": "...", "units": [{{"category": "<exactly as given>", "read": "..."}}]}}
+{{"overview": "...", "themes": [{{"theme": "<exactly as given>", "read": "..."}}]}}
 """
 
 
@@ -826,8 +845,7 @@ def _bu_reads(company: str, units: list[dict]) -> dict:
     A missing read costs a line of prose on a card that still carries all of
     its numbers, so nothing here raises and nothing here blocks the widget.
     """
-    payload = [{"category": u["category"],
-                "hp_play": u["hp_play"],
+    payload = [{"theme": u["category"],
                 "topics": [t["topic"] for t in (u.get("bombora_top_topics") or [])]}
                for u in units]
     if not any(p["topics"] for p in payload):
@@ -837,19 +855,18 @@ def _bu_reads(company: str, units: list[dict]) -> dict:
                                    max_words=BU_READ_MAX_WORDS)
     try:
         raw = generate_gpt4o_json_completion(
-            system, json.dumps({"company": company, "units": payload},
+            system, json.dumps({"company": company, "themes": payload},
                                ensure_ascii=False)) or {}
     except Exception:
-        logger.exception("intent: business-unit reads failed")
+        logger.exception("intent: theme reads failed")
         return {}
 
-    named = {p["category"]: [p["category"], p["hp_play"], *p["topics"]]
-             for p in payload}
+    named = {p["theme"]: [p["theme"], *p["topics"]] for p in payload}
     reads = {}
-    for item in (raw.get("units") or []):
+    for item in (raw.get("themes") or []):
         if not isinstance(item, dict):
             continue
-        name = _clean(item.get("category"))
+        name = _clean(item.get("theme"))
         text = " ".join(str(item.get("read") or "").split())
         if not (name and text) or _has_figure(text, named.get(name, ())):
             continue
@@ -912,30 +929,67 @@ def _bu_summary(topics: list[dict], categories: list[dict]) -> dict:
     included = [t for t in topics if t.get("included")]
     lead = "Bombora" if included else "PredictLeads"
     by_name = {c.get("category"): c for c in categories}
+
+    if lead == "Bombora":
+        # The account's own research themes, not HP's five business units.
+        #
+        # Sahaj, 30 Sep: on an account with Bombora, group by the broad topic
+        # rather than by HP line - "we directly show the broad topic and the
+        # cards shown will contain their summary". Advantest researches across
+        # eight themes; folding those into five HP units discarded most of what
+        # the export says and made five cards out of an estate that does not
+        # divide that way.
+        #
+        # The themes are the dictionary's own and keep its display order, which
+        # is HP-owned themes first, then the context themes. `Other / Low
+        # Relevance` is excluded: it is the residue rather than a theme, and it
+        # has its own section further down the tab.
+        units = []
+        for theme in tm.THEMES:
+            if theme == tm.THEME_OTHER:
+                continue
+            mapped = sorted((t for t in included if t.get("theme") == theme),
+                            key=lambda t: -(t.get("composite_score") or 0))
+            if not mapped:
+                continue
+            units.append({
+                "category": theme,
+                # A theme is what the account is researching, not a line HP
+                # sells - the dictionary gives its context themes no HP
+                # category on purpose, and inventing one here would put an HP
+                # play behind "E-commerce & Logistics".
+                "hp_play": None,
+                "bombora_topic_count": len(mapped),
+                "bombora_max": mapped[0].get("composite_score"),
+                "bombora_top_topics": [{"topic": t.get("topic_name"),
+                                        "score": t.get("composite_score")}
+                                       for t in mapped[:BU_TOP_TOPICS]],
+                "category_file_score": None,
+                "category_file_stage": None,
+            })
+        units.sort(key=lambda u: (-(u["bombora_max"] or -1),
+                                  -u["bombora_topic_count"]))
+        return {"lead_source": lead, "unit_kind": "theme",
+                "source_label": "Bombora", "units": units}
+
+    # No Bombora for this account, so the HP category intent file leads and the
+    # units are HP's own five. Unchanged.
     units = []
     for cat in tm.HP_CATEGORIES:
         name = cat["category"]
-        mapped = sorted((t for t in included if t.get("hp_category") == name),
-                        key=lambda t: -(t.get("composite_score") or 0))
         primary = (by_name.get(name) or {}).get("primary") or {}
         units.append({
             "category": name,
             "hp_play": cat["hp_play"],
-            "bombora_topic_count": len(mapped),
-            "bombora_max": mapped[0].get("composite_score") if mapped else None,
-            "bombora_top_topics": [{"topic": t.get("topic_name"),
-                                    "score": t.get("composite_score")}
-                                   for t in mapped[:BU_TOP_TOPICS]],
+            "bombora_topic_count": 0,
+            "bombora_max": None,
+            "bombora_top_topics": [],
             "category_file_score": primary.get("score"),
             "category_file_stage": primary.get("stage"),
         })
-    if lead == "Bombora":
-        units.sort(key=lambda u: (-(u["bombora_max"] or -1), -u["bombora_topic_count"]))
-    else:
-        units.sort(key=lambda u: -(u["category_file_score"] or -1))
-    return {"lead_source": lead,
-            "source_label": "Bombora and PredictLeads",
-            "units": units}
+    units.sort(key=lambda u: -(u["category_file_score"] or -1))
+    return {"lead_source": lead, "unit_kind": "hp_category",
+            "source_label": "PredictLeads", "units": units}
 
 
 @requires_local_datasets(
@@ -1080,6 +1134,13 @@ def extract_intent_demand_signals(account_id: str) -> list[dict]:
                 bu["overview"] = written.get("overview") or None
                 for unit in bu["units"]:
                     unit["read"] = written["reads"].get(unit["category"])
+            # "So what for HP" leads the tab, and on a Bombora account the
+            # category file's scores no longer fill it - they are the other
+            # source's answer. The overview of the account's own research is
+            # what belongs there instead, so the box carries the read rather
+            # than standing empty above it.
+            if bu.get("overview"):
+                summary["so_what"] = [bu["overview"], *summary.get("so_what", [])]
         summary["bu_summary"] = bu
 
         summary_payload["status"] = "available"
