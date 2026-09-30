@@ -139,14 +139,7 @@ UNKNOWN = None
 
 
 # The "Source classification" column of HP_Live_Signal_Scoring_Logic, verbatim.
-#
-# The client asked on 27 Sep whether we follow a tier strategy - T0 filings, T1
-# established news, T2 paid tools, T3 long tail - and said the definition shown
-# on the card "doesn't tell much". Those tier names are from that message, not
-# from the scoring document, so they are not used: the document's own five
-# classifications are, and they are what these bands have always been. What
-# changes is only that the card now names the classification instead of the
-# phrase describing the lookup that produced it.
+# This table is the scoring document's and is never rewritten here.
 SOURCE_CLASSIFICATIONS = {
     FIRST_PARTY: "First-party or authoritative",
     ESTABLISHED_REPORTING: "Established independent reporting",
@@ -155,22 +148,73 @@ SOURCE_CLASSIFICATIONS = {
     UNVERIFIABLE: "Unverifiable",
 }
 
+# The same ladder in the client's own vocabulary, from their 27 Sep message:
+# "T0 = SEC / stock exchange filings, company press release engine, T1 =
+# established news channels, T2 = paid licensed tools, T3 = long tail, low
+# credibility sources."
+#
+# An earlier pass declined to use these, on the grounds that the tier names
+# came from that message rather than from the scoring document. The client has
+# since asked for them directly (30 Sep), and the two vocabularies describe one
+# ladder: filings, established news, paid structured tools, long tail. So the
+# tier is shown ALONGSIDE the document's classification, never in place of it.
+#
+# Nothing about the score moves. Every point value is still the one
+# `scoring.yaml` supplies, `classification_for` still returns the document's own
+# wording, and no signal changes position. The mapping is the client's own, so
+# it is a name for a band rather than a judgement about one.
+#
+# Unverifiable carries NO tier. Their list defines four, and a source that
+# cannot be established at all is precisely the one with no tier to claim - a
+# T4 would be us extending a scale they wrote.
+SOURCE_TIERS = {
+    FIRST_PARTY: "T0",
+    ESTABLISHED_REPORTING: "T1",
+    STRUCTURED_THIRD_PARTY: "T2",
+    WEAK_SECONDARY: "T3",
+}
+
+# How each tier reads on a card: short enough to sit in front of a publisher,
+# and in the client's words rather than the document's longer column, which is
+# what "the definition doesn't tell much" was about.
+SOURCE_TIER_LABELS = {
+    FIRST_PARTY: "First-party",
+    ESTABLISHED_REPORTING: "Established news",
+    STRUCTURED_THIRD_PARTY: "Licensed data tool",
+    WEAK_SECONDARY: "Long tail",
+}
+
 
 def classification_for(points) -> str:
     """The scoring document's name for a source-reliability score."""
     return SOURCE_CLASSIFICATIONS.get(points, "")
 
 
+def tier_for(points) -> str:
+    """The client's tier name for the same score, or "" where there is none."""
+    return SOURCE_TIERS.get(points, "")
+
+
 def describe_source(points, basis: str, publisher: str = "") -> str:
-    """The source line a reader sees: the document's classification, and who
-    the source was.
+    """The source line a reader sees: the tier, what it means, and who published.
+
+        T1 - Established news: Nikkei
+        T0 - First-party: Advantest
+        Unverifiable
 
     The client, 27 Sep, on the scoring document's table: "only show the part
     written in classification n not definition". The first pass kept the lookup
     basis alongside the classification - "Structured third-party evidence.
     Structured provider record with no underlying source URL" - and the second
     half of that is the definition column, which is what they asked us to stop
-    printing. It is gone.
+    printing. It is gone and stays gone.
+
+    What is added is the tier, because the classification alone was still not
+    the vocabulary they read in ("the definition doesn't tell much"). The score
+    behind it is unchanged - see `SOURCE_TIERS`.
+
+    A band with no tier - Unverifiable - falls back to the document's own word,
+    so the line is never empty and never claims a tier it does not have.
 
     The publisher stays where there is one. It is not from the document at all:
     it is who actually published THIS signal, which the band alone never says.
@@ -178,9 +222,11 @@ def describe_source(points, basis: str, publisher: str = "") -> str:
     `basis` is still taken so the call sites and the stored scores keep their
     shape; it is no longer read.
     """
-    label = classification_for(points)
-    parts = [p for p in (label, (publisher or "").strip()) if p]
-    return ". ".join(parts)
+    tier = tier_for(points)
+    label = SOURCE_TIER_LABELS.get(points) or classification_for(points)
+    head = "%s - %s" % (tier, label) if tier and label else (tier or label)
+    name = (publisher or "").strip()
+    return "%s: %s" % (head, name) if head and name else (head or name)
 
 
 # --- 10/10: first-party or authoritative --------------------------------------

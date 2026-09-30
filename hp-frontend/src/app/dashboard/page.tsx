@@ -168,6 +168,43 @@ interface ProvenanceEntry {
 const CITATION_BRACKET_RE = /\[[^[\]]*?[a-z][a-z0-9]*(?:_[a-z0-9]+)+[^[\]]*\]/g;
 const EVIDENCE_ID_RE = /[a-z][a-z0-9]*(?:_[a-z0-9]+)+/g;
 
+// The source-reliability line on a Live Signal, composed here from the score
+// the widget already stores rather than read from the text stored beside it.
+//
+// This must stay the mirror of `describe_source` in
+// services/extractors/signal_scoring.py, and `test_signal_batching.py` pins
+// every string below so a change there fails a test rather than showing two
+// different lines for the same signal.
+//
+// Why derive it instead of reading `rationales.source_reliability`: that string
+// is composed when the signal is scored and frozen inside the widget, so
+// renaming a band would reach an account only when its Live Signals are
+// regenerated - which re-runs the Executive Dashboard, its index, the
+// opportunity triggers and Strategy Chat's snapshot along with it. The score
+// itself never moved, so the name can be resolved at read time and every
+// account shows it at once.
+//
+// The tiers are the client's own (27 Sep): T0 filings and press releases, T1
+// established news channels, T2 paid licensed tools, T3 long tail. Unverifiable
+// carries no tier - their list defines four - so it falls back to the scoring
+// document's own word.
+const SOURCE_TIERS: Record<number, [string, string]> = {
+  10: ['T0', 'First-party'],
+  8: ['T1', 'Established news'],
+  6: ['T2', 'Licensed data tool'],
+  3: ['T3', 'Long tail'],
+  0: ['', 'Unverifiable'],
+};
+
+function sourceReliabilityLine(points: unknown, publisher: unknown): string {
+  const entry = SOURCE_TIERS[Number(points)];
+  if (!entry) return '';
+  const [tier, label] = entry;
+  const head = tier ? `${tier} - ${label}` : label;
+  const name = String(publisher ?? '').trim();
+  return name ? `${head}: ${name}` : head;
+}
+
 /**
  * The chat answer with its evidence tags turned into footnote markers.
  *
@@ -2552,10 +2589,25 @@ export default function UserDashboardPage() {
                                                 basis is the event's date, and the
                                                 card above already shows it. The
                                                 score and its weight still read
-                                                here. */}
-                                            {dim !== 'recency' && sc.rationales?.[dim] && (
-                                              <p className="text-[10px] text-slate-400 pl-[8.5rem] leading-relaxed">{sc.rationales[dim]}</p>
-                                            )}
+                                                here.
+
+                                                Source reliability is composed from
+                                                the score rather than read from the
+                                                stored text, so the band's name is
+                                                current on every account without
+                                                regenerating any of them - see
+                                                `sourceReliabilityLine`. The stored
+                                                line is the fallback, for a widget
+                                                whose score is missing. */}
+                                            {dim !== 'recency' && (() => {
+                                              const line = dim === 'source_reliability'
+                                                ? (sourceReliabilityLine(val, s.source_publisher)
+                                                   || sc.rationales?.[dim])
+                                                : sc.rationales?.[dim];
+                                              return line ? (
+                                                <p className="text-[10px] text-slate-400 pl-[8.5rem] leading-relaxed">{line}</p>
+                                              ) : null;
+                                            })()}
                                           </div>
                                         );
                                       })}
@@ -2881,7 +2933,7 @@ export default function UserDashboardPage() {
                                             onMouseLeave={() => setHoveredIntentCat(null)}
                                           >
                                             <div
-                                              className={`w-14 rounded-t-md cursor-default ${CATEGORY_STYLE[u.category]?.bar || 'bg-slate-400'}`}
+                                              className={`w-14 rounded-t-md cursor-default ${THEME_STYLE[u.category]?.bar || CATEGORY_STYLE[u.category]?.bar || 'bg-slate-400'}`}
                                               style={{ height: `${pct}%` }}
                                             ></div>
                                             <span className="absolute text-[11px] font-bold text-slate-700" style={{ bottom: `calc(${pct}% + 6px)` }}>
@@ -2947,7 +2999,13 @@ export default function UserDashboardPage() {
                               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                                 {bu.units.map((u: any) => {
                                   const researched = u.bombora_topic_count > 0;
-                                  const style = CATEGORY_STYLE[u.category]
+                                  // On a Bombora account the units are the
+                                  // account's own research themes, so they take
+                                  // the theme palette - the same colour this
+                                  // theme carries in the chart above and its
+                                  // group below. HP's five business units keep
+                                  // theirs on an account with no Bombora.
+                                  const style = THEME_STYLE[u.category] || CATEGORY_STYLE[u.category]
                                     || { bar: 'bg-slate-400', chip: 'bg-slate-50 text-slate-700 border-slate-200' };
                                   return (
                                     <div
@@ -2970,12 +3028,14 @@ export default function UserDashboardPage() {
                                           </span>
                                         )}
                                       </div>
-                                      <p className="text-[11px] text-slate-400 leading-snug">{u.hp_play}</p>
+                                      {u.hp_play && (
+                                        <p className="text-[11px] text-slate-400 leading-snug">{u.hp_play}</p>
+                                      )}
 
                                       <p className="text-[11px] font-semibold text-slate-600">
                                         {researched
                                           ? <>{u.bombora_topic_count} researched topic{u.bombora_topic_count === 1 ? '' : 's'}</>
-                                          : <span className="text-slate-400">No researched topic maps to this unit</span>}
+                                          : <span className="text-slate-400">No researched topic maps to this</span>}
                                       </p>
 
                                       {u.bombora_top_topics?.length > 0 && (
@@ -3405,7 +3465,12 @@ export default function UserDashboardPage() {
                                     <div className="flex flex-wrap items-center gap-2">
                                       <span className={`px-2.5 py-0.5 rounded-full text-xs font-extrabold border ${style.chip}`}>{theme.theme}</span>
                                       <span className="text-xs font-semibold text-slate-500">
-                                        {theme.topic_count} topics • max {theme.max} • avg {theme.average}
+                                        {/* The count alone. The average said
+                                            little - every theme on a real
+                                            export sits in the sixties - and
+                                            the strongest score is already the
+                                            bar above and the first row below. */}
+                                        {theme.topic_count} topics
                                         {shown.length !== theme.topic_count ? ` • showing ${shown.length}` : ''}
                                       </span>
                                     </div>
@@ -3422,8 +3487,6 @@ export default function UserDashboardPage() {
 
                             {otherTheme && otherTheme.topic_count > 0 && (() => {
                               const shown = filteredTopics.filter((x: any) => x.included && x.theme === 'Other / Low Relevance');
-                              const flaggedShown = shown.filter((x: any) => x.mapping_status === 'flagged');
-                              const rest = shown.filter((x: any) => x.mapping_status !== 'flagged');
                               // Open like every other theme group: a search opens
                               // it, otherwise the button decides. It used to toggle
                               // between the whole list and the first five rows,
@@ -3438,7 +3501,10 @@ export default function UserDashboardPage() {
                                     <div className="flex flex-wrap items-center gap-2">
                                       <span className="px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-slate-100 text-slate-700 border border-slate-200">Other / Low Relevance</span>
                                       <span className="text-xs font-semibold text-slate-500">
-                                        {otherTheme.topic_count} topics not matched by {dictionaryVersion} • {otherTheme.flagged_count} flagged for review
+                                        {/* The dictionary version and the
+                                            flagged count were ours to act on,
+                                            not the seller's to read. */}
+                                        {otherTheme.topic_count} topics
                                       </span>
                                     </div>
                                     <button
@@ -3450,23 +3516,21 @@ export default function UserDashboardPage() {
                                       <ChevronDown className={`w-3.5 h-3.5 transition-transform ${otherOpen ? 'rotate-180' : ''}`} />
                                     </button>
                                   </div>
-                                  {otherOpen && flaggedShown.length > 0 && (
-                                    <div className="space-y-2 bg-amber-50/60 border border-amber-200 rounded-xl p-3">
-                                      <span className="text-[10px] font-bold uppercase tracking-wider text-amber-800 block">Flagged for review · near-misses the dictionary does not map</span>
-                                      {flaggedShown.map((item: any) => (
-                                        <div key={item.topic_name} className="flex items-start justify-between gap-3 text-xs">
-                                          <div className="min-w-0">
-                                            <span className="font-semibold text-slate-800 capitalize block truncate">{item.topic_name}</span>
-                                            <span className="text-[10px] text-amber-800 block">{item.flag_reason}</span>
-                                          </div>
-                                          <span className="font-mono font-bold text-slate-900 flex-shrink-0">{item.composite_score}</span>
-                                        </div>
-                                      ))}
-                                    </div>
-                                  )}
+                                  {/* One list, in the same shape as every other
+                                      theme: topic, score, source. The flagged
+                                      rows used to sit above it on amber with the
+                                      reason the dictionary did not place them -
+                                      "Mentions 'financial' but no Financial
+                                      Services & Fintech dictionary term". That is
+                                      a note to whoever maintains the dictionary,
+                                      not to a seller reading the account, and it
+                                      made an unmapped topic look like a problem
+                                      with the topic. `mapping_status` and
+                                      `flag_reason` are still in the payload for
+                                      that maintenance. */}
                                   {otherOpen && (
                                     <div className="space-y-2">
-                                      {rest.map((item: any, idx: number) => renderTopicRow(item, idx, 'bg-slate-500'))}
+                                      {shown.map((item: any, idx: number) => renderTopicRow(item, idx, 'bg-slate-500'))}
                                     </div>
                                   )}
                                 </div>
@@ -4439,34 +4503,6 @@ export default function UserDashboardPage() {
                     })
                     .filter(Boolean);
 
-                  // One row per technology, not per group: the export files
-                  // NetSuite under five categories, and a sheet that repeated it
-                  // five times would not be "the whole techstack" any more.
-                  const downloadTechStack = () => {
-                    const esc = (v: any) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-                    const categoriesOf: Record<string, string[]> = {};
-                    techGroups.forEach((g: any) => (g.technologies || []).forEach((t: string) => {
-                      (categoriesOf[t] = categoriesOf[t] || []).push(g.category);
-                    }));
-                    const sv: any = matrixData.stack_view;
-                    const csv = sv
-                      ? [['technology', 'family', 'export_categories', 'source', 'hp_play', 'hp_category', 'risk', 'reason'].join(','),
-                         ...(sv.technologies || []).map((t: any) => [
-                           esc(t.name), esc(t.family), esc((t.export_categories || []).join('; ')), esc(t.source),
-                           esc(t.hp?.hp_play), esc(t.hp?.hp_category), esc(t.hp?.risk_level), esc(t.hp?.reason),
-                         ].join(','))].join('\n')
-                      : [['technology', 'category', 'source_sheet'].join(','),
-                         ...(matrixData.full_tech_stack || []).map((t: string) =>
-                           [esc(t), esc((categoriesOf[t] || []).join('; ')), esc(techSources[t] || '')].join(','))].join('\n');
-                    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = `tech_stack_${selectedAccount?.name || 'account'}.csv`.replace(/\s+/g, '_');
-                    a.click();
-                    URL.revokeObjectURL(url);
-                  };
-
                   return (
                     <div className="space-y-6 animate-fade-in">
 
@@ -4845,8 +4881,14 @@ export default function UserDashboardPage() {
                           The whole technology stack, clubbed into the export's own
                           categories. The client, 27 Sep: "we mention about 281
                           technologies detected - we need to club those in relevant
-                          categories and show here and also, have a download button to
-                          extract the whole techstack."
+                          categories and show here."
+
+                          They asked for a download beside it in the same sentence, and
+                          it shipped; it was removed on 30 Sep. The sheet carried one row
+                          per technology with hp_play, hp_category, risk and reason blank
+                          on every row HP has no line for - which is most of 281 - and
+                          filling those with "No HP play" would have been 281 rows of
+                          nothing. The stack on screen is the answer to the request.
 
                           It sits below the HP categories and changes nothing above it:
                           those cards are the HP-relevant reading of the estate, this is
@@ -4877,23 +4919,12 @@ export default function UserDashboardPage() {
                         };
                         return (
                           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 space-y-5">
-                            <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
-                              <div>
-                                <h4 className="text-sm font-extrabold text-slate-900">Combined technology view</h4>
-                                <p className="text-[11px] text-slate-500 mt-0.5">
-                                  {sv.total} technologies for {selectedAccount?.name || 'this account'}, merged and de-duplicated
-                                  across sources &middot; {sv.hp_relevant_count} support an HP play
-                                </p>
-                              </div>
-                              <button
-                                type="button"
-                                onClick={downloadTechStack}
-                                disabled={!sv.total}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-50 transition disabled:opacity-40 whitespace-nowrap"
-                              >
-                                <FileSpreadsheet className="w-3.5 h-3.5" />
-                                <span>Download full stack</span>
-                              </button>
+                            <div>
+                              <h4 className="text-sm font-extrabold text-slate-900">Combined technology view</h4>
+                              <p className="text-[11px] text-slate-500 mt-0.5">
+                                {sv.total} technologies for {selectedAccount?.name || 'this account'}, merged and de-duplicated
+                                across sources &middot; {sv.hp_relevant_count} support an HP play
+                              </p>
                             </div>
 
                             {/* Filters */}
@@ -5025,15 +5056,6 @@ export default function UserDashboardPage() {
                                   className="w-full sm:w-56 pl-9 pr-3 py-2 text-xs font-medium bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-hp-navy"
                                 />
                               </div>
-                              <button
-                                type="button"
-                                onClick={downloadTechStack}
-                                disabled={totalTechCount === 0}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-50 transition disabled:opacity-40 whitespace-nowrap"
-                              >
-                                <FileSpreadsheet className="w-3.5 h-3.5" />
-                                <span>Download</span>
-                              </button>
                             </div>
                           </div>
 

@@ -105,7 +105,15 @@ NODES = (
          # 4: tech_stack_matrix also carries category_groups - the whole estate
          # clubbed into the export's own 20 category columns, with what the
          # export left uncategorised in a group of its own.
-         logic_version=4,
+         # 5: Client OS reads its spellings from one shared OS table, so "Mac
+         # OS" with a space is recognised (Sahaj, 30 Sep) - which also carries
+         # the Apple card through the Driver 1 gate, because "mac os" is a
+         # named WXP 04 technology and "apple ios" alone is not. Plus a
+         # reconciliation pass after suppression: the header count is recounted
+         # from the cards that survived, and a "what it means for HP" paragraph
+         # naming a card that was removed is dropped. All of it is stored
+         # inside the widget, so the bump is what rewrites it.
+         logic_version=5,
          logic_refs=("app.services.hp.map_narrative:MAP_NARRATIVE_PROMPT_VERSION",),
          run=f"{_P}:tech_core"),
     Node("objection", "objection_playbook",
@@ -159,6 +167,15 @@ NODES = (
          # inside the scored entry, and `describe_source` runs behind this
          # feature's own fingerprint cache - which `cache_suffix()` keys on
          # this number, so the bump is what re-scores and rewrites it.
+         # NOT bumped for the tier names added on 30 Sep ("T1 - Established
+         # news: Nikkei"). A bump would have been the usual lever, but it
+         # marks this node stale on every account and re-runs everything
+         # downstream of it - exec_core, opp_triggers, exec_priorities,
+         # tech_recs, strategy_snapshot and a full idx_executive_dashboard
+         # re-embed - to change one line of text. So the tier is derived at
+         # READ time from the reliability score the widget already stores,
+         # and nothing goes stale. See `signal_scoring.describe_source` and
+         # its mirror in the dashboard.
          logic_version=2,
          logic_refs=("app.services.extractors.recent_news_signals:"
                      "SIGNAL_SCORING_PROMPT_VERSION",),
