@@ -31,6 +31,14 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found",
         )
+    # A token outlives a deactivation by up to ACCESS_TOKEN_EXPIRE_MINUTES;
+    # without this check a deactivated user keeps working until it expires.
+    # A missing field predates activation and means active.
+    if user.get("is_active", True) is False:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="This account has been deactivated",
+        )
 
     return {
         "id": str(user["_id"]),
@@ -74,6 +82,14 @@ def get_current_user_flexible(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found",
+        )
+    # A token outlives a deactivation by up to ACCESS_TOKEN_EXPIRE_MINUTES;
+    # without this check a deactivated user keeps working until it expires.
+    # A missing field predates activation and means active.
+    if user.get("is_active", True) is False:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="This account has been deactivated",
         )
 
     return {

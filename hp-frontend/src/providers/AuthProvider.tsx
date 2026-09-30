@@ -3,6 +3,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User, AuthState } from '@/types/auth';
 import api from '@/services/api';
+import { flushOnExit } from '@/lib/track';
 
 interface AuthContextType extends AuthState {
   login: (email: string, pass: string) => Promise<{ success: boolean; role?: string; error?: string }>;
@@ -51,6 +52,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const logout = () => {
+    // Send queued usage events while the token that authenticates them exists.
+    flushOnExit();
     localStorage.removeItem('hp_token');
     localStorage.removeItem('hp_user');
     setToken(null);
