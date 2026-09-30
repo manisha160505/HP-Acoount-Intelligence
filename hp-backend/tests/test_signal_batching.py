@@ -18,6 +18,7 @@ Run: python -m pytest tests/test_signal_batching.py -v
 import os
 import sys
 from datetime import UTC, datetime
+from typing import ClassVar
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
@@ -122,10 +123,20 @@ class TestTheRecencyBasis:
 
 
 class TestTheSourceClassification:
-    """The names come from the Source classification column of
-    HP_Live_Signal_Scoring_Logic, verbatim. The T0-T3 tiers the client
-    mentioned on 27 Sep are from that message, not from the scoring document,
-    so they are deliberately not used."""
+    """Two vocabularies for one ladder, and neither one moves a score.
+
+    The classification names come from the Source classification column of
+    HP_Live_Signal_Scoring_Logic, verbatim, and are what `classification_for`
+    returns to everything else. The T0-T3 tiers come from the client's 27 Sep
+    message - "T0 = SEC / stock exchange filings, company press release engine,
+    T1 = established news channels, T2 = paid licensed tools, T3 = long tail" -
+    and they now lead the line on the card, because the classification alone
+    was still not the vocabulary they read in.
+
+    An earlier pass declined to print the tiers on the grounds that they were
+    not in the scoring document. They were asked for directly on 30 Sep. What
+    matters is that this stayed a relabelling: the points are the ones
+    scoring.yaml supplies, unchanged, so no signal moved position."""
 
     def test_each_band_carries_the_document_s_own_name(self):
         for points, name in (
@@ -136,36 +147,59 @@ class TestTheSourceClassification:
                 (ss.UNVERIFIABLE, "Unverifiable")):
             assert ss.classification_for(points) == name
 
-    def test_no_tier_vocabulary_anywhere(self):
-        for points in (10, 8, 6, 3, 0):
-            line = ss.describe_source(points, "established publication", "Nikkei")
-            assert "T0" not in line
-            assert "T1" not in line
-            assert "T2" not in line
-            assert "T3" not in line
+    def test_each_band_carries_the_clients_own_tier(self):
+        """Their mapping, not ours: filings, established news, paid tools,
+        long tail."""
+        assert ss.tier_for(ss.FIRST_PARTY) == "T0"
+        assert ss.tier_for(ss.ESTABLISHED_REPORTING) == "T1"
+        assert ss.tier_for(ss.STRUCTURED_THIRD_PARTY) == "T2"
+        assert ss.tier_for(ss.WEAK_SECONDARY) == "T3"
 
-    def test_the_line_names_the_publisher_too(self):
-        """The band alone says nothing about this signal; the publisher was on
-        the card and never in the explanation."""
+    def test_unverifiable_claims_no_tier(self):
+        """Their list defines four. A source that cannot be established at all
+        is the one with no tier to claim, and a T4 would be us extending a
+        scale they wrote."""
+        assert ss.tier_for(ss.UNVERIFIABLE) == ""
+        line = ss.describe_source(ss.UNVERIFIABLE, "no source URL or publisher", "")
+        assert line == "Unverifiable"
+
+    def test_relabelling_did_not_become_rescoring(self):
+        """The test that says what this change was allowed to touch.
+
+        The points are the client's, from scoring.yaml, and naming a band must
+        never move one. If this fails, a display change has reached the
+        score."""
+        assert (ss.FIRST_PARTY, ss.ESTABLISHED_REPORTING,
+                ss.STRUCTURED_THIRD_PARTY, ss.WEAK_SECONDARY,
+                ss.UNVERIFIABLE) == (10, 8, 6, 3, 0)
+        assert sorted(ss.SOURCE_TIERS) == [3, 6, 8, 10]
+        assert set(ss.SOURCE_CLASSIFICATIONS) == {10, 8, 6, 3, 0}
+
+    def test_the_line_leads_with_the_tier_and_names_the_publisher(self):
+        """The format put to the client on 29 Sep. The band alone says nothing
+        about this signal; the publisher was on the card and never in the
+        explanation."""
         line = ss.describe_source(ss.ESTABLISHED_REPORTING,
                                   "established publication", "Nikkei")
-        assert line == "Established independent reporting. Nikkei"
+        assert line == "T1 - Established news: Nikkei"
 
     def test_no_basis_reaches_the_line_whatever_it_says(self):
         line = ss.describe_source(ss.ESTABLISHED_REPORTING,
                                   "established publication (reuters.com)", "Reuters")
-        assert line == "Established independent reporting. Reuters"
+        assert line == "T1 - Established news: Reuters"
 
     def test_the_definition_is_never_printed(self):
         """Sahaj, 28 Sep: "only show the part written in classification n not
         definition". The first pass kept the lookup basis beside the
         classification - "Structured third-party evidence. Structured provider
         record with no underlying source URL" - and the second half of that is
-        the document's definition column."""
+        the document's definition column. Adding the tier did not bring it
+        back."""
         line = ss.describe_source(ss.STRUCTURED_THIRD_PARTY,
                                   "structured provider record with no underlying "
                                   "source URL", "")
-        assert line == "Structured third-party evidence"
+        assert line == "T2 - Licensed data tool"
+        assert "underlying" not in line
 
     def test_the_publisher_is_not_a_definition_and_stays(self):
         """It is not from the document at all - it is who published THIS
@@ -173,7 +207,7 @@ class TestTheSourceClassification:
         line = ss.describe_source(ss.FIRST_PARTY,
                                   "first-party company page (newsroom subdomain)",
                                   "Accenture")
-        assert line == "First-party or authoritative. Accenture"
+        assert line == "T0 - First-party: Accenture"
 
     def test_a_company_newsroom_on_a_subdomain_is_first_party(self):
         """The document puts "Company newsroom" in the 10/10 row. We matched
@@ -215,3 +249,121 @@ class TestTheSourceClassification:
         scoring document and are frozen."""
         assert (ss.FIRST_PARTY, ss.ESTABLISHED_REPORTING, ss.STRUCTURED_THIRD_PARTY,
                 ss.WEAK_SECONDARY, ss.UNVERIFIABLE) == (10, 8, 6, 3, 0)
+
+
+class TestTheTierComesFromTheSourceNotThePipe:
+    """Asked directly: "verify that T1 - google news rss and exa".
+
+    Almost. Google News RSS and Exa are PIPES, and the tier belongs to what
+    came through them. A recognised outlet through either pipe is T1, which is
+    what was asked for - but a company press release through the same pipe is
+    T0, and a licensed provider record with no publisher at all is T2. Tiering
+    the pipe itself would flatten all three into one, and the specification is
+    explicit that the underlying source is what gets scored.
+
+    Google News exports carry an opaque /rss/articles/CBMi... link that decodes
+    to nothing offline, so the publisher COLUMN is the only usable identity -
+    which is why these cases pass a wrapped URL and a real publisher name.
+    """
+
+    def test_an_established_outlet_through_google_news_is_t1(self):
+        for publisher in ("Nikkei Asia", "Reuters"):
+            points, _basis, _url = ss.source_reliability_points(
+                url="https://news.google.com/rss/articles/CBMiK2h0dHBz",
+                publisher=publisher)
+            assert points == ss.ESTABLISHED_REPORTING, publisher
+            assert ss.tier_for(points) == "T1"
+
+    def test_an_established_outlet_through_exa_is_t1(self):
+        """Exa rows carry a real URL, and sometimes only a publisher name."""
+        with_url, _b, _u = ss.source_reliability_points(
+            url="https://asia.nikkei.com/Business/advantest-story",
+            publisher="Nikkei Asia")
+        name_only, _b2, _u2 = ss.source_reliability_points(
+            url="", publisher="Nikkei Asia")
+        assert with_url == ss.ESTABLISHED_REPORTING
+        assert name_only == ss.ESTABLISHED_REPORTING
+        assert ss.tier_for(name_only) == "T1"
+
+    def test_a_company_announcement_through_a_pipe_is_t0_not_t1(self):
+        """The pipe carried it; the company published it. This is the case
+        that breaks if the tier is ever attached to the feed."""
+        points, _basis, _url = ss.source_reliability_points(
+            url="https://www.advantest.com/news/press-releases/2026-09",
+            publisher="Advantest")
+        assert points == ss.FIRST_PARTY
+        assert ss.tier_for(points) == "T0"
+
+    def test_a_structured_provider_record_is_t2(self):
+        """T2 is the client's "paid licensed tools" - a PredictLeads or
+        Explorium event with no underlying source to verify."""
+        points, _basis, _url = ss.source_reliability_points(
+            url="", publisher="", dataset="news_events")
+        assert points == ss.STRUCTURED_THIRD_PARTY
+        assert ss.tier_for(points) == "T2"
+
+    def test_no_source_at_all_is_unverifiable_and_untiered(self):
+        points, _basis, _url = ss.source_reliability_points(url="", publisher="")
+        assert points == ss.UNVERIFIABLE
+        assert ss.tier_for(points) == ""
+
+    def test_an_unrecognised_outlet_is_left_for_the_caller_to_decide(self):
+        """Pinned because the tier names change how the fallback READS.
+
+        `source_reliability_points` returns UNKNOWN - not a band - for an
+        outlet it has no standing for, and `recent_news_signals` currently
+        settles that at 6. Under the old wording that was a neutral bucket;
+        under the client's vocabulary 6 is "paid licensed tools", which a
+        regional newspaper is not. Changing the fallback moves scores, so it
+        waits for the client. This test records where the decision lives.
+        """
+        points, basis, _url = ss.source_reliability_points(
+            url="https://news.google.com/rss/articles/CBMiQQQ",
+            publisher="Jakarta Daily Post")
+        assert points is ss.UNKNOWN
+        assert "unrecognised publisher" in basis
+
+
+class TestTheSourceLineIsResolvedAtReadTime:
+    """The line is composed from the score, not regenerated into the widget.
+
+    `rationales.source_reliability` is written when a signal is scored and then
+    frozen inside the widget, so renaming a band the usual way - bump
+    `news.logic_version` - would reach an account only by re-running Live
+    Signals, and with it exec_core, opp_triggers, exec_priorities, tech_recs,
+    strategy_snapshot and a full idx_executive_dashboard re-embed. For one line
+    of text, on every account.
+
+    The score itself never moved, so the dashboard composes the line from
+    `scores.source_reliability` and the signal's publisher instead, and every
+    account shows the current wording without regenerating any of them.
+
+    That puts a copy of the mapping in the frontend (`sourceReliabilityLine` in
+    dashboard/page.tsx), which is the thing that can drift. These assertions are
+    what it is checked against: if a band is renamed here and not there, this
+    fails rather than the two quietly disagreeing on screen.
+    """
+
+    EXPECTED: ClassVar[dict] = {
+        10: "T0 - First-party: Nikkei",
+        8: "T1 - Established news: Nikkei",
+        6: "T2 - Licensed data tool: Nikkei",
+        3: "T3 - Long tail: Nikkei",
+        0: "Unverifiable: Nikkei",
+    }
+
+    def test_every_band_renders_the_string_the_dashboard_mirrors(self):
+        for points, expected in self.EXPECTED.items():
+            assert ss.describe_source(points, "any basis at all", "Nikkei") == expected
+
+    def test_a_signal_with_no_publisher_renders_the_head_alone(self):
+        assert ss.describe_source(ss.ESTABLISHED_REPORTING, "b", "") == "T1 - Established news"
+        assert ss.describe_source(ss.UNVERIFIABLE, "b", "") == "Unverifiable"
+
+    def test_the_line_needs_nothing_the_widget_does_not_already_store(self):
+        """Both inputs are on a stored signal already - the reliability score
+        in `scores`, the publisher on the card. Nothing has to be regenerated
+        to produce the line, which is the whole point."""
+        stored_score, stored_publisher = 8, "Nikkei"
+        assert ss.describe_source(stored_score, "", stored_publisher) == \
+            self.EXPECTED[stored_score]
