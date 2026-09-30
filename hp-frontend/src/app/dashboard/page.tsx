@@ -1981,98 +1981,31 @@ export default function UserDashboardPage() {
 
                                           {open && (
                                             <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-3">
-                                              {/* Evidence strength: the score,
-                                                  then one bar per term. Three
-                                                  terms, three bars - the
-                                                  formula has no fourth. Each
-                                                  bar fills to its own share of
-                                                  100, so their widths add up to
-                                                  the score the way the terms
-                                                  add up to the total, and the
-                                                  basis line under each says
-                                                  what it was counted from. */}
-                                              <div className="space-y-2">
-                                                <div className="flex items-center justify-between">
-                                                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 inline-flex items-center gap-1">
-                                                    <BarChart3 className="w-3 h-3" />
-                                                    Evidence strength
-                                                  </span>
-                                                  <span
-                                                    className="text-[11px] font-extrabold text-slate-700 cursor-help"
-                                                    title={p.evidence_strength?.formula || prioritiesData?.evidence_strength_formula}
-                                                  >
-                                                    {p.evidence_strength?.zero_reason
-                                                      ? 'Not scored'
-                                                      : `${p.evidence_strength?.score ?? 0}/${p.evidence_strength?.max_score ?? 100}`}
-                                                  </span>
-                                                </div>
+                                              {/* The score, and nothing about how it was reached.
+                                                  The client, 30 Sep: the working does not belong on
+                                                  screen. So the three term bars, the basis lines
+                                                  ("2 relevant filings x 5 points"), the scored-on note
+                                                  and the Supporting counts line are all gone from here.
 
-                                                <div className="flex items-stretch gap-2">
-                                                  {(p.evidence_strength?.terms || []).map((t: any, ti: number) => (
-                                                    <div key={ti} className="flex-1 min-w-0 space-y-1" title={t.basis}>
-                                                      <div className="h-1.5 rounded-full bg-slate-200 overflow-hidden">
-                                                        <div
-                                                          className="h-full rounded-full bg-hp-navy transition-all"
-                                                          style={{ width: `${t.max_points ? Math.round((t.points / t.max_points) * 100) : 0}%` }}
-                                                        />
-                                                      </div>
-                                                      <div className="flex items-baseline justify-between gap-1">
-                                                        <span className="text-[9px] text-slate-500 truncate">{t.label}</span>
-                                                        <span className="text-[9px] font-bold text-slate-600 flex-shrink-0">
-                                                          {t.points}/{t.max_points}
-                                                        </span>
-                                                      </div>
-                                                    </div>
-                                                  ))}
-                                                </div>
-
-                                                <div className="space-y-0.5 pt-1">
-                                                  {(p.evidence_strength?.terms || []).map((t: any, ti: number) => (
-                                                    <p key={ti} className="text-[10px] text-slate-500 leading-relaxed">
-                                                      <span className="text-slate-400">{t.label}:</span> {t.basis}
-                                                    </p>
-                                                  ))}
-                                                </div>
-
-                                                {/* Evidence that named no
-                                                    category scored nothing for
-                                                    diversity. Said plainly,
-                                                    because a reader comparing
-                                                    two cards needs to know the
-                                                    difference between evidence
-                                                    that is absent and evidence
-                                                    that could not be placed. */}
-                                                {(() => {
-                                                  const div = (p.evidence_strength?.terms || []).find((t: any) => t.key === 'source_diversity');
-                                                  const un = div?.uncategorised_sources || 0;
-                                                  return un > 0 ? (
-                                                    <p className="text-[10px] text-amber-700 leading-relaxed">
-                                                      {un} supporting source{un === 1 ? '' : 's'} carried no category and scored nothing for diversity.
-                                                    </p>
-                                                  ) : null;
-                                                })()}
-
-                                                <p className="text-[10px] text-slate-400 leading-relaxed pt-1 border-t border-slate-200">
-                                                  Scored on {p.evidence_strength?.scored_on || prioritiesData?.scored_on}. Age is measured to that date, so the score does not drift as this page ages.
-                                                </p>
-                                              </div>
-
-                                              {/* ABX's own four measures, kept
-                                                  beside the score rather than
-                                                  replaced by it. They are what
-                                                  the ordering rule uses, and
-                                                  they say something the three
-                                                  scored terms do not. */}
-                                              <div className="space-y-1 pt-1 border-t border-slate-200">
-                                                <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 block">
-                                                  Supporting counts
+                                                  The payload still carries every one of them, and must:
+                                                  `measures` decides the ORDER these catalysts appear in
+                                                  (priorities.py), feeds the executive summary and the
+                                                  Strategy Chat corpus, and verify_executive_dashboard.py
+                                                  asserts the whole evidence_strength structure. This is a
+                                                  display change and only a display change. */}
+                                              <div className="flex items-center justify-between">
+                                                <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 inline-flex items-center gap-1">
+                                                  <BarChart3 className="w-3 h-3" />
+                                                  Evidence strength
                                                 </span>
-                                                <p className="text-[10px] text-slate-500 leading-relaxed">
-                                                  {m.support_count} source sentence{m.support_count === 1 ? '' : 's'}
-                                                  {' · '}{m.distinct_sections} document section{m.distinct_sections === 1 ? '' : 's'}
-                                                  {' · '}{m.independent_source_count} independent source{m.independent_source_count === 1 ? '' : 's'}
-                                                  {m.most_recent_date ? ` · most recent ${m.most_recent_date}` : ''}
-                                                </p>
+                                                <span
+                                                  className="text-[11px] font-extrabold text-slate-700 cursor-help"
+                                                  title={p.evidence_strength?.formula || prioritiesData?.evidence_strength_formula}
+                                                >
+                                                  {p.evidence_strength?.zero_reason
+                                                    ? 'Not scored'
+                                                    : `${p.evidence_strength?.score ?? 0}/${p.evidence_strength?.max_score ?? 100}`}
+                                                </span>
                                               </div>
 
                                               <div className="space-y-1.5 pt-1 border-t border-slate-200">
