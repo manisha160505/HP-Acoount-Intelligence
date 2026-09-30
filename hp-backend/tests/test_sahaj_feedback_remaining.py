@@ -11,9 +11,11 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
+import pytest
+
 from app.services.evaluator import formats as ef
 from app.services.extractors import content_studio as cstudio, intent_demand_signals as ids
-from app.services.hp import intent_topic_map as tm
+from app.services.hp import content_gates, intent_topic_map as tm
 from app.services.strategy import chat
 
 
@@ -86,7 +88,13 @@ class TestContentStudioFormatsAndTopics:
         c = cstudio.CONTENT_TYPE_CONTRACTS["linkedin_message"]
         assert c["title"] == "LinkedIn Message"
         assert "headline" not in c["required"] and not c.get("public")
-        assert c["words"][1] <= 80
+        # Short, and the contract no longer says how short. The 30 Sep build
+        # specification sets 60-110 words and makes a budget miss "regenerate
+        # once"; carried here as well it would also be a hard fault, and a
+        # 55-word message would be withheld from the seller instead of
+        # rewritten. `content_gates.WORD_BUDGETS` is the one owner.
+        assert "words" not in c
+        assert content_gates.WORD_BUDGETS["linkedin_message"] == (60, 110)
 
     def test_the_topics_are_the_five_business_units(self):
         assert len(cstudio.HP_BU_TOPICS) == 5
@@ -107,7 +115,30 @@ class TestMessageEvaluatorFormats:
         assert spec["rewrite"]["sections"] == (4, 4) and spec["wants_headings"]
 
     def test_older_formats_still_normalise(self):
+        """The wide reader stays wide: an evaluation stored months ago under
+        `social_post` has to read back, and its format key still has to resolve
+        to a label and a rubric."""
         assert ef.normalize_format("Social Post") == "social_post"
+
+    def test_but_a_new_evaluation_may_only_use_the_three(self):
+        """`OFFERED_FORMATS` gated the dropdown and nothing else, so
+        `POST .../evaluate` with "format": "tech_blog" was scored - against a
+        rubric for a format the seller cannot pick and Section 2.3 has no row
+        for. The narrow check lives at the entry point; the wide reader stays
+        where reading happens."""
+        for key in ef.OFFERED_FORMATS:
+            assert ef.normalize_offered_format(key) == key
+        for key in ("social_post", "website_copy", "tech_blog", "message_planks"):
+            if key not in ef.FORMATS:
+                continue
+            with pytest.raises(ef.FormatError):
+                ef.normalize_offered_format(key)
+
+    def test_the_evaluator_criteria_are_the_specification_s(self):
+        """Spec Section 4.5 "replaces FORMAT_CRITERIA entirely" for the three."""
+        assert "greeting boilerplate" in ef.FORMATS["email"]["criteria"]
+        assert "could be sent to anyone" in ef.FORMATS["linkedin_message"]["criteria"]
+        assert "standalone leave-behind" in ef.FORMATS["one_pager"]["criteria"]
 
 
 class TestStrategyChatStructure:
@@ -198,19 +229,38 @@ class TestNoTrendWords:
 
 
 class TestContentStudioFindsTheBuyingCommittee:
-    """Sahaj's screenshot: "Unknown persona_id 'role_chief_technology_officer_cto'
-    for this account". Suggesting angles and generating share one lookup, so the
-    buying-committee roles must resolve there or neither step works for them."""
+    """Suggesting angles and generating share one persona lookup, so a persona
+    the picker offers must resolve there or neither step works for it.
 
-    def test_a_client_role_id_resolves(self, monkeypatch):
-        role = {"target_persona": "Chief Technology Officer (CTO)", "department": "IT",
-                "buying_committee_angle": "", "contact_name": "", "actual_job_title": "",
-                "work_email": "", "phone_number": "", "linkedin_url": "",
-                "contact_status": "", "source": "", "matched_alias": "", "is_filled": False}
-        monkeypatch.setattr(cstudio.personas, "read_roles", lambda _aid: [role])
+    The lookup narrowed on 30 Sep: the client's `company_personas` carries
+    thirty-two target roles per account and the build specification locks the
+    programme to eight of them. A role outside the eight no longer resolves,
+    and that is the scope lock working rather than the bug this class was
+    written for."""
+
+    def _roles(self, *titles):
+        return [{"target_persona": t, "department": "IT",
+                 "buying_committee_angle": "", "contact_name": "",
+                 "actual_job_title": "", "work_email": "", "phone_number": "",
+                 "linkedin_url": "", "contact_status": "", "source": "",
+                 "matched_alias": "", "is_filled": False} for t in titles]
+
+    def test_a_persona_in_scope_resolves(self, monkeypatch):
+        monkeypatch.setattr(cstudio.personas, "read_roles",
+                            lambda _aid: self._roles("IT Security Manager"))
         monkeypatch.setattr(cstudio, "_derive_named_personas", lambda _db, _aid: [])
-        found = cstudio._persona_by_id(None, "acct", [], "role_chief_technology_officer_cto")
-        assert found is not None and found["id"] == "role_chief_technology_officer_cto"
+        found = cstudio._persona_by_id(None, "acct", [], "it-security-manager")
+        assert found is not None
+        assert found["id"] == "it-security-manager"
+        assert found["kind"] == "client_role"
+
+    def test_a_role_outside_the_eight_is_not_offered(self, monkeypatch):
+        """The CTO is one of the twenty-four roles the file carries that this
+        programme does not write to."""
+        monkeypatch.setattr(cstudio.personas, "read_roles",
+                            lambda _aid: self._roles("Chief Technology Officer (CTO)"))
+        monkeypatch.setattr(cstudio, "_derive_named_personas", lambda _db, _aid: [])
+        assert cstudio._derive_client_personas("acct") == []
 
 
 class TestTheBusinessUnitReads:

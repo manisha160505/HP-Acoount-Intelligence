@@ -46,6 +46,7 @@ from app.services.extractors.solution_narrative_opportunity_map import (
 from app.services.extractors.stakeholder_map import extract_stakeholder_map
 from app.services.extractors.strategy_chat import extract_strategy_chat
 from app.services.extractors.tech_landscape import extract_tech_landscape
+from app.services.hp import buyer_personas as evaluator_personas
 from app.services.retrieval import (
     ingest as retrieval_ingest,
     query as retrieval_query,
@@ -840,6 +841,9 @@ def message_evaluator_options(
             "influence_type": p.get("influence_type"),
             "is_named_person": bool(p.get("is_named_person")),
             "evidence_note": p.get("evidence_note"),
+            # Spec Section 4.3's card - the whole of Step B. Identical on all
+            # 220 accounts; only `is_named_person` above varies.
+            "card": p.get("card"),
             "sources": p.get("sources") or {},
         })
 
@@ -878,6 +882,8 @@ def message_evaluator_options(
         "modes": list(evaluator_evaluate.MODES),
         "personas": personas,
         "persona_source": data.get("persona_source"),
+        "persona_card_source": data.get("persona_card_source"),
+        "persona_pack_version": data.get("persona_pack_version"),
         "company_name": exec_card.get("company_name") or data.get("company_name"),
         "account_context": {
             "business_context": data.get("business_context"),
@@ -887,8 +893,11 @@ def message_evaluator_options(
                          for t in triggers][:5],
         },
         "context_sources": {
-            "pain_points": "Account evidence (stakeholder talking points)",
-            "opening_angle": "Account evidence (stakeholder talking points)",
+            # The persona card is a persona reference, not account intelligence,
+            # and the footer has to say so - see spec Section 4.3. The account
+            # still reaches the evaluation through everything below this line;
+            # it is only the card that is static.
+            "persona_card": evaluator_personas.PERSONA_CARD_SOURCE_LABEL,
             "hp_opportunity": ("HP deck facts approved by the guardrails for this "
                                "account" if hp_opportunity else "Not available"),
             "competitive_vendors": ("Detected in this account's technology data"

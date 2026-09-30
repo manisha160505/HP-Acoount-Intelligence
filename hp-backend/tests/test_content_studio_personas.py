@@ -28,19 +28,23 @@ NAMED = {
     "influence_type": "Decision Maker",
     "buying_committee_persona": "IT Decision Maker",
 }
+# The client's eight, keyed by the specification's persona_id. A client_role
+# persona now carries one of those ids, so the evidence block is built from
+# the hardcoded pack rather than from whatever the export happened to say.
 CLIENT_FILLED = {
-    "id": "role_cto", "kind": "client_role", "source": "company_personas",
-    "title": "Chief Technology Officer (CTO)", "subtitle": "Adam Neal",
-    "department": "Executive / C-Suite",
+    "id": "vp-it", "kind": "client_role", "source": "company_personas",
+    "title": "VP / Head of Information Technology", "subtitle": "Adam Neal",
+    "department": "IT",
     "buying_committee_persona": "Economic Buyer",
-    "full_name": "Adam Neal", "actual_job_title": "Chief Technology Officer",
+    "full_name": "Adam Neal", "actual_job_title": "Head of IT",
     "contact_status": "Work email only; phone missing", "is_filled": True,
 }
 CLIENT_EMPTY = {
-    "id": "role_head_of_procurement", "kind": "client_role",
+    "id": "head-procurement", "kind": "client_role",
     "source": "company_personas", "title": "Head of Procurement",
     "subtitle": "Procurement", "department": "Procurement",
-    "buying_committee_persona": "Economic Buyer", "full_name": None,
+    "buying_committee_persona": "Gatekeeper - Procurement & Legal",
+    "full_name": None,
     "contact_status": "No suitable distinct candidate found", "is_filled": False,
 }
 ROLE_PROXY = {
@@ -108,24 +112,39 @@ class TestTheClientRoleBlock:
     def test_a_filled_role_carries_the_contact(self):
         block = _block(CLIENT_FILLED)
         assert "Name: Adam Neal" in block
-        assert "Actual job title: Chief Technology Officer" in block
+        assert "Actual job title: Head of IT" in block
         assert "Buying-committee angle: Economic Buyer" in block
 
     def test_an_unfilled_role_carries_no_name(self):
+        """[P6] and [P7] are omitted entirely, not emitted empty. The
+        specification is explicit that an empty slot invites the model to
+        fill it."""
         block = _block(CLIENT_EMPTY)
         assert "Adam Neal" not in block
         assert "Name:" not in block
-        assert "no contact identified for this role" in block
+        assert "Actual job title" not in block
 
-    def test_the_gap_reason_survives_into_the_prompt(self):
-        """The client said why no one was found. That is the evidence."""
-        assert "No suitable distinct candidate found" in _block(CLIENT_EMPTY)
+    def test_the_unfilled_state_is_carried_by_the_rule_not_the_evidence(self):
+        """Spec Section 3.3 closes slot 2 at [P1]-[P5] plus the contact.
+
+        The gap reason used to sit in the evidence block. It moved: the fact
+        that nobody holds this role is a constraint on what may be written,
+        not a fact about the account, so it belongs in the persona RULE where
+        the model is bound by it - "Name nobody. Greet nobody by name."
+        """
+        assert "No suitable distinct candidate found" not in _block(CLIENT_EMPTY)
+        rule = cs._persona_rule("client_role", "ACME Corp",
+                                cs.CONTENT_TYPE_CONTRACTS["email"], False)
+        assert "NO PERSON HAS BEEN IDENTIFIED" in rule.upper()
+        assert "may not name anyone" in rule.lower()
 
     def test_each_field_is_its_own_citable_line(self):
         """Flattened into one Description blob, department and angle could not
         be cited under rule 7 and the validator could not see the name."""
         lines = _block(CLIENT_FILLED).splitlines()
-        assert len(lines) == 5
+        # [P1] role, [P2] department, [P3] angle, [P4] remit, [P5] metrics,
+        # then [P6] name and [P7] actual title because this one is filled.
+        assert len(lines) == 7
         assert all(line.startswith("[P") for line in lines)
 
 

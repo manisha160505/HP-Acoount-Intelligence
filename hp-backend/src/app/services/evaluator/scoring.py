@@ -12,11 +12,19 @@ Two rules are load-bearing and easy to get wrong:
     to the score, so a mismatch here would be visible and wrong.
 
   * **Every dimension a formula references must be valid before any composite
-    is published.** Five for Awareness, Engagement and Consideration; six for
-    Conversion. A missing, non-numeric or out-of-range dimension invalidates the
-    whole composite - there is no partial-weight fallback and no renormalising
-    over whichever dimensions happened to arrive, because either of those would
-    quietly produce a plausible number from incomplete input.
+    is published.** There is no partial-weight fallback and no renormalising
+    over whichever dimensions happened to arrive, because either would quietly
+    produce a plausible number from incomplete input. What the 30 Sep build
+    specification adds (T21) is a stated, visible substitute: a dimension still
+    missing after the correction round trip is padded to 50, the pad is
+    recorded on the evaluation, and the seller is told which number was not the
+    model's. A recorded pad is not a renormalisation - the formula is
+    unchanged - and it is the difference between an evaluation that says so and
+    one that looks complete.
+
+All seven dimensions are always scored and always shown. The weights decide
+what reaches the composite; a dimension weighted 0 for this objective is still
+a number the seller sees, which is the point of showing all seven.
 """
 
 RELEVANCE = "relevance"
@@ -77,6 +85,16 @@ OBJECTIVES = ["awareness", "engagement", "consideration", "conversion", "advocac
 
 OBJECTIVE_LABELS = {k: k.capitalize() for k in OBJECTIVES}
 
+# The names the build specification uses for the same seven (Section 4.5 and
+# the 4.10 contract). Two differ from our display labels, and the prompt is
+# written in the specification's spellings so an HP reader comparing the two
+# documents sees the same words. `_match_dimension` reads all of them back.
+SPEC_DIMENSION_NAMES = {
+    RELEVANCE: "Relevance", IMPACT: "Impact", BRAND_RECALL: "Brand_Recall",
+    CLARITY: "Clarity", CREATIVITY: "Creativity", EMOTIONAL: "Emotional",
+    NEXT_STEP: "CTA",
+}
+
 DIMENSION_LABELS = {
     RELEVANCE: "Relevance", IMPACT: "Impact", BRAND_RECALL: "Brand Recall",
     CLARITY: "Clarity", CREATIVITY: "Creativity",
@@ -89,6 +107,28 @@ assert set(OBJECTIVES) == set(OBJECTIVE_FORMULAS) == set(FORMULA_SOURCE)
 
 SCORE_MIN = 0
 SCORE_MAX = 100
+
+# Spec Section 4.5. Six bands, read from the top down; the previous table had
+# five and started "Strong" at 80, so a 76 read as "Good" where the
+# specification calls it Strong.
+SCORE_BANDS = (
+    (90, "Exceptional"),
+    (75, "Strong"),
+    (60, "Good"),
+    (40, "Average"),
+    (20, "Weak"),
+    (0, "Poor"),
+)
+
+# T21: what a dimension the model never returned is worth. Not 0 - that would
+# read as a judgement the model did not make - and not the mean of the others,
+# which would be an invention dressed as arithmetic. 50 is the midpoint of the
+# scale, and it is recorded so nobody mistakes it for a score.
+PAD_SCORE = 50.0
+
+# The one problem `pad_missing` may substitute for. Named rather than spelled
+# twice, because the pad is keyed off this exact string.
+MISSING_DETAIL = "missing"
 
 
 class ScoringError(Exception):
@@ -129,8 +169,115 @@ def formula_expression(objective: str) -> str:
         for dim, weight in weights.items())
 
 
-def required_dimensions(objective: str) -> list:
+def required_dimensions(_objective: str = "") -> list:
+    """All seven. Spec Section 4.5: "Seven. Always."
+
+    This used to return the weighted dimensions for the objective, which meant
+    Awareness never asked for Emotional or CTA and the seller saw five bars.
+    The objective still decides the composite - see `weighted_dimensions` - but
+    it no longer decides what gets scored.
+
+    The argument is kept and ignored so every existing call site still reads
+    correctly; the answer does not depend on it.
+    """
+    return list(ALL_DIMENSIONS)
+
+
+def weighted_dimensions(objective: str) -> list:
+    """The dimensions this objective's formula actually multiplies.
+
+    The rest are scored and displayed at weight 0. Use this only where the
+    composite is concerned - never to decide what to ask the model for.
+    """
     return sorted(formula_for(objective))
+
+
+def weight_of(objective: str, dimension: str) -> float:
+    """This dimension's weight, 0.0 when the formula does not reference it."""
+    return formula_for(objective).get(dimension, 0.0)
+
+
+def pad_missing(valid: dict, problems: list) -> tuple[dict, list, list]:
+    """T21: pad a dimension the model never gave us, and say which.
+
+    Called after the correction round trip, not instead of it. Returns
+    (dimensions, padded, remaining_problems) - `padded` names every dimension
+    that now holds `PAD_SCORE` rather than a score, and `remaining_problems`
+    keeps anything padding cannot fix, so a caller can still refuse to publish.
+    """
+    dimensions = dict(valid or {})
+    padded, remaining = [], []
+    for problem in (problems or []):
+        # `validate_dimensions` formats every problem as "<dimension>: <detail>",
+        # and only one detail means the model did not answer: "missing". A
+        # dimension it returned as "excellent", or as 400, is a different
+        # failure and stays a problem - padding it would replace a wrong answer
+        # with a plausible one, which is the thing this module exists to refuse.
+        dimension, _, detail = str(problem).partition(": ")
+        if (detail == MISSING_DETAIL and dimension in ALL_DIMENSIONS
+                and dimension not in dimensions):
+            dimensions[dimension] = PAD_SCORE
+            padded.append(dimension)
+        else:
+            remaining.append(problem)
+    return dimensions, padded, remaining
+
+
+def split_dimension_payload(raw):
+    """(scores, rationales) from either shape the model may return.
+
+    Spec Section 4.10 asks for an array - `[{"dimension": "Creativity",
+    "score": 82, "rationale": "..."}, ...]` - and the build has always asked
+    for an object keyed by dimension. Both are read here rather than in the
+    caller, so the rest of the pipeline sees one shape and an evaluation stored
+    under the older contract still loads.
+
+    Dimension names are matched case-insensitively and against the display
+    label as well as the key, because the specification writes them as
+    "Brand_Recall" and "CTA" where this module's keys are `brand_recall` and
+    `next_step_strength`.
+    """
+    scores, rationales = {}, {}
+    if isinstance(raw, dict):
+        for key, value in raw.items():
+            dimension = _match_dimension(key)
+            if dimension is None:
+                continue
+            if isinstance(value, dict):
+                # {"clarity": {"score": 70, "rationale": "..."}}
+                scores[dimension] = value.get("score")
+                if str(value.get("rationale") or "").strip():
+                    rationales[dimension] = str(value["rationale"]).strip()
+            else:
+                scores[dimension] = value
+        return scores, rationales
+
+    for entry in (raw or []):
+        if not isinstance(entry, dict):
+            continue
+        dimension = _match_dimension(entry.get("dimension") or entry.get("name"))
+        if dimension is None:
+            # "Extra/unrecognised dimension: drop it" - Section 4.10.
+            continue
+        scores[dimension] = entry.get("score")
+        if str(entry.get("rationale") or "").strip():
+            rationales[dimension] = str(entry["rationale"]).strip()
+    return scores, rationales
+
+
+_DIMENSION_ALIASES = {}
+for _dim in ALL_DIMENSIONS:
+    _DIMENSION_ALIASES[_dim.lower()] = _dim
+    _DIMENSION_ALIASES[DIMENSION_LABELS[_dim].lower()] = _dim
+    _DIMENSION_ALIASES[DIMENSION_LABELS[_dim].replace(" ", "_").lower()] = _dim
+# The specification's own spellings for the two that differ from ours.
+_DIMENSION_ALIASES["cta"] = NEXT_STEP
+_DIMENSION_ALIASES["call to action"] = NEXT_STEP
+_DIMENSION_ALIASES["emotional"] = EMOTIONAL
+
+
+def _match_dimension(name):
+    return _DIMENSION_ALIASES.get(str(name or "").strip().lower())
 
 
 def validate_dimensions(raw: dict, objective: str):
@@ -144,7 +291,7 @@ def validate_dimensions(raw: dict, objective: str):
 
     for dimension in needed:
         if dimension not in (raw or {}):
-            problems.append("%s: missing" % dimension)
+            problems.append("%s: %s" % (dimension, MISSING_DETAIL))
             continue
         value = (raw or {})[dimension]
         if isinstance(value, bool) or not isinstance(value, (int, float)):
@@ -180,15 +327,10 @@ def composite(dimensions: dict, objective: str) -> float:
 
 
 def score_band(value) -> str:
-    """The qualitative band shown under the number."""
+    """The qualitative band shown under the number (spec Section 4.5)."""
     if value is None:
         return "Unavailable"
-    if value >= 80:
-        return "Strong"
-    if value >= 60:
-        return "Good"
-    if value >= 40:
-        return "Fair"
-    if value >= 20:
-        return "Weak"
+    for floor, label in SCORE_BANDS:
+        if value >= floor:
+            return label
     return "Poor"

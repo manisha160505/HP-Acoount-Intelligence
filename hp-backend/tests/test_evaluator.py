@@ -182,10 +182,27 @@ def test_each_objective_uses_its_own_formula():
     assert S.composite(dims, "awareness") == 0.0
 
 
-def test_conversion_requires_six_dimensions_others_five():
+def test_seven_dimensions_are_scored_whatever_the_objective():
+    """Spec Section 4.5: "Seven. Always."
+
+    This test used to assert the opposite - five dimensions for Awareness, six
+    for Conversion - because `required_dimensions` returned the WEIGHTED ones
+    and the two ideas were the same function. They are now separate: the
+    objective still decides the composite, and no longer decides what the
+    seller sees a score for.
+    """
+    for objective in S.OBJECTIVES:
+        assert S.required_dimensions(objective) == S.ALL_DIMENSIONS
+        assert len(S.required_dimensions(objective)) == 7
+
+
+def test_the_objective_still_decides_what_carries_weight():
     for objective in ("awareness", "engagement", "consideration"):
-        assert len(S.required_dimensions(objective)) == 5
-    assert len(S.required_dimensions("conversion")) == 6
+        assert len(S.weighted_dimensions(objective)) == 5
+    assert len(S.weighted_dimensions("conversion")) == 6
+    # A dimension outside the formula is scored and weighs nothing.
+    assert S.weight_of("awareness", S.NEXT_STEP) == 0.0
+    assert S.weight_of("awareness", S.RELEVANCE) == 0.30
 
 
 def test_unknown_objective_is_refused():
@@ -370,7 +387,7 @@ def test_lite_chunk_limit_is_enforced_and_phrases_are_ordered():
     phrases, dropped = verify.verify_phrases(raw, src, max_chunks=5)
     assert len(phrases) == 5
     assert [p["start"] for p in phrases] == sorted(p["start"] for p in phrases)
-    assert any("LITE chunk limit" in d["reason"] for d in dropped)
+    assert any("over the chunk limit" in d["reason"] for d in dropped)
 
 
 # ---------------------------------------------------------------------------

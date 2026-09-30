@@ -10,6 +10,7 @@ from app.services.extractors.datasets import (
     read_dataset_records,
     requires_local_datasets,
 )
+from app.services.hp import buyer_personas as bp
 from app.services.regen import store as widget_store
 
 
@@ -104,29 +105,51 @@ def _personas_from_contacts(db, account_id: str, contacts_records: list) -> list
 
 
 def _personas_from_client_roles(account_id: str) -> list:
-    """Role personas from the client's own target list. A role, never a name.
+    """The client's eight target roles, each carrying its hardcoded card.
 
-    This sits between the two paths that already existed. Source A contacts are
-    the best answer and hiring postings the weakest; the client naming the role
-    they want reached - and, for two thirds of them, who holds it - is better
-    than inferring a role from how many times a job title was advertised.
+    Spec Sections 4.2 and 4.3. The eight are eight of the thirty-two roles
+    `company_personas` already carries on all 220 accounts, so this narrows the
+    client's own list; `buyer_personas` owns both the matching and the card.
 
-    A filled role carries the person's name and title because the client
-    supplied them. An unfilled one carries neither, and says so.
+    Exactly one thing here varies by account, because it changes what the
+    evaluation may say: whether a named contact holds the role. Everything on
+    the card itself is identical everywhere, which is T19.
+
+    `pain_points` stays empty and the card's pain points stay on the card. They
+    are not the same thing: the archetype's `pain_points` field means "pain
+    points this ACCOUNT's evidence shows", which is what the options endpoint
+    labels "Account evidence (stakeholder talking points)". Filling it from a
+    hardcoded pack would make that label a lie.
     """
-    out = []
+    by_persona = {}
     for role in personas.read_roles(account_id):
+        persona_id = bp.match_role(role["target_persona"])
+        if persona_id and persona_id not in by_persona:
+            by_persona[persona_id] = role
+
+    out = []
+    for persona_id in bp.PERSONA_IDS:
+        role = by_persona.get(persona_id)
+        if role is None:
+            continue
+        # The LITE card. The behavioural state is mode-dependent and the widget
+        # is not: `evaluate_message` asks the pack again with deep=True.
+        card = bp.evaluator_card(persona_id)
         filled = role["is_filled"]
         out.append({
-            "persona_id": personas.role_id(role["target_persona"]),
+            "persona_id": persona_id,
             "is_named_person": filled,
             "name": role["contact_name"] or None,
-            "title": role["actual_job_title"] or role["target_persona"],
+            # The pack's title, not the export's. A reworded title in a later
+            # delivery must not change what the card says.
+            "title": card["title"],
             "target_persona": role["target_persona"],
-            "department": role["department"] or None,
+            "department": card["department"],
             "normalized_department": None,
             "seniority_band": None,
-            "influence_type": role["buying_committee_angle"] or None,
+            # What the UI calls influence is the committee angle here, and the
+            # angle is the pack's: Section 2.2 assigns these eight explicitly.
+            "influence_type": card["committee_angle"],
             "hp_relevance_band": None,
             "opening_angle": None,
             "pain_points": [],
@@ -137,12 +160,12 @@ def _personas_from_client_roles(account_id: str) -> list:
                    if filled else
                    "no contact identified for this role (%s)"
                    % (role["contact_status"] or "none found"))),
+            "card": card,
             "sources": {
-                "title": personas.DATASET_KEY,
+                "title": bp.PERSONA_CARD_SOURCE_LABEL,
                 "name": personas.DATASET_KEY if filled else "not_available",
-                "department": personas.DATASET_KEY if role["department"] else "not_available",
-                "influence_type": (personas.DATASET_KEY
-                                   if role["buying_committee_angle"] else "not_available"),
+                "department": bp.PERSONA_CARD_SOURCE_LABEL,
+                "influence_type": bp.PERSONA_CARD_SOURCE_LABEL,
                 "seniority_band": "not_available",
                 "opening_angle": "not_available",
                 "pain_points": "not_available",
@@ -227,36 +250,28 @@ def extract_message_evaluator(account_id: str) -> list[dict]:
         if f_name:
             company_name = f_name
 
-    # 1. Personas - every one of them from this account's own data.
+    # 1. Personas - the client's eight, and only the eight (spec 4.2).
     #
-    # This used to start from five hardcoded "base personas" that named two real
-    # Astra contacts ("Stephen Dharma", "Mochamad (ivan) Triawan") and attached
-    # departments to them - IT Procurement, Technology Development, IT
-    # Operations, Risk Advisory, Data Enablement - that appear nowhere in the
-    # account. Real people, invented roles, and Astra's names would have been
-    # offered on every other account too.
+    # This was a three-tier fallback: named contacts from the Stakeholder Map,
+    # then the client's target roles, then roles inferred from open postings.
+    # Before that it was five hardcoded "base personas" naming two real Astra
+    # contacts, which would have been offered on every other account too.
     #
-    # The 11-Features sourcing reference defines the correct behaviour:
-    # "persona defaults to Source A (Stakeholder Map), falls back to the
-    # Source B hiring field when no named contact exists". So there are two
-    # paths and neither invents a person.
-    persona_list = _personas_from_contacts(db, account_id, contacts_records)
-    persona_source = "prospect_contacts"
+    # The eight replace the chain rather than sitting at the top of it. They
+    # are the only personas Section 2.3's eligibility matrix has a row for, so
+    # a stimulus scored against anything else could not be judged against the
+    # rules the rest of this build enforces.
+    #
+    # `_personas_from_contacts` and `_personas_from_hiring` stay defined and
+    # unscheduled. If HP asks for a named-contact audience back, it is a line
+    # here rather than a rewrite.
+    persona_list = _personas_from_client_roles(account_id)
+    persona_source = personas.DATASET_KEY
+    filled = sum(1 for p in persona_list if p["is_named_person"])
 
-    if not persona_list:
-        # The client's target roles before the hiring proxy: a role they asked
-        # for beats a role inferred from how often a title was advertised.
-        persona_list = _personas_from_client_roles(account_id)
-        persona_source = personas.DATASET_KEY
-
-    if not persona_list:
-        # No named contact and no target list - build ROLE personas from open
-        # postings. A role, never a name.
-        persona_list = _personas_from_hiring(
-            _read_dataset_records(account_id, "job_openings"))
-        persona_source = "job_openings"
-
-    pipeline.step("personas", "%d from %s" % (len(persona_list), persona_source))
+    pipeline.step("personas", "%d from %s" % (len(persona_list), persona_source),
+                  filled=filled, unfilled=len(persona_list) - filled,
+                  card_source=bp.PERSONA_CARD_SOURCE)
     persona_archetypes = persona_list
 
     # 2. Business Context
@@ -303,6 +318,10 @@ def extract_message_evaluator(account_id: str) -> list[dict]:
             "persona_archetypes": persona_archetypes,
             "persona_source": persona_source,
             "persona_count": len(persona_archetypes),
+            # Section 4.3's flag, so a later switch to account-derived card
+            # fields is one visible line rather than an inference.
+            "persona_card_source": bp.PERSONA_CARD_SOURCE,
+            "persona_pack_version": bp.PERSONA_PACK_VERSION,
             "business_context": business_context
         },
         "source_datasets": ["prospect_contacts", "job_openings", "firmographics"],
