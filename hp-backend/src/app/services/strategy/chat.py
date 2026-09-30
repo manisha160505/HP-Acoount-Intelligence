@@ -59,7 +59,16 @@ logger = logging.getLogger(__name__)
 # 4: the ANSWER is as long as the question needs - a block per part when the
 #    question asks for several things - instead of two or three sentences
 #    whatever was asked (30 Sep: "the answer part is very short").
-PROMPT_VERSION = 4
+# 5: v4 still prescribed a length per question type ("three or four sentences"
+#    for a single-thing question), which is how "who is the strongest entry
+#    point" came back at three sentences and 2% of the output budget. The
+#    length is now the model's judgement, with the three shapes offered rather
+#    than assigned, and FACTS / RECOMMENDED NEXT STEPS are dropped entirely
+#    when the question does not call for them - "who is the CEO" is answered by
+#    a name, not by a five-point evidence list and three things to do about it.
+#    Also: read the whole account, not the one obvious section. The answer that
+#    prompted this cited 2 sections out of ~23.
+PROMPT_VERSION = 5
 
 MAX_HISTORY_TURNS = 12
 MAX_VALIDATION_ATTEMPTS = 3
@@ -190,14 +199,25 @@ HP RULES:
 IF THE EVIDENCE DOES NOT ANSWER THE QUESTION: say plainly that the platform does not hold it, and
 name the closest thing it does hold. That is a correct answer, not a failure.
 
-FORMAT - always these sections, in this order, and nothing before the first one:
+FORMAT - these sections, in this order, and nothing before the first one. ANSWER: is always there.
+FACTS: and RECOMMENDED NEXT STEPS: are there when the question calls for them, and left out entirely
+when it does not.
 ANSWER:
-  Answer the whole question, at the length the question needs. Lead with the answer itself, not
-  with background.
-  - Asked one thing ("who is the strongest entry point"), write three or four sentences of prose.
-  - Asked for several things - a risk and a counter-argument per incumbent, a comparison, one
-    recommendation per business unit - give each one its own short block: a SHORT ALL-CAPS LABEL on
-    its own line, then two or three sentences under it. Cover every part that was asked about.
+  Answer the question that was actually asked, at whatever length it deserves. There is no target
+  length, no minimum and no house style. Judge it from the question:
+  - A question with one answer - "who is the CEO", "what was revenue last year", "do they run
+    Windows" - gets the answer and nothing else. One sentence, maybe two. Do not stretch it.
+  - A question asking why, how, which, or what to do gets as much as it takes to be genuinely
+    useful, and no more. Usually a paragraph.
+  - A question asking about several things - a risk and a counter for each incumbent, a comparison,
+    one recommendation per business unit - gets a short block for each, opened by a SHORT ALL-CAPS
+    LABEL on its own line. Cover every part that was asked about.
+  Pick the shape that fits. A page in answer to "who is the CEO" is as wrong as two sentences in
+  answer to "how should I approach this account".
+  DRAW ON THE WHOLE ACCOUNT, not just the obvious section. Who to approach is also about what they
+  care about, what they already run and what they will push back on; the evidence for that is
+  spread across the sections below, and an answer that reads one of them is a thinner answer than
+  the data supports.
   Every line here that says anything about the account ends with its tag - the first line, the
   sentences, and a label that names vendors. A bare label like COMPETITIVE RISKS names nothing and
   needs none.
@@ -206,8 +226,12 @@ FACTS:
   most five for a single-topic answer; up to eight when the answer covers several things, so each
   part shows the evidence it rests on. Only the facts the answer rests on; not an inventory of
   everything known.
+  LEAVE THIS SECTION OUT when the answer already said its facts and a list would only repeat them.
+  A one-line answer does not need a FACTS block under it.
 RECOMMENDED NEXT STEPS:
   A numbered list of two or three concrete actions for the seller.
+  LEAVE THIS SECTION OUT when the question did not ask what to do. "What was revenue last year" is
+  answered by the figure, not by three things to do about it.
 If the evidence does not answer the question, write ANSWER: saying so and naming the closest thing
 the platform holds, and leave out the other two sections.
 Plain text: no markdown, no asterisks, no hashes. Do not pad: no background the question did not

@@ -1547,50 +1547,6 @@ export default function UserDashboardPage() {
                             A period-on-period move is shown only where the earlier period was itself reported.
                           </p>
                         )}
-
-                        {/* Filings on record: filings.csv + PredictLeads
-                            sec_filings, the client's definition, inside the
-                            12-month window. A list of documents with their
-                            links - the figures above are what was read from
-                            them. */}
-                        {(() => {
-                          const fo: any = metricsData?.filings_on_record;
-                          const list: any[] = fo?.filings || [];
-                          // Only when there is something to list (Sahaj 1.c).
-                          if (!fo || list.length === 0) return null;
-                          const left = fo.total_on_record - fo.in_window;
-                          return (
-                            <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-4 space-y-2">
-                              <div className="flex items-center justify-between gap-2">
-                                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                                  Filings on record
-                                </span>
-                                <span className="text-[10px] text-slate-400">
-                                  {fo.in_window} in the last 12 months{left > 0 ? ` · ${left} older, undated or without a link` : ''}
-                                </span>
-                              </div>
-                              {(
-                                <ul className="divide-y divide-slate-100">
-                                  {list.slice(0, 12).map((f: any, i: number) => (
-                                    <li key={f.url || i} className="py-1.5 flex items-start justify-between gap-3 text-xs">
-                                      <a href={f.url} target="_blank" rel="noopener noreferrer"
-                                         className="text-slate-700 hover:text-hp-navy hover:underline break-words min-w-0">
-                                        {f.title || f.document_type || 'Filing'}
-                                        {f.reporting_period ? <span className="text-slate-400"> · {f.reporting_period}</span> : null}
-                                      </a>
-                                      <span className="text-[10px] text-slate-400 whitespace-nowrap flex-shrink-0">
-                                        {f.filed_on} · {f.source === 'filings.csv' ? 'Filings list' : 'PredictLeads'}
-                                      </span>
-                                    </li>
-                                  ))}
-                                </ul>
-                              )}
-                              {list.length > 12 && (
-                                <p className="text-[10px] text-slate-400">and {list.length - 12} more</p>
-                              )}
-                            </div>
-                          );
-                        })()}
                       </div>
 
                       {/* Section 4: URGENCY SCORE

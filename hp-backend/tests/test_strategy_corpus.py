@@ -627,14 +627,58 @@ def test_two_list_items_still_need_a_tag_each():
     assert "without citing" in reason
 
 
-def test_the_prompt_asks_for_a_scaled_answer_not_a_fixed_count():
+def test_the_prompt_prescribes_no_length_at_all():
+    """The length is the model's judgement, not a rule in the prompt.
+
+    Two versions in a row got this wrong in the same way: v3 said "two or three
+    sentences" for every question, and v4 replaced it with "three or four
+    sentences" for a single-thing question - which is how "who is the strongest
+    entry point" came back at three sentences and 2% of the output budget. The
+    fix is not a bigger number, it is no number.
+    """
     from app.services.strategy import chat
 
-    assert "Two or three sentences" not in chat.ANSWER_SYSTEM
-    assert "Keep it tight" not in chat.ANSWER_SYSTEM
-    assert "at the length the question needs" in chat.ANSWER_SYSTEM
+    for prescription in ("Two or three sentences", "three or four sentences",
+                         "Keep it tight"):
+        assert prescription not in chat.ANSWER_SYSTEM, prescription
+    assert "at whatever length it deserves" in chat.ANSWER_SYSTEM
+    assert "no minimum and no house style" in chat.ANSWER_SYSTEM
     assert "Do not pad" in chat.ANSWER_SYSTEM
-    assert chat.PROMPT_VERSION >= 4
+    assert chat.PROMPT_VERSION >= 5
+
+
+def test_a_short_question_may_drop_the_other_two_sections():
+    """"Who is the CEO" is answered by a name, not by an evidence list and
+    three things to do about it. Both sections are explicitly optional."""
+    from app.services.strategy import chat
+
+    assert "LEAVE THIS SECTION OUT" in chat.ANSWER_SYSTEM
+    # And the order the format is declared in still holds, which is what
+    # test_sahaj_feedback_remaining pins.
+    assert (chat.ANSWER_SYSTEM.index("ANSWER:")
+            < chat.ANSWER_SYSTEM.index("FACTS:")
+            < chat.ANSWER_SYSTEM.index("RECOMMENDED NEXT STEPS:"))
+
+
+def test_a_one_line_answer_with_no_other_sections_validates():
+    """The shortest legal reply: the answer, its tag, nothing else.
+
+    Worth pinning because the validator finds the fact region by looking for
+    the RECOMMENDED NEXT STEPS header. With no such header the whole body is
+    the fact region, which is correct - but it is the path a short answer now
+    takes on every question, so it must not be the untested one.
+    """
+    ok, reason, cited, _ = _advisor(
+        "ANSWER:\nIrvan Nr is Chief Operating Officer [stakeholder_contacts_grid].")
+    assert ok is True, reason
+    assert cited == ["stakeholder_contacts_grid"]
+
+
+def test_the_prompt_asks_it_to_read_the_whole_account():
+    """The answer that prompted v5 cited 2 sections out of ~23."""
+    from app.services.strategy import chat
+
+    assert "DRAW ON THE WHOLE ACCOUNT" in chat.ANSWER_SYSTEM
 
 
 def test_the_answer_prompt_renders_through_str_format():
