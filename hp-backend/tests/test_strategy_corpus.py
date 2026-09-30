@@ -504,3 +504,164 @@ def test_a_glue_sentence_asserts_nothing():
     assert _asserts_facts("Irvan Nr owns the refresh") is True
     assert _asserts_facts("Understood.") is False
     assert _asserts_facts("The platform does not hold that.") is False
+
+
+# ---------------------------------------------------------------------------
+# An ANSWER as long as the question needs
+#
+# The prompt used to cap the ANSWER at "two or three sentences" whatever was
+# asked, so a question asking for competitive risks AND a counter-argument per
+# incumbent got five vendors named in two sentences and the counter-arguments
+# pushed into RECOMMENDED NEXT STEPS. The cap is gone; the answer now uses a
+# short ALL-CAPS labelled block per part.
+#
+# That shape walks straight into the per-sentence citation gate, which is why
+# these tests exist. The rule does NOT relax: every line that says anything
+# about the account still carries its own tag, including the opening line and
+# a label that names vendors. Only a bare label - "ENDPOINT SECURITY" - is
+# exempt, because it names nothing.
+# ---------------------------------------------------------------------------
+
+STRUCTURED_PAYLOAD = "\n\n".join([
+    "===== technographic_map (feature: tech_landscape) =====",
+    '{"workstations":["NVIDIA CUDA / GPUs","AutoCAD / Autodesk"],'
+    '"security":["Cloudflare","Symantec / Kaspersky"]}',
+    "===== opportunity_narrative_plays (feature: opportunity_map) =====",
+    '{"play":"Z by HP certified for AutoCAD, Cadence and Dassault SOLIDWORKS"}',
+])
+STRUCTURED_KEYS = ["technographic_map", "opportunity_narrative_plays"]
+
+STRUCTURED_ANSWER = """ANSWER:
+Advantest runs two vendor estates HP would have to work against, and each
+needs a different line [technographic_map].
+
+WORKSTATIONS - NVIDIA CUDA / GPUs, AutoCAD / Autodesk [technographic_map]
+The design and simulation stack is the incumbent, not a laptop brand
+[technographic_map]. Z by HP is certified for AutoCAD, Cadence and Dassault
+SOLIDWORKS [opportunity_narrative_plays].
+
+ENDPOINT SECURITY
+Cloudflare and Symantec / Kaspersky are both detected [technographic_map].
+
+FACTS:
+1. NVIDIA CUDA / GPUs and AutoCAD / Autodesk are detected [technographic_map].
+2. Z by HP is certified for AutoCAD [opportunity_narrative_plays].
+
+RECOMMENDED NEXT STEPS:
+1. Open on the design stack rather than on a laptop refresh.
+2. Position Wolf below the existing edge and endpoint tools.
+"""
+
+
+def _structured(answer):
+    from app.services.strategy.chat import _validate
+
+    return _validate(answer, STRUCTURED_PAYLOAD, STRUCTURED_KEYS)
+
+
+def test_a_multi_block_answer_publishes():
+    """The shape the new prompt asks for, through the real validator.
+
+    If this fails, the prompt is asking the model for an answer the gate will
+    reject three times and then refuse - which reads to a seller as "not in
+    the evidence" rather than as a format problem.
+    """
+    ok, reason, cited, _ = _structured(STRUCTURED_ANSWER)
+    assert ok is True, reason
+    assert set(cited) == {"technographic_map", "opportunity_narrative_plays"}
+
+
+def test_a_bare_all_caps_label_needs_no_citation():
+    """"ENDPOINT SECURITY" names nothing about the account."""
+    from app.services.strategy.chat import _claim_sentences
+
+    claims = _claim_sentences("ANSWER:\nENDPOINT SECURITY\nCOMPETITIVE RISKS\n")
+    assert claims == []
+
+
+def test_a_label_that_names_vendors_still_needs_its_tag():
+    """The narrow exemption must not become a loophole.
+
+    Found by running it: `_unwrap` glued the untagged label to the sentence
+    beneath it, and that sentence's tag covered three vendor names the model
+    had asserted on its own. A label is a claim when it names something.
+    """
+    ok, reason, _, _ = _structured(STRUCTURED_ANSWER.replace(
+        "WORKSTATIONS - NVIDIA CUDA / GPUs, AutoCAD / Autodesk [technographic_map]",
+        "WORKSTATIONS - NVIDIA CUDA / GPUs, AutoCAD / Autodesk"))
+    assert ok is False
+    assert "without citing" in reason
+
+
+def test_the_opening_line_is_not_exempt():
+    ok, reason, _, _ = _structured(STRUCTURED_ANSWER.replace(
+        "needs a different line [technographic_map].", "needs a different line."))
+    assert ok is False
+    assert "without citing" in reason
+
+
+def test_a_sentence_wrapped_across_two_lines_is_one_claim():
+    """Longer prose wraps, and a wrap is not two claims.
+
+    Splitting on newlines before sentences made the first half of a wrapped
+    sentence a claim of its own - with the tag on the second half, so it was
+    rejected as uncited. Rare at three sentences, common at paragraph length.
+    """
+    from app.services.strategy.chat import _claim_sentences
+
+    claims = _claim_sentences(
+        "ANSWER:\nAdvantest runs two vendor estates HP would have to work\n"
+        "against, and each needs a different line [technographic_map].")
+    assert len(claims) == 1
+    assert claims[0].startswith("Advantest runs two vendor estates")
+    assert claims[0].endswith("[technographic_map].")
+
+
+def test_two_list_items_still_need_a_tag_each():
+    """Unwrapping must not let one tag cover the fact above it."""
+    ok, reason, _, _ = _structured(STRUCTURED_ANSWER.replace(
+        "1. NVIDIA CUDA / GPUs and AutoCAD / Autodesk are detected "
+        "[technographic_map].",
+        "1. NVIDIA CUDA / GPUs and AutoCAD / Autodesk are detected"))
+    assert ok is False
+    assert "without citing" in reason
+
+
+def test_the_prompt_asks_for_a_scaled_answer_not_a_fixed_count():
+    from app.services.strategy import chat
+
+    assert "Two or three sentences" not in chat.ANSWER_SYSTEM
+    assert "Keep it tight" not in chat.ANSWER_SYSTEM
+    assert "at the length the question needs" in chat.ANSWER_SYSTEM
+    assert "Do not pad" in chat.ANSWER_SYSTEM
+    assert chat.PROMPT_VERSION >= 4
+
+
+def test_the_answer_prompt_renders_through_str_format():
+    """ANSWER_SYSTEM goes through str.format; a stray brace would raise.
+
+    ROLEPLAY_SYSTEM has had this guard since it was written. This one did not,
+    and it is the prompt being edited.
+    """
+    from app.services.strategy import chat
+
+    rendered = chat.ANSWER_SYSTEM.format(company="PT Example Tbk")
+    assert "PT Example Tbk" in rendered
+    assert "{company}" not in rendered
+
+
+def test_the_grounding_corpus_is_built_once_per_payload():
+    """Streaming validates on every closed citation; the payload does not move.
+
+    `Corpus.__init__` scans the whole ~450 KB payload. A longer answer has more
+    citations, so without this the scan count rises with answer length.
+    """
+    from app.services.strategy import chat
+
+    chat._CORPUS_CACHE.clear()
+    first = chat._corpus_for(STRUCTURED_PAYLOAD)
+    again = chat._corpus_for(STRUCTURED_PAYLOAD)
+    assert again is first
+    other = chat._corpus_for(STRUCTURED_PAYLOAD + "\nextra")
+    assert other is not first
+    assert len(chat._CORPUS_CACHE) <= chat._CORPUS_CACHE_MAX

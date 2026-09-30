@@ -56,7 +56,10 @@ logger = logging.getLogger(__name__)
 #    lot of gibberish and then the real answer comes out").
 # 3: the whole account in one call instead of retrieved fragments; citations
 #    name the payload section they came from.
-PROMPT_VERSION = 3
+# 4: the ANSWER is as long as the question needs - a block per part when the
+#    question asks for several things - instead of two or three sentences
+#    whatever was asked (30 Sep: "the answer part is very short").
+PROMPT_VERSION = 4
 
 MAX_HISTORY_TURNS = 12
 MAX_VALIDATION_ATTEMPTS = 3
@@ -189,17 +192,27 @@ name the closest thing it does hold. That is a correct answer, not a failure.
 
 FORMAT - always these sections, in this order, and nothing before the first one:
 ANSWER:
-  Two or three sentences that answer the question directly. Lead with the answer itself, not with
-  background. A sentence here that states a fact about the account ends with its tag like any other.
+  Answer the whole question, at the length the question needs. Lead with the answer itself, not
+  with background.
+  - Asked one thing ("who is the strongest entry point"), write three or four sentences of prose.
+  - Asked for several things - a risk and a counter-argument per incumbent, a comparison, one
+    recommendation per business unit - give each one its own short block: a SHORT ALL-CAPS LABEL on
+    its own line, then two or three sentences under it. Cover every part that was asked about.
+  Every line here that says anything about the account ends with its tag - the first line, the
+  sentences, and a label that names vendors. A bare label like COMPETITIVE RISKS names nothing and
+  needs none.
 FACTS:
-  A numbered list of the evidence behind the answer - at most five points, one fact each, each
-  ending with its tag. Only the facts the answer rests on; not an inventory of everything known.
+  A numbered list of the evidence behind the answer, one fact each, each ending with its tag. At
+  most five for a single-topic answer; up to eight when the answer covers several things, so each
+  part shows the evidence it rests on. Only the facts the answer rests on; not an inventory of
+  everything known.
 RECOMMENDED NEXT STEPS:
   A numbered list of two or three concrete actions for the seller.
 If the evidence does not answer the question, write ANSWER: saying so and naming the closest thing
 the platform holds, and leave out the other two sections.
-Plain text: no markdown, no asterisks, no hashes. Keep it tight - a seller is reading this between
-meetings."""
+Plain text: no markdown, no asterisks, no hashes. Do not pad: no background the question did not
+ask for, no restating the question, no summary of what you are about to say. Length comes from
+covering what was asked, never from saying it at greater length."""
 
 
 # A separate constant rather than a branch inside ANSWER_SYSTEM, for three
@@ -336,6 +349,8 @@ def _answer_once(company: str, question: str, context: str, messages: list,
 # Step 5 - validation, which the model cannot talk past
 # ---------------------------------------------------------------------------
 
+import collections
+import hashlib
 import re
 
 # A citation names the payload section it came from - "[exec_urgency_score]" -
@@ -441,13 +456,97 @@ def _asserts_facts(sentence: str) -> bool:
 _ADVICE_HEADER_RE = re.compile(
     r"(?:recommended|suggested)?\s*next\s+steps\s*:|recommendations?\s*:", re.I)
 
-# A header line the format asks for, whole ("FACTS:") or opening a line
-# ("FACTS: 1. ..."), plus the list markers the numbered sections use.
-_HEADER_LINE_RE = re.compile(r"^[A-Z][A-Z \t/&-]{1,40}:\s*$")
+# A header line: one the format asks for ("FACTS:") or a block label the
+# answer uses to separate the parts of a multi-part question ("ENDPOINT
+# SECURITY").
+#
+# The bare-label half is deliberately narrow - all caps, no digits, at most
+# five words, colon optional. A blanket "an all-caps line asserts nothing"
+# would be a way to state an uncited fact in capitals, and this gate exists
+# because a gate a model can talk past is not a gate. A label that names
+# vendors ("WORKSTATIONS - NVIDIA CUDA, AutoCAD") is longer than five words or
+# carries lowercase, so it stays a claim and the prompt tells the model to tag
+# it, which is right: naming a vendor is a claim about the account.
+_HEADER_LINE_RE = re.compile(
+    r"^[A-Z][A-Z \t/&-]{1,40}:\s*$"
+    r"|^[A-Z][A-Z&/-]*(?:[ \t]+[A-Z&/-]+){0,4}:?\s*$")
 _LABEL_PREFIX_RE = re.compile(
     r"^\s*(?:answer|facts?|context|evidence|so what(?:\s+for\s+hp)?)\s*:\s*",
     re.I)
 _LIST_MARKER_RE = re.compile(r"^\s*(?:[-*•]|\(?\d{1,2}[.)])\s*")
+_SENTENCE_END_RE = re.compile(r"[.!?][\"')\]]*$")
+# A block label that is NOT bare: an all-caps run introducing something, as in
+# "WORKSTATIONS - NVIDIA CUDA / GPUs, AutoCAD". It names vendors, so it is a
+# claim and needs its own tag - which means it must not be glued to the
+# sentence beneath it, or that sentence's tag would cover both.
+_BLOCK_LABEL_RE = re.compile(r"^[A-Z][A-Z&/-]*(?:[ \t]+[A-Z&/-]+)*[ \t]*[-–—:]")
+
+# The grounding corpus for one payload, built once.
+#
+# `Corpus.__init__` is eager: it normalises the whole payload - about 450 KB -
+# and runs the number, percentage and URL scanners over it. That was affordable
+# when it happened once per answer. It no longer is: streaming validates the
+# prefix every time a citation bracket closes, and the point of a longer answer
+# is more citations, so a fifteen-citation answer would scan the payload
+# fifteen times while the seller waits.
+#
+# The corpus depends on the payload alone, and the payload is fixed for the
+# life of a turn, so it is remembered. Two entries, not one: a retry validates
+# the same payload as the attempt before it, and nothing here should be
+# sensitive to a second conversation interleaving. Keyed on the text itself -
+# not on `id()`, which a garbage-collected string can hand to a different
+# payload.
+_CORPUS_CACHE: "collections.OrderedDict" = collections.OrderedDict()
+_CORPUS_CACHE_MAX = 2
+
+
+def _corpus_for(payload: str):
+    """`grounding.corpus_from_texts([payload])`, memoised on the payload."""
+    key = hashlib.sha256(str(payload or "").encode("utf-8")).hexdigest()
+    found = _CORPUS_CACHE.get(key)
+    if found is None:
+        found = grounding.corpus_from_texts([payload])
+        _CORPUS_CACHE[key] = found
+        while len(_CORPUS_CACHE) > _CORPUS_CACHE_MAX:
+            _CORPUS_CACHE.popitem(last=False)
+    else:
+        _CORPUS_CACHE.move_to_end(key)
+    return found
+
+
+def _unwrap(lines: list) -> list:
+    """Rejoin a sentence the model wrapped across two lines.
+
+    `_claim_sentences` splits on newlines before it splits on sentences, so a
+    sentence broken over two lines used to arrive as two claims - and the first
+    half, the half without the trailing tag, was rejected as uncited. At two or
+    three sentences that almost never happened. At paragraph length it is the
+    likeliest false rejection there is.
+
+    A line is joined to the one before it when that line did not finish a
+    sentence. It is NOT joined when either side is a list item or a block
+    label: two numbered facts on two lines are two claims and each carries its
+    own tag, and merging them would let one tag cover both.
+
+    The label case is the one that bites. "WORKSTATIONS - NVIDIA CUDA, AutoCAD"
+    ends without a full stop, so a naive join glues it to the sentence beneath
+    it and that sentence's tag silently covers the vendors named in the label.
+    Verified: before this guard, a heading naming three vendors with no tag of
+    its own published.
+    """
+    out = []
+    for line in lines:
+        joinable = (out
+                    and not _SENTENCE_END_RE.search(out[-1])
+                    and not _BLOCK_LABEL_RE.match(out[-1])
+                    and not _LIST_MARKER_RE.match(line)
+                    and not _BLOCK_LABEL_RE.match(line)
+                    and not _HEADER_LINE_RE.match(line))
+        if joinable:
+            out[-1] = "%s %s" % (out[-1], line)
+        else:
+            out.append(line)
+    return out
 
 
 def _claim_sentences(body: str) -> list:
@@ -462,12 +561,15 @@ def _claim_sentences(body: str) -> list:
     advice = _ADVICE_HEADER_RE.search(text)
     region = text[:advice.start()] if advice else text
 
-    out = []
+    kept = []
     for raw_line in region.split("\n"):
         line = raw_line.strip()
         if not line or _HEADER_LINE_RE.match(line):
             continue
-        line = _LABEL_PREFIX_RE.sub("", line)
+        kept.append(_LABEL_PREFIX_RE.sub("", line))
+
+    out = []
+    for line in _unwrap(kept):
         for chunk in _DIALOGUE_SENTENCE_RE.split(line):
             sentence = _LIST_MARKER_RE.sub("", chunk).strip()
             if sentence:
@@ -637,7 +739,7 @@ def _validate_roleplay(answer: str, payload: str, widget_keys: list,
     # invented number. Both would reject it; only one says why usefully, and the
     # reason is fed straight back to the model as the correction for its next
     # attempt.
-    corpus = grounding.corpus_from_texts([payload])
+    corpus = _corpus_for(payload)
     countable = _CITATION_RE.sub("", body)
     unsourced_numbers = corpus.unsourced_numbers(countable)
     if unsourced_numbers:
@@ -721,7 +823,7 @@ def _validate(answer: str, payload: str, widget_keys: list) -> tuple:
                 % (len(uncited), " / ".join(s[:70] for s in uncited[:2])),
                 [], "")
 
-    corpus = grounding.corpus_from_texts([payload])
+    corpus = _corpus_for(payload)
     # Citations out before figures are counted. A section tag is not a claim,
     # and a widget key like `exec_key_metrics` contributes no digits - but
     # `intent_topics_table` would have, and a tag is not something the model

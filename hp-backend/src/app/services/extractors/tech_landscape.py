@@ -7,6 +7,7 @@ from bson import ObjectId
 from app.config import scoring as _scoring
 from app.database.mongodb import get_db
 from app.observability import pipeline
+from app.services.dashboard.urgency import OS_FAMILIES
 from app.services.extractors.datasets import (
     account_display_name,
     read_dataset_records,
@@ -21,6 +22,53 @@ from app.services.hp import (
 from app.services.regen import store as widget_store
 
 logger = logging.getLogger(__name__)
+
+
+def _kw_in(kw: str, entry: str) -> bool:
+    """Word-boundary match of one keyword inside one lowercased stack entry.
+
+    Plain substring matching put "Adobe Digital Marketing Suite" under Google
+    Workspace, because "g suite" is inside "marketin(g suite)". The same
+    failure mode was fixed in the Opportunity Map and the Objection Playbook;
+    this is the last copy of it.
+
+    Module level rather than nested inside `extract_tech_landscape`, so the
+    post-filter reconciliation below matches vendor names the same way the
+    category rules match technology names. One matcher, one set of edge cases.
+
+    The boundary is what makes a keyword's own spelling load-bearing: the
+    pattern is `re.escape`d, so a space inside a keyword is matched literally
+    and "macos" does NOT find "Mac OS". That is why the OS keywords come from
+    one table (`OS_FAMILIES`) rather than being typed out per category.
+    """
+    return re.search(r"(?<![a-z0-9])" + re.escape(kw.lower()) + r"(?![a-z0-9])",
+                     entry) is not None
+
+
+# The Client OS card's three vendor buckets, spelled once.
+#
+# These come from `urgency.OS_FAMILIES` rather than being typed out at the
+# card, because this card and the urgency score answer the same question -
+# "which OS family is this stack entry" - and two copies of the answer had
+# already drifted apart. The card's list said ("apple", "macos", "ios");
+# `_kw_in` matches a keyword literally between word boundaries, so an export
+# saying "Mac OS" with a space matched none of the three. Advantest's does.
+# The Apple card was then built from "Apple iOS" alone, which the HP rulebook
+# does not name, so Driver 1 scored it 0 and the card was suppressed - while
+# the urgency score, reading the same export through OS_FAMILIES, counted
+# Apple without trouble. One table ends that class of disagreement, and brings
+# "os x", "osx" and "ipados" with it.
+#
+# `OS_FAMILIES["other"]` holds ChromeOS, Android and the enterprise Unixes
+# together. Only the Unixes belong on this card: its description already reads
+# "Linux / Unix platform" and the list it replaces carried "unix", so dropping
+# them would lose an AIX or Solaris shop its card. ChromeOS and Android have
+# no card of their own here; giving them one is a product decision rather than
+# a spelling fix, so they stay out instead of being filed under Linux.
+ENTERPRISE_UNIX = ("unix", "solaris", "aix")
+CLIENT_OS_WINDOWS = OS_FAMILIES["windows"]
+CLIENT_OS_APPLE = OS_FAMILIES["apple"]
+CLIENT_OS_LINUX = OS_FAMILIES["linux"] + ENTERPRISE_UNIX
 
 TECHNOGRAPHICS_CATEGORY_COLUMNS = [
     "Testing And Qa",
@@ -842,6 +890,62 @@ def _score_card_confidence(categories: list, intent_scores: dict) -> dict:
     return report
 
 
+def _reconcile_after_suppression(categories: list, suppressed: list) -> dict:
+    """Make the header count and the narrative agree with the cards shown.
+
+    `_score_card_confidence` deletes vendors, and two things written earlier
+    still describe the list as it was before:
+
+    **`detected_signals_count`** is a `len()` taken when the category was
+    built, so a Client OS section that lost its Apple card reads "2 detected
+    signals" above one card. Recounted here from what survived. Whitespace rows
+    are excluded exactly as the original counts excluded them - they are HP's
+    own absence, not a detected signal.
+
+    **`what_it_means`** is written by the narrative layer, which runs BEFORE
+    this filter and is handed the unfiltered vendor list with an instruction to
+    name a vendor it was given. That ordering is deliberate and stays: Driver 1
+    scores the technology against the HP line, and the HP line only exists once
+    the narrative has run. So the text cannot be generated after the filter -
+    but it can be checked against it. A paragraph naming a vendor that is no
+    longer on the card is dropped, and the card falls back to the deterministic
+    `hp_relationship` sentence the UI already renders in its place.
+
+    Dropped rather than rewritten: rewriting would mean a second model call per
+    category, and the fallback is a sentence this module wrote itself from the
+    badge. Python decides; nothing is regenerated.
+    """
+    gone = {}
+    for entry in suppressed or []:
+        name = str(entry.get("vendor") or "").strip()
+        if name:
+            gone.setdefault(entry.get("category"), []).append(name)
+
+    report = {"recounted": [], "narratives_dropped": []}
+    for category in categories or []:
+        key = category.get("category_key")
+        vendors = category.get("vendors") or []
+
+        counted = len([v for v in vendors if not v.get("is_whitespace")])
+        if counted != category.get("detected_signals_count"):
+            report["recounted"].append(
+                {"category": key, "was": category.get("detected_signals_count"),
+                 "now": counted})
+            category["detected_signals_count"] = counted
+
+        text = str(category.get("what_it_means") or "")
+        if not text:
+            continue
+        lowered = text.lower()
+        named = [n for n in gone.get(key, []) if _kw_in(n, lowered)]
+        if named:
+            report["narratives_dropped"].append(
+                {"category": key, "named": named})
+            category["what_it_means"] = None
+
+    return report
+
+
 @requires_local_datasets(
     "technographics", "technology_detections", "webstack",
 )
@@ -895,17 +999,6 @@ def extract_tech_landscape(account_id: str,  # noqa: PLR0912, PLR0915 - branch-h
 
     full_tech_lower = [t.lower() for t in full_tech_list]
 
-    def _kw_in(kw: str, entry: str) -> bool:
-        """Word-boundary match.
-
-        Plain substring matching put "Adobe Digital Marketing Suite" under
-        Google Workspace, because "g suite" is inside "marketin(g suite)".
-        The same failure mode was fixed in the Opportunity Map and the
-        Objection Playbook; this is the last copy of it.
-        """
-        return re.search(r"(?<![a-z0-9])" + re.escape(kw.lower()) + r"(?![a-z0-9])",
-                         entry) is not None
-
     # Entries that name network, server or storage equipment are not client
     # devices, whatever brand is on them. "Huawei Firewall" was driving the
     # PC/Laptop Brands card - and with it a Compete rating and an HP Elite/Pro
@@ -945,12 +1038,13 @@ def extract_tech_landscape(account_id: str,  # noqa: PLR0912, PLR0915 - branch-h
     # 1. Widget: technographic_map (HP Strategic Technographic Map)
     hp_categories = []
 
-    # Category 1: Client OS
+    # Category 1: Client OS. Keywords from CLIENT_OS_* above - see there for
+    # why they are not spelled out at the card.
     client_os_vendors = []
-    if has_tech("windows", "microsoft windows"):
+    if has_tech(*CLIENT_OS_WINDOWS):
         client_os_vendors.append({
             "vendor_name": "Microsoft",
-            "detected_as": matched_tech("windows", "microsoft windows"),
+            "detected_as": matched_tech(*CLIENT_OS_WINDOWS),
             "description": "Microsoft Windows platform",
             "risk_level": "Inferred TBD",
             "hp_play": {
@@ -959,10 +1053,10 @@ def extract_tech_landscape(account_id: str,  # noqa: PLR0912, PLR0915 - branch-h
             },
             "confidence": "TBD"
         })
-    if has_tech("apple", "macos", "ios"):
+    if has_tech(*CLIENT_OS_APPLE):
         client_os_vendors.append({
             "vendor_name": "Apple",
-            "detected_as": matched_tech("apple", "macos", "ios"),
+            "detected_as": matched_tech(*CLIENT_OS_APPLE),
             "description": "Apple platform",
             "risk_level": "Inferred TBD",
             "hp_play": {
@@ -971,10 +1065,10 @@ def extract_tech_landscape(account_id: str,  # noqa: PLR0912, PLR0915 - branch-h
             },
             "confidence": "TBD"
         })
-    if has_tech("linux", "centos", "unix"):
+    if has_tech(*CLIENT_OS_LINUX):
         client_os_vendors.append({
             "vendor_name": "Linux / Enterprise OS",
-            "detected_as": matched_tech("linux", "centos", "unix"),
+            "detected_as": matched_tech(*CLIENT_OS_LINUX),
             "description": "Linux / Unix platform",
             "risk_level": "Inferred TBD",
             "hp_play": None,
@@ -1328,6 +1422,16 @@ def extract_tech_landscape(account_id: str,  # noqa: PLR0912, PLR0915 - branch-h
                     len(confidence_report["suppressed"]), account_id)
         pipeline.guardrail(len(confidence_report["suppressed"]),
                            "no rulebook rule supports the detected technology")
+
+    # Whatever the filter above removed, nothing on the card may still be
+    # describing it: the header count and the "what it means for HP" paragraph
+    # were both written before it ran.
+    reconciled = _reconcile_after_suppression(hp_categories,
+                                              confidence_report["suppressed"])
+    for dropped in reconciled["narratives_dropped"]:
+        logger.info("tech landscape: %s narrative dropped for %s - it named "
+                    "%s, whose card was suppressed", dropped["category"],
+                    account_id, ", ".join(dropped["named"]))
 
     strategic_read_text = narrative_report.get("strategic_read")
 
