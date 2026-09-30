@@ -1,9 +1,16 @@
 'use client';
 
 import React from 'react';
+import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useAuth } from '@/providers/AuthProvider';
-import { LogOut, User as UserIcon, Shield } from 'lucide-react';
+import { LogOut, User as UserIcon, Shield, Building2, Users, BarChart3 } from 'lucide-react';
+
+const ADMIN_LINKS = [
+  { href: '/admin/platform', label: 'Platform', Icon: Building2 },
+  { href: '/admin/users', label: 'Users', Icon: Users },
+  { href: '/admin/analytics', label: 'Analytics', Icon: BarChart3 },
+];
 
 export const Navbar: React.FC = () => {
   const { user, isAuthenticated, logout } = useAuth();
@@ -33,6 +40,26 @@ export const Navbar: React.FC = () => {
               </span>
             </div>
           </div>
+
+          {user.role === 'admin' && (
+            <div className="hidden md:flex items-center space-x-1">
+              {ADMIN_LINKS.map(({ href, label, Icon }) => {
+                const active = pathname?.startsWith(href);
+                return (
+                  <Link
+                    key={href}
+                    href={href}
+                    className={`inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                      active ? 'bg-white/15 text-white' : 'text-gray-300 hover:text-white hover:bg-white/10'
+                    }`}
+                  >
+                    <Icon className="w-3.5 h-3.5" />
+                    <span>{label}</span>
+                  </Link>
+                );
+              })}
+            </div>
+          )}
 
           <div className="flex items-center space-x-4">
             <div className="flex items-center space-x-2 bg-slate-800 px-3 py-1.5 rounded-full border border-slate-700">
