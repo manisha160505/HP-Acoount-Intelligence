@@ -313,6 +313,15 @@ class FakeCollection:
             self.docs.append(doc)
             return _Result(inserted_id=doc["_id"])
 
+    def insert_many(self, docs, ordered=True):
+        with self._lock:
+            docs = [copy.deepcopy(d) for d in docs]
+            for d in docs:
+                d.setdefault("_id", ObjectId())
+            self._check([*self.docs, *docs])
+            self.docs.extend(docs)
+            return _Result()
+
     def _write(self, query, update, upsert, sort=None, many=False):
         _check_conflicting_paths(update)
         positions = [i for i, d in enumerate(self.docs) if matches(d, query)]

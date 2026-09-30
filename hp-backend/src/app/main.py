@@ -67,6 +67,11 @@ async def lifespan(app: FastAPI):
     connect_to_mongo()
 
     seed_users()
+    # Each logs and returns on failure: a missing index slows a query or
+    # weakens a guarantee, which is no reason to refuse to start.
+    from app.services import usage, users_admin
+    users_admin.ensure_indexes(get_db())
+    usage.ensure_indexes(get_db())
     try:
         seed_database_if_empty()
     except Exception:

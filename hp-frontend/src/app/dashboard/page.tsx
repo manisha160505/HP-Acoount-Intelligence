@@ -6,6 +6,8 @@ import { ProtectedRoute } from '@/components/common/ProtectedRoute';
 import { useAuth } from '@/providers/AuthProvider';
 import api, { postStream } from '@/services/api';
 import { CompanyAccount } from '@/types/account';
+import { NORTHSTAR_SIDEBAR_GROUPS } from '@/lib/features';
+import { track } from '@/lib/track';
 import { 
   WidgetResponse, 
   WidgetClassification,
@@ -88,46 +90,6 @@ const ICON_MAP: Record<string, React.FC<{ className?: string }>> = {
   TrendingUp
 };
 
-interface SidebarItem {
-  key: string;
-  label: string;
-  subtitle: string;
-  description: string;
-  iconName: string;
-}
-
-interface SidebarGroup {
-  sectionTitle: string;
-  items: SidebarItem[];
-}
-
-const NORTHSTAR_SIDEBAR_GROUPS: SidebarGroup[] = [
-  {
-    sectionTitle: "INTELLIGENCE",
-    items: [
-      { key: 'executive_dashboard', label: 'Executive Dashboard', subtitle: 'Account profile & key metrics', description: 'Account profile & key metrics', iconName: 'LayoutDashboard' },
-      { key: 'recent_news_signals', label: 'Live Signals', subtitle: 'Real-time news & triggers', description: 'Real-time news & triggers', iconName: 'Newspaper' },
-      { key: 'intent_demand_signals', label: 'Intent & Demand Signals', subtitle: 'HP-category & topic-level research intent', description: 'HP-category & topic-level research intent', iconName: 'TrendingUp' },
-      { key: 'stakeholder_map', label: 'Stakeholder Map', subtitle: 'Contacts & influence map', description: 'Contacts & influence map', iconName: 'Users' },
-      { key: 'solution_narrative_opportunity_map', label: 'Opportunity Map', subtitle: 'HP plays: outcome, impact & evidence', description: 'HP plays: outcome, impact & evidence', iconName: 'Lightbulb' },
-      { key: 'tech_landscape', label: 'Technographic Map', subtitle: 'Tech stack by category & HP fit', description: 'Tech stack by category & HP fit', iconName: 'Cpu' },
-      { key: 'objection_playbook', label: 'Objection Playbook', subtitle: 'Reframes & proof points', description: 'Reframes & proof points', iconName: 'ShieldAlert' }
-    ]
-  },
-  {
-    sectionTitle: "ACTION",
-    items: [
-      { key: 'content_studio', label: 'Content Studio', subtitle: 'Generate tailored content', description: 'Generate tailored content', iconName: 'FileText' },
-      { key: 'strategy_chat', label: 'Strategy Chat', subtitle: 'AI strategy assistant', description: 'AI strategy assistant', iconName: 'MessageSquare' }
-    ]
-  },
-  {
-    sectionTitle: "SIMULATION & PLANNING",
-    items: [
-      { key: 'message_evaluator', label: 'Message Evaluator', subtitle: 'Test messages against personas', description: 'Test messages against personas', iconName: 'CheckSquare' }
-    ]
-  }
-];
 
 
 
@@ -740,6 +702,20 @@ export default function UserDashboardPage() {
   useEffect(() => {
     fetchUserAccounts();
   }, [fetchUserAccounts]);
+
+  // Usage analytics: one feature_view each time the seller lands on a feature
+  // (or on a new account within it), starting with the first feature shown
+  // once the account list has loaded. track() only queues - it never blocks or
+  // fails navigation. The ref drops the duplicate StrictMode's double effect
+  // run would otherwise send.
+  const lastTrackedView = useRef('');
+  useEffect(() => {
+    if (isLoadingAccounts) return;
+    const key = `${activeFeatureKey}|${selectedAccountId}`;
+    if (key === lastTrackedView.current) return;
+    lastTrackedView.current = key;
+    track({ event: 'feature_view', feature_key: activeFeatureKey, account_id: selectedAccountId || null });
+  }, [activeFeatureKey, selectedAccountId, isLoadingAccounts]);
 
   useEffect(() => {
     if (selectedAccountId) {
