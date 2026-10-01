@@ -1,7 +1,14 @@
 /**
- * Usage tracking: which features sellers open.
+ * Usage tracking: which features sellers open, and for how long.
  *
  *   track({ event: 'feature_view', feature_key, account_id })
+ *
+ * Time spent: after a feature_view, a `feature_heartbeat` for that feature is
+ * queued every HEARTBEAT_MS - but only while the tab is visible and the seller
+ * has touched the page (mouse, key, scroll, touch) within IDLE_AFTER_MS. A tab
+ * left open over lunch stops counting. The server decides what a heartbeat is
+ * worth and counts each 30s window once, so duplicates add nothing.
+ * `stopFeatureTime()` ends it when the dashboard unmounts.
  *
  * Events are queued in memory and sent to POST /events in one batch every
  * FLUSH_INTERVAL_MS, and once more when the page is hidden or closed (via
@@ -21,7 +28,7 @@ import { API_URL } from '@/services/api';
 import logger from '@/lib/logger';
 
 export interface TrackEvent {
-  event: 'feature_view';
+  event: 'feature_view' | 'feature_heartbeat';
   feature_key: string;
   account_id?: string | null;
 }
@@ -31,6 +38,9 @@ interface QueuedEvent extends TrackEvent {
 }
 
 export const FLUSH_INTERVAL_MS = 10_000;
+// Must match HEARTBEAT_SECONDS on the backend (services/usage.py).
+export const HEARTBEAT_MS = 30_000;
+export const IDLE_AFTER_MS = 5 * 60_000;
 // The backend accepts at most 100 per request; anything beyond waits for the
 // next flush. Also the cap on what is held while the server is unreachable.
 export const MAX_BATCH = 100;
@@ -41,6 +51,12 @@ const SESSION_KEY = 'hp_session_id';
 let queue: QueuedEvent[] = [];
 let timer: ReturnType<typeof setInterval> | null = null;
 let exitHandlersInstalled = false;
+
+// The feature on screen, for heartbeats. Set by every feature_view.
+let current: { feature_key: string; account_id: string | null } | null = null;
+let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+let lastInteraction = Date.now();
+let interactionHandlersInstalled = false;
 
 function readToken(): string | null {
   try {
@@ -82,7 +98,39 @@ export function track(event: TrackEvent): void {
   queue.push({ ...event, account_id: event.account_id || null, session_id: sessionId() });
   // Bounded: a tab left open with the API down must not grow without limit.
   if (queue.length > MAX_BATCH * 5) queue = queue.slice(-MAX_BATCH * 5);
+  if (event.event === 'feature_view') {
+    current = { feature_key: event.feature_key, account_id: event.account_id || null };
+    startHeartbeat();
+  }
   start();
+}
+
+function markInteraction(): void {
+  lastInteraction = Date.now();
+}
+
+function startHeartbeat(): void {
+  if (!interactionHandlersInstalled) {
+    interactionHandlersInstalled = true;
+    for (const name of ['mousemove', 'mousedown', 'keydown', 'scroll', 'touchstart', 'wheel']) {
+      window.addEventListener(name, markInteraction, { passive: true, capture: true });
+    }
+  }
+  // Opening a feature is itself activity.
+  markInteraction();
+  if (heartbeatTimer) return;
+  heartbeatTimer = setInterval(() => {
+    if (!current || document.visibilityState !== 'visible') return;
+    if (Date.now() - lastInteraction > IDLE_AFTER_MS) return;
+    track({ event: 'feature_heartbeat', ...current });
+  }, HEARTBEAT_MS);
+}
+
+/** Stop counting time, e.g. when the dashboard unmounts. Never throws. */
+export function stopFeatureTime(): void {
+  current = null;
+  if (heartbeatTimer) clearInterval(heartbeatTimer);
+  heartbeatTimer = null;
 }
 
 /** Send what is queued. Resolves when done; never rejects. */
@@ -156,5 +204,6 @@ export const __testing = {
     queue = [];
     if (timer) clearInterval(timer);
     timer = null;
+    stopFeatureTime();
   },
 };

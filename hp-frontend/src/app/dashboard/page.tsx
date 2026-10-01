@@ -7,7 +7,9 @@ import { useAuth } from '@/providers/AuthProvider';
 import api, { postStream } from '@/services/api';
 import { CompanyAccount } from '@/types/account';
 import { NORTHSTAR_SIDEBAR_GROUPS } from '@/lib/features';
-import { track } from '@/lib/track';
+import { track, stopFeatureTime } from '@/lib/track';
+import { MyActivityPanel } from '@/components/analytics/MyActivityPanel';
+import { Activity as ActivityIcon } from 'lucide-react';
 import { 
   WidgetResponse, 
   WidgetClassification,
@@ -716,6 +718,11 @@ export default function UserDashboardPage() {
     lastTrackedView.current = key;
     track({ event: 'feature_view', feature_key: activeFeatureKey, account_id: selectedAccountId || null });
   }, [activeFeatureKey, selectedAccountId, isLoadingAccounts]);
+  // Time on a feature stops counting once the dashboard is gone.
+  useEffect(() => () => stopFeatureTime(), []);
+
+  const [isMyActivityOpen, setIsMyActivityOpen] = useState(false);
+  const closeMyActivity = useCallback(() => setIsMyActivityOpen(false), []);
 
   useEffect(() => {
     if (selectedAccountId) {
@@ -1098,6 +1105,19 @@ export default function UserDashboardPage() {
                 </span>
               );
             })()}
+
+            {/* My Activity: the seller's own usage. Admin activity is not
+                tracked, so there is nothing to show an admin here. */}
+            {user?.role !== 'admin' && (
+              <button
+                type="button"
+                onClick={() => setIsMyActivityOpen(true)}
+                className="inline-flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl border text-xs font-bold transition shadow-xs bg-white text-slate-700 border-slate-300 hover:bg-slate-50"
+              >
+                <ActivityIcon className="w-3.5 h-3.5 text-hp-navy" />
+                <span>My Activity</span>
+              </button>
+            )}
 
             {/* X-Ray Mode Toggle Button */}
             <div className="flex items-center space-x-3">
@@ -7933,6 +7953,7 @@ export default function UserDashboardPage() {
         </div>
 
       </div>
+      <MyActivityPanel open={isMyActivityOpen} onClose={closeMyActivity} userName={user?.full_name} />
     </ProtectedRoute>
   );
 }
