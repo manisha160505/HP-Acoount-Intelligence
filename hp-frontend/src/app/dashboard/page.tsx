@@ -581,7 +581,12 @@ export default function UserDashboardPage() {
   const [chatPersonas, setChatPersonas] = useState<any[]>([]);
   // `personaTitle` is stamped on each message rather than read from the current
   // selection, so a bubble keeps saying who said it after the selector moves.
-  const [chatMessages, setChatMessages] = useState<Array<{ id: string; sender: 'user' | 'assistant'; text: string; timestamp: string; citations?: any[]; available?: boolean; personaTitle?: string }>>([]);
+  // `text` is what the seller reads - prose with [section] tags the footnote
+  // renderer turns into markers. `clean` is the same prose without them, for
+  // copying, emailing and the history posted back to the model. They are kept
+  // apart deliberately: a tag is presentation, and nothing downstream of the
+  // screen should ever see one.
+  const [chatMessages, setChatMessages] = useState<Array<{ id: string; sender: 'user' | 'assistant'; text: string; clean?: string; timestamp: string; citations?: any[]; available?: boolean; personaTitle?: string }>>([]);
   const [chatPending, setChatPending] = useState(false);
   // Which stage of the answer is running. An answer takes around fifteen
   // seconds and cannot be streamed - every fact is validated against the
@@ -4186,6 +4191,10 @@ export default function UserDashboardPage() {
                   // Python already returns the roster in seniority order.
                   const seniorContacts = filteredContacts.filter(
                     c => c.seniority_band === 'C-Suite' || c.seniority_band === 'VP');
+                  // Everyone the senior rule leaves out. Python already returns
+                  // the roster in seniority order, so this keeps that order.
+                  const otherContacts = filteredContacts.filter(
+                    c => c.seniority_band !== 'C-Suite' && c.seniority_band !== 'VP');
                   const byId: Record<string, any> = {};
                   contactsList.forEach(c => { byId[c.contact_id] = c; });
 
@@ -4201,6 +4210,112 @@ export default function UserDashboardPage() {
                     'Manager': 'bg-yellow-100 text-yellow-700',
                     'Individual Contributor': 'bg-gray-100 text-gray-600',
                   };
+
+                  // One roster card. Defined once because it is rendered
+                  // twice - the senior contacts first, then everybody else -
+                  // and two copies of this much JSX drift the first time one
+                  // of them is edited.
+                  const renderContactCard = (c: any) => {
+                                const tp = talkingPoints[c.contact_id] || {};
+                                return (
+                                  <div key={c.contact_id} className="bg-white rounded-xl border border-slate-200 shadow-xs p-4 space-y-3">
+
+                                    {/* Identity */}
+                                    <div className="flex items-start gap-3">
+                                      <div className="w-10 h-10 rounded-full bg-sky-50 text-hp-navy flex items-center justify-center text-xs font-bold flex-shrink-0">
+                                        {initialsOf(c.full_name)}
+                                      </div>
+                                      <div className="min-w-0 flex-1">
+                                        <div className="flex items-center gap-1.5">
+                                          <h5 className="text-sm font-bold text-slate-900 truncate">{c.full_name}</h5>
+                                          {c.linkedin_url && (
+                                            <a href={linkedinHref(c.linkedin_url)} target="_blank" rel="noreferrer"
+                                               title="Open LinkedIn profile"
+                                               className="text-slate-400 hover:text-hp-navy flex-shrink-0">
+                                              <Linkedin className="w-3.5 h-3.5" />
+                                            </a>
+                                          )}
+                                        </div>
+                                        <p className="text-xs text-slate-500 font-normal leading-snug">{c.title || 'Title unspecified'}</p>
+                                        <p className="text-[11px] text-slate-400 font-normal">{c.normalized_department}</p>
+                                      </div>
+                                    </div>
+
+                                    {/* Badges */}
+                                    <div className="flex flex-wrap gap-1.5">
+                                      {renderBadges(c)}
+                                    </div>
+
+                                    {/* Contact details */}
+                                    <div className="border-t border-slate-100 pt-3 space-y-1.5 text-xs">
+                                      <div className="flex items-center gap-2">
+                                        <Mail className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+                                        {c.email
+                                          ? <a href={`mailto:${c.email}`} className="text-hp-navy font-medium truncate hover:underline">{c.email}</a>
+                                          : <span className="text-slate-400 italic">Email not available</span>}
+                                      </div>
+                                      <div className="flex items-center gap-2 flex-wrap">
+                                        <Phone className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+                                        {c.phone
+                                          ? <span className="text-slate-700 font-normal">{c.phone}</span>
+                                          : <span className="text-slate-400 italic">Phone not available</span>}
+                                        {c.contact_location && (
+                                          <span className="text-[10px] font-medium text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">{c.contact_location}</span>
+                                        )}
+                                        <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">
+                                          {c.source_label || 'Explorium + Contacts Waterfall Tools'}
+                                        </span>
+                                      </div>
+                                      {c.email_status && (
+                                        <p className="text-[10px] text-slate-400 italic">Email status: {c.email_status}</p>
+                                      )}
+                                    </div>
+
+                                    {/* How to open */}
+                                    {tp.how_to_open ? (
+                                      <div className="bg-sky-50/70 border border-sky-100 rounded-lg p-3 space-y-1">
+                                        <span className="text-[11px] font-semibold text-hp-navy uppercase tracking-wider block">How to open</span>
+                                        <p className="text-xs text-slate-700 font-normal leading-relaxed">{tp.how_to_open}</p>
+                                      </div>
+                                    ) : (
+                                      <p className="text-[11px] text-slate-400 italic">No opening angle generated for this contact.</p>
+                                    )}
+
+                                    {/* Label / value rows */}
+                                    {(tp.hp_play_focus || tp.decision_power) && (
+                                      <div className="space-y-1.5">
+                                        {tp.hp_play_focus && (
+                                          <div className="flex gap-2">
+                                            <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider w-24 flex-shrink-0 pt-0.5">HP play focus:</span>
+                                            <span className="text-xs text-slate-700 font-normal leading-relaxed">{tp.hp_play_focus}</span>
+                                          </div>
+                                        )}
+                                        {tp.decision_power && (
+                                          <div className="flex gap-2">
+                                            <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider w-24 flex-shrink-0 pt-0.5">Decision power:</span>
+                                            <span className="text-xs text-slate-700 font-normal leading-relaxed">{tp.decision_power}</span>
+                                          </div>
+                                        )}
+                                      </div>
+                                    )}
+
+                                    {Array.isArray(tp.pain_points) && tp.pain_points.length > 0 && (
+                                      <div className="space-y-1">
+                                        <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">Potential pain points <span className="normal-case font-normal">(inferred)</span></span>
+                                        <ul className="space-y-0.5">
+                                          {tp.pain_points.map((p: string, i: number) => (
+                                            <li key={i} className="text-[11px] text-slate-600 font-normal flex gap-1.5">
+                                              <span className="text-red-400 flex-shrink-0">&bull;</span>
+                                              <span>{p}</span>
+                                            </li>
+                                          ))}
+                                        </ul>
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                  };
+
 
                   const handleExportCsv = () => {
                     // No influence, priority, HP relevance, composite score or
@@ -4429,110 +4544,38 @@ export default function UserDashboardPage() {
                             </p>
 
                             <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
-                              {seniorContacts.map((c: any) => {
-                                const tp = talkingPoints[c.contact_id] || {};
-                                return (
-                                  <div key={c.contact_id} className="bg-white rounded-xl border border-slate-200 shadow-xs p-4 space-y-3">
-
-                                    {/* Identity */}
-                                    <div className="flex items-start gap-3">
-                                      <div className="w-10 h-10 rounded-full bg-sky-50 text-hp-navy flex items-center justify-center text-xs font-bold flex-shrink-0">
-                                        {initialsOf(c.full_name)}
-                                      </div>
-                                      <div className="min-w-0 flex-1">
-                                        <div className="flex items-center gap-1.5">
-                                          <h5 className="text-sm font-bold text-slate-900 truncate">{c.full_name}</h5>
-                                          {c.linkedin_url && (
-                                            <a href={linkedinHref(c.linkedin_url)} target="_blank" rel="noreferrer"
-                                               title="Open LinkedIn profile"
-                                               className="text-slate-400 hover:text-hp-navy flex-shrink-0">
-                                              <Linkedin className="w-3.5 h-3.5" />
-                                            </a>
-                                          )}
-                                        </div>
-                                        <p className="text-xs text-slate-500 font-normal leading-snug">{c.title || 'Title unspecified'}</p>
-                                        <p className="text-[11px] text-slate-400 font-normal">{c.normalized_department}</p>
-                                      </div>
-                                    </div>
-
-                                    {/* Badges */}
-                                    <div className="flex flex-wrap gap-1.5">
-                                      {renderBadges(c)}
-                                    </div>
-
-                                    {/* Contact details */}
-                                    <div className="border-t border-slate-100 pt-3 space-y-1.5 text-xs">
-                                      <div className="flex items-center gap-2">
-                                        <Mail className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
-                                        {c.email
-                                          ? <a href={`mailto:${c.email}`} className="text-hp-navy font-medium truncate hover:underline">{c.email}</a>
-                                          : <span className="text-slate-400 italic">Email not available</span>}
-                                      </div>
-                                      <div className="flex items-center gap-2 flex-wrap">
-                                        <Phone className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
-                                        {c.phone
-                                          ? <span className="text-slate-700 font-normal">{c.phone}</span>
-                                          : <span className="text-slate-400 italic">Phone not available</span>}
-                                        {c.contact_location && (
-                                          <span className="text-[10px] font-medium text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">{c.contact_location}</span>
-                                        )}
-                                        <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">
-                                          {c.source_label || 'Explorium + Contacts Waterfall Tools'}
-                                        </span>
-                                      </div>
-                                      {c.email_status && (
-                                        <p className="text-[10px] text-slate-400 italic">Email status: {c.email_status}</p>
-                                      )}
-                                    </div>
-
-                                    {/* How to open */}
-                                    {tp.how_to_open ? (
-                                      <div className="bg-sky-50/70 border border-sky-100 rounded-lg p-3 space-y-1">
-                                        <span className="text-[11px] font-semibold text-hp-navy uppercase tracking-wider block">How to open</span>
-                                        <p className="text-xs text-slate-700 font-normal leading-relaxed">{tp.how_to_open}</p>
-                                      </div>
-                                    ) : (
-                                      <p className="text-[11px] text-slate-400 italic">No opening angle generated for this contact.</p>
-                                    )}
-
-                                    {/* Label / value rows */}
-                                    {(tp.hp_play_focus || tp.decision_power) && (
-                                      <div className="space-y-1.5">
-                                        {tp.hp_play_focus && (
-                                          <div className="flex gap-2">
-                                            <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider w-24 flex-shrink-0 pt-0.5">HP play focus:</span>
-                                            <span className="text-xs text-slate-700 font-normal leading-relaxed">{tp.hp_play_focus}</span>
-                                          </div>
-                                        )}
-                                        {tp.decision_power && (
-                                          <div className="flex gap-2">
-                                            <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider w-24 flex-shrink-0 pt-0.5">Decision power:</span>
-                                            <span className="text-xs text-slate-700 font-normal leading-relaxed">{tp.decision_power}</span>
-                                          </div>
-                                        )}
-                                      </div>
-                                    )}
-
-                                    {Array.isArray(tp.pain_points) && tp.pain_points.length > 0 && (
-                                      <div className="space-y-1">
-                                        <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">Potential pain points <span className="normal-case font-normal">(inferred)</span></span>
-                                        <ul className="space-y-0.5">
-                                          {tp.pain_points.map((p: string, i: number) => (
-                                            <li key={i} className="text-[11px] text-slate-600 font-normal flex gap-1.5">
-                                              <span className="text-red-400 flex-shrink-0">&bull;</span>
-                                              <span>{p}</span>
-                                            </li>
-                                          ))}
-                                        </ul>
-                                      </div>
-                                    )}
-                                  </div>
-                                );
-                              })}
+                              {seniorContacts.map(renderContactCard)}
                             </div>
                           </div>
                           )}
 
+                          {/* The rest of the roster. The senior block above is
+                              the 28 Sep rule - C-Suite and VP, read off the
+                              title. It is kept, and everyone else is shown here
+                              rather than reduced to a count: at an account whose
+                              senior people are titled "Head of ..." that rule
+                              surfaces one card out of twenty-three. */}
+                          {otherContacts.length > 0 && (
+                          <div className="space-y-3">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <h4 className="text-base font-bold text-slate-900">All other contacts</h4>
+                              <span className="text-[10px] font-semibold text-slate-600 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-full">
+                                {otherContacts.length} on the roster
+                              </span>
+                              {getClassificationBadge('inferred')}
+                            </div>
+                            <p className="text-xs text-slate-500 font-normal">
+                              Everyone else on the roster at {selectedAccount?.name}, most senior
+                              first. A &ldquo;Head of&rdquo; title bands as Director rather than VP,
+                              so the seniority badge is the title&rsquo;s wording, not a judgement
+                              about influence.
+                            </p>
+
+                            <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
+                              {otherContacts.map(renderContactCard)}
+                            </div>
+                          </div>
+                          )}
                           {/* Departments - the whole roster */}
                           <div className="border-t border-slate-200 pt-5 space-y-4">
                             <div className="flex items-center gap-2 flex-wrap">
@@ -7784,9 +7827,13 @@ export default function UserDashboardPage() {
                     // is stateless per account on the server, which is what lets
                     // ABX's rule hold: switching account clears these messages,
                     // and the old turns simply stop being sent.
+                    // The clean form goes back to the model. Sending the
+                    // rendered answer taught it that an assistant turn looks
+                    // like prose with [section] tags glued on, which is the
+                    // habit the segment contract exists to break.
                     const history = [...chatMessages, userMsg].map(m => ({
                       role: m.sender === 'user' ? 'user' : 'assistant',
-                      content: m.text,
+                      content: m.sender === 'assistant' ? (m.clean || m.text) : m.text,
                     }));
 
                     setChatMessages(prev => [...prev, userMsg]);
@@ -7807,13 +7854,14 @@ export default function UserDashboardPage() {
                     let settled = false;
                     const publish = (
                       text: string, citations: any[], available: boolean,
-                      personaTitle?: string,
+                      personaTitle?: string, clean?: string,
                     ) => {
                       settled = true;
                       setChatMessages(prev => [...prev, {
                         id: `asst_${Date.now()}`,
                         sender: 'assistant' as const,
-                        text, timestamp: stamp(), citations, available,
+                        text, clean: clean || text,
+                        timestamp: stamp(), citations, available,
                         personaTitle,
                       }]);
                     };
@@ -7847,6 +7895,7 @@ export default function UserDashboardPage() {
                               event.available === false
                                 ? undefined
                                 : (event.persona as any)?.title,
+                              (event.answer_clean as string) || undefined,
                             );
                           } else if (event.type === 'error') {
                             publish(
@@ -8080,7 +8129,7 @@ export default function UserDashboardPage() {
                                       <button
                                         type="button"
                                         onClick={() => {
-                                          navigator.clipboard?.writeText(msg.text);
+                                          navigator.clipboard?.writeText(msg.clean || msg.text);
                                           setCopiedMessageId(msg.id);
                                           setTimeout(() => setCopiedMessageId(null), 1500);
                                         }}
@@ -8090,7 +8139,7 @@ export default function UserDashboardPage() {
                                         {copiedMessageId === msg.id ? 'Copied' : 'Copy'}
                                       </button>
                                       <a
-                                        href={`mailto:?subject=${encodeURIComponent(`${companyName} — ABM strategy notes`)}&body=${encodeURIComponent(msg.text)}`}
+                                        href={`mailto:?subject=${encodeURIComponent(`${companyName} — ABM strategy notes`)}&body=${encodeURIComponent(msg.clean || msg.text)}`}
                                         className="text-[10px] font-bold text-slate-500 hover:text-hp-navy inline-flex items-center gap-1 transition"
                                       >
                                         <Mail className="w-3 h-3" />

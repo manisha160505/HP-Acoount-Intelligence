@@ -285,13 +285,26 @@ class TestContentStudioFindsTheBuyingCommittee:
         assert found["id"] == "it-security-manager"
         assert found["kind"] == "client_role"
 
-    def test_a_role_outside_the_eight_is_not_offered(self, monkeypatch):
+    def test_a_role_outside_the_eight_is_never_offered(self, monkeypatch):
         """The CTO is one of the twenty-four roles the file carries that this
-        programme does not write to."""
+        programme does not write to. It is dropped - and the eight are still
+        offered, because spec 1.4 says "treat all eight as client target
+        roles" and the file decides only FILLED or UNFILLED."""
+        from app.services.hp import buyer_personas as bp
         monkeypatch.setattr(cstudio.personas, "read_roles",
                             lambda _aid: self._roles("Chief Technology Officer (CTO)"))
-        monkeypatch.setattr(cstudio, "_derive_named_personas", lambda _db, _aid: [])
-        assert cstudio._derive_client_personas("acct") == []
+        out = cstudio._derive_client_personas("acct")
+        assert [p["id"] for p in out] == list(bp.PERSONA_IDS)
+        assert all(not p["is_filled"] for p in out)
+
+    def test_an_account_with_no_target_role_file_still_has_eight(self, monkeypatch):
+        """The bug this replaced: the eight were gated on the file having a
+        matching row, so an account without it offered none at all."""
+        from app.services.hp import buyer_personas as bp
+        monkeypatch.setattr(cstudio.personas, "read_roles", lambda _aid: [])
+        out = cstudio._derive_client_personas("acct")
+        assert [p["id"] for p in out] == list(bp.PERSONA_IDS)
+        assert all(not p["is_filled"] and p["full_name"] is None for p in out)
 
 
 class TestTheBusinessUnitReads:
