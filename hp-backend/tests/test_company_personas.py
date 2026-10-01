@@ -19,6 +19,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from app.services.extractors import personas
+from app.services.hp import buyer_personas as bp
 
 
 def _load_splitter():
@@ -203,25 +204,48 @@ class TestMessageEvaluatorPersonaPaths:
         monkeypatch.setattr(personas, "read_dataset_records",
                             lambda _a, _k: [dict(ROLE_IN_SCOPE), dict(ROLE_EMPTY)])
         out = me._personas_from_client_roles("acct")
-        assert [p["persona_id"] for p in out] == ["vp-it", "head-procurement"]
-        assert [p["is_named_person"] for p in out] == [True, False]
-        assert out[1]["name"] is None
-        assert out[1]["title"] == "Head of Procurement"
-        assert "no contact identified" in out[1]["evidence_note"]
-        assert out[0]["card"]["persona_id"] == "vp-it"
+        # All eight, in pack order, on every account - spec 1.4 "Treat all
+        # eight as client target roles". The file supplies the contact; it
+        # never decides which personas exist.
+        assert [p["persona_id"] for p in out] == list(bp.PERSONA_IDS)
+        by_id = {p["persona_id"]: p for p in out}
+        assert by_id["vp-it"]["is_named_person"] is True
+        assert by_id["head-procurement"]["is_named_person"] is False
+        assert by_id["head-procurement"]["name"] is None
+        assert by_id["head-procurement"]["title"] == "Head of Procurement"
+        assert "no contact identified" in by_id["head-procurement"]["evidence_note"]
+        assert by_id["vp-it"]["card"]["persona_id"] == "vp-it"
+        out = [by_id["vp-it"], by_id["head-procurement"]]
         # LITE shape: the behavioural state is mode-dependent, and the widget
         # is written once for both modes.
         assert "behavioural_state" not in out[0]["card"]
 
-    def test_a_role_outside_the_eight_is_not_offered(self, monkeypatch):
+    def test_a_role_outside_the_eight_is_never_offered(self, monkeypatch):
         """The CTO is one of the twenty-four roles `company_personas` carries
-        that this programme does not evaluate against. Section 2.3's
-        eligibility matrix has no row for it, so a stimulus scored against it
-        could not be judged at all."""
+        that this programme does not evaluate against - Section 2.3's
+        eligibility matrix has no row for it.
+
+        It is dropped; the eight are still offered. This test once asserted
+        that NOTHING was offered, which encoded a real bug: the eight were
+        gated on the file having a matching row, so an account without the
+        file - every account on a local machine - showed an empty audience in
+        a feature whose audience is a fixed list.
+        """
         from app.services.extractors import message_evaluator as me
         monkeypatch.setattr(personas, "read_dataset_records",
                             lambda _a, _k: [dict(ROLE_FILLED)])
-        assert me._personas_from_client_roles("acct") == []
+        out = me._personas_from_client_roles("acct")
+        assert [p["persona_id"] for p in out] == list(bp.PERSONA_IDS)
+        assert all(not p["is_named_person"] for p in out)
+        assert "Adam Neal" not in str(out)
+
+    def test_an_account_with_no_target_role_file_still_has_eight(self, monkeypatch):
+        """Spec 1.4: UNFILLED is "the normal path, not an error state"."""
+        from app.services.extractors import message_evaluator as me
+        monkeypatch.setattr(personas, "read_dataset_records", lambda _a, _k: [])
+        out = me._personas_from_client_roles("acct")
+        assert len(out) == 8
+        assert all(p["card"] and not p["is_named_person"] for p in out)
 
     def test_the_angle_comes_from_the_pack_not_the_export(self, monkeypatch):
         """Section 2.2 assigns the eight angles explicitly, so a reworded

@@ -47,7 +47,11 @@ from app.database.mongodb import get_db
 from app.observability import steps
 from app.services.extractors import grounding
 from app.services.regen import store as widget_store
-from app.services.strategy import context as account_context, personas as strategy_personas
+from app.services.strategy import (
+    claims as claim_model,
+    context as account_context,
+    personas as strategy_personas,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +72,7 @@ logger = logging.getLogger(__name__)
 #    a name, not by a five-point evidence list and three things to do about it.
 #    Also: read the whole account, not the one obvious section. The answer that
 #    prompted this cited 2 sections out of ~23.
-PROMPT_VERSION = 5
+PROMPT_VERSION = 6
 
 MAX_HISTORY_TURNS = 12
 MAX_VALIDATION_ATTEMPTS = 3
@@ -181,15 +185,39 @@ goes under RECOMMENDED NEXT STEPS:. This is not decoration - a seller repeats fa
 weighs recommendations themselves, and an answer that blurs the two gets the platform's inferences
 quoted as the customer's own filings.
 
-CITATIONS: the account data is divided into sections, each introduced by a line reading
-===== <section_name> (feature: ...) =====
-EVERY sentence that states a fact about the account - in ANSWER: or in FACTS: - must end with the
-section it came from, in square brackets - for example [exec_urgency_score]. Cite several when a
-sentence rests on several: [a_section, b_section].
+HOW YOU ANSWER: not as prose, but as a list of SEGMENTS. Each segment is one sentence or one
+short line of the answer, and each one says what it is. Read in order they are the answer; the
+seller never sees the structure. Do NOT write citation tags into the text - say which section a
+segment came from in its own field and the platform adds the citation itself.
 
+The account data is divided into sections, each introduced by a line reading
+===== <section_name> (feature: ...) =====
 Copy section names character for character from those header lines. Never invent one, never adapt
-one, and never use a name that does not appear as a header above - a name that does not match a
-section is rejected and the whole answer is discarded.
+one, and never use a name that does not appear as a header above.
+
+EVERY SEGMENT HAS A TYPE, and the type decides what it must carry:
+
+FACT - states something about the account: a name, title, vendor, number, date, event.
+  Needs "sections": the section or sections it came from.
+  Needs "quote": a short run of words copied EXACTLY from one of those sections that shows the
+  fact is there. Copy it character for character from the data - it is checked against the
+  section, and a quote that is not in it is rejected.
+
+DERIVED - an account statement you worked out from the data rather than read off it: a count, a
+  comparison between two things in the evidence, a restatement. Same requirements as FACT.
+
+SYNTHESIS - your conclusion, recommendation or judgement, drawn from segments already in the list.
+  Needs "depends_on": the ids of the segments it rests on. Needs NO sections and NO quote.
+  It may summarise, compare or conclude - and it may name nothing the segments it depends on do
+  not already carry. A new vendor, number, person, event or relationship in a SYNTHESIS is
+  rejected: put that in a FACT with its own evidence first, then conclude from it.
+
+GENERAL - how this kind of situation usually works, said about the world and not about this
+  account. No sections, no quote. It may not name {company} and may not carry a figure - if you
+  find yourself doing either, it is a FACT and needs evidence.
+
+Keep facts and conclusions in separate segments. One sentence that half-states a fact and
+half-draws a conclusion cannot be checked, and will be rejected.
 
 HP RULES:
 - You represent HP Inc. Never describe a competitor's product as ours.
@@ -199,9 +227,55 @@ HP RULES:
 IF THE EVIDENCE DOES NOT ANSWER THE QUESTION: say plainly that the platform does not hold it, and
 name the closest thing it does hold. That is a correct answer, not a failure.
 
-FORMAT - these sections, in this order, and nothing before the first one. ANSWER: is always there.
-FACTS: and RECOMMENDED NEXT STEPS: are there when the question calls for them, and left out entirely
-when it does not.
+OUTPUT - return ONE JSON object and nothing else. No prose around it, no markdown fence.
+
+{{"segments": [
+  {{"id": "c1", "type": "FACT", "block": "paragraph",
+   "text": "...", "sections": ["a_section"], "quote": "exact words from that section"}},
+  {{"id": "c2", "type": "SYNTHESIS", "block": "paragraph",
+   "text": "...", "depends_on": ["c1"]}},
+  {{"id": "c3", "type": "GENERAL", "block": "paragraph", "text": "..."}}
+]}}
+
+WORKED EXAMPLE. Three facts and the conclusion they earn:
+
+{{"segments": [
+  {{"id": "c1", "type": "GENERAL", "block": "heading", "text": "ANSWER:"}},
+  {{"id": "c2", "type": "FACT", "block": "paragraph",
+    "text": "Their estate runs AutoCAD and CATIA.",
+    "sections": ["tech_stack_matrix"], "quote": "AutoCAD"}},
+  {{"id": "c3", "type": "FACT", "block": "paragraph",
+    "text": "The Opportunity Map rates workstations a Critical play.",
+    "sections": ["opportunity_narrative_plays"], "quote": "Critical"}},
+  {{"id": "c4", "type": "SYNTHESIS", "block": "paragraph",
+    "text": "So the workstation line has the strongest case of the three.",
+    "depends_on": ["c2", "c3"]}}
+]}}
+
+Read the "quote" rule off that example: "AutoCAD" and "Critical" are words
+lifted out of the data, not sentences about it. A quote is a SHORT run of
+characters you can find by searching the section - a vendor name, a title, a
+status, a figure. Do not write a sentence of your own there; it is compared
+against the section and a sentence you composed is not in it.
+
+And read the SYNTHESIS rule off c4: it names nothing c2 and c3 do not already
+name. If you want to recommend an HP line, the line has to appear in a FACT
+with its own section and quote FIRST - then conclude from that FACT. A
+conclusion is where you reason, never where you introduce.
+
+Inside "text", never use a double quote - the answer is one JSON object and a
+stray quote breaks it. Write a quoted phrase with single quotes, or none.
+
+"block" is how the line sits on the page: "paragraph" for ordinary prose, "bullet" for an item in
+a list, "heading" for a section heading such as ANSWER: or FACTS:, "label" for a SHORT ALL-CAPS
+LABEL opening a block. Headings and labels are usually GENERAL - they name nothing about the
+account - but a label that names a vendor is a FACT and needs its evidence.
+
+The answer still has the shape it always had, written as segments:
+A "heading" segment reading ANSWER: , then the answer. Then a "heading" segment reading FACTS:
+and the facts, when the question calls for them. Then a "heading" segment reading
+RECOMMENDED NEXT STEPS: and the steps, when the question asks what to do. ANSWER: is always there;
+the other two are left out entirely when the question does not call for them.
 ANSWER:
   Answer the question that was actually asked, at whatever length it deserves. There is no target
   length, no minimum and no house style. Judge it from the question:
@@ -218,25 +292,28 @@ ANSWER:
   care about, what they already run and what they will push back on; the evidence for that is
   spread across the sections below, and an answer that reads one of them is a thinner answer than
   the data supports.
-  Every line here that says anything about the account ends with its tag - the first line, the
-  sentences, and a label that names vendors. A bare label like COMPETITIVE RISKS names nothing and
-  needs none.
+  Every segment here that says anything about the account is a FACT or a DERIVED with its own
+  evidence - the first line, the sentences, and a label that names vendors. A bare label like
+  COMPETITIVE RISKS names nothing and is GENERAL. A line that draws the answer together is a
+  SYNTHESIS resting on the segments above it.
 FACTS:
-  A numbered list of the evidence behind the answer, one fact each, each ending with its tag. At
-  most five for a single-topic answer; up to eight when the answer covers several things, so each
-  part shows the evidence it rests on. Only the facts the answer rests on; not an inventory of
-  everything known.
+  A numbered list of the evidence behind the answer, one fact each, each a FACT segment with its
+  section and quote, "block": "bullet". At most five for a single-topic answer; up to eight when
+  the answer covers several things, so each part shows the evidence it rests on. Only the facts
+  the answer rests on; not an inventory of everything known.
   LEAVE THIS SECTION OUT when the answer already said its facts and a list would only repeat them.
   A one-line answer does not need a FACTS block under it.
 RECOMMENDED NEXT STEPS:
-  A numbered list of two or three concrete actions for the seller.
+  A numbered list of two or three concrete actions for the seller, each a SYNTHESIS segment
+  resting on the facts that justify it, "block": "bullet".
   LEAVE THIS SECTION OUT when the question did not ask what to do. "What was revenue last year" is
   answered by the figure, not by three things to do about it.
 If the evidence does not answer the question, write ANSWER: saying so and naming the closest thing
 the platform holds, and leave out the other two sections.
-Plain text: no markdown, no asterisks, no hashes. Do not pad: no background the question did not
-ask for, no restating the question, no summary of what you are about to say. Length comes from
-covering what was asked, never from saying it at greater length."""
+Each segment's "text" is plain: no markdown, no asterisks, no hashes, and no square-bracket
+citation tags - the platform adds those. Do not pad: no background the question did not ask for,
+no restating the question, no summary of what you are about to say. Length comes from covering
+what was asked, never from saying it at greater length."""
 
 
 # A separate constant rather than a branch inside ANSWER_SYSTEM, for three
@@ -882,6 +959,30 @@ def _validate(answer: str, payload: str, widget_keys: list) -> tuple:
 # Entry point
 # ---------------------------------------------------------------------------
 
+# Why there is no answer. Three unrelated failures used to print one message -
+# "nothing in it supports an answer here" - including the case where the model
+# answered and the gate rejected it. A seller reading that concludes the
+# platform holds nothing about the account, which on a 350,000-character
+# payload is the most damaging thing it could tell them.
+CAUSE_NO_DATA = "no_data"            # no feature has published anything
+CAUSE_MODEL = "model"                # the model failed, or hit the token cap
+CAUSE_UNEVIDENCED = "unevidenced"    # it answered; the answer could not be evidenced
+
+CAUSE_OPENING = {
+    CAUSE_NO_DATA:
+        "I have nothing to answer from for {company} yet.\n\n"
+        "No feature has published anything for this account, so there is no "
+        "account intelligence to read.",
+    CAUSE_MODEL:
+        "I could not finish that answer for {company}.\n\n"
+        "The model did not return a usable answer, so there is nothing I can "
+        "stand behind. This is a fault on our side, not a gap in the data.",
+    CAUSE_UNEVIDENCED:
+        "I drafted an answer about {company} but could not evidence all of "
+        "it.\n\nRather than show you claims I cannot trace to this account's "
+        "data, I have held it back.",
+}
+
 UNAVAILABLE = (
     "I could not answer that from {company}'s account intelligence.\n\n"
     "Everything I say has to come from the data this platform holds for this "
@@ -916,7 +1017,113 @@ def _answer(db, timer, account_id, messages, mode, persona_id) -> dict:
     if "done" in turn:
         return turn["done"]
 
-    attempts, correction, last_reason = [], "", "no attempt was made"
+    if turn["persona"]:
+        return _answer_roleplay(timer, turn, messages, attempts=[])
+    return _answer_advisor(timer, turn, messages)
+
+
+def _stream_advisor(timer, turn, messages):
+    """The advisor turn as SSE, validated before a word is shown.
+
+    The same `_answer_advisor` decision, wrapped in the stage events the UI
+    animates. Nothing unvalidated reaches the client: the answer arrives in one
+    delta once the gate has passed it, which is the point of the change.
+    """
+    yield {"type": "stage", "stage": "writing"}
+    result = _answer_advisor(timer, turn, messages)
+    yield {"type": "stage", "stage": "checking"}
+    if result.get("available") and result.get("answer"):
+        yield {"type": "delta", "text": result["answer"]}
+    yield {"type": "done", **result}
+
+
+def _answer_advisor(timer, turn, messages) -> dict:
+    """Generate the whole answer as segments, validate it whole, repair it.
+
+    Nothing is published until the segment list holds. When the retry budget
+    is spent the segments that DID hold are published and the rest dropped -
+    an answer missing a line is worth more to a seller than being told the
+    platform holds nothing about an account it holds 350,000 characters on.
+    """
+    attempts, correction = [], ""
+    last_failures, last_segments = [], []
+
+    for attempt in range(MAX_VALIDATION_ATTEMPTS):
+        try:
+            with timer.step("generation", attempt=attempt + 1):
+                raw = _answer_once(turn["company"], turn["question"],
+                                   turn["payload"], messages, correction)
+        except gemini.GeminiUnavailable as exc:
+            # Truncation included, and named rather than left to the validator,
+            # which would have rejected the cut-off answer for a missing
+            # citation and spent the remaining attempts reproducing it.
+            logger.error("strategy chat: %s", exc)
+            return _unavailable_for(turn, str(exc), attempts,
+                                    cause=CAUSE_MODEL)
+        try:
+            with timer.step("validation"):
+                ok, failures, cited, segments = _check_segments(turn, raw)
+        except claim_model.ClaimError as exc:
+            # A malformed list is the model's answer being unusable, not an
+            # ungrounded claim. Named as such so the retry fixes the shape.
+            reason = str(exc)
+            attempts.append({"attempt": attempt + 1, "accepted": False,
+                             "reason": reason})
+            correction = ("Your previous answer was not a segment list: %s. "
+                          "Return one JSON object with a \"segments\" array "
+                          "and nothing else." % reason)
+            logger.info("strategy chat: attempt %d unparsable - %s",
+                        attempt + 1, reason)
+            continue
+
+        reason = _reason_for(failures)
+        attempts.append({"attempt": attempt + 1, "accepted": ok, "reason": reason})
+        if ok:
+            _log_timings(timer, turn["question"], accepted=True)
+            return _published(turn, claim_model.render(segments), cited,
+                              attempts, timer, segments=segments)
+        last_failures, last_segments = failures, segments
+        correction = claim_model.repair_notes(failures)
+        logger.info("strategy chat: attempt %d rejected - %s", attempt + 1, reason)
+
+    # The retry budget is spent. Publish what held rather than nothing.
+    kept = claim_model.surviving(last_segments, last_failures)
+    if kept:
+        ok, failures, cited, _ = _revalidate(turn, kept)
+        if ok:
+            dropped = len(last_segments) - len(kept)
+            logger.info("strategy chat: published %d of %d segments, %d dropped",
+                        len(kept), len(last_segments), dropped)
+            _log_timings(timer, turn["question"], accepted=True)
+            return _published(turn, claim_model.render(kept), cited, attempts,
+                              timer, segments=kept, dropped=dropped)
+
+    _log_timings(timer, turn["question"], accepted=False)
+    return _unavailable_for(turn, _reason_for(last_failures), attempts, timer,
+                            cause=CAUSE_UNEVIDENCED)
+
+
+def _revalidate(turn: dict, segments: list) -> tuple:
+    """The same gate, over a list we have already pruned."""
+    ok, failures, cited = claim_model.validate(
+        segments,
+        widget_keys=turn["widget_keys"],
+        section_texts=_section_texts(turn["payload"]),
+        corpus=_corpus_for(turn["payload"]),
+        company=turn["company"],
+        payload=turn["payload"])
+    return ok, failures, cited, segments
+
+
+def _answer_roleplay(timer, turn, messages, attempts) -> dict:
+    """In-character dialogue, unchanged.
+
+    The persona path keeps prose with literal tags and the per-sentence gate.
+    Its answer is spoken, not structured; segments would make a character read
+    like a report, and `_validate_roleplay` carries rules - banned names,
+    section overlap - that have nothing to do with the advisor.
+    """
+    correction, last_reason = "", "no attempt was made"
     for attempt in range(MAX_VALIDATION_ATTEMPTS):
         try:
             with timer.step("generation", attempt=attempt + 1):
@@ -924,11 +1131,8 @@ def _answer(db, timer, account_id, messages, mode, persona_id) -> dict:
                                    turn["payload"], messages, correction,
                                    persona=turn["persona"])
         except gemini.GeminiUnavailable as exc:
-            # Truncation included, and named rather than left to the validator,
-            # which would have rejected the cut-off answer for a missing
-            # citation and spent the remaining attempts reproducing it.
             logger.error("strategy chat: %s", exc)
-            return _unavailable_for(turn, str(exc), attempts)
+            return _unavailable_for(turn, str(exc), attempts, cause=CAUSE_MODEL)
         with timer.step("validation"):
             ok, reason, cited, cleaned = _check(turn, raw)
         attempts.append({"attempt": attempt + 1, "accepted": ok, "reason": reason})
@@ -939,10 +1143,9 @@ def _answer(db, timer, account_id, messages, mode, persona_id) -> dict:
         correction = reason
         logger.info("strategy chat: attempt %d rejected - %s", attempt + 1, reason)
 
-    # Bounded retries, then stop. A third failure means the evidence does not
-    # support the answer the model keeps wanting to give.
     _log_timings(timer, turn["question"], accepted=False)
-    return _unavailable_for(turn, last_reason, attempts, timer)
+    return _unavailable_for(turn, last_reason, attempts, timer,
+                            cause=CAUSE_UNEVIDENCED)
 
 
 def _prepare(db, timer, account_id, messages, mode, persona_id) -> dict:
@@ -993,8 +1196,37 @@ def _prepare(db, timer, account_id, messages, mode, persona_id) -> dict:
                        if persona else [])}
     if not payload:
         return {"done": _unavailable_for(
-            turn, "no feature has published anything for this account yet")}
+            turn, "no feature has published anything for this account yet",
+            cause=CAUSE_NO_DATA)}
     return turn
+
+
+def _check_segments(turn: dict, raw: str) -> tuple:
+    """(ok, failures, cited, segments) for the advisor's segment list.
+
+    Replaces reconstructing claims from prose. The model says what each piece
+    of its answer is; this proves it. `failures` carries a segment id per
+    fault so the repair can name what to fix instead of asking for the whole
+    answer again.
+    """
+    segments = claim_model.parse(raw)
+    ok, failures, cited = claim_model.validate(
+        segments,
+        widget_keys=turn["widget_keys"],
+        section_texts=_section_texts(turn["payload"]),
+        corpus=_corpus_for(turn["payload"]),
+        company=turn["company"],
+        payload=turn["payload"])
+    return ok, failures, cited, segments
+
+
+def _reason_for(failures: list) -> str:
+    """The one-line reason that goes on the response and into the log."""
+    if not failures:
+        return "ok"
+    head = failures[0]
+    extra = " (and %d more)" % (len(failures) - 1) if len(failures) > 1 else ""
+    return "segment %s: %s%s" % (head["id"], head["reason"], extra)
 
 
 def _check(turn: dict, text: str) -> tuple:
@@ -1006,9 +1238,19 @@ def _check(turn: dict, text: str) -> tuple:
 
 
 def _published(turn: dict, cleaned: str, cited: list, attempts: list,
-               timer) -> dict:
+               timer, segments: list | None = None, dropped: int = 0) -> dict:
+    """The three outputs, kept apart.
+
+    `answer` is what the seller reads: prose with `[section]` tags the UI turns
+    into footnote markers. `answer_clean` is the same prose with none, for
+    anything that reuses it - the copy button, an email draft, the history sent
+    back to the model. `claims` is the evidence behind each line, so a
+    downstream generator can be grounded without ever seeing a tag.
+    """
     return {
         "answer": cleaned,
+        "answer_clean": claim_model.clean(segments) if segments else cleaned,
+        "claims": segments or [],
         "question": turn["question"],
         "topic": turn["topic"],
         "mode": turn["mode"],
@@ -1021,6 +1263,9 @@ def _published(turn: dict, cleaned: str, cited: list, attempts: list,
             "widgets_in_context": len(turn["widget_keys"]),
             "context_chars": len(turn["payload"]),
             "attempts": attempts,
+            # Segments dropped after the retry budget was spent, so a partial
+            # answer says so rather than looking complete.
+            "segments_dropped": dropped,
             # Slowest step first, plus the token counters. Returned as well as
             # logged because the person asking "why did that take so long" is
             # looking at the screen, not the server.
@@ -1030,10 +1275,11 @@ def _published(turn: dict, cleaned: str, cited: list, attempts: list,
     }
 
 
-def _unavailable_for(turn: dict, reason: str, attempts=None, timer=None) -> dict:
+def _unavailable_for(turn: dict, reason: str, attempts=None, timer=None,
+                     cause: str = CAUSE_UNEVIDENCED) -> dict:
     return _unavailable(turn["company"], turn["question"], turn["topic"], reason,
                         attempts, mode=turn["mode"], persona=turn["persona"],
-                        timer=timer)
+                        timer=timer, cause=cause)
 
 
 def _answer_once_stream(company: str, question: str, context: str, messages: list,
@@ -1116,6 +1362,10 @@ def answer_stream(account_id: str, messages: list, mode: str | None = None,
         turn = _prepare(db, timer, account_id, messages, mode, persona_id)
     if "done" in turn:
         yield {"type": "done", **turn["done"]}
+        return
+
+    if not turn["persona"]:
+        yield from _stream_advisor(timer, turn, messages)
         return
 
     attempts, correction, last_reason = [], "", "no attempt was made"
@@ -1268,12 +1518,16 @@ def _greeting(company: str, question: str, mode: str = "advisor",
     }
 
 
-def _unavailable(company, question, topic, reason, attempts=None,
+def _unavailable(company, question, topic, reason, attempts=None,  # noqa: PLR0913, PLR0917 - every field of the refusal payload
                  mode: str = "advisor", persona: dict | None = None,
-                 timer=None) -> dict:
+                 timer=None, cause: str = CAUSE_UNEVIDENCED) -> dict:
     closest = ("You could look at the Stakeholder Map, Tech Landscape or Recent "
                "Signals for the nearest related evidence.")
-    body = UNAVAILABLE.format(company=company, closest=closest)
+    # The opening line says which of the three things went wrong. It used to
+    # assert "nothing in it supports an answer" for all of them, including the
+    # case where the model answered and the gate rejected the answer.
+    opening = CAUSE_OPENING.get(cause, CAUSE_OPENING[CAUSE_UNEVIDENCED])
+    body = "%s\n\n%s" % (opening.format(company=company), closest)
     if persona:
         # Deliberately OUT of character, and this is the one place the
         # simulation breaks on purpose.
@@ -1296,7 +1550,10 @@ def _unavailable(company, question, topic, reason, attempts=None,
         "mode": mode,
         "persona": _persona_summary(persona),
         "citations": [],
+        "answer_clean": body,
+        "claims": [],
         "available": False,
+        "unavailable_cause": cause,
         "generation": {"prompt_version": PROMPT_VERSION, "reason": reason,
                        "attempts": attempts or [],
                        # The timer rather than two derived dicts: a refusal

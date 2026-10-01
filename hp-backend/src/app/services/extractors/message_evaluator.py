@@ -104,6 +104,15 @@ def _personas_from_contacts(db, account_id: str, contacts_records: list) -> list
     return found
 
 
+# Spec 1.4's UNFILLED, for a persona the account's target-role file has no
+# row for - "the normal path, not an error state".
+_UNFILLED_ROLE = {
+    "target_persona": "", "department": "", "buying_committee_angle": "",
+    "contact_name": "", "actual_job_title": "", "contact_status": "",
+    "is_filled": False,
+}
+
+
 def _personas_from_client_roles(account_id: str) -> list:
     """The client's eight target roles, each carrying its hardcoded card.
 
@@ -129,9 +138,9 @@ def _personas_from_client_roles(account_id: str) -> list:
 
     out = []
     for persona_id in bp.PERSONA_IDS:
-        role = by_persona.get(persona_id)
-        if role is None:
-            continue
+        # Every one of the eight, on every account - spec 1.4. The file
+        # decides FILLED or UNFILLED, never whether the persona is offered.
+        role = by_persona.get(persona_id) or _UNFILLED_ROLE
         # The LITE card. The behavioural state is mode-dependent and the widget
         # is not: `evaluate_message` asks the pack again with deep=True.
         card = bp.evaluator_card(persona_id)
