@@ -563,3 +563,168 @@ class TestBothDimensionShapesAreRead:
     def test_nothing_at_all_is_empty_rather_than_an_error(self):
         assert S.split_dimension_payload(None) == ({}, {})
         assert S.split_dimension_payload([]) == ({}, {})
+
+    def test_the_card_block_carries_every_section_4_10_names(self):
+        """4.10 lists the persona blocks the scoring prompt must contain.
+
+        Our headings differ from the specification's ("They decide by asking"
+        for DECISION CRITERIA, "What lands with them" for WHAT RESONATES) -
+        the content is what is checked, not the capitalisation, because an HP
+        reader comparing the two is reading for the buyer's goals, not for a
+        heading style.
+        """
+        card = bp.evaluator_card("cfo", deep=True)
+        block = E._card_block(card)
+        for field in ("goals", "pain_points", "value_drivers",
+                      "decision_criteria", "typical_objections",
+                      "resonates", "does_not_resonate"):
+            assert card[field][0] in block, field
+        prefs = card["content_preferences"]
+        assert prefs["tone"] in block
+        assert prefs["format"] in block
+        assert prefs["key_metrics"][0] in block
+        assert card["behavioural_state"]["name"] in block
+
+    def test_the_prompt_names_the_account(self):
+        """The card is the same on all 220, so this line and the evidence are
+        the only things saying which account is being written to."""
+        class _Corpus:
+            cells: typing.ClassVar[list] = ["a fact"]
+
+        class _Sources:
+            account = _Corpus()
+            hp = _Corpus()
+            country = "japan"
+            company_name = "Advantest Corporation"
+            superlatives_blocked = False
+            competitor_claims_blocked = False
+
+        prompt = E._user_prompt(
+            "msg", {"title": "CFO"}, "conversion", "email", E.MODE_DEEP,
+            _Sources(), F.structure_checks("x", "email"),
+            card=bp.evaluator_card("cfo"), severe=[])
+        assert "ACCOUNT: Advantest Corporation" in prompt
+
+    def test_format_notes_are_asked_for_and_stored(self):
+        """4.10's `formatNotes`: what the draft does well or badly AS an email,
+        which the seven dimensions do not ask about directly."""
+        import inspect
+        assert "format_notes" in inspect.getsource(E._user_prompt)
+        assert "format_notes" in inspect.getsource(E.evaluate_message)
+
+    def test_the_composite_formula_is_deliberately_withheld(self):
+        """4.10 puts it in the prompt and this build does not.
+
+        The model is told it will never see the composite. Handing it the
+        weights would tell it which three dimensions to optimise and which four
+        do not count. The number is computed in code either way, so the
+        seller's score is identical; what changes is whether the model has a
+        reason to inflate Relevance under Engagement.
+        """
+        assert "do NOT compute the composite" in E.SYSTEM_PROMPT
+        for objective in S.OBJECTIVES:
+            assert S.formula_expression(objective) not in E._dimension_block(objective)
+
+
+# --- tuning row 9, Column 6 -------------------------------------------------
+
+class TestTheRulebookAndCaseStudiesReachTheScorer:
+    """Tuning ROW 9, Column 6.
+
+        "The Rulebook is used in scoring rather than in generation:
+         Brand_Recall is assessed against whether HP is positioned as the
+         Rulebook describes the named line, and Impact is assessed against
+         whether a claim that could have been proved by an available HP case
+         study was left unproved."
+
+    Neither reached the Evaluator. Brand_Recall was "HP positioning
+    reinforcement" with nothing to measure against, so it scored on how
+    enthusiastic the copy sounded.
+    """
+
+    RULE: typing.ClassVar[dict] = {
+        "kind": "rule", "family": "WOLF", "rule_label": "B1", "order": 1,
+        "part": "B", "routing_only": False,
+        "offering": "HP Wolf Security - firmware protection below the OS",
+        "allowed_facts": ["Protection sits below the operating system."],
+        "prohibitions": ["Do not claim it replaces an endpoint detection product."],
+    }
+
+    def _with_knowledge(self, monkeypatch, *, rules=True, studies=True):
+        from app.services.hp import case_studies as cstudies, rulebook
+        monkeypatch.setattr(rulebook, "load", lambda _db: {
+            "rules": [self.RULE] if rules else [], "routing": [],
+            "matrices": {}, "guardrails": [], "country_lists": {}})
+        monkeypatch.setattr(cstudies, "match",
+                            lambda _db, _l, **_k: [{"headline": "x"}] if studies else [])
+        monkeypatch.setattr(cstudies, "as_proof_point", lambda _s: {
+            "text": "HP secured 40,000 endpoints at a global manufacturer.",
+            "customer": "A global manufacturer", "industry": "manufacturing"})
+
+    def test_the_lines_the_seller_named_are_found(self):
+        found = E._hp_lines_named(
+            "We would put HP Wolf Security on the fleet and add HP Care Pack Services.")
+        assert found == ["HP Wolf Security", "HP Care Pack Services"]
+
+    def test_a_message_naming_nothing_pulls_nothing(self):
+        assert E._hp_lines_named("Your estate is due a refresh. Worth a chat?") == []
+        assert E._rulebook_block([], [], []) == ""
+
+    def test_brand_recall_is_given_the_positioning(self, monkeypatch):
+        self._with_knowledge(monkeypatch)
+        lines = ["HP Wolf Security"]
+        block = E._rulebook_block(E._rulebook_positioning(None, lines),
+                                  E._proof_available(None, lines, "", "draft"), lines)
+        assert "HOW HP POSITIONS THESE LINES" in block
+        assert "firmware protection below the OS" in block
+        assert "may state: Protection sits below the operating system." in block
+        assert "must NOT say: Do not claim it replaces" in block
+        assert "not against enthusiasm" in block
+
+    def test_impact_is_given_the_proof_that_exists(self, monkeypatch):
+        self._with_knowledge(monkeypatch)
+        lines = ["HP Wolf Security"]
+        block = E._rulebook_block(E._rulebook_positioning(None, lines),
+                                  E._proof_available(None, lines, "", "draft"), lines)
+        assert "HP PROOF THAT EXISTS" in block
+        assert "40,000 endpoints" in block
+        assert "left unproved" in block
+
+    def test_with_no_case_study_the_instruction_is_to_cut_not_soften(self, monkeypatch):
+        """The row is explicit: "Where no case study fits, the recommendation
+        is to cut the claim rather than to soften it." Softening an unprovable
+        claim leaves it in the message."""
+        self._with_knowledge(monkeypatch, studies=False)
+        lines = ["HP Wolf Security"]
+        block = E._rulebook_block(E._rulebook_positioning(None, lines),
+                                  E._proof_available(None, lines, "", "draft"), lines)
+        assert "CUT the claim, not to soften it" in block
+
+    def test_with_no_rulebook_entry_brand_recall_says_so(self, monkeypatch):
+        self._with_knowledge(monkeypatch, rules=False)
+        lines = ["HP Wolf Security"]
+        block = E._rulebook_block(E._rulebook_positioning(None, lines), [], lines)
+        assert "carries no positioning" in block
+
+    def test_the_system_prompt_says_what_those_two_are_measured_against(self):
+        assert "measured against the Rulebook positioning" in E.SYSTEM_PROMPT
+        assert "left unproved" in E.SYSTEM_PROMPT
+
+    def test_what_was_judged_against_is_stored(self):
+        """The score is inspectable rather than asserted."""
+        import inspect
+        source = inspect.getsource(E.evaluate_message)
+        for key in ("hp_lines_named", "rulebook_positioning", "proof_available"):
+            assert '"%s"' % key in source
+
+    def test_the_generator_is_still_never_shown_a_case_study(self):
+        """The asymmetry is the point. Rule 4 makes the HP line something the
+        GENERATOR has to earn, so handing it a study would hand it the product
+        to work backwards from. The evaluator is judging a line the seller
+        already named, so nothing is being chosen."""
+        import inspect
+
+        from app.services.extractors import content_studio
+        prompt_source = inspect.getsource(content_studio._build_system_prompt)
+        assert "case study" not in prompt_source.lower()
+        assert "proof point" not in prompt_source.lower()

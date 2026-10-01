@@ -25,15 +25,28 @@ WIDGET_KEY = "evaluator_feedback_score"
 
 
 def message_fingerprint(message: str, persona_id: str, objective: str,
-                        fmt: str, mode: str) -> str:
+                        fmt: str, mode: str, logic_version: str = "") -> str:
     """Identity of one evaluation request.
 
     Re-submitting the same message against the same persona, objective, format
     and mode returns the stored result instead of paying for another model call.
+
+    `logic_version` is what makes that safe. The five inputs describe the
+    REQUEST; they say nothing about the scorer. Without it a seller who
+    resubmitted a draft after the prompt changed was handed the old answer -
+    and the 30 Sep specification moved a great deal: five or six dimensions
+    became seven, the rubric gained a band, two severe-failure rules appeared,
+    and the persona card and the Rulebook positioning joined the prompt. The
+    caller passes its prompt version and the persona pack version, so a
+    corrected persona card re-scores every draft it touched.
+
+    It defaults to "" rather than being required, because a stored fingerprint
+    has to stay computable the way it was computed.
     """
     payload = "||".join([
         " ".join(str(message or "").split()),
         str(persona_id or ""), str(objective or ""), str(fmt or ""), str(mode or ""),
+        str(logic_version or ""),
     ])
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 

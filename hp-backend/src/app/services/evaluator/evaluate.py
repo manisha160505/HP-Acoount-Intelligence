@@ -28,11 +28,17 @@ from datetime import UTC, datetime
 from app.core.llm import generate_gpt4o_json_completion
 from app.services.evaluator import formats as F, scoring as S, sources as SRC, storage, verify
 from app.services.extractors.grounding import corpus_from_texts
-from app.services.hp import buyer_personas as bp, content_gates
+from app.services.hp import (
+    buyer_personas as bp,
+    case_studies as cs,
+    content_audit,
+    content_gates,
+    rulebook,
+)
 
 logger = logging.getLogger(__name__)
 
-PROMPT_VERSION = 4
+PROMPT_VERSION = 6
 
 MODE_LITE = "LITE"
 MODE_DEEP = "DEEP"
@@ -81,6 +87,13 @@ RULES THAT ARE CHECKED IN CODE AFTER YOU ANSWER:
 3. Do not introduce a number, percentage, statistic or URL that is not in the
    supplied context. Anything you invent is stripped.
 4. Do not claim an HP capability that is not in the approved HP facts below.
+
+Two dimensions are measured against something supplied below rather than
+against your own taste:
+  - Brand_Recall is measured against the Rulebook positioning, where one is
+    given. Praising HP in terms HP does not use is not reinforcement.
+  - Impact is measured partly on whether a claim that COULD have been proved
+    by the HP proof listed below was left unproved.
 
 Score every dimension from 0 to 100. Return all of them; a missing dimension
 invalidates the whole evaluation."""
@@ -174,6 +187,8 @@ def _card_block(card):
            "- They decide by asking: %s" % "; ".join(card["decision_criteria"]),
            "- Measured on: %s" % ", ".join(card["content_preferences"]["key_metrics"]),
            "- Preferred tone: %s" % card["content_preferences"]["tone"],
+           "- Preferred format: %s" % card["content_preferences"]["format"],
+           "- What lands with them: %s" % "; ".join(card["resonates"]),
            "- What does NOT land with them: %s" % "; ".join(card["does_not_resonate"]),
            "- Objections they raise: %s" % "; ".join(card["typical_objections"]),
            "- What HP can and cannot address here: %s" % card["hp_opportunity"]]
@@ -191,6 +206,151 @@ def _card_block(card):
                 "- What works from this state: %s" % state["messaging_approach"],
                 "- What would move them forward: %s" % state["fast_track_trigger"],
                 "- What holds them back: %s" % state["key_blocker"]]
+    return "\n".join(out)
+
+
+# How much Rulebook and proof reaches one prompt. A named line usually routes
+# to one or two families and each family carries a handful of rules; all of it
+# would be longer than the message being judged.
+RULEBOOK_RULES_PER_LINE = 3
+PROOF_POINTS_PER_LINE = 2
+
+
+def _hp_lines_named(text: str) -> list:
+    """The HP lines the seller's own message names.
+
+    Matched against the same enum the generator is validated on, so a line that
+    would have been rejected at generation is the line that gets looked up
+    here.
+    """
+    low = str(text or "").lower()
+    return [line for line in content_gates.ALL_HP_LINES if line.lower() in low]
+
+
+def _rulebook_positioning(db, lines) -> list:
+    """How the Rulebook says each named line may be positioned.
+
+    Returns (line, offering, allowed_facts, prohibitions) rows. This is what
+    Brand_Recall is scored against: the dimension means "HP positioning
+    reinforcement", and without the Rulebook there was nothing to reinforce it
+    AGAINST - a message could praise HP in terms HP does not use and score
+    well for enthusiasm.
+    """
+    if not lines:
+        return []
+    try:
+        book = rulebook.load(db)
+    except Exception:
+        logger.exception("evaluator: rulebook load failed")
+        return []
+
+    # The line -> family map covers six lines directly; the family -> line map
+    # covers ten. Both are read so a line named either way resolves.
+    families_for = {}
+    for family, line in rulebook.RULEBOOK_FAMILY_TO_HP_LINE.items():
+        families_for.setdefault(line.lower(), set()).add(family)
+    for line, families in rulebook.HP_LINE_TO_RULEBOOK_FAMILIES.items():
+        families_for.setdefault(line, set()).update(families)
+
+    out = []
+    for line in lines:
+        wanted = families_for.get(line.lower()) or set()
+        if not wanted:
+            continue
+        rules = [r for r in book.get("rules") or []
+                 if r.get("family") in wanted and not r.get("routing_only")]
+        for rule in rules[:RULEBOOK_RULES_PER_LINE]:
+            out.append({
+                "line": line,
+                "offering": str(rule.get("offering") or "").strip(),
+                "allowed": [str(f) for f in (rule.get("allowed_facts") or [])],
+                "prohibited": [str(p) for p in (rule.get("prohibitions") or [])],
+            })
+    return out
+
+
+def _proof_available(db, lines, industry: str, stimulus: str) -> list:
+    """HP case studies that exist for the lines this message names.
+
+    Impact is scored against whether a claim that COULD have been proved was
+    left unproved, so the model has to be told what proof exists. And where a
+    phrase asserts a benefit with nothing behind it, the recommendation can
+    name the study instead of saying "add proof".
+    """
+    out = []
+    for line in lines:
+        canonical = cs.lines_for_hp_line(line) or cs.lines_for_product_text(line)
+        if not canonical:
+            continue
+        for study in cs.match(db, canonical, industry=cs.normalise_industry(industry),
+                              signals=cs.signals_for_opportunity(stimulus),
+                              limit=PROOF_POINTS_PER_LINE):
+            point = cs.as_proof_point(study)
+            if point and point.get("text"):
+                out.append({"line": line, "text": point["text"],
+                            "customer": point.get("customer") or "",
+                            "industry": point.get("industry") or ""})
+    return out
+
+
+def _account_industry(db, account_id: str) -> str:
+    """The account's industry, for scoring which case study fits.
+
+    `cs.match` ranks partly on industry, so a semiconductor account should see
+    a semiconductor study where one exists. The persona carries no industry -
+    it is the same card on all 220 accounts - so it is read from the widget
+    that already published it.
+    """
+    from app.services.regen import store as widget_store
+    for key, field in (("evaluator_persona_context", None),
+                       ("exec_summary_card", "industry_classification")):
+        data = (widget_store.get(account_id, key, db=db) or {}).get("data") or {}
+        if field:
+            value = data.get(field)
+        else:
+            value = (data.get("business_context") or {}).get("industry_classification")
+        if str(value or "").strip():
+            return str(value).strip()
+    return ""
+
+
+def _rulebook_block(positioning, proof, lines) -> str:
+    """Tuning row 9, Column 6, as the two things the scorer needs."""
+    if not lines:
+        return ""
+    out = ["HP LINES THIS MESSAGE NAMES: %s" % ", ".join(lines)]
+
+    if positioning:
+        out.append("")
+        out.append("HOW HP POSITIONS THESE LINES (Product, Services and Solutions "
+                   "Rulebook). Brand_Recall is scored against this, not against "
+                   "enthusiasm: a message that praises HP in terms HP does not use "
+                   "has not reinforced the positioning.")
+        for row in positioning:
+            out.append("  - %s%s" % (row["line"],
+                                     ": " + row["offering"] if row["offering"] else ""))
+            for fact in row["allowed"][:3]:
+                out.append("      may state: %s" % fact)
+            for banned in row["prohibited"][:3]:
+                out.append("      must NOT say: %s" % banned)
+    else:
+        out.append("The Rulebook carries no positioning for these lines, so judge "
+                   "Brand_Recall on whether HP is named specifically rather than "
+                   "against a standard.")
+
+    out.append("")
+    if proof:
+        out.append("HP PROOF THAT EXISTS FOR THESE LINES. Impact is scored partly on "
+                   "whether a claim that COULD have been proved was left unproved. "
+                   "Where a phrase asserts a benefit with nothing behind it, the "
+                   "recommendation is to point at one of these, by name:")
+        for point in proof:
+            out.append("  - %s%s" % (point["text"],
+                                     " (%s)" % point["customer"] if point["customer"] else ""))
+    else:
+        out.append("NO HP case study fits these lines for this account. Where a phrase "
+                   "asserts a benefit with no proof, the recommendation is to CUT the "
+                   "claim, not to soften it - there is nothing to soften it into.")
     return "\n".join(out)
 
 
@@ -301,7 +461,7 @@ def _context_block(sources, limit=18):
 
 
 def _user_prompt(message, persona, objective, fmt, mode, sources, checks,  # noqa: PLR0913, PLR0917 - one argument per prompt section; a context object would hide what the prompt is built from
-                 card=None, severe=()):
+                 card=None, severe=(), rulebook_block=""):
     spec = F.FORMATS[fmt]
     want_reaction = mode == MODE_DEEP
 
@@ -310,6 +470,10 @@ def _user_prompt(message, persona, objective, fmt, mode, sources, checks,  # noq
         or "  (all coded checks passed)"
 
     parts = [
+        # Spec 4.10 opens with the account. The persona card is the same on all
+        # 220, so this line and the evidence below it are the only things in
+        # the prompt that say which account is being written to.
+        "ACCOUNT: %s" % (getattr(sources, "company_name", "") or "this account"),
         "OBJECTIVE (funnel stage): %s" % objective.capitalize(),
         "FORMAT: %s" % spec["label"],
         "FORMAT CRITERIA: %s" % spec["criteria"],
@@ -320,6 +484,8 @@ def _user_prompt(message, persona, objective, fmt, mode, sources, checks,  # noq
         _card_block(card),
         "",
         _lines_block(card),
+        "",
+        rulebook_block,
         "",
         _context_block(sources),
         "",
@@ -344,6 +510,8 @@ def _user_prompt(message, persona, objective, fmt, mode, sources, checks,  # noq
         '     "comment": "<why, one sentence>",',
         '     "suggestion": "<a concrete replacement, or empty>"}',
         "  ],   // %s" % _chunk_instruction(mode),
+        '  "format_notes": "<observations specific to this format - what it does well '
+        'or badly AS a %s, beyond the dimension scores>",' % spec["label"],
         '  "summary": "<3-4 sentences: what works, what to fix first>",',
         '  "strengths": ["<short>", "..."],',
         '  "weaknesses": ["<short>", "..."]',
@@ -426,7 +594,11 @@ def evaluate_message(account_id, persona_id, objective, fmt, message,
         raise EvaluationError(
             "persona %r does not belong to this account" % persona_id)
 
-    fingerprint = storage.message_fingerprint(text, persona_id, objective, fmt, mode)
+    # The scorer's version travels with the request, so a prompt change or a
+    # corrected persona card re-scores rather than serving the old answer.
+    fingerprint = storage.message_fingerprint(
+        text, persona_id, objective, fmt, mode,
+        logic_version="p%d-pack%d" % (PROMPT_VERSION, bp.PERSONA_PACK_VERSION))
     cached = storage.find_existing(account_id, fingerprint)
     if cached:
         logger.info("evaluator: returning stored evaluation for %s", fingerprint[:12])
@@ -440,9 +612,19 @@ def evaluate_message(account_id, persona_id, objective, fmt, message,
     card = _card_for(persona, mode)
     severe = _severe_failures(text, card["persona_id"]) if card else []
 
+    # Tuning row 9, Column 6: the Rulebook and the case study library reach the
+    # scorer. Keyed off the lines the SELLER named - nothing is chosen here, so
+    # showing the proof that exists for a line already in the draft cannot make
+    # the evaluator work backwards from a product the way a generator would.
+    named_lines = _hp_lines_named(text)
+    positioning = _rulebook_positioning(db, named_lines)
+    proof = _proof_available(db, named_lines, _account_industry(db, account_id), text)
+
     audit = []
     prompt = _user_prompt(text, persona, objective, fmt, mode, sources, checks,
-                          card=card, severe=severe)
+                          card=card, severe=severe,
+                          rulebook_block=_rulebook_block(positioning, proof,
+                                                         named_lines))
     raw = _ask(SYSTEM_PROMPT, prompt)
     scores, rationales = S.split_dimension_payload(raw.get("dimensions"))
     dimensions, problems = S.validate_dimensions(scores, objective)
@@ -576,11 +758,21 @@ def evaluate_message(account_id, persona_id, objective, fmt, message,
         "persona_card": card,
         "persona_card_source": (card or {}).get("card_source"),
         "severe_failures": severe,
+        # What Brand_Recall and Impact were judged against, stored so the
+        # score is inspectable rather than asserted.
+        "hp_lines_named": named_lines,
+        "rulebook_positioning": positioning,
+        "proof_available": proof,
         "phrases": phrases,
         "phrases_dropped": len(dropped),
         "chunk_fidelity_faults": fidelity,
         "reaction": reaction,
         "reaction_withheld": reaction_faults,
+        # Spec 4.10's `formatNotes`: what the draft does well or badly AS an
+        # email, a message or a one-pager, which the seven dimensions do not
+        # ask about directly.
+        "format_notes": verify._text(raw.get("format_notes")
+                                     or raw.get("formatNotes")),
         "summary": verify._text(raw.get("summary")),
         "strengths": [verify._text(s) for s in (raw.get("strengths") or []) if verify._text(s)],
         "weaknesses": [verify._text(s) for s in (raw.get("weaknesses") or []) if verify._text(s)],
@@ -625,7 +817,8 @@ Return a single JSON object in the exact structured shape requested. Do not
 return a single block of prose, and do not wrap the JSON in markdown."""
 
 
-def _rewrite_gate_faults(rewrite, card, persona, banned, sources, original, fmt):
+def _rewrite_gate_faults(rewrite, card, persona, banned, sources, original, fmt,
+                         audit=None):
     """The Section 6 gates, on the version the seller actually sends.
 
     Only the REJECT findings become faults. A regenerate-once finding - a filler
@@ -664,6 +857,8 @@ def _rewrite_gate_faults(rewrite, card, persona, banned, sources, original, fmt)
         filled=bool(persona.get("is_named_person")), corpus=corpus,
         supplied_labels=(), label_texts={}, known_names=banned,
         competitors=(), industry="", required_keys=())
+    if audit is not None:
+        audit.extend(findings)
     return ["%s: %s" % (f["gate"], f.get("detail") or f.get("denied_line_named")
                         or f.get("leaked_name") or f["gate"])
             for f in content_gates.rejects(findings)]
@@ -709,8 +904,13 @@ def rewrite_message(account_id, fingerprint, selected_recommendations,
     card = _card_for(persona, evaluation.get("mode") or MODE_DEEP)
     raw = _ask(REWRITE_SYSTEM, prompt)
     banned = sources.contact_names()
+    # Spec 4.8 runs the Section 6 gates on the rewrite because it is the
+    # version that actually gets sent, so its findings belong in the same audit
+    # files as a generation's - see `content_audit`.
+    gate_audit: list = []
     rewrite, faults = F.validate_rewrite(raw, fmt, banned, persona, original)
-    faults += _rewrite_gate_faults(rewrite, card, persona, banned, sources, original, fmt)
+    faults += _rewrite_gate_faults(rewrite, card, persona, banned, sources,
+                                   original, fmt, audit=gate_audit)
 
     if faults:
         logger.warning("evaluator: rewrite rejected (%s), retrying once",
@@ -718,9 +918,18 @@ def rewrite_message(account_id, fingerprint, selected_recommendations,
         retry = _ask(REWRITE_SYSTEM, prompt + "\n\nYour previous answer was rejected:\n"
                      + "\n".join("  - %s" % f for f in faults))
         rewrite, faults = F.validate_rewrite(retry, fmt, banned, persona, original)
-        faults += _rewrite_gate_faults(rewrite, card, persona, banned, sources, original, fmt)
+        faults += _rewrite_gate_faults(rewrite, card, persona, banned, sources,
+                                       original, fmt, audit=gate_audit)
         if faults:
             rewrite = None
+
+    content_audit.record(
+        db, gate_audit, account_id=account_id,
+        persona_id=(card or {}).get("persona_id") or evaluation["persona_contact_id"],
+        content_type=fmt, asset_id=fingerprint[:16],
+        surface=content_audit.SURFACE_REWRITE,
+        outcome=(content_audit.OUTCOME_PUBLISHED if rewrite
+                 else content_audit.OUTCOME_WITHHELD))
 
     if not rewrite:
         # The seller keeps their original rather than receiving a malformed one.

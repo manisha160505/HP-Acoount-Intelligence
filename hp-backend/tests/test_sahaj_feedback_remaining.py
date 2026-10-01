@@ -100,9 +100,26 @@ class TestContentStudioFormatsAndTopics:
         assert len(cstudio.HP_BU_TOPICS) == 5
         assert "HP Multi Jet Fusion (3D)" in cstudio.HP_BU_TOPICS
 
-    def test_older_contracts_still_resolve_for_saved_assets(self):
-        for key in ("linkedin", "exec_brief", "follow_up", "branded_emailer", "landing_page"):
-            assert key in cstudio.CONTENT_TYPE_CONTRACTS
+    def test_the_retired_content_types_keep_their_names_and_nothing_else(self):
+        """Spec 1.2: "Do not leave the code path in \'just in case\'."
+
+        These five kept full contracts so a stored asset would still render.
+        That reason did not survive checking - an asset stores its own
+        `plain_text` and `rendered_html` at generation time, so displaying one
+        never reads a contract. What the contracts bought was the ability to
+        generate against a rubric no seller can choose.
+        """
+        for key in ("linkedin", "exec_brief", "follow_up", "branded_emailer",
+                    "landing_page"):
+            assert key not in cstudio.CONTENT_TYPE_CONTRACTS
+            assert key in cstudio.RETIRED_CONTENT_TYPES
+        assert list(cstudio.CONTENT_TYPE_CONTRACTS) == list(cstudio.OFFERED_CONTENT_TYPES)
+
+    def test_asking_for_a_retired_type_says_so(self):
+        """A seller replaying an old link gets "retired", not "unknown"."""
+        with pytest.raises(ValueError, match="no longer generated"):
+            cstudio._build_generation_context(
+                None, "acct", "cfo", "branded_emailer", "a topic", "")
 
 
 class TestMessageEvaluatorFormats:
@@ -114,11 +131,25 @@ class TestMessageEvaluatorFormats:
         assert spec["label"] == "One-Pager Exec Brief"
         assert spec["rewrite"]["sections"] == (4, 4) and spec["wants_headings"]
 
-    def test_older_formats_still_normalise(self):
-        """The wide reader stays wide: an evaluation stored months ago under
-        `social_post` has to read back, and its format key still has to resolve
-        to a label and a rubric."""
-        assert ef.normalize_format("Social Post") == "social_post"
+    def test_the_retired_formats_keep_their_names_and_nothing_else(self):
+        """Spec 1.2 names these five and says to remove the code path.
+
+        They were kept so an evaluation stored under one would still read. An
+        evaluation stores its own `format_label`, so re-reading one never
+        consults the table - what the contracts actually bought was the
+        ability to score against a rubric no seller can choose.
+        """
+        for key in ("social_post", "website_copy", "tech_blog",
+                    "message_planks", "campaign_idea"):
+            assert key not in ef.FORMATS
+            assert key in ef.RETIRED_FORMATS
+        assert sorted(ef.FORMATS) == sorted(ef.OFFERED_FORMATS)
+
+    def test_a_retired_format_says_retired_rather_than_unknown(self):
+        with pytest.raises(ef.FormatError, match="was retired"):
+            ef.normalize_format("Social Post")
+        with pytest.raises(ef.FormatError, match="unknown format"):
+            ef.normalize_format("not-a-format")
 
     def test_but_a_new_evaluation_may_only_use_the_three(self):
         """`OFFERED_FORMATS` gated the dropdown and nothing else, so

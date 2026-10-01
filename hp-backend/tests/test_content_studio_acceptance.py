@@ -16,6 +16,7 @@ follow. These are checks the code enforces."
 """
 import os
 import sys
+import typing
 
 import pytest
 
@@ -226,9 +227,16 @@ class TestT4FilledLinkedInMessageMayUseTheName:
         assert "Robert" in clean["opening"]
 
     def test_the_linkedin_message_contract_is_not_public(self):
-        """The override branches on `public`, and this format must not carry it."""
+        """The override branches on `public`, and this format must not carry it.
+
+        It used to be checked against the LinkedIn Post contract sitting beside
+        it. That format was retired with spec 1.2, which settles Section 1.3
+        more firmly than the flag did: there is no public-post contract left
+        for LinkedIn Message to be confused with.
+        """
         assert not cstudio.CONTENT_TYPE_CONTRACTS["linkedin_message"].get("public")
-        assert cstudio.CONTENT_TYPE_CONTRACTS["linkedin"].get("public")
+        assert "linkedin" not in cstudio.CONTENT_TYPE_CONTRACTS
+        assert cstudio.RETIRED_CONTENT_TYPES["linkedin"] == "LinkedIn Post"
 
     def test_the_filled_rule_is_not_the_public_post_rule(self):
         rule = cstudio._persona_rule(
@@ -525,3 +533,94 @@ class TestEveryPersonaHasAMatrixRow:
         assert isinstance(bound["never"], tuple)
         if bp.angle(persona_id) != "Economic Buyer":
             assert bound["never"]
+
+
+# --- tuning row 8, Column 4 -------------------------------------------------
+
+class TestTheEvidenceBlockIsTheWholeAccount:
+    """Tuning ROW 8, Column 4 names eight sources. The block carried three.
+
+    Everything else reached the prompt only as a topic pill, and the topic is
+    explicitly not evidence - so a seller picking "Windows 11 refresh" got an
+    email that could say nothing about the estate. The row's own worked example
+    opens on "the multiple PC brands detected across the estate alongside the
+    headcount growth in the hiring data", which this build could not write.
+    """
+
+    WIDGETS: typing.ClassVar[dict] = {
+        "tech_stack_matrix": {
+            "total_tech_count": 220,
+            "technology_basis": {"basis": "installed estate"},
+            "stack_view": {"families": [
+                {"family": "Security", "count": 9},
+                {"family": "Endpoints, OS & IT Management", "count": 26},
+            ]},
+        },
+        "intent_category_summary": {
+            "provider": {"name": "Bombora"},
+            "observation": {"as_of": "2026-08-30"},
+            "themes": [{"theme": "AI & Compute", "topic_count": 20,
+                        "intensity": "High"}],
+        },
+        "opportunity_trigger_signals": {
+            "triggers": [{"headline": "ASII sets IDR 36 trillion capex for 2026"}]},
+        "opportunity_narrative_plays": {
+            "opportunity_plays": [{"title": "Device Lifecycle with DaaS",
+                                   "priority": "High"}]},
+        "exec_key_metrics": {"filings_on_record": {"filings": [
+            {"title": "Annual report 2025"}]}},
+    }
+
+    def _evidence(self, monkeypatch, widgets):
+        monkeypatch.setattr(cstudio.widget_store, "get",
+                            lambda _a, key, **_kw: {"data": widgets.get(key)}
+                            if key in widgets else None)
+        return dict(cstudio._published_evidence(None, "acct"))
+
+    def test_every_source_the_row_names_reaches_the_prompt(self, monkeypatch):
+        found = self._evidence(monkeypatch, self.WIDGETS)
+        assert set(found) == {"Technology estate", "Research intent",
+                              "Published signals", "Qualified opportunities",
+                              "Filings on record"}
+
+    def test_the_estate_names_its_families_and_its_basis(self, monkeypatch):
+        line = self._evidence(monkeypatch, self.WIDGETS)["Technology estate"]
+        assert "220 technologies" in line
+        assert "installed estate" in line
+        assert "Security 9" in line
+
+    def test_intent_carries_its_own_disclaimer(self, monkeypatch):
+        """Research activity read as a buying decision is the misreading this
+        data invites, and the model is the last place to introduce it."""
+        line = self._evidence(monkeypatch, self.WIDGETS)["Research intent"]
+        assert "Bombora" in line and "2026-08-30" in line
+        assert "not confirmed buying intent" in line
+
+    def test_a_widget_with_nothing_to_say_produces_no_line(self, monkeypatch):
+        """No placeholder, and nothing inferred from the absence."""
+        assert self._evidence(monkeypatch, {}) == {}
+
+    def test_an_account_with_no_filings_has_no_filings_line(self, monkeypatch):
+        widgets = dict(self.WIDGETS,
+                       exec_key_metrics={"filings_on_record": {"filings": []}})
+        assert "Filings on record" not in self._evidence(monkeypatch, widgets)
+
+    def test_the_counts_are_capped_so_the_block_is_not_a_tour(self, monkeypatch):
+        """Rule 6 asks the opening to name the ONE item that matters, "not a
+        tour of the account". An evidence block with twenty lines is a tour
+        waiting to happen."""
+        widgets = dict(self.WIDGETS, opportunity_narrative_plays={
+            "opportunity_plays": [{"title": "Play %d" % i, "priority": "High"}
+                                  for i in range(9)]})
+        line = self._evidence(monkeypatch, widgets)["Qualified opportunities"]
+        assert line.count(";") == cstudio.EVIDENCE_PLAYS - 1
+        # The count is still honest about how many there are.
+        assert "carries 9 plays" in line
+
+    def test_the_two_oldest_labels_do_not_move(self):
+        """An asset stored yesterday cites [A1] and [A2]. Those must still mean
+        the business description and the industry when it is re-read, so the
+        published lines are appended rather than inserted."""
+        import inspect
+        source = inspect.getsource(cstudio._build_generation_context)
+        assert source.index("_account_evidence") < source.index("_published_evidence")

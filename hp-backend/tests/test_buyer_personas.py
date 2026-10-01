@@ -267,3 +267,72 @@ def test_the_same_persona_is_identical_whoever_asks():
     intelligence, so it cannot vary between accounts or sessions."""
     assert bp.card("cfo") is bp.card("cfo")
     assert bp.generation_evidence("cfo") == bp.generation_evidence("cfo")
+
+
+class TestTheFourPolyLines:
+    """HP confirmed on 1 Oct that Poly Lens and HP Poly Room Compute are
+    sellable lines, not features inside Poly Studio.
+
+    Spec 2.3 offers the AV & Collaboration Systems Manager five lines. The pack
+    could only offer three, because the other two had no entry in the shared
+    product enum - carried in OPEN_WITH_CLIENT until HP answered.
+    """
+
+    POLY = ("Poly Collaboration", "Poly Studio", "Poly Lens",
+            "HP Poly Room Compute")
+
+    def test_all_four_are_nameable(self):
+        from app.services.extractors.grounding import HP_PRODUCT_LINES
+        for line in self.POLY:
+            assert line in HP_PRODUCT_LINES
+
+    def test_each_one_resolves_to_itself(self):
+        """The catch-all that would have swallowed them.
+
+        `HP_LINE_TOKENS` carries a bare ("poly",) rule, so before the specific
+        rules existed a model returning "Poly Lens" was stored as "Poly
+        Collaboration" - the names would have been in the list and unreachable
+        through the resolver, and the distinction spec 2.3 draws would have
+        been lost on the way in. "Poly Studio" was already in that position.
+        """
+        from app.services.extractors.grounding import normalize_hp_product
+        for line in self.POLY:
+            assert normalize_hp_product(line) == line, line
+
+    def test_an_unqualified_poly_still_falls_to_collaboration(self):
+        """The catch-all is still a catch-all; it is just last now."""
+        from app.services.extractors.grounding import normalize_hp_product
+        for text in ("poly headsets", "a Poly speakerphone", "Poly"):
+            assert normalize_hp_product(text) == "Poly Collaboration"
+
+    def test_the_av_manager_is_offered_the_five_the_matrix_gives(self):
+        assert bp.allowed_lines("av-collaboration-manager") == (
+            "Poly Collaboration", "Poly Studio", "Poly Lens",
+            "HP Poly Room Compute", "HP Care Pack Services")
+
+    def test_poly_all_means_all_four(self):
+        """Spec 2.3 writes "Poly (all)" in five DENIED rows. A Poly line that
+        is nameable but missing from those rows is a line a CFO could be sent:
+        allowed nowhere, denied nowhere, and so never rejected."""
+        assert set(bp.ALL_POLY) == set(self.POLY)
+        for persona_id in bp.PERSONA_IDS:
+            denied = set(bp.denied_lines(persona_id))
+            overlap = denied & set(self.POLY)
+            if overlap:
+                assert overlap == set(self.POLY), (
+                    "%s denies only part of Poly: %s" % (persona_id, sorted(overlap)))
+
+    def test_no_hp_line_is_nameable_everywhere_and_deniable_nowhere(self):
+        """The general form of the bug the two missing lines created."""
+        from app.services.extractors.grounding import HP_PRODUCT_LINES
+        placed = set()
+        for persona_id in bp.PERSONA_IDS:
+            placed |= set(bp.allowed_lines(persona_id))
+            placed |= set(bp.denied_lines(persona_id))
+        # Aliases of a canonical line are not separate rows in the matrix.
+        aliases = {"HP Enterprise Printing & MPS", "HP Anyware", "HP DaaS",
+                   "HP EliteBook", "HP ProBook", "Original HP Ink"}
+        unplaced = set(HP_PRODUCT_LINES) - placed - aliases
+        assert not unplaced, (
+            "nameable but in no persona's allowed or denied set: %s"
+            % sorted(unplaced))

@@ -58,7 +58,7 @@ marks [inference] are named per card in `inference_fields`.
 
 # Bumped whenever a card, an eligibility row or an angle changes. The regen
 # graph references this, so a correction from HP reaches every account.
-PERSONA_PACK_VERSION = 2
+PERSONA_PACK_VERSION = 3
 
 # Section 4.3: the card is a persona reference, not account intelligence. HP
 # may later want it to reflect the account - pain points from that account's
@@ -177,6 +177,8 @@ LINE_PROBOOK = "HP ProBook"
 LINE_WOLF = "HP Wolf Security"
 LINE_POLY = "Poly Collaboration"
 LINE_POLY_STUDIO = "Poly Studio"
+LINE_POLY_LENS = "Poly Lens"
+LINE_POLY_ROOM = "HP Poly Room Compute"
 LINE_PRINT = "HP Enterprise Print / MPS"
 LINE_3D = "HP Multi Jet Fusion (3D)"
 LINE_ANYWARE = "HP Anyware / DaaS"
@@ -186,7 +188,10 @@ LINE_LIFECYCLE = "HP Lifecycle & Sustainability Services"
 LINE_DEPLOYMENT = "HP Deployment & Configuration Services"
 LINE_IQ = "HP IQ for Enterprise"
 
-ALL_POLY = (LINE_POLY, LINE_POLY_STUDIO)
+# What spec 2.3 means by "Poly (all)" in the five rows that deny Poly
+# outright. All four lines, so a line that is nameable is also deniable - a
+# Poly line missing from here would be offerable to a CFO.
+ALL_POLY = (LINE_POLY, LINE_POLY_STUDIO, LINE_POLY_LENS, LINE_POLY_ROOM)
 
 
 # ---------------------------------------------------------------------------
@@ -1325,7 +1330,10 @@ ALLOWED_LINES = {
                                  LINE_LIFECYCLE, LINE_WXP, LINE_ANYWARE),
     "pc-fleet-standards-owner": (LINE_ELITE_PRO, LINE_Z, LINE_DEPLOYMENT, LINE_WOLF,
                                  LINE_CARE_PACK),
-    "av-collaboration-manager": (LINE_POLY, LINE_POLY_STUDIO, LINE_CARE_PACK),
+    # Spec 2.3 gives this persona five lines and this is the only row where
+    # Poly is the lead rather than a denial.
+    "av-collaboration-manager": (LINE_POLY, LINE_POLY_STUDIO, LINE_POLY_LENS,
+                                 LINE_POLY_ROOM, LINE_CARE_PACK),
 }
 
 DENIED_LINES = {
@@ -1407,9 +1415,6 @@ OPEN_WITH_CLIENT = (
     "appears only inside multi-country samples.",
     "S8: 'HP Anyware / DaaS' is carried as one line; HP to confirm whether it is "
     "one offering or two in the APAC catalogue.",
-    "'Poly Lens' and 'HP Poly Room Compute' are named in the matrix but are not "
-    "entries in grounding.HP_PRODUCT_LINES; they are covered here by Poly "
-    "Collaboration and Poly Studio.",
     "Section 2.3 denies HP Lifecycle & Sustainability Services to "
     "it-security-manager 'except secure disposal'. The line is denied outright "
     "here: a matrix of line names cannot carry an exception, and a silent pass "
