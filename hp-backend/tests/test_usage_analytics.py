@@ -199,3 +199,21 @@ def test_window_rejects_bad_input(f, t):
     with pytest.raises(APIError) as exc:
         resolve_window(f, t, today=date(2026, 9, 30))
     assert exc.value.status_code == 400
+
+
+def test_drilldown_user_lists(seeded):
+    """Each clickable number carries the people behind it - and never an admin."""
+    db, u = seeded
+    alice, bob = str(u["alice"]["_id"]), str(u["bob"]["_id"])
+    res = _run(db)
+    daily = {d.date: d for d in res.daily_active_users}
+    assert daily["2026-09-20"].user_ids == sorted([alice, bob])
+    assert daily["2026-09-19"].user_ids == [alice]
+    assert daily["2026-09-15"].user_ids == []
+    for d in res.daily_active_users:
+        assert len(d.user_ids) == d.active_users
+    acme = res.top_accounts[0]
+    assert acme.user_ids == sorted([alice, bob]) and len(acme.user_ids) == acme.unique_users
+    later = build_analytics(db, "2026-09-15", "2026-09-21", now=datetime(2026, 9, 22, tzinfo=UTC))
+    assert later.totals.active_user_ids_7d == sorted([alice, bob])
+    assert later.totals.active_users_7d == 2

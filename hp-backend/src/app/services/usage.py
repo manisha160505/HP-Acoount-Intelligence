@@ -23,7 +23,15 @@ logger = logging.getLogger(__name__)
 USAGE_EVENTS = "usage_events"
 EVENT_LOGIN = "login"
 EVENT_FEATURE_VIEW = "feature_view"
-EVENT_TYPES = (EVENT_LOGIN, EVENT_FEATURE_VIEW)
+EVENT_FEATURE_HEARTBEAT = "feature_heartbeat"
+EVENT_TYPES = (EVENT_LOGIN, EVENT_FEATURE_VIEW, EVENT_FEATURE_HEARTBEAT)
+
+# What one heartbeat is worth. The browser sends one every this-many seconds
+# while a feature is open in a visible tab and the seller has been active.
+# Analytics counts distinct (user, feature, HEARTBEAT_SECONDS-long window)
+# buckets rather than raw events, so duplicate or replayed heartbeats - two
+# tabs, a retried batch, a tampered client - cannot add time.
+HEARTBEAT_SECONDS = 30
 
 # One year. Enough for any "who used what this quarter" question; old events
 # expire on their own instead of growing the collection forever.
@@ -68,8 +76,9 @@ def record_login(db, user: dict) -> None:
         logger.exception("usage_events: could not record a login")
 
 
-def record_feature_views(db, user: dict, events) -> int:
-    """Store a batch from the browser. Returns how many were stored.
+def record_client_events(db, user: dict, events) -> int:
+    """Store a batch of feature views and heartbeats from the browser.
+    Returns how many were stored.
 
     Admin batches are accepted and dropped (the call succeeds, nothing is
     written). Feature keys outside the registry are dropped rather than
@@ -93,6 +102,6 @@ def record_feature_views(db, user: dict, events) -> int:
     try:
         db[USAGE_EVENTS].insert_many(docs, ordered=False)
     except PyMongoError:
-        logger.exception("usage_events: could not record %d feature view(s)", len(docs))
+        logger.exception("usage_events: could not record %d event(s)", len(docs))
         return 0
     return len(docs)

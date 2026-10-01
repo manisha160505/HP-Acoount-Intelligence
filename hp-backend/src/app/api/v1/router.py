@@ -8,6 +8,7 @@ from app.api.v1.analytics import router as analytics_router
 from app.api.v1.auth import router as auth_router
 from app.api.v1.events import router as events_router
 from app.api.v1.feature_mapping import router as feature_mapping_router
+from app.api.v1.my_activity import router as my_activity_router
 from app.api.v1.regeneration import router as regeneration_router
 from app.api.v1.users import router as users_router
 from app.api.v1.widgets import router as widgets_router
@@ -24,3 +25,4 @@ api_v1_router.include_router(regeneration_router)
 api_v1_router.include_router(admin_users_router)
 api_v1_router.include_router(events_router)
 api_v1_router.include_router(analytics_router)
+api_v1_router.include_router(my_activity_router)

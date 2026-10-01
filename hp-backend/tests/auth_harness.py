@@ -63,9 +63,11 @@ def client():
     from app.api.v1.analytics import router as analytics_router
     from app.api.v1.auth import router as auth_router
     from app.api.v1.events import router as events_router
+    from app.api.v1.my_activity import router as my_activity_router
     app = FastAPI()
     register_error_handlers(app)
-    for router in (auth_router, admin_users_router, events_router, analytics_router):
+    for router in (auth_router, admin_users_router, events_router, analytics_router,
+                   my_activity_router):
         app.include_router(router, prefix="/api/v1")
     return TestClient(app)
 
