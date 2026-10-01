@@ -30,7 +30,8 @@ def test_default_graph_is_acyclic_and_every_upstream_comes_first():
         seen.add(nid)
     # 16: Content Messaging's three nodes were removed on 28 Sep (client dropped it).
     # 15: idx_strategy removed - Strategy Chat reads the whole account instead.
-    assert len(DEFAULT.order) == len(DEFAULT.nodes) == 15
+    # 16: hiring added - the Hiring Signals section of Intent & Demand Signals (1 Oct).
+    assert len(DEFAULT.order) == len(DEFAULT.nodes) == 16
 
 
 def test_every_registered_widget_has_exactly_one_owner_or_is_a_user_output():

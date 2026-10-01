@@ -5,111 +5,83 @@ import { ProtectedRoute } from '@/components/common/ProtectedRoute';
 import api from '@/services/api';
 import { parseApiError } from '@/lib/apiError';
 import { featureLabel } from '@/lib/features';
-import { AnalyticsResponse } from '@/types/analytics';
-import { BarChart3, Loader2, AlertCircle, RefreshCw, Users, Activity, LogIn, Eye } from 'lucide-react';
+import { AnalyticsResponse, UserUsage } from '@/types/analytics';
+import {
+  Card, DailyColumns, HorizontalBars, RangePicker, StatTile, Toggle, UserListDialog, UserListRow,
+  formatDateTime, formatDuration, utcDay,
+} from '@/components/analytics/AnalyticsParts';
+import { ParallaxBand } from '@/components/common/motion';
+import { Loader2, AlertCircle, RefreshCw, Users, Activity, LogIn, Eye, Clock } from 'lucide-react';
 
-// Dates are UTC calendar days, inclusive at both ends - the API's contract.
-function utcDay(offsetDays = 0): string {
-  const d = new Date();
-  d.setUTCDate(d.getUTCDate() + offsetDays);
-  return d.toISOString().slice(0, 10);
-}
+type FeatureMeasure = 'users' | 'views' | 'time';
+type CellMeasure = 'views' | 'time';
 
-const PRESETS = [
-  { label: '7 days', days: 7 },
-  { label: '30 days', days: 30 },
-  { label: '90 days', days: 90 },
-];
+interface Drill { title: string; subtitle?: string; rows: UserListRow[] }
 
-function formatDateTime(value: string | null): string {
-  if (!value) return '—';
-  const d = new Date(/[zZ]|[+-]\d\d:\d\d$/.test(value) ? value : `${value}Z`);
-  return isNaN(d.getTime()) ? '—' : d.toLocaleString(undefined, {
-    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
-  });
-}
+const totalViews = (u: UserUsage) => Object.values(u.feature_views).reduce((a, b) => a + b, 0);
+const lastLogin = (u: UserUsage) => (u.last_login_at ? `Last login ${formatDateTime(u.last_login_at)}` : 'Never logged in');
+const toRow = (u: UserUsage, value?: string, detail?: string): UserListRow => ({
+  user_id: u.user_id, name: u.full_name, email: u.email, is_active: u.is_active, value, detail,
+});
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
-function StatTile({ label, value, hint, Icon }: { label: string; value: number; hint: string; Icon: React.FC<{ className?: string }> }) {
-  return (
-    <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">
-      <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-gray-500">
-        <Icon className="w-4 h-4 text-hp-navy" />
-        <span>{label}</span>
-      </div>
-      <div className="mt-2 text-3xl font-extrabold text-gray-900 tabular-nums">{value.toLocaleString()}</div>
-      <div className="mt-1 text-[11px] text-gray-500">{hint}</div>
-    </div>
-  );
-}
-
-function Card({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
-  return (
-    <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
-      <h2 className="text-sm font-bold text-gray-900">{title}</h2>
-      {subtitle && <p className="text-[11px] text-gray-500 mt-0.5">{subtitle}</p>}
-      <div className="mt-4">{children}</div>
-    </div>
-  );
-}
-
-/** Horizontal bars, one per feature, every feature shown - zero included. */
-function FeatureBars({ data }: { data: AnalyticsResponse }) {
-  const max = Math.max(1, ...data.per_feature.map(f => f.unique_users));
-  return (
-    <div className="space-y-2" role="list">
-      {data.per_feature.map(f => (
-        <div
-          key={f.feature_key}
-          role="listitem"
-          className="group grid grid-cols-[minmax(0,11rem)_1fr_2.5rem] items-center gap-3 rounded-md px-1 py-0.5 hover:bg-gray-50"
-          title={`${featureLabel(f.feature_key)}: ${f.unique_users} user(s), ${f.total_views} view(s), last used ${formatDateTime(f.last_used_at)}`}
-        >
-          <span className="text-xs font-semibold text-gray-700 truncate">{featureLabel(f.feature_key)}</span>
-          <div className="h-3.5 bg-gray-100 rounded-sm">
-            {f.unique_users > 0 && (
-              <div
-                className="h-full bg-hp-blue rounded-r group-hover:bg-hp-dark transition-colors"
-                style={{ width: `${(f.unique_users / max) * 100}%` }}
-              />
-            )}
-          </div>
-          <span className={`text-xs tabular-nums text-right ${f.unique_users ? 'font-bold text-gray-900' : 'text-gray-400'}`}>
-            {f.unique_users}
-          </span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-/** One column per day. Single series, so no legend; hover gives the number. */
-function DailyColumns({ data }: { data: AnalyticsResponse }) {
-  const days = data.daily_active_users;
-  const max = Math.max(1, ...days.map(d => d.active_users));
-  const peak = days.reduce((a, d) => (d.active_users > a.active_users ? d : a), days[0]);
-  return (
-    <div>
-      <div className="flex items-end gap-[2px] h-32 border-b border-gray-200">
-        {days.map(d => (
-          <div
-            key={d.date}
-            className="group relative flex-1 h-full flex items-end"
-            title={`${d.date}: ${d.active_users} active user(s)`}
-          >
-            <div
-              className="w-full bg-hp-blue group-hover:bg-hp-dark rounded-t transition-colors"
-              style={{ height: d.active_users ? `${Math.max(3, (d.active_users / max) * 100)}%` : '0' }}
-            />
-          </div>
-        ))}
-      </div>
-      <div className="flex justify-between mt-1.5 text-[10px] text-gray-500 tabular-nums">
-        <span>{days[0]?.date}</span>
-        {peak && peak.active_users > 0 && <span>Peak {peak.active_users} on {peak.date}</span>}
-        <span>{days[days.length - 1]?.date}</span>
-      </div>
-    </div>
-  );
+/**
+ * The list behind each clickable number. Every list is built from the same
+ * response the number came from, so its length matches what was clicked.
+ */
+function drills(data: AnalyticsResponse) {
+  const byId = new Map(data.per_user.map(u => [u.user_id, u]));
+  const pick = (ids: string[] = []) => ids.map(id => byId.get(id)).filter((u): u is UserUsage => !!u);
+  const byName = (a: UserUsage, b: UserUsage) => (a.full_name || a.email).localeCompare(b.full_name || b.email);
+  const range = `${data.date_from} to ${data.date_to}`;
+  return {
+    total: (): Drill => ({
+      title: 'All users', subtitle: 'every non-admin user, active or not',
+      rows: [...data.per_user].sort(byName).map(u => toRow(u, plural(u.features_used, 'feature'), lastLogin(u))),
+    }),
+    active7d: (): Drill => ({
+      title: 'Active in the last 7 days', subtitle: 'signed in or opened a feature',
+      rows: pick(data.totals.active_user_ids_7d).sort(byName).map(u => toRow(u, undefined, lastLogin(u))),
+    }),
+    logins: (): Drill => ({
+      title: 'Who logged in', subtitle: range,
+      rows: data.per_user.filter(u => u.logins > 0).sort((a, b) => b.logins - a.logins)
+        .map(u => toRow(u, plural(u.logins, 'login'), lastLogin(u))),
+    }),
+    views: (): Drill => ({
+      title: 'Who opened features', subtitle: range,
+      rows: data.per_user.filter(u => totalViews(u) > 0).sort((a, b) => totalViews(b) - totalViews(a))
+        .map(u => toRow(u, plural(totalViews(u), 'view'), plural(u.features_used, 'feature'))),
+    }),
+    time: (): Drill => ({
+      title: 'Time spent by user', subtitle: range,
+      rows: data.per_user.filter(u => u.time_seconds > 0).sort((a, b) => b.time_seconds - a.time_seconds)
+        .map(u => toRow(u, formatDuration(u.time_seconds), u.top_feature ? `Mostly ${featureLabel(u.top_feature)}` : undefined)),
+    }),
+    // A bar counts users by views (Users, Views) or by time (Time); the list
+    // uses the same rule so its length matches the bar.
+    feature: (f: string, measure: FeatureMeasure): Drill => {
+      const v = (u: UserUsage) => u.feature_views[f] ?? 0;
+      const t = (u: UserUsage) => u.feature_seconds?.[f] ?? 0;
+      const users = data.per_user.filter(u => (measure === 'time' ? t(u) : v(u)) > 0)
+        .sort((a, b) => (measure === 'time' ? t(b) - t(a) : v(b) - v(a)));
+      return {
+        title: featureLabel(f), subtitle: range,
+        rows: users.map(u => toRow(u, plural(v(u), 'view'), `${formatDuration(t(u))} spent`)),
+      };
+    },
+    day: (date: string): Drill => ({
+      title: `Active on ${date}`, subtitle: 'UTC day',
+      rows: pick(data.daily_active_users.find(d => d.date === date)?.user_ids).sort(byName).map(u => toRow(u)),
+    }),
+    account: (accountId: string): Drill => {
+      const a = data.top_accounts.find(x => x.account_id === accountId);
+      return {
+        title: a?.account_name || accountId, subtitle: `viewed by, ${range}`,
+        rows: pick(a?.user_ids).sort(byName).map(u => toRow(u)),
+      };
+    },
+  };
 }
 
 export default function AdminAnalyticsPage() {
@@ -118,6 +90,10 @@ export default function AdminAnalyticsPage() {
   const [data, setData] = useState<AnalyticsResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [featureMeasure, setFeatureMeasure] = useState<FeatureMeasure>('users');
+  const [cellMeasure, setCellMeasure] = useState<CellMeasure>('views');
+  const [drill, setDrill] = useState<Drill | null>(null);
+  const closeDrill = useCallback(() => setDrill(null), []);
 
   const fetchAnalytics = useCallback(async (f: string, t: string) => {
     setIsLoading(true);
@@ -137,76 +113,64 @@ export default function AdminAnalyticsPage() {
   }, [from, to, fetchAnalytics]);
 
   const rangeInvalid = !from || !to || from > to;
-  const activePreset = to === utcDay(0) ? PRESETS.find(p => from === utcDay(-(p.days - 1)))?.days : undefined;
-  const hasActivity = !!data && (data.totals.feature_views > 0 || data.totals.logins > 0);
+  const hasActivity = !!data && (data.totals.feature_views > 0 || data.totals.logins > 0 || data.totals.time_seconds > 0);
+  const d = data ? drills(data) : null;
 
   return (
     <ProtectedRoute allowedRoles={['admin']}>
-      <div className="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
+      <div className="as-page">
+      <ParallaxBand>
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-10 pb-20 sm:pt-12 sm:pb-24">
+          <h1 className="as-rise text-2xl sm:text-3xl font-extrabold text-white tracking-tight">Usage Analytics</h1>
+          <p className="as-rise mt-2 text-sm text-slate-300/90 max-w-2xl" style={{ ['--as-delay' as string]: '70ms' }}>
+            Which features sellers use. Admin activity is excluded. Dates are UTC and inclusive.
+          </p>
+        </div>
+      </ParallaxBand>
 
-        <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4 mb-6">
-          <div>
-            <h1 className="text-2xl font-extrabold text-gray-900 tracking-tight flex items-center gap-2">
-              <BarChart3 className="w-7 h-7 text-hp-navy" />
-              <span>Usage Analytics</span>
-            </h1>
-            <p className="text-xs text-gray-500 mt-1 font-medium">
-              Which features sellers use. Admin activity is excluded. Dates are UTC and inclusive.
-            </p>
-          </div>
-
-          <div className="bg-white p-3 rounded-2xl border border-gray-200 shadow-sm flex flex-wrap items-center gap-2">
-            {PRESETS.map(p => (
-              <button
-                key={p.days}
-                type="button"
-                onClick={() => { setFrom(utcDay(-(p.days - 1))); setTo(utcDay(0)); }}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
-                  activePreset === p.days ? 'bg-hp-navy text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-              >
-                {p.label}
-              </button>
-            ))}
-            <span className="w-px h-6 bg-gray-200 mx-1" />
-            <label className="text-[11px] font-bold text-gray-500 uppercase">From</label>
-            <input type="date" value={from} max={to} onChange={e => setFrom(e.target.value)}
-              className="px-2 py-1.5 border border-gray-300 rounded-lg text-xs bg-gray-50 focus:outline-none focus:ring-2 focus:ring-hp-navy" />
-            <label className="text-[11px] font-bold text-gray-500 uppercase">To</label>
-            <input type="date" value={to} min={from} onChange={e => setTo(e.target.value)}
-              className="px-2 py-1.5 border border-gray-300 rounded-lg text-xs bg-gray-50 focus:outline-none focus:ring-2 focus:ring-hp-navy" />
-            <button type="button" onClick={() => !rangeInvalid && fetchAnalytics(from, to)} title="Refresh"
-              className="p-2 text-gray-500 hover:text-hp-navy rounded-lg hover:bg-gray-100 transition">
-              <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
-            </button>
-          </div>
+      <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 -mt-12 sm:-mt-14 pb-12">
+        <div
+          className="as-rise relative z-10 mb-6 bg-white p-3 rounded-2xl border border-slate-200/80 flex flex-wrap items-center justify-between gap-2 shadow-[0_12px_32px_-12px_rgba(11,19,43,0.28),0_2px_6px_-2px_rgba(11,19,43,0.08)]"
+          style={{ ['--as-delay' as string]: '120ms' }}
+        >
+          <RangePicker from={from} to={to} onChange={(f, t) => { setFrom(f); setTo(t); }} />
+          <button type="button" onClick={() => !rangeInvalid && fetchAnalytics(from, to)} title="Refresh"
+            className="p-2 text-gray-500 hover:text-hp-navy rounded-lg hover:bg-gray-100 transition-colors">
+            <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
+          </button>
         </div>
 
         {rangeInvalid && (
-          <div className="mb-6 bg-amber-50 border-l-4 border-amber-500 p-4 rounded-r-lg text-amber-800 text-xs font-semibold">
+          <div className="mb-6 as-fade bg-amber-50 border border-amber-200 p-4 rounded-xl text-amber-800 text-xs font-semibold">
             Choose a start date on or before the end date.
           </div>
         )}
 
         {error && (
-          <div className="mb-6 bg-red-50 border-l-4 border-red-500 p-4 rounded-r-lg flex items-center space-x-2 text-red-800 text-xs font-semibold shadow-sm">
+          <div className="mb-6 as-fade bg-red-50 border border-red-200 p-4 rounded-xl flex items-center space-x-2 text-red-800 text-xs font-semibold shadow-sm">
             <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0" />
             <span>{error}</span>
           </div>
         )}
 
         {isLoading && !data ? (
-          <div className="p-16 flex flex-col items-center justify-center space-y-3">
+          <div className="as-fade p-16 flex flex-col items-center justify-center space-y-3">
             <Loader2 className="w-8 h-8 text-hp-navy animate-spin" />
             <p className="text-xs text-gray-500 font-medium">Loading analytics...</p>
           </div>
         ) : data && (
-          <div className={`space-y-6 transition-opacity ${isLoading ? 'opacity-60' : ''}`}>
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              <StatTile label="Total users" value={data.totals.total_users} hint="Non-admin users, active or not" Icon={Users} />
-              <StatTile label="Active, last 7 days" value={data.totals.active_users_7d} hint="Signed in or opened a feature" Icon={Activity} />
-              <StatTile label="Logins" value={data.totals.logins} hint={`${data.date_from} to ${data.date_to}`} Icon={LogIn} />
-              <StatTile label="Feature views" value={data.totals.feature_views} hint={`${data.date_from} to ${data.date_to}`} Icon={Eye} />
+          <div className={`space-y-6 transition-opacity duration-300 ${isLoading ? 'opacity-60' : ''}`}>
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+              <StatTile index={0} label="Total users" value={data.totals.total_users} hint="Non-admin users, active or not" Icon={Users}
+                onClick={() => setDrill(d!.total())} />
+              <StatTile index={1} label="Active, last 7 days" value={data.totals.active_users_7d} hint="Signed in or opened a feature" Icon={Activity}
+                onClick={() => setDrill(d!.active7d())} />
+              <StatTile index={2} label="Logins" value={data.totals.logins} hint={`${data.date_from} to ${data.date_to}`} Icon={LogIn}
+                onClick={() => setDrill(d!.logins())} />
+              <StatTile index={3} label="Feature views" value={data.totals.feature_views} hint={`${data.date_from} to ${data.date_to}`} Icon={Eye}
+                onClick={() => setDrill(d!.views())} />
+              <StatTile index={4} label="Time spent" value={formatDuration(data.totals.time_seconds)} hint="Active time on features" Icon={Clock}
+                onClick={() => setDrill(d!.time())} />
             </div>
 
             {!hasActivity && (
@@ -216,11 +180,32 @@ export default function AdminAnalyticsPage() {
             )}
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <Card title="Unique users per feature" subtitle="Every feature is listed; grey zero means nobody opened it in this range.">
-                <FeatureBars data={data} />
+              <Card
+                title={featureMeasure === 'users' ? 'Unique users per feature' : featureMeasure === 'views' ? 'Views per feature' : 'Time spent per feature'}
+                subtitle="Every feature is listed; a grey zero means nobody used it in this range. Click a bar to see who."
+              >
+                <div className="mb-3">
+                  <Toggle value={featureMeasure} onChange={setFeatureMeasure}
+                    options={[{ key: 'users', label: 'Users' }, { key: 'views', label: 'Views' }, { key: 'time', label: 'Time' }]} />
+                </div>
+                <HorizontalBars rows={data.per_feature.map(f => {
+                  const value = featureMeasure === 'users' ? f.unique_users : featureMeasure === 'views' ? f.total_views : f.time_seconds;
+                  return {
+                    key: f.feature_key,
+                    label: featureLabel(f.feature_key),
+                    value,
+                    display: featureMeasure === 'time' ? formatDuration(value) : String(value),
+                    title: `${featureLabel(f.feature_key)}: ${f.unique_users} user(s), ${f.total_views} view(s), ${formatDuration(f.time_seconds)} spent, last used ${formatDateTime(f.last_used_at)}`,
+                    onClick: () => setDrill(d!.feature(f.feature_key, featureMeasure)),
+                  };
+                })} />
               </Card>
               <Card title="Daily active users" subtitle="Distinct sellers who signed in or opened a feature, per UTC day.">
-                <DailyColumns data={data} />
+                <DailyColumns
+                  points={data.daily_active_users.map(p => ({ date: p.date, value: p.active_users }))}
+                  unit="active user(s)"
+                  onPointClick={date => setDrill(d!.day(date))}
+                />
                 {data.top_accounts.length > 0 && (
                   <div className="mt-6">
                     <h3 className="text-[11px] font-bold uppercase tracking-wider text-gray-500 mb-2">Most viewed accounts</h3>
@@ -230,7 +215,12 @@ export default function AdminAnalyticsPage() {
                           <tr key={a.account_id}>
                             <td className="py-1.5 text-gray-800 font-semibold truncate">{a.account_name || <span className="text-gray-400">{a.account_id}</span>}</td>
                             <td className="py-1.5 text-right tabular-nums text-gray-900 font-bold">{a.views} views</td>
-                            <td className="py-1.5 text-right tabular-nums text-gray-500 w-20">{a.unique_users} user{a.unique_users === 1 ? '' : 's'}</td>
+                            <td className="py-1.5 text-right tabular-nums w-20">
+                              <button type="button" onClick={() => setDrill(d!.account(a.account_id))}
+                                className="text-hp-blue hover:underline font-semibold" title="See who viewed this account">
+                                {a.unique_users} user{a.unique_users === 1 ? '' : 's'}
+                              </button>
+                            </td>
                           </tr>
                         ))}
                       </tbody>
@@ -240,22 +230,33 @@ export default function AdminAnalyticsPage() {
               </Card>
             </div>
 
-            <Card title="Views by user and feature" subtitle="Feature views in the selected range. A grey 0 is a feature this user did not open.">
+            <Card
+              title={cellMeasure === 'views' ? 'Views by user and feature' : 'Time by user and feature'}
+              subtitle="In the selected range. A grey 0 is a feature this user did not use; the outlined cell is their top feature."
+            >
+              <div className="mb-3">
+                <Toggle value={cellMeasure} onChange={setCellMeasure}
+                  options={[{ key: 'views', label: 'Views' }, { key: 'time', label: 'Time' }]} />
+              </div>
               {data.per_user.length === 0 ? (
                 <p className="text-xs text-gray-500">No users yet. Add sellers on the Users page.</p>
               ) : (
-                <UserFeatureTable data={data} />
+                <UserFeatureTable data={data} measure={cellMeasure} />
               )}
             </Card>
           </div>
         )}
       </div>
+      </div>
+      {drill && <UserListDialog title={drill.title} subtitle={drill.subtitle} rows={drill.rows} onClose={closeDrill} />}
     </ProtectedRoute>
   );
 }
 
-function UserFeatureTable({ data }: { data: AnalyticsResponse }) {
-  const max = Math.max(1, ...data.per_user.flatMap(u => Object.values(u.feature_views)));
+function UserFeatureTable({ data, measure }: { data: AnalyticsResponse; measure: CellMeasure }) {
+  const cell = (u: AnalyticsResponse['per_user'][number], f: string) =>
+    measure === 'views' ? (u.feature_views[f] ?? 0) : (u.feature_seconds?.[f] ?? 0);
+  const max = Math.max(1, ...data.per_user.flatMap(u => data.features.map(f => cell(u, f))));
   return (
     <div className="overflow-x-auto -mx-6">
       <table className="w-full text-left border-collapse text-xs">
@@ -265,6 +266,7 @@ function UserFeatureTable({ data }: { data: AnalyticsResponse }) {
             <th className="py-3 px-3 text-right">Logins</th>
             <th className="py-3 px-3">Last login</th>
             <th className="py-3 px-3 text-right">Features</th>
+            <th className="py-3 px-3 text-right">Time</th>
             {data.features.map(f => (
               <th key={f} className="py-3 px-2 text-center min-w-[5.5rem] normal-case tracking-normal">{featureLabel(f)}</th>
             ))}
@@ -282,21 +284,22 @@ function UserFeatureTable({ data }: { data: AnalyticsResponse }) {
               <td className="py-2.5 px-3 text-right tabular-nums">{u.logins}</td>
               <td className="py-2.5 px-3 text-gray-500 whitespace-nowrap">{u.last_login_at ? formatDateTime(u.last_login_at) : 'Never'}</td>
               <td className="py-2.5 px-3 text-right tabular-nums font-bold">{u.features_used}</td>
+              <td className="py-2.5 px-3 text-right tabular-nums whitespace-nowrap">{formatDuration(u.time_seconds ?? 0)}</td>
               {data.features.map(f => {
-                const n = u.feature_views[f] ?? 0;
+                const n = cell(u, f);
                 const isTop = u.top_feature === f;
                 return (
                   <td key={f} className="py-1 px-1 text-center">
                     <span
-                      title={`${u.email} · ${featureLabel(f)}: ${n} view(s)${isTop ? ' (top feature)' : ''}`}
-                      className={`inline-block min-w-[2.5rem] rounded px-1.5 py-1 tabular-nums ${
+                      title={`${u.email} · ${featureLabel(f)}: ${u.feature_views[f] ?? 0} view(s), ${formatDuration(u.feature_seconds?.[f] ?? 0)}${isTop ? ' (top feature)' : ''}`}
+                      className={`inline-block min-w-[2.5rem] rounded px-1.5 py-1 tabular-nums whitespace-nowrap transition-[background-color,color] duration-500 ${
                         n ? 'text-gray-900 font-semibold' : 'text-gray-300'
                       } ${isTop ? 'ring-1 ring-hp-dark' : ''}`}
-                      // One-hue sequential tint: darker = more views. The number
-                      // is always printed, so the tint is never the only signal.
+                      // One-hue sequential tint: darker = more. The value is
+                      // always printed, so the tint is never the only signal.
                       style={n ? { backgroundColor: `rgba(0, 125, 184, ${0.12 + 0.38 * (n / max)})` } : undefined}
                     >
-                      {n}
+                      {measure === 'views' ? n : formatDuration(n)}
                     </span>
                   </td>
                 );

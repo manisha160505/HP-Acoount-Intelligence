@@ -19,6 +19,7 @@ from app.services.extractors.grounding import (
     build_corpus,
     check_text,
 )
+from app.services.hp import hiring_jobs
 from app.services.regen import store as widget_store
 
 logger = logging.getLogger(__name__)
@@ -294,17 +295,23 @@ def extract_executive_dashboard(account_id: str) -> list[dict]:
     widget_store.put(account_id, "exec_key_metrics", metrics_payload, db=db)
     results.append(metrics_payload)
 
-    # 3. exec_hiring_velocity
-    if job_rows and len(job_rows) > 0:
+    # 3. exec_hiring_velocity - the same jobs the Hiring Signals page counts:
+    # country check, then the last 12 months to the PredictLeads pull date,
+    # open and closed alike (client answer #6, 1 Oct). Not every row any more.
+    selected = hiring_jobs.select_jobs(account_display_name(account_id), job_rows)
+    if selected.jobs:
         sample_roles = []
-        for r in job_rows[:5]:
+        for r in selected.jobs:
             t = (r.get("title") or r.get("normalized_title") or "").strip()
             if t and t not in sample_roles:
                 sample_roles.append(t)
+            if len(sample_roles) == 5:
+                break
 
         hiring_data = {
-            "open_job_count": len(job_rows),
-            "sample_roles": sample_roles
+            "job_postings_12m": len(selected.jobs),
+            "sample_roles": sample_roles,
+            "basis": selected.basis(),
         }
 
         hiring_payload = {

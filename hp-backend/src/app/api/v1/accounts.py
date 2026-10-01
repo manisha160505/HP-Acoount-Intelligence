@@ -6,7 +6,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.core.deps import require_admin_role, require_user_role
 from app.database.mongodb import get_db
-from app.schemas.account import AccountCreate, AccountResponse, AccountStatusUpdate
+from app.schemas.account import (
+    AccountCreate,
+    AccountResponse,
+    AccountStatusUpdate,
+    UserAccountResponse,
+)
+from app.services.regen import store as widget_store
 
 router = APIRouter(prefix="/accounts", tags=["Account Management"])
 
@@ -19,13 +25,31 @@ def serialize_account(doc: dict) -> dict:
         "updated_at": doc["updated_at"].isoformat() if isinstance(doc.get("updated_at"), datetime) else str(doc.get("updated_at", ""))
     }
 
-@router.get("/user-list", response_model=list[AccountResponse])
+def urgency_of(widget: dict | None) -> tuple[int | None, int | None]:
+    """(score, max_score) as the Executive Dashboard reads them: only from an
+    available or partial widget, and None when the score was withheld."""
+    if not widget or widget.get("status") not in ("available", "partial"):
+        return None, None
+    data = widget.get("data") or {}
+    return data.get("score"), data.get("max_score")
+
+
+@router.get("/user-list", response_model=list[UserAccountResponse])
 def list_active_accounts_for_user(
     current_user: dict = Depends(require_user_role)
 ):
     db = get_db()
-    cursor = db["accounts"].find({"status": "active"}).sort("name", 1)
-    return [serialize_account(doc) for doc in cursor]
+    docs = list(db["accounts"].find({"status": "active"}).sort("name", 1))
+    # Read, never computed: the score is whatever the last generation
+    # committed, so the picker and the dashboard cannot disagree.
+    widgets = widget_store.committed_many(
+        db, [str(d["_id"]) for d in docs], "exec_urgency_score")
+    out = []
+    for doc in docs:
+        score, max_score = urgency_of(widgets.get(str(doc["_id"])))
+        out.append(serialize_account(doc)
+                   | {"urgency_score": score, "urgency_max_score": max_score})
+    return out
 
 @router.get("", response_model=list[AccountResponse])
 def list_accounts(

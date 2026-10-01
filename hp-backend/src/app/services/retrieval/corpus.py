@@ -1090,15 +1090,14 @@ def executive_dashboard_documents(account_id: str,
 
         def fill_hiring(b):
             out = []
-            count = _text(hiring.get("open_job_count")) or _text(
-                demand.get("open_job_count"))
+            count = _text(hiring.get("job_postings_12m"))
             if count:
-                out.append("Open job postings: %s"
-                           % b.line(count, field="open_job_count",
+                out.append("Job postings in the last 12 months (open and closed): %s"
+                           % b.line(count, field="job_postings_12m",
                                     dataset="job_openings"))
             roles = [_text(r) for r in (hiring.get("sample_roles") or []) if _text(r)]
             if roles:
-                out.append("Roles currently being hired for: %s"
+                out.append("Roles posted in the last 12 months: %s"
                            % b.line(", ".join(roles[:10]), field="sample_roles",
                                     dataset="job_openings"))
             for key, label in (("seniority_breakdown", "Hiring by seniority"),
@@ -1416,11 +1415,10 @@ def _strategy_account_documents(db, account_id, index, company, summary) -> list
                         "Reported financials - %s" % company, metrics, fill_metrics))
 
     hiring = _widget(db, account_id, "intent_hiring_demand")
-    # `exec_hiring_velocity` counts the same job_openings rows: its
-    # `open_job_count` and this widget's `postings_seen` are the same number
-    # over the same dataset. Only `sample_roles` is new, so it joins the
-    # existing document rather than opening a second one that would disagree
-    # with this one by rounding or by gate.
+    # `exec_hiring_velocity` counts a filtered selection (country check, last
+    # 12 months) while this widget counts every row, so only its
+    # `sample_roles` joins this document; its count is in the hiring document
+    # above, labelled with its window.
     velocity = _widget(db, account_id, "exec_hiring_velocity")
     if hiring or velocity:
         def fill_hiring(b, velocity=velocity):

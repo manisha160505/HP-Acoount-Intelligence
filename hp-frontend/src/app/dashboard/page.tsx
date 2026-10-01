@@ -7,7 +7,10 @@ import { useAuth } from '@/providers/AuthProvider';
 import api, { postStream } from '@/services/api';
 import { CompanyAccount } from '@/types/account';
 import { NORTHSTAR_SIDEBAR_GROUPS } from '@/lib/features';
-import { track } from '@/lib/track';
+import { activeAccountFrom, dashboardHref } from '@/lib/accountSelection';
+import { track, stopFeatureTime } from '@/lib/track';
+import { MyActivityPanel } from '@/components/analytics/MyActivityPanel';
+import { Activity as ActivityIcon } from 'lucide-react';
 import { 
   WidgetResponse, 
   WidgetClassification,
@@ -73,7 +76,8 @@ import {
   UserCheck,
   CheckCircle2,
   Minus,
-  BarChart3
+  BarChart3,
+  Briefcase
 } from 'lucide-react';
 
 const ICON_MAP: Record<string, React.FC<{ className?: string }>> = {
@@ -474,6 +478,7 @@ function HpRecommendationCard({ rec, xray }: { rec: any; xray?: boolean }) {
 
 export default function UserDashboardPage() {
   const { user, logout } = useAuth();
+  const router = useRouter();
 
   const [accounts, setAccounts] = useState<CompanyAccount[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState<string>('');
@@ -664,9 +669,18 @@ export default function UserDashboardPage() {
     try {
       const response = await api.get<CompanyAccount[]>('/accounts/user-list');
       setAccounts(response.data);
-      if (response.data.length > 0) {
-        setSelectedAccountId(response.data[0].id);
-        setSelectedAccount(response.data[0]);
+      // The active account is the one in the URL, put there by the Account
+      // Selection screen or the dropdown below - which is what lets it survive
+      // a refresh. Read from window.location rather than useSearchParams, which
+      // would need a Suspense boundary for one parameter. With no account, or
+      // one that is no longer active, send the seller to choose one rather
+      // than opening whichever account sorts first.
+      const match = activeAccountFrom(response.data, window.location.search);
+      if (match) {
+        setSelectedAccountId(match.id);
+        setSelectedAccount(match);
+      } else {
+        router.replace('/accounts');
       }
     } catch (err: any) {
       const msg = err.response?.data?.detail || 'Failed to load accessible account list.';
@@ -674,7 +688,7 @@ export default function UserDashboardPage() {
     } finally {
       setIsLoadingAccounts(false);
     }
-  }, []);
+  }, [router]);
 
   // Fetch Widget Contracts for Selected Account + Feature
   const fetchWidgetContracts = useCallback(async (accId: string, featureKey: string) => {
@@ -710,12 +724,19 @@ export default function UserDashboardPage() {
   // run would otherwise send.
   const lastTrackedView = useRef('');
   useEffect(() => {
-    if (isLoadingAccounts) return;
+    // No account means the page is on its way back to Account Selection; a
+    // view recorded now would count a dashboard the seller never saw.
+    if (isLoadingAccounts || !selectedAccountId) return;
     const key = `${activeFeatureKey}|${selectedAccountId}`;
     if (key === lastTrackedView.current) return;
     lastTrackedView.current = key;
     track({ event: 'feature_view', feature_key: activeFeatureKey, account_id: selectedAccountId || null });
   }, [activeFeatureKey, selectedAccountId, isLoadingAccounts]);
+  // Time on a feature stops counting once the dashboard is gone.
+  useEffect(() => () => stopFeatureTime(), []);
+
+  const [isMyActivityOpen, setIsMyActivityOpen] = useState(false);
+  const closeMyActivity = useCallback(() => setIsMyActivityOpen(false), []);
 
   useEffect(() => {
     if (selectedAccountId) {
@@ -751,6 +772,8 @@ export default function UserDashboardPage() {
     setSelectedAccountId(acc.id);
     setSelectedAccount(acc);
     setIsDropdownOpen(false);
+    // Keep the URL on the active account so a refresh reopens this one.
+    router.replace(dashboardHref(acc.id), { scroll: false });
   };
 
   const getDownloadUrl = (datasetKey: string) => {
@@ -804,7 +827,7 @@ export default function UserDashboardPage() {
       { field_path: 'employee_count', source: '1_firmographics.csv (Number Of Employees Range)', type: 'Firmographics', date: '2026-09-04', confidence: '90%', url: 'data/accounts/' + selectedAccount.id + '/firmographics/firmographics.csv' },
       { field_path: 'revenue', source: '1_firmographics.csv (Yearly Revenue Range)', type: 'Firmographics', date: '2026-09-04', confidence: '90%', url: 'data/accounts/' + selectedAccount.id + '/firmographics/firmographics.csv' },
       { field_path: 'company_hierarchy', source: '2_company_hierarchy.csv (Parent Company Name)', type: 'Hierarchy', date: '2026-09-04', confidence: '90%', url: 'data/accounts/' + selectedAccount.id + '/company_hierarchy/company_hierarchy.csv' },
-      { field_path: 'open_job_count', source: 'job_openings.csv (All postings seen, open and closed)', type: 'Job Openings', date: '2026-09-04', confidence: '85%', url: 'data/accounts/' + selectedAccount.id + '/job_openings/job_openings.csv' },
+      { field_path: 'job_postings_12m', source: 'job_openings.csv (Last 12 months, account country only, open and closed)', type: 'Job Openings', date: '2026-09-04', confidence: '85%', url: 'data/accounts/' + selectedAccount.id + '/job_openings/job_openings.csv' },
       { field_path: 'liveSignals', source: 'google_news_rss_data.csv + news_events.csv', type: 'Google News', date: '2026-09-04', confidence: '80%', url: 'data/accounts/' + selectedAccount.id + '/google_news/google_news_rss_data.csv' },
       { field_path: 'technology_stack', source: '4_technographics.csv (Full Tech Stack)', type: 'Technographics', date: '2026-09-04', confidence: '85%', url: 'data/accounts/' + selectedAccount.id + '/technographics/technographics.csv' },
       { field_path: 'intentTopics', source: '11_intent_score.csv (Composite Score)', type: 'Bombora', date: '2026-09-04', confidence: '80%', url: 'data/accounts/' + selectedAccount.id + '/intent_score/intent_score.csv' }
@@ -851,9 +874,18 @@ export default function UserDashboardPage() {
             {/* Target Account Selector Section */}
             {!isSidebarCollapsed && (
               <div className="p-3 border-b border-slate-800/80">
-                <span className="text-[9px] font-extrabold text-gray-400 uppercase tracking-widest block mb-1.5 px-1">
-                  Target Account
-                </span>
+                <div className="flex items-center justify-between mb-1.5 px-1">
+                  <span className="text-[9px] font-extrabold text-gray-400 uppercase tracking-widest">
+                    Target Account
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => router.push('/accounts')}
+                    className="text-[10px] font-bold text-hp-accent hover:underline"
+                  >
+                    All accounts
+                  </button>
+                </div>
 
                 <div className="relative">
                   <button
@@ -1098,6 +1130,19 @@ export default function UserDashboardPage() {
                 </span>
               );
             })()}
+
+            {/* My Activity: the seller's own usage. Admin activity is not
+                tracked, so there is nothing to show an admin here. */}
+            {user?.role !== 'admin' && (
+              <button
+                type="button"
+                onClick={() => setIsMyActivityOpen(true)}
+                className="inline-flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl border text-xs font-bold transition shadow-xs bg-white text-slate-700 border-slate-300 hover:bg-slate-50"
+              >
+                <ActivityIcon className="w-3.5 h-3.5 text-hp-navy" />
+                <span>My Activity</span>
+              </button>
+            )}
 
             {/* X-Ray Mode Toggle Button */}
             <div className="flex items-center space-x-3">
@@ -1426,12 +1471,13 @@ export default function UserDashboardPage() {
                             </div>
                           )}
 
-                          {/* Open job postings - a count, not a band. */}
-                          {hiringData?.open_job_count && (
+                          {/* Job postings - a count, not a band. Same selection as
+                              Hiring Signals: account country, last 12 months, open and closed. */}
+                          {hiringData && hiringData.job_postings_12m > 0 && (
                             <div className="relative bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col justify-between min-h-[7rem]">
-                              <span className="text-[11px] text-slate-500 block">Active Open Job Postings</span>
+                              <span className="text-[11px] text-slate-500 block">Job postings (last 12 months)</span>
                               <span className="text-lg font-semibold text-slate-900 leading-tight">
-                                {hiringData.open_job_count}
+                                {hiringData.job_postings_12m}
                               </span>
                               <span className="text-[10px] text-slate-400">Count · Job postings</span>
                             </div>
@@ -3485,6 +3531,150 @@ export default function UserDashboardPage() {
                       )}
 
                       {/* Hiring-linked demand: dropped for now (Sahaj, 27 Sep - BridgeAI will come back on it). */}
+
+                      {/* Hiring Signals - Hiring_Signals_Rule_Set_Final.docx, laid out as the
+                          Australia Post worked example. The jobs are the ones the Executive
+                          Dashboard's job postings tile counts. */}
+                      {(() => {
+                        const pick = (key: string) => {
+                          const w = widgets.find(x => x.widget_key === key);
+                          return (w && w.status === 'available' && w.data) ? w.data : null;
+                        };
+                        const summary = pick('hiring_postings_summary');
+                        const families = pick('hiring_family_breakdown');
+                        const tags = pick('hiring_tech_tags');
+                        const cards = pick('hiring_theme_cards');
+
+                        // No jobs after the country check and the 12-month window: the
+                        // section is left out, never "no data" (rule set).
+                        if (!summary) return null;
+
+                        const bars: any[] = families?.bars || [];
+                        const maxBar = Math.max(1, ...bars.map((b: any) => b.count || 0));
+                        const tagList: any[] = tags?.tags || [];
+                        const cardList: any[] = cards?.cards || [];
+
+                        return (
+                          <div className="space-y-6 pt-6 border-t border-slate-200">
+
+                            {/* Header */}
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                              <div>
+                                <h2 className="text-lg font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
+                                  <Briefcase className="w-5 h-5 text-hp-navy" />
+                                  <span>Hiring Signals</span>
+                                  {summary.country_code && (
+                                    <span className="px-1.5 py-0.5 rounded bg-blue-50 text-hp-navy border border-blue-200 text-[10px] font-bold">
+                                      {summary.country_code}
+                                    </span>
+                                  )}
+                                </h2>
+                                <p className="text-xs text-slate-500 mt-0.5">
+                                  Job openings powered by Predictleads{summary.domain ? ` · ${summary.domain}` : ''}
+                                </p>
+                              </div>
+                            </div>
+
+                            {/* Tiles */}
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
+                                <span className="text-xs text-slate-500 block">Job postings</span>
+                                <span className="text-3xl font-extrabold text-slate-900 block mt-1">{summary.job_postings}</span>
+                                <span className="text-[11px] text-slate-500 block mt-1">{summary.window_label || 'Last 12 months'}</span>
+                              </div>
+                              {summary.hybrid_count > 0 && (
+                                <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
+                                  <span className="text-xs text-slate-500 block">Hybrid roles</span>
+                                  <span className="text-3xl font-extrabold text-slate-900 block mt-1">{summary.hybrid_pct}%</span>
+                                  <span className="text-[11px] text-slate-500 block mt-1">
+                                    {summary.hybrid_count} of {summary.job_postings} list hybrid, remote or work from home
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* What they're hiring for + tech named in job ads */}
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                              {bars.length > 0 && (
+                                <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
+                                  <h3 className="text-sm font-bold text-slate-900 mb-4">What they&apos;re hiring for</h3>
+                                  <div className="space-y-2.5">
+                                    {bars.map((b: any) => (
+                                      <div key={b.family} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_2rem] items-center gap-3">
+                                        <span className="text-xs text-slate-700 truncate" title={b.family}>{b.family}</span>
+                                        <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden">
+                                          <div className="h-full bg-hp-navy rounded-full" style={{ width: `${(b.count / maxBar) * 100}%` }} />
+                                        </div>
+                                        <span className="text-xs font-bold text-slate-900 text-right tabular-nums">{b.count}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                  <div className="flex justify-between border-t border-slate-200 mt-4 pt-3 text-xs font-bold text-slate-900">
+                                    <span>Total postings</span>
+                                    <span className="tabular-nums">{families?.total}</span>
+                                  </div>
+                                </div>
+                              )}
+                              {tagList.length > 0 && (
+                                <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
+                                  <h3 className="text-sm font-bold text-slate-900 mb-4">Tech named in job ads</h3>
+                                  <div className="flex flex-wrap gap-2">
+                                    {tagList.map((t: any) => (
+                                      <span key={t.tag} title={`${t.jobs} job${t.jobs === 1 ? '' : 's'}`}
+                                        className="px-2.5 py-1 rounded-md border border-slate-200 text-[11px] text-slate-700 bg-white">
+                                        {t.tag}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Hiring signals for HP - one card per theme with jobs */}
+                            {cardList.length > 0 && (
+                              <div className="space-y-4">
+                                <h3 className="text-base font-extrabold text-slate-900">Hiring signals for HP</h3>
+                                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 items-start">
+                                  {cardList.map((c: any) => (
+                                    <div key={c.theme_key} className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-4">
+                                      <div className="flex items-start justify-between gap-3">
+                                        <h4 className="text-sm font-bold text-slate-900 leading-snug">{c.theme}</h4>
+                                        <span className="text-xs font-bold text-hp-navy whitespace-nowrap">
+                                          {c.job_count} job{c.job_count === 1 ? '' : 's'}
+                                        </span>
+                                      </div>
+                                      <div className="bg-slate-50 rounded-xl p-3">
+                                        <span className="text-[10px] font-extrabold uppercase tracking-wider text-hp-navy block mb-2">Jobs found</span>
+                                        <ul className="space-y-1.5">
+                                          {(c.titles || []).map((t: any) => (
+                                            <li key={t.title} className="text-xs text-slate-700 flex gap-2">
+                                              <span className="text-slate-400">•</span>
+                                              <span>{t.title}{t.posted > 1 ? ` (posted ${t.posted}×)` : ''}</span>
+                                            </li>
+                                          ))}
+                                        </ul>
+                                        {c.more_jobs > 0 && (
+                                          <span className="text-[11px] text-slate-500 block mt-1.5 pl-4">+ {c.more_jobs} more job{c.more_jobs === 1 ? '' : 's'}</span>
+                                        )}
+                                      </div>
+                                      <div className="border-t border-slate-200 pt-3 space-y-3">
+                                        {[['HP product', c.hp_product], ['HP service', c.hp_service], ['HP solution', c.hp_solution]]
+                                          .filter(([, v]) => v)
+                                          .map(([label, value]) => (
+                                            <div key={label}>
+                                              <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 block">{label}</span>
+                                              <span className="text-xs text-slate-800 block mt-0.5">{value}</span>
+                                            </div>
+                                          ))}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </div>
                   );
                 })()}
@@ -8109,6 +8299,7 @@ export default function UserDashboardPage() {
         </div>
 
       </div>
+      <MyActivityPanel open={isMyActivityOpen} onClose={closeMyActivity} userName={user?.full_name} />
     </ProtectedRoute>
   );
 }

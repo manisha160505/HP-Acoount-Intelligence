@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/providers/AuthProvider';
+import { homeRouteFor } from '@/lib/accountSelection';
 import { Shield, User as UserIcon, Lock, Mail, AlertCircle, Loader2 } from 'lucide-react';
 
 export default function LoginPage() {
@@ -17,11 +18,7 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (isAuthenticated && user) {
-      if (user.role === 'admin') {
-        router.push('/admin/platform');
-      } else {
-        router.push('/dashboard');
-      }
+      router.push(homeRouteFor(user.role));
     }
   }, [isAuthenticated, user, router]);
 
@@ -57,11 +54,7 @@ export default function LoginPage() {
     setIsSubmitting(false);
 
     if (result.success) {
-      if (result.role === 'admin') {
-        router.push('/admin/platform');
-      } else {
-        router.push('/dashboard');
-      }
+      router.push(homeRouteFor(result.role));
     } else {
       setError(result.error || 'Authentication failed. Please check credentials.');
     }

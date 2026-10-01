@@ -26,3 +26,12 @@ class AccountResponse(BaseModel):
     status: Literal['active', 'hidden']
     created_at: str
     updated_at: str
+
+
+class UserAccountResponse(AccountResponse):
+    # The account's published urgency score, read from the committed
+    # `exec_urgency_score` widget - the same value the Executive Dashboard
+    # shows. None when the widget has not been generated or the score was
+    # withheld for low coverage.
+    urgency_score: int | None = None
+    urgency_max_score: int | None = None

@@ -40,6 +40,11 @@ def intent(account_id: str):
     return extract_intent_demand_signals(account_id)
 
 
+def hiring(account_id: str):
+    from app.services.extractors.hiring_signals import extract_hiring_signals
+    return extract_hiring_signals(account_id)
+
+
 def messaging_context(account_id: str):
     from app.services.extractors.content_messaging import extract_content_messaging
     return extract_content_messaging(account_id)

@@ -51,6 +51,7 @@ NODE_LABELS = {
     "tech_recs": "Tech Landscape - recommendations",
     "objection": "Objection Playbook",
     "intent": "Intent & Demand Signals",
+    "hiring": "Intent & Demand Signals - hiring signals",
     "opp_core": "Opportunity Map",
     "opp_triggers": "Opportunity Map - triggers",
     "content_persona": "Content Studio",
