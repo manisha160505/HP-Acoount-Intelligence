@@ -45,6 +45,7 @@ raw-data-to-driver formula for all accounts"*, and its own missing-input rule
 then forbids computing an overall score from incomplete drivers.
 """
 
+import copy
 import logging
 import re
 from datetime import UTC, datetime
@@ -180,7 +181,264 @@ def source_label(row: dict) -> str:
     return "Account evidence"
 
 
-def _source(row: dict) -> dict:
+# A supporting claim is shown as one short point. The client, 1 Oct: the
+# claims arrived as whole paragraphs - a firmographics row is the company's
+# entire description, cut at 2000 characters mid-word - and they want points.
+#
+# The point is still the source's own words. It is the one sentence of the
+# registered text that says most about the priority, so it can be found in the
+# source exactly as written; `source_text` stays whole beside it and the
+# verifier still checks that. Nothing is paraphrased and no model is asked.
+CLAIM_POINT_MAX_WORDS = 18
+_SENTENCE_END_RE = re.compile(r"[.!?]\s+")
+# Where a long sentence can end and still read as finished: punctuation, a
+# dash, or the start of a trailing "which / while / alongside" clause.
+_BREAK_RE = re.compile(
+    r"\s*[,;:(]\s+|\s+[\u2014\u2013-]\s+"
+    r"|\s+(?=(?:which|while|alongside|whereas|as well as|in order to)\b)")
+_HALF_PHRASE_RE = re.compile(r"\b(?:the|a|an)\s+[\w-]+$", re.I)
+# "Advantest Corporation, a Japanese entity founded in 1954" - an aside opened
+# after the subject and cut before the verb that follows it.
+_OPEN_ASIDE_RE = re.compile(r"^[^,]+,\s+(?:a|an|the|which|who)\b[^,]*$", re.I)
+# A weaker break, tried only when none of the above fits the budget.
+_SOFT_BREAK_RE = re.compile(r"\s+(?=and\b)")
+_DANGLING_RE = re.compile(
+    r"(?:\s+(?:and|or|but|including|such as|with|of|for|to|the|a|an|by|in|on|"
+    r"as|at|from|through))+$", re.I)
+# Connective openers that make a point read as a fragment of a paragraph.
+_LEAD_FILLER_RE = re.compile(
+    r"^(?:in addition|additionally|furthermore|moreover|meanwhile|also|"
+    r"at the same time|as a result|on the other hand|in this regard|"
+    r"and|but|or|so)\s*,?\s+",
+    re.I)
+# A list marker the filing ended the sentence with ("...segment; d.").
+_TRAILING_MARKER_RE = re.compile(r"[\s;,]+\(?[a-z]\)?\.?$")
+# Words a section heading run into its paragraph is usually followed by:
+# "Transformational Leadership To prepare future leaders ...".
+_SENTENCE_STARTERS = {"The", "To", "As", "This", "These", "Our", "We", "In",
+                      "Its", "It", "With", "Through", "Since", "By", "For"}
+_HEADING_MINOR = {"a", "an", "and", "&", "of", "on", "to", "for", "in", "the",
+                  "based", "with"}
+# Filings paste their own bullet glyphs mid-paragraph; each is a break.
+_INLINE_BULLET_RE = re.compile(r"\s*[\u2022\u25aa\u25cf]\s*")
+# A full stop after these does not end a sentence ("PDF Solutions Inc.
+# focused on ..." is one sentence).
+_ABBREVIATIONS = {"inc", "ltd", "co", "corp", "plc", "llc", "bhd", "tbk", "pt",
+                  "no", "vs", "mr", "mrs", "ms", "dr", "st", "jr", "approx",
+                  "e.g", "i.e", "u.s", "u.k"}
+_MIN_POINT_WORDS = 6
+
+
+def _split_sentences(text: str) -> list:
+    out, start = [], 0
+    for m in _SENTENCE_END_RE.finditer(text):
+        before = text[start:m.start()].split()
+        word = before[-1].lower().rstrip(".") if before else ""
+        following = text[m.end():m.end() + 1]
+        if word in _ABBREVIATIONS or following.islower():
+            continue
+        out.append(text[start:m.start() + 1])
+        start = m.end()
+    out.append(text[start:])
+    return out
+
+
+def _drop_heading(sentence: str) -> str:
+    """'About Accenture Accenture helps ...' -> 'Accenture helps ...'.
+
+    A page heading run into the paragraph under it shows as a short Title Case
+    run whose last word the sentence then repeats. Only that exact shape is
+    removed; anything less certain is left as written.
+    """
+    words = sentence.split()
+    for i in range(1, min(6, len(words) - 1)):
+        if (words[i] == words[i - 1]
+                and all(w[:1].isupper() for w in words[:i])):
+            return " ".join(words[i:])
+    # The other shape: two or more Title Case heading words, then a word that
+    # starts sentences ("... Future-Ready Talents The Company's main focus").
+    for i in range(2, min(14, len(words) - 2)):
+        if words[i] not in _SENTENCE_STARTERS:
+            continue
+        head = words[:i]
+        titled = [w for w in head if w.lower() not in _HEADING_MINOR]
+        if (len(titled) >= 2
+                and all(w[:1].isupper() or w[:1] == "(" for w in titled)
+                and not any(w[-1] in ".,;:" for w in head)):
+            return " ".join(words[i:])
+        break
+    return sentence
+
+
+def _shorten(sentence: str, max_words: int, must_cut: bool = False) -> str:
+    """A sentence ended at a natural break so it fits the word budget.
+
+    The last break inside the budget wins; failing that, the first one up to
+    six words past it; failing that, the last "and" inside it. Ends with a full stop, never an ellipsis - the client asked for
+    points that read as finished. With no usable break the sentence is kept
+    whole, or "" when `must_cut` (a cut-off fragment cannot be shown whole).
+    """
+    if not must_cut and len(sentence.split()) <= max_words:
+        return sentence
+
+    def cuts(pattern):
+        out = []
+        for m in pattern.finditer(sentence):
+            head = _DANGLING_RE.sub("", sentence[:m.start()].rstrip(" ,;:"))
+            # Unbalanced bracket, or "...lead in the safe" - an article and one
+            # word is usually an adjective cut off from its noun.
+            if (head.count("(") > head.count(")")
+                    or _HALF_PHRASE_RE.search(head)
+                    or _OPEN_ASIDE_RE.match(head)):
+                continue
+            n = len(head.split())
+            if n >= _MIN_POINT_WORDS:
+                out.append((n, head))
+        return out
+
+    # A real break a few words over budget beats cutting at "and", which can
+    # split a noun phrase ("semiconductor | and component testing equipment").
+    strong, soft = cuts(_BREAK_RE), cuts(_SOFT_BREAK_RE)
+    inside = [c for c in strong if c[0] <= max_words]
+    past = [c for c in strong if max_words < c[0] <= max_words + 6]
+    soft_inside = [c for c in soft if c[0] <= max_words]
+    pick = (inside[-1] if inside else past[0] if past
+            else soft_inside[-1] if soft_inside else None)
+    if pick:
+        return pick[1] + "."
+    return "" if must_cut else sentence
+
+
+def _sentences(text: str) -> list:
+    parts = []
+    for chunk in _INLINE_BULLET_RE.split(_text(text)):
+        parts.extend(s.strip() for s in _split_sentences(chunk) if s.strip())
+    # A row cut at a length limit ends in half a sentence ("...marketing st").
+    # That fragment is never shown as it stands. It is used, ended at a clause
+    # break, only when everything before it is a colon lead-in ("...focuses
+    # on:") - then the cut-off part is the point the lead-in introduces.
+    if len(parts) > 1 and parts[-1][-1] not in ".!?\"'\u201d)":
+        tail = parts.pop()
+        if all(p.endswith(":") for p in parts):
+            clipped = _shorten(tail, CLAIM_POINT_MAX_WORDS, must_cut=True)
+            if clipped:
+                parts.append(clipped)
+    return [_drop_heading(p) for p in parts]
+
+
+def _tidy(point: str) -> str:
+    """Opening connective dropped, capital first letter, one closing stop."""
+    point = _LEAD_FILLER_RE.sub("", point).strip()
+    point = _TRAILING_MARKER_RE.sub("", point)
+    if point[-1:] in (",", ";", ":"):
+        point = point[:-1]
+    if point and point[-1] not in ".!?\"'\u201d)":
+        point += "."
+    return point[:1].upper() + point[1:]
+
+
+def claim_point(text, wanted) -> str:
+    """The one sentence of a source that best supports its priority, kept short.
+
+    Sentences are ranked by how many of the priority's content words they
+    mention (the same stem match `_supports` uses), earlier sentences winning a
+    tie, then cut to CLAIM_POINT_MAX_WORDS at a natural break. Returns "" for
+    empty text.
+    """
+    sentences = _sentences(text)
+    if not sentences:
+        return ""
+    stems = {w[:6] for w in (wanted or ())}
+
+    def hits(sentence):
+        low = sentence.lower()
+        return sum(1 for s in stems if s in low)
+
+    # A lead-in ending in a colon ("...focuses on:") introduces the point
+    # rather than making it, so any complete sentence beats it.
+    best = max(enumerate(sentences),
+               key=lambda p: (not p[1].endswith(":"), hits(p[1]), -p[0]))[1]
+    best = _TRAILING_MARKER_RE.sub("", _LEAD_FILLER_RE.sub("", best))
+    return _tidy(_shorten(best, CLAIM_POINT_MAX_WORDS))
+
+
+# A long source - a company description, ~10 sentences - is several points,
+# not one (client, 1 Oct: "if the paragraph is much longer, max 6 and min 3").
+# Filing sentences in this corpus are 1-3 sentences under 75 words; the
+# description rows are 225+ words, so the threshold sits well between them.
+LONG_SOURCE_WORDS = 60
+LONG_SOURCE_MIN_POINTS = 3
+LONG_SOURCE_MAX_POINTS = 6
+_MIN_SHOWN_WORDS = 4
+
+
+def claim_points(text, wanted) -> list:
+    """The points a source is shown as: one, or 3-6 for a long paragraph.
+
+    For a long source the sentences that mention the priority come first, up to
+    the maximum; if fewer than the minimum do, the paragraph's next sentences
+    fill in, since the paragraph as a whole was cited. Points keep the order
+    they appear in the source, so they read as the source reads. A paragraph
+    with fewer usable sentences than the minimum gives what it has - a point is
+    never made up to reach a count.
+    """
+    sentences = _sentences(text)
+    if (len(_text(text).split()) < LONG_SOURCE_WORDS
+            or len(sentences) < LONG_SOURCE_MIN_POINTS):
+        point = claim_point(text, wanted)
+        return [point] if point else []
+
+    stems = {w[:6] for w in (wanted or ())}
+    usable = [(i, s) for i, s in enumerate(sentences) if not s.endswith(":")]
+    relevant = [(i, s) for i, s in usable
+                if any(st in s.lower() for st in stems)]
+    chosen = relevant[:LONG_SOURCE_MAX_POINTS]
+    for i, s in usable:
+        if len(chosen) >= LONG_SOURCE_MIN_POINTS:
+            break
+        if (i, s) not in chosen:
+            chosen.append((i, s))
+
+    points, seen = [], set()
+    for _, sentence in sorted(chosen):
+        sentence = _TRAILING_MARKER_RE.sub("", _LEAD_FILLER_RE.sub("", sentence))
+        point = _tidy(_shorten(sentence, CLAIM_POINT_MAX_WORDS))
+        key = point.lower()
+        if len(point.split()) >= _MIN_SHOWN_WORDS and key not in seen:
+            seen.add(key)
+            points.append(point)
+    return points
+
+
+def _with_points(source: dict, wanted) -> dict:
+    points = claim_points(source.get("source_text"), wanted)
+    source["claim_points"] = points
+    # One-point field kept for readers built before the list existed.
+    source["claim_point"] = (points[0] if len(points) == 1
+                             else claim_point(source.get("source_text"), wanted))
+    return source
+
+
+def with_claim_points(data: dict) -> dict:
+    """A copy of a stored priorities payload with every source's point worked out.
+
+    Used when the widget is read, so a page published before `claim_point`
+    existed - or before the rule was last tuned - shows points without a
+    regeneration and without writing to the database.
+    """
+    out = copy.deepcopy(data or {})
+    for priority in out.get("priorities") or []:
+        if not isinstance(priority, dict):
+            continue
+        wanted = _content_words("%s %s" % (priority.get("title") or "",
+                                           priority.get("theme") or ""))
+        for source in priority.get("sources") or []:
+            if isinstance(source, dict):
+                _with_points(source, wanted)
+    return out
+
+
+def _source(row: dict, wanted=None) -> dict:
     """One citation as the UI shows it, carrying the figure fields when present."""
     out = {
         "evidence_id": row["evidence_id"],
@@ -189,6 +447,7 @@ def _source(row: dict) -> dict:
         "source_text": row.get("source_text"),
         "label": source_label(row),
     }
+    _with_points(out, wanted)
     for key in ("source_url", "publisher", "quote", "period", "value", "unit",
                 "page", "filing_label", "filing_period"):
         if row.get(key) is not None and row.get(key) != "":
@@ -291,7 +550,7 @@ def _resolve_priorities(account_id: str, candidates: list) -> tuple:
             continue
         resolved = relevant
 
-        sources = [_source(r) for r in resolved]
+        sources = [_source(r, wanted) for r in resolved]
         sections = {_section(r) for r in resolved}
         dates = sorted(d for d in (_recency(r) for r in resolved) if d)
         publishers = {_text(r.get("publisher")) for r in resolved

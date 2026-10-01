@@ -8,6 +8,7 @@ from fastapi.responses import StreamingResponse
 
 from app.database.mongodb import get_db
 from app.errors import APIError, ErrorCode
+from app.services.dashboard import priorities
 from app.services.extractors.datasets import account_data_as_of
 from app.services.regen import store as widget_store
 
@@ -623,6 +624,14 @@ def get_account_feature_widgets(
             updated_at_val = ext_doc.get("updated_at")
             updated_at_str = updated_at_val.isoformat() if isinstance(updated_at_val, datetime) else str(updated_at_val or "")
 
+            data = ext_doc.get("data", {})
+            # Supporting claims read as short points (client, 1 Oct). Worked
+            # out on read, on a copy, so pages published before the rule - or
+            # before it was last tuned - show points with no regeneration and
+            # nothing written back.
+            if w_key == priorities.WIDGET_KEY:
+                data = priorities.with_claim_points(data)
+
             responses.append({
                 "account_id": account_id,
                 "feature_key": key_clean,
@@ -632,7 +641,7 @@ def get_account_feature_widgets(
                 "widget_type": contract["widget_type"],
                 "data_classification": contract["data_classification"],
                 "status": ext_doc.get("status", "empty"),
-                "data": ext_doc.get("data", {}),
+                "data": data,
                 "source_datasets": contract["source_datasets"],
                 "source_fields": contract["source_fields"],
                 "display_order": contract["display_order"],
