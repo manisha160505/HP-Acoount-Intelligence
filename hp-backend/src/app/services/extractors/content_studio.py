@@ -283,7 +283,7 @@ def _derive_role_proxy_personas(job_records: list[dict]) -> list[dict]:
     that produced it listed as evidence. Nothing names a person. Relevance is
     scored by the helper Stakeholder Map applies to a named contact; junior and
     intern postings are gated out before clustering. No status filter, matching
-    exec_hiring_velocity and intent_hiring_demand, which count every row."""
+    intent_hiring_demand, which counts every row."""
     groups: dict[tuple[str, str], dict] = {}
     for row in job_records:
         title = str(row.get("normalized_title") or row.get("title") or "").strip()

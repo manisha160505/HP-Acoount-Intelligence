@@ -91,4 +91,6 @@ export interface MyActivityResponse {
   daily: DailyPoint[];
   top_accounts: AccountViews[];
   recent: { ts: string; feature_key: string; account_id: string | null; account_name: string | null }[];
+  /** Own sign-ins in the range, newest first, capped (totals.logins is the full count). */
+  recent_logins?: string[];
 }

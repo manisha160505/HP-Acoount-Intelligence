@@ -129,3 +129,7 @@ class MyActivityResponse(BaseModel):
     daily: list[DailyActiveUsers]
     top_accounts: list[AccountViews]
     recent: list[RecentActivity]
+    # The user's own sign-ins in the range, newest first, at most
+    # LOGIN_LIMIT - the list behind the Logins tile. `totals.logins` is the
+    # full count, so a reader can tell when this is truncated.
+    recent_logins: list[datetime] = []

@@ -162,6 +162,16 @@ def test_recent_is_newest_first_with_account_names(two_sellers):
         ("strategy_chat", "Acme"), ("executive_dashboard", "Acme")]
 
 
+def test_recent_logins_are_mine_newest_first_and_in_range(two_sellers):
+    db, me, _, _ = two_sellers
+    _ev(db, me, "login", _t(21, 7))
+    _ev(db, me, "login", _t(10, 7))          # before the range
+    res = build_my_activity(db, _me(me), "2026-09-15", "2026-09-21", now=NOW)
+    # The other seller's login on the 20th is not in my list.
+    assert res.recent_logins == [_t(21, 7), _t(20, 8)]
+    assert res.totals.logins == len(res.recent_logins)
+
+
 def test_daily_series_covers_every_day(two_sellers):
     db, me, _, _ = two_sellers
     res = build_my_activity(db, _me(me), "2026-09-15", "2026-09-21", now=NOW)

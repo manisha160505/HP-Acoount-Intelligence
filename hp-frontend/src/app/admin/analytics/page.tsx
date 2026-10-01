@@ -10,7 +10,8 @@ import {
   Card, DailyColumns, HorizontalBars, RangePicker, StatTile, Toggle, UserListDialog, UserListRow,
   formatDateTime, formatDuration, utcDay,
 } from '@/components/analytics/AnalyticsParts';
-import { BarChart3, Loader2, AlertCircle, RefreshCw, Users, Activity, LogIn, Eye, Clock } from 'lucide-react';
+import { ParallaxBand } from '@/components/common/motion';
+import { Loader2, AlertCircle, RefreshCw, Users, Activity, LogIn, Eye, Clock } from 'lucide-react';
 
 type FeatureMeasure = 'users' | 'views' | 'time';
 type CellMeasure = 'views' | 'time';
@@ -117,58 +118,58 @@ export default function AdminAnalyticsPage() {
 
   return (
     <ProtectedRoute allowedRoles={['admin']}>
-      <div className="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
+      <div className="as-page">
+      <ParallaxBand>
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-10 pb-20 sm:pt-12 sm:pb-24">
+          <h1 className="as-rise text-2xl sm:text-3xl font-extrabold text-white tracking-tight">Usage Analytics</h1>
+          <p className="as-rise mt-2 text-sm text-slate-300/90 max-w-2xl" style={{ ['--as-delay' as string]: '70ms' }}>
+            Which features sellers use. Admin activity is excluded. Dates are UTC and inclusive.
+          </p>
+        </div>
+      </ParallaxBand>
 
-        <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4 mb-6">
-          <div>
-            <h1 className="text-2xl font-extrabold text-gray-900 tracking-tight flex items-center gap-2">
-              <BarChart3 className="w-7 h-7 text-hp-navy" />
-              <span>Usage Analytics</span>
-            </h1>
-            <p className="text-xs text-gray-500 mt-1 font-medium">
-              Which features sellers use. Admin activity is excluded. Dates are UTC and inclusive.
-            </p>
-          </div>
-
-          <div className="bg-white p-3 rounded-2xl border border-gray-200 shadow-sm flex flex-wrap items-center gap-2">
-            <RangePicker from={from} to={to} onChange={(f, t) => { setFrom(f); setTo(t); }} />
-            <button type="button" onClick={() => !rangeInvalid && fetchAnalytics(from, to)} title="Refresh"
-              className="p-2 text-gray-500 hover:text-hp-navy rounded-lg hover:bg-gray-100 transition">
-              <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
-            </button>
-          </div>
+      <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 -mt-12 sm:-mt-14 pb-12">
+        <div
+          className="as-rise relative z-10 mb-6 bg-white p-3 rounded-2xl border border-slate-200/80 flex flex-wrap items-center justify-between gap-2 shadow-[0_12px_32px_-12px_rgba(11,19,43,0.28),0_2px_6px_-2px_rgba(11,19,43,0.08)]"
+          style={{ ['--as-delay' as string]: '120ms' }}
+        >
+          <RangePicker from={from} to={to} onChange={(f, t) => { setFrom(f); setTo(t); }} />
+          <button type="button" onClick={() => !rangeInvalid && fetchAnalytics(from, to)} title="Refresh"
+            className="p-2 text-gray-500 hover:text-hp-navy rounded-lg hover:bg-gray-100 transition-colors">
+            <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
+          </button>
         </div>
 
         {rangeInvalid && (
-          <div className="mb-6 bg-amber-50 border-l-4 border-amber-500 p-4 rounded-r-lg text-amber-800 text-xs font-semibold">
+          <div className="mb-6 as-fade bg-amber-50 border border-amber-200 p-4 rounded-xl text-amber-800 text-xs font-semibold">
             Choose a start date on or before the end date.
           </div>
         )}
 
         {error && (
-          <div className="mb-6 bg-red-50 border-l-4 border-red-500 p-4 rounded-r-lg flex items-center space-x-2 text-red-800 text-xs font-semibold shadow-sm">
+          <div className="mb-6 as-fade bg-red-50 border border-red-200 p-4 rounded-xl flex items-center space-x-2 text-red-800 text-xs font-semibold shadow-sm">
             <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0" />
             <span>{error}</span>
           </div>
         )}
 
         {isLoading && !data ? (
-          <div className="p-16 flex flex-col items-center justify-center space-y-3">
+          <div className="as-fade p-16 flex flex-col items-center justify-center space-y-3">
             <Loader2 className="w-8 h-8 text-hp-navy animate-spin" />
             <p className="text-xs text-gray-500 font-medium">Loading analytics...</p>
           </div>
         ) : data && (
-          <div className={`space-y-6 transition-opacity ${isLoading ? 'opacity-60' : ''}`}>
+          <div className={`space-y-6 transition-opacity duration-300 ${isLoading ? 'opacity-60' : ''}`}>
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-              <StatTile label="Total users" value={data.totals.total_users} hint="Non-admin users, active or not" Icon={Users}
+              <StatTile index={0} label="Total users" value={data.totals.total_users} hint="Non-admin users, active or not" Icon={Users}
                 onClick={() => setDrill(d!.total())} />
-              <StatTile label="Active, last 7 days" value={data.totals.active_users_7d} hint="Signed in or opened a feature" Icon={Activity}
+              <StatTile index={1} label="Active, last 7 days" value={data.totals.active_users_7d} hint="Signed in or opened a feature" Icon={Activity}
                 onClick={() => setDrill(d!.active7d())} />
-              <StatTile label="Logins" value={data.totals.logins} hint={`${data.date_from} to ${data.date_to}`} Icon={LogIn}
+              <StatTile index={2} label="Logins" value={data.totals.logins} hint={`${data.date_from} to ${data.date_to}`} Icon={LogIn}
                 onClick={() => setDrill(d!.logins())} />
-              <StatTile label="Feature views" value={data.totals.feature_views} hint={`${data.date_from} to ${data.date_to}`} Icon={Eye}
+              <StatTile index={3} label="Feature views" value={data.totals.feature_views} hint={`${data.date_from} to ${data.date_to}`} Icon={Eye}
                 onClick={() => setDrill(d!.views())} />
-              <StatTile label="Time spent" value={formatDuration(data.totals.time_seconds)} hint="Active time on features" Icon={Clock}
+              <StatTile index={4} label="Time spent" value={formatDuration(data.totals.time_seconds)} hint="Active time on features" Icon={Clock}
                 onClick={() => setDrill(d!.time())} />
             </div>
 
@@ -246,6 +247,7 @@ export default function AdminAnalyticsPage() {
           </div>
         )}
       </div>
+      </div>
       {drill && <UserListDialog title={drill.title} subtitle={drill.subtitle} rows={drill.rows} onClose={closeDrill} />}
     </ProtectedRoute>
   );
@@ -290,7 +292,7 @@ function UserFeatureTable({ data, measure }: { data: AnalyticsResponse; measure:
                   <td key={f} className="py-1 px-1 text-center">
                     <span
                       title={`${u.email} · ${featureLabel(f)}: ${u.feature_views[f] ?? 0} view(s), ${formatDuration(u.feature_seconds?.[f] ?? 0)}${isTop ? ' (top feature)' : ''}`}
-                      className={`inline-block min-w-[2.5rem] rounded px-1.5 py-1 tabular-nums whitespace-nowrap ${
+                      className={`inline-block min-w-[2.5rem] rounded px-1.5 py-1 tabular-nums whitespace-nowrap transition-[background-color,color] duration-500 ${
                         n ? 'text-gray-900 font-semibold' : 'text-gray-300'
                       } ${isTop ? 'ring-1 ring-hp-dark' : ''}`}
                       // One-hue sequential tint: darker = more. The value is

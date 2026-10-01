@@ -65,6 +65,7 @@ DEFAULT_WINDOW_DAYS = 30
 MAX_WINDOW_DAYS = 366
 TOP_ACCOUNTS = 10
 RECENT_LIMIT = 15
+LOGIN_LIMIT = 50
 
 
 def _parse_day(value: str | None, name: str) -> date | None:
@@ -320,6 +321,10 @@ def build_my_activity(db, user: dict, date_from: str | None = None,
                              account_name=names.get(r.get("account_id") or ""))
               for r in rows if r.get("feature_key") in usage.order]
 
+    logins = [_aware(r["ts"]) for r in db[USAGE_EVENTS].find(
+        {"user_id": uid, "event": EVENT_LOGIN, "ts": {"$gte": start, "$lt": end}},
+        {"ts": 1}).sort("ts", -1).limit(LOGIN_LIMIT)]
+
     doc = db["users"].find_one({"_id": ObjectId(uid)}) or {}
     return MyActivityResponse(
         date_from=start_day.isoformat(),
@@ -338,4 +343,5 @@ def build_my_activity(db, user: dict, date_from: str | None = None,
         daily=usage.daily,
         top_accounts=usage.top_accounts,
         recent=recent,
+        recent_logins=logins,
     )

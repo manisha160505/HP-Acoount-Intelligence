@@ -157,3 +157,67 @@ body {
   .as-row-btn:hover .as-monogram { transform: none; }
   .as-seg-indicator { transition: opacity 150ms ease; }
 }
+
+/* ---------------------------------------------------------------------------
+   Analytics and My Activity (shared parts in components/analytics). Same
+   rules as above: the final state is the default, motion is an entrance.
+   --------------------------------------------------------------------------- */
+
+/* Bars are full-size elements scaled to their value, so a measure switch
+   glides on the compositor instead of re-laying out the row. The keyframes
+   set only `from`, so the inline scale is where each bar lands - and where a
+   later transition starts from. */
+@keyframes as-grow-x { from { transform: scaleX(0); } }
+@keyframes as-grow-y { from { transform: scaleY(0); } }
+.as-bar-x {
+  transform-origin: left center;
+  transition: transform 560ms var(--as-ease-out), background-color 180ms ease;
+  animation: as-grow-x 820ms var(--as-ease-out) backwards;
+  animation-delay: calc(120ms + var(--as-i, 0) * 30ms);
+}
+.as-bar-y {
+  transform-origin: center bottom;
+  transition: transform 560ms var(--as-ease-out), background-color 180ms ease;
+  animation: as-grow-y 700ms var(--as-ease-out) backwards;
+  animation-delay: calc(80ms + var(--as-i, 0) * 12ms);
+}
+
+/* Stat tiles: arrive in sequence, lift slightly on hover when clickable. */
+.as-tile { animation: as-rise 620ms var(--as-ease-out) both; animation-delay: calc(var(--as-i, 0) * 55ms); }
+.as-tile-btn { transition: transform 260ms var(--as-ease-out), box-shadow 260ms var(--as-ease-out), border-color 200ms ease; }
+.as-tile-btn:hover { transform: translate3d(0, -2px, 0); box-shadow: 0 14px 28px -16px rgba(0, 75, 120, 0.35), 0 2px 6px -2px rgba(11, 19, 43, 0.08); }
+.as-tile-btn:active { transform: translate3d(0, 0, 0) scale(0.99); }
+
+/* Scroll reveal, applied by <Reveal> only to content that starts off screen. */
+.as-reveal-pending { opacity: 0; transform: translate3d(0, 16px, 0); filter: blur(4px); }
+.as-reveal-in {
+  opacity: 1; transform: none; filter: none;
+  transition: opacity 600ms ease, transform 760ms var(--as-ease-out), filter 600ms ease;
+}
+
+/* Overlays. Exit is quicker than entrance. */
+@keyframes as-backdrop-in { from { opacity: 0; } }
+@keyframes as-backdrop-out { to { opacity: 0; } }
+@keyframes as-dialog-in { from { opacity: 0; transform: translate3d(0, 10px, 0) scale(0.98); filter: blur(4px); } }
+@keyframes as-dialog-out { to { opacity: 0; transform: translate3d(0, 6px, 0) scale(0.985); } }
+@keyframes as-sheet-in { from { transform: translate3d(100%, 0, 0); } }
+@keyframes as-sheet-out { to { transform: translate3d(100%, 0, 0); } }
+.as-backdrop { animation: as-backdrop-in 260ms ease both; }
+.as-backdrop.is-closing { animation: as-backdrop-out 200ms ease both; }
+.as-dialog { animation: as-dialog-in 360ms var(--as-ease-out) both; }
+.as-dialog.is-closing { animation: as-dialog-out 180ms var(--as-ease-in-out) both; }
+.as-sheet { animation: as-sheet-in 520ms var(--as-ease-out) both; }
+.as-sheet.is-closing { animation: as-sheet-out 240ms var(--as-ease-in-out) both; }
+
+/* Content swapped in place (a new date range, a measure toggle). */
+.as-swap { animation: as-fade 320ms ease both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .as-bar-x, .as-bar-y { animation: none; transition: background-color 150ms ease; }
+  .as-tile { animation-name: as-fade; animation-duration: 200ms; animation-delay: 0ms; }
+  .as-tile-btn:hover, .as-tile-btn:active { transform: none; }
+  .as-reveal-pending { opacity: 1; transform: none; filter: none; }
+  .as-dialog, .as-dialog.is-closing { animation-name: as-fade; animation-duration: 150ms; }
+  .as-dialog.is-closing, .as-sheet.is-closing, .as-backdrop.is-closing { animation: none; }
+  .as-sheet { animation: as-fade 150ms ease both; }
+}

@@ -1,8 +1,9 @@
 'use client';
 
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ProtectedRoute } from '@/components/common/ProtectedRoute';
+import { ParallaxBand, SlidingSegments } from '@/components/common/motion';
 import api from '@/services/api';
 import { CompanyAccount } from '@/types/account';
 import {
@@ -33,8 +34,6 @@ export default function AccountSelectionPage() {
   const [page, setPage] = useState(1);
   const [openingId, setOpeningId] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
-  const heroRef = useRef<HTMLElement>(null);
-  useParallax(heroRef);
 
   const load = useCallback(async () => {
     setIsLoading(true);
@@ -101,11 +100,8 @@ export default function AccountSelectionPage() {
     <ProtectedRoute allowedRoles={['user', 'admin']}>
       <div className="as-page min-h-[calc(100vh-4rem)] bg-[#F4F6F8]">
         {/* Header band: continues the navbar's ink, with parallax depth. */}
-        <section ref={heroRef} className="as-hero">
-          <div className="as-layer as-layer-grid" aria-hidden />
-          <div className="as-layer as-layer-glow-a" aria-hidden />
-          <div className="as-layer as-layer-glow-b" aria-hidden />
-          <div className="as-hero-copy relative max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 pt-10 pb-20 sm:pt-14 sm:pb-24">
+        <ParallaxBand>
+          <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 pt-10 pb-20 sm:pt-14 sm:pb-24">
             <h1 className="as-rise text-2xl sm:text-3xl font-extrabold text-white tracking-tight [text-wrap:balance]">
               Select an account
             </h1>
@@ -116,7 +112,7 @@ export default function AccountSelectionPage() {
               )}
             </p>
           </div>
-        </section>
+        </ParallaxBand>
 
         <div className="relative max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 -mt-12 sm:-mt-14 pb-16">
           {/* Controls, floating over the band's edge */}
@@ -158,7 +154,9 @@ export default function AccountSelectionPage() {
               <span id="as-urgency-label" className="text-xs font-bold text-slate-600 whitespace-nowrap">
                 Urgency Score
               </span>
-              <SegmentedFilter value={urgency} onChange={setUrgency} labelledBy="as-urgency-label" />
+              <div className="as-scroll-x overflow-x-auto -mx-1 px-1 min-w-0">
+                <SlidingSegments value={urgency} onChange={setUrgency} labelledBy="as-urgency-label" options={URGENCY_FILTERS} />
+              </div>
             </div>
           </div>
 
@@ -353,131 +351,9 @@ function PageButton({ children, onClick, disabled, current }: {
   );
 }
 
-/** Urgency ranges as one segmented control; the highlight slides to the
- *  selected option instead of jumping. */
-function SegmentedFilter({ value, onChange, labelledBy }: {
-  value: UrgencyFilter;
-  onChange: (v: UrgencyFilter) => void;
-  labelledBy: string;
-}) {
-  const trackRef = useRef<HTMLDivElement>(null);
-  const refs = useRef<Record<string, HTMLButtonElement | null>>({});
-  const [box, setBox] = useState<{ x: number; w: number } | null>(null);
-
-  const measure = useCallback(() => {
-    const el = refs.current[value];
-    if (el) setBox({ x: el.offsetLeft, w: el.offsetWidth });
-  }, [value]);
-
-  useLayoutEffect(() => {
-    measure();
-    refs.current[value]?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-  }, [measure, value]);
-
-  useEffect(() => {
-    const track = trackRef.current;
-    if (!track || typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(measure);
-    ro.observe(track);
-    return () => ro.disconnect();
-  }, [measure]);
-
-  const onKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
-    e.preventDefault();
-    const i = URGENCY_FILTERS.findIndex((f) => f.value === value);
-    const next = URGENCY_FILTERS[(i + (e.key === 'ArrowRight' ? 1 : -1) + URGENCY_FILTERS.length) % URGENCY_FILTERS.length];
-    onChange(next.value);
-    refs.current[next.value]?.focus();
-  };
-
-  return (
-    <div className="as-scroll-x overflow-x-auto -mx-1 px-1 min-w-0">
-      <div
-        ref={trackRef}
-        role="radiogroup"
-        aria-labelledby={labelledBy}
-        onKeyDown={onKeyDown}
-        className="relative inline-flex items-center gap-0.5 p-1 bg-slate-100 rounded-xl"
-      >
-        <span
-          aria-hidden
-          className="as-seg-indicator absolute top-1 bottom-1 left-0 rounded-lg bg-white shadow-[0_1px_3px_rgba(11,19,43,0.12),0_1px_1px_rgba(11,19,43,0.04)]"
-          style={{ width: box?.w ?? 0, transform: `translate3d(${box?.x ?? 0}px,0,0)`, opacity: box ? 1 : 0 }}
-        />
-        {URGENCY_FILTERS.map((f) => {
-          const active = f.value === value;
-          return (
-            <button
-              key={f.value}
-              ref={(el) => { refs.current[f.value] = el; }}
-              type="button"
-              role="radio"
-              aria-checked={active}
-              tabIndex={active ? 0 : -1}
-              onClick={() => onChange(f.value)}
-              className={`relative z-10 px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap tabular-nums transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0096D6]/50 ${
-                active ? 'text-[#0B132B]' : 'text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              {f.label}
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 // The first two letters of the company's first word. Initials of the first
 // two words read badly here: "Accenture Inc" became "AI".
 function monogram(name: string): string {
   const word = name.replace(/[^A-Za-z0-9 ]+/g, ' ').trim().split(/\s+/)[0] ?? '';
   return word.slice(0, 2).toUpperCase() || '#';
-}
-
-/**
- * Pointer and scroll parallax for the header band. Writes three CSS variables
- * the layers read; the pointer offset is eased toward its target so the layers
- * glide rather than track the cursor 1:1, and the loop stops once it settles.
- * Does nothing under prefers-reduced-motion.
- */
-function useParallax(ref: React.RefObject<HTMLElement>) {
-  useEffect(() => {
-    const el = ref.current;
-    if (!el || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-
-    let tx = 0, ty = 0, cx = 0, cy = 0, sy = -1, raf = 0;
-    const tick = () => {
-      cx += (tx - cx) * 0.08;
-      cy += (ty - cy) * 0.08;
-      const scroll = Math.min(window.scrollY, 400);
-      el.style.setProperty('--as-px', cx.toFixed(4));
-      el.style.setProperty('--as-py', cy.toFixed(4));
-      if (scroll !== sy) {
-        sy = scroll;
-        el.style.setProperty('--as-sy', String(scroll));
-      }
-      raf = Math.abs(tx - cx) > 0.001 || Math.abs(ty - cy) > 0.001 ? requestAnimationFrame(tick) : 0;
-    };
-    const kick = () => { if (!raf) raf = requestAnimationFrame(tick); };
-    const onMove = (e: PointerEvent) => {
-      if (e.pointerType !== 'mouse') return;
-      tx = (e.clientX / window.innerWidth) * 2 - 1;
-      ty = (e.clientY / window.innerHeight) * 2 - 1;
-      kick();
-    };
-    const onLeave = () => { tx = 0; ty = 0; kick(); };
-
-    window.addEventListener('pointermove', onMove, { passive: true });
-    document.addEventListener('pointerleave', onLeave);
-    window.addEventListener('scroll', kick, { passive: true });
-    kick();
-    return () => {
-      window.removeEventListener('pointermove', onMove);
-      document.removeEventListener('pointerleave', onLeave);
-      window.removeEventListener('scroll', kick);
-      if (raf) cancelAnimationFrame(raf);
-    };
-  }, [ref]);
 }
