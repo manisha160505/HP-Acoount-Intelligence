@@ -84,6 +84,40 @@ def committed(db, account_id: str, widget_key: str, graph=DEFAULT) -> dict | Non
     return shape(account_id, widget_key, widget, graph, current)
 
 
+def committed_many(db, account_ids, widget_key: str, graph=DEFAULT) -> dict:
+    """`committed` for one widget across many accounts, in two queries.
+
+    For list views (the account picker shows every account's urgency score):
+    calling `committed` per account would cost up to two round trips each.
+    Resolution per account is exactly `committed`'s - node state when the
+    account has one, `account_widgets` when it does not.
+    """
+    db = _db(db)
+    account_ids = [str(a) for a in account_ids]
+    owner = graph.owner.get(widget_key)
+    out: dict = dict.fromkeys(account_ids)
+
+    legacy_ids = account_ids
+    if owner is not None:
+        ids = {state_id(a, owner): a for a in account_ids}
+        found = set()
+        for doc in db[STATE_COLLECTION].find({"_id": {"$in": list(ids)}},
+                                             {"current": 1}):
+            account_id = ids[doc["_id"]]
+            found.add(account_id)
+            current = doc.get("current") or {}
+            widget = (current.get("widgets") or {}).get(widget_key)
+            if widget is not None:
+                out[account_id] = shape(account_id, widget_key, widget, graph, current)
+        legacy_ids = [a for a in account_ids if a not in found]
+
+    if legacy_ids:
+        for doc in db["account_widgets"].find(
+                {"account_id": {"$in": legacy_ids}, "widget_key": widget_key}):
+            out[doc["account_id"]] = doc
+    return out
+
+
 def get(account_id: str, widget_key: str, *, soft: bool = False, db=None,
         graph=DEFAULT) -> dict | None:
     """Read one widget. `soft=True` marks a read that must not create a

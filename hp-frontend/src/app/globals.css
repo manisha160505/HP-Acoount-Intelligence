@@ -39,3 +39,121 @@ body {
     background-image: linear-gradient(90deg, #e2e8f0, #f1f5f9);
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Account Selection (/accounts). Every animation here starts from content that
+   is already visible in its final state if CSS animation is unavailable, and
+   the reduced-motion block at the end keeps fades but drops movement.
+   --------------------------------------------------------------------------- */
+:root {
+  --as-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --as-ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --as-ink: #0B132B;
+  --as-ink-2: #1C2541;
+  --as-blue: #0096D6;
+  --as-sky: #00B0FF;
+}
+
+.as-page ::selection { background: rgba(0, 150, 214, 0.22); color: inherit; }
+.as-page input { caret-color: var(--as-blue); }
+
+/* Header band: continues the navbar's ink, with layers that drift at different
+   rates. --as-px/--as-py are the pointer offset (-1..1); --as-sy is scroll. */
+.as-hero {
+  --as-px: 0; --as-py: 0; --as-sy: 0;
+  position: relative;
+  overflow: hidden;
+  background: var(--as-ink);
+  isolation: isolate;
+}
+.as-layer {
+  position: absolute;
+  inset: -12%;
+  pointer-events: none;
+  will-change: transform;
+}
+.as-layer-grid {
+  background-image: radial-gradient(rgba(148, 197, 255, 0.16) 1px, transparent 1.2px);
+  background-size: 22px 22px;
+  mask-image: radial-gradient(ellipse 70% 90% at 70% 40%, #000 20%, transparent 75%);
+  -webkit-mask-image: radial-gradient(ellipse 70% 90% at 70% 40%, #000 20%, transparent 75%);
+  transform: translate3d(calc(var(--as-px) * -8px), calc(var(--as-py) * -6px + var(--as-sy) * 0.12px), 0);
+}
+.as-layer-glow-a {
+  background: radial-gradient(38% 55% at 78% 30%, rgba(0, 150, 214, 0.38), transparent 70%);
+  transform: translate3d(calc(var(--as-px) * 22px), calc(var(--as-py) * 16px + var(--as-sy) * 0.3px), 0);
+}
+.as-layer-glow-b {
+  background: radial-gradient(30% 45% at 18% 85%, rgba(0, 176, 255, 0.16), transparent 70%);
+  transform: translate3d(calc(var(--as-px) * -14px), calc(var(--as-py) * -10px + var(--as-sy) * 0.2px), 0);
+}
+.as-hero-copy {
+  transform: translate3d(0, calc(var(--as-sy) * -0.08px), 0);
+  opacity: calc(1 - var(--as-sy) / 400);
+}
+
+@keyframes as-rise {
+  from { opacity: 0; transform: translate3d(0, 10px, 0); filter: blur(6px); }
+  to   { opacity: 1; transform: none; filter: none; }
+}
+@keyframes as-row-in {
+  from { opacity: 0; transform: translate3d(0, 8px, 0); filter: blur(4px); }
+  to   { opacity: 1; transform: none; filter: none; }
+}
+@keyframes as-fill {
+  from { transform: scaleX(0); }
+  to   { transform: scaleX(1); }
+}
+@keyframes as-fade { from { opacity: 0; } to { opacity: 1; } }
+
+.as-rise { animation: as-rise 640ms var(--as-ease-out) both; animation-delay: var(--as-delay, 0ms); }
+
+/* Rows: --as-i is the row's position, capped in the component so the last
+   row lands within ~200ms of the first. */
+.as-row { animation: as-row-in 440ms var(--as-ease-out) both; animation-delay: calc(var(--as-i, 0) * 26ms); }
+.as-list-swap .as-row { animation-duration: 300ms; animation-delay: calc(var(--as-i, 0) * 16ms); }
+
+.as-meter-fill {
+  transform-origin: left center;
+  animation: as-fill 820ms var(--as-ease-out) both;
+  animation-delay: calc(140ms + var(--as-i, 0) * 26ms);
+}
+.as-list-swap .as-meter-fill { animation-duration: 520ms; animation-delay: calc(60ms + var(--as-i, 0) * 16ms); }
+
+.as-row-btn { transition: background-color 180ms ease, opacity 260ms ease, transform 160ms var(--as-ease-out); }
+.as-row-btn:active { transform: scale(0.994); }
+.as-row-arrow { transition: transform 260ms var(--as-ease-out), opacity 200ms ease; transform: translate3d(-6px, 0, 0); opacity: 0; }
+.as-row-btn:hover .as-row-arrow,
+.as-row-btn:focus-visible .as-row-arrow { transform: none; opacity: 1; }
+.as-monogram { transition: transform 260ms var(--as-ease-out), box-shadow 260ms var(--as-ease-out), background-color 200ms ease; }
+.as-row-btn:hover .as-monogram { transform: translate3d(0, -1px, 0); box-shadow: 0 4px 10px -4px rgba(0, 75, 120, 0.35); }
+
+/* Segmented filter: the highlight slides between options. Width is animated
+   deliberately: the indicator is absolutely positioned, so it reflows nothing
+   around it, and scaleX would stretch its rounded corners. */
+.as-seg-indicator {
+  transition: transform 340ms var(--as-ease-out), width 340ms var(--as-ease-out), opacity 200ms ease;
+}
+
+.as-fade { animation: as-fade 260ms ease both; }
+
+.as-scroll-x { scrollbar-width: none; }
+.as-scroll-x::-webkit-scrollbar { display: none; }
+/* On narrow screens the filter scrolls; fade its trailing edge so it reads as
+   more options rather than a clipped control. */
+@media (max-width: 639px) {
+  .as-scroll-x {
+    mask-image: linear-gradient(to right, #000 82%, transparent);
+    -webkit-mask-image: linear-gradient(to right, #000 82%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .as-layer, .as-hero-copy { transform: none !important; }
+  .as-hero-copy { opacity: 1; }
+  .as-rise, .as-row { animation-name: as-fade; animation-duration: 200ms; animation-delay: 0ms; }
+  .as-meter-fill { animation: none; }
+  .as-row-arrow { transform: none; }
+  .as-row-btn:hover .as-monogram { transform: none; }
+  .as-seg-indicator { transition: opacity 150ms ease; }
+}
