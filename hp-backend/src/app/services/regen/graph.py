@@ -137,6 +137,16 @@ NODES = (
          # a business-unit summary led by Bombora.
          logic_version=2,
          run=f"{_P}:intent"),
+    # The Hiring Signals section of Intent & Demand Signals. Its own node so a
+    # job upload rebuilds it without re-running the intent model calls.
+    # Deterministic: the shared job selection plus the O*NET theme table.
+    Node("hiring", "intent_demand_signals",
+         widgets=("hiring_postings_summary", "hiring_family_breakdown",
+                  "hiring_tech_tags", "hiring_theme_cards"),
+         datasets=("job_openings",),
+         logic_refs=("app.services.hp.hiring_jobs:HIRING_RULES_VERSION",
+                     "app.services.hp.hiring_themes:THEMES_VERSION"),
+         run=f"{_P}:hiring"),
     Node("opp_core", "solution_narrative_opportunity_map",
          widgets=("opportunity_context_card", "opportunity_narrative_plays"),
          datasets=("firmographics", "technographics", "intent_score",
@@ -216,13 +226,16 @@ NODES = (
          # The company description is reorganised into bullets by one cached,
          # grounded model call (client feedback 1.a, 27 Sep).
          llm=True,
-         logic_refs=("app.services.extractors.executive_dashboard:SUMMARY_PROMPT_VERSION",),
+         logic_refs=("app.services.extractors.executive_dashboard:SUMMARY_PROMPT_VERSION",
+                     "app.services.hp.hiring_jobs:HIRING_RULES_VERSION"),
          # 2: exec_key_metrics lists the filings on record (the filings list
          # CSV uploaded with the PDFs under compliance_filings); Quick Stats
          # counts and the contacts read dropped (client feedback 1.e).
          # 3: exec_key_metrics carries reported_metrics from the filings index
          # (filings_financials.csv) when it is uploaded.
-         logic_version=3,
+         # 4: exec_hiring_velocity counts the Hiring Signals selection (country
+         # check + last 12 months) as job_postings_12m, not every row.
+         logic_version=4,
          run=f"{_P}:exec_core"),
     Node("evaluator_personas", "message_evaluator",
          widgets=("evaluator_persona_context",),

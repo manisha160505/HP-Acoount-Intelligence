@@ -102,11 +102,11 @@ FEATURE_MAPPINGS = {
             },
             {
                 "field_key": "hiring_velocity",
-                "display_name": "Hiring Velocity / Urgency Signal",
-                "purpose": "Open job postings count as role-proxy/urgency signal",
+                "display_name": "Job Postings (last 12 months)",
+                "purpose": "Job postings after the Hiring Signals country check, first seen in the 12 months to the PredictLeads pull date, open and closed - the same count as the Hiring Signals page",
                 "dataset_key": "job_openings",
                 "source_sheet": "job_openings",
-                "source_column": "job_openings record count",
+                "source_column": "account_country_code, location, first_seen_at (filtered row count)",
                 "data_type": "DETERMINISTIC"
             }
         ]
@@ -869,7 +869,7 @@ FEATURE_MAPPINGS = {
     "intent_demand_signals": {
         "feature_key": "intent_demand_signals",
         "display_name": "Intent & Demand Signals",
-        "purpose": "HP category intent scores (primary), the Bombora signals that support each category with their exact scores, the account technologies that confirm them, and hiring-linked demand",
+        "purpose": "HP category intent scores (primary), the Bombora signals that support each category with their exact scores, the account technologies that confirm them, and the Hiring Signals section (Hiring_Signals_Rule_Set_Final.docx)",
         # technographics and webstack are Explorium sheets 4 and 5, read directly
         # to confirm which supporting signals are backed by technology in use.
         "dependent_datasets": ["hp_category_intent", "intent_score", "intent_topics", "job_openings",
@@ -977,10 +977,73 @@ FEATURE_MAPPINGS = {
             {
                 "field_key": "hiring_linked_demand",
                 "display_name": "Hiring-Linked Intent Category",
-                "purpose": "Postings seen (every row, the Executive Dashboard figure), open postings (no closing status) and seniority mix as hiring-linked intent signal",
+                "purpose": "Postings seen (every row), open postings (no closing status) and seniority mix as hiring-linked intent signal",
                 "dataset_key": "job_openings",
                 "source_sheet": "job_openings",
                 "source_column": "status, seniority (row count)",
+                "data_type": "DETERMINISTIC"
+            },
+            {
+                "field_key": "job_selection",
+                "display_name": "Jobs Linked to the Account",
+                "purpose": "A job belongs to the account on domain + company name + country code. A job whose location names another country is dropped; a blank location, or one naming no country, is kept. Two-code rows (MY; SG, JP; TH) go to the account the location names. Location is never shown",
+                "dataset_key": "job_openings",
+                "source_sheet": "job_openings",
+                "source_column": "company_domain, company_name, account_country_code, location",
+                "data_type": "DETERMINISTIC"
+            },
+            {
+                "field_key": "job_window",
+                "display_name": "Last 12 Months",
+                "purpose": "Only jobs first seen in the 12 months to the PredictLeads pull date (18 Sep 2026); a job with no first_seen_at is dropped. Open and closed postings both count",
+                "dataset_key": "job_openings",
+                "source_sheet": "job_openings",
+                "source_column": "first_seen_at",
+                "data_type": "DETERMINISTIC"
+            },
+            {
+                "field_key": "job_postings",
+                "display_name": "Job Postings Tile",
+                "purpose": "Count of the selected jobs, labelled Last 12 months",
+                "dataset_key": "job_openings",
+                "source_sheet": "job_openings",
+                "source_column": "row count",
+                "data_type": "DETERMINISTIC"
+            },
+            {
+                "field_key": "hybrid_pct",
+                "display_name": "Hybrid Roles Tile",
+                "purpose": "Share of the selected jobs whose contract types contain hybrid, remote or work from home; hidden when 0",
+                "dataset_key": "job_openings",
+                "source_sheet": "job_openings",
+                "source_column": "contract_types",
+                "data_type": "DETERMINISTIC"
+            },
+            {
+                "field_key": "onet_family",
+                "display_name": "What They're Hiring For",
+                "purpose": "Jobs per O*NET job family; the six largest, the rest (and jobs with no family) as Other",
+                "dataset_key": "job_openings",
+                "source_sheet": "job_openings",
+                "source_column": "onet_data.family",
+                "data_type": "DETERMINISTIC"
+            },
+            {
+                "field_key": "tags",
+                "display_name": "Tech Named in Job Ads",
+                "purpose": "How many jobs mention each tag, top 30, without the company's own name or non-tech tags (Internship, Contractor, Business Development, Customer success, Marketing Campaigns, Advertising, Social Media)",
+                "dataset_key": "job_openings",
+                "source_sheet": "job_openings",
+                "source_column": "tags",
+                "data_type": "DETERMINISTIC"
+            },
+            {
+                "field_key": "hiring_theme",
+                "display_name": "Hiring Signals for HP",
+                "purpose": "Each job's O*NET code mapped to one of nine HP themes by the rule set table (first match wins); one card per theme with jobs, showing up to five titles most frequent first and the theme's HP product, service and solution",
+                "dataset_key": "job_openings",
+                "source_sheet": "job_openings",
+                "source_column": "onet_data.code, title",
                 "data_type": "DETERMINISTIC"
             }
         ]

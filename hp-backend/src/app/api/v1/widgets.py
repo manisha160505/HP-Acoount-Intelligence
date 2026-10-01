@@ -138,11 +138,11 @@ WIDGET_REGISTRY = {
             "widget_key": "exec_hiring_velocity",
             "widget_name": "Hiring Velocity Signal",
             "feature_key": "executive_dashboard",
-            "description": "Open job postings volume as role-proxy and urgency indicator",
+            "description": "Job postings in the last 12 months (country-checked, open and closed), the same count as Hiring Signals",
             "widget_type": "metric_card",
             "data_classification": "deterministic",
             "source_datasets": ["job_openings"],
-            "source_fields": ["hiring_velocity"],
+            "source_fields": ["job_postings_12m"],
             "display_order": 3
         },
         {
@@ -484,6 +484,54 @@ WIDGET_REGISTRY = {
             "source_datasets": ["job_openings"],
             "source_fields": ["hiring_linked_demand"],
             "display_order": 3
+        },
+        # Hiring Signals section at the bottom of this page
+        # (Hiring_Signals_Rule_Set_Final.docx, Dhruvi, 1 Oct). The jobs are the
+        # shared selection in hp/hiring_jobs.py, the same ones the Executive
+        # Dashboard's job postings tile counts.
+        {
+            "widget_key": "hiring_postings_summary",
+            "widget_name": "Job Postings & Hybrid Roles",
+            "feature_key": "intent_demand_signals",
+            "description": "Job postings in the last 12 months after the country check, and the share listing hybrid, remote or work from home",
+            "widget_type": "metric_card",
+            "data_classification": "deterministic",
+            "source_datasets": ["job_openings"],
+            "source_fields": ["job_postings", "hybrid_pct"],
+            "display_order": 4
+        },
+        {
+            "widget_key": "hiring_family_breakdown",
+            "widget_name": "What They're Hiring For",
+            "feature_key": "intent_demand_signals",
+            "description": "Jobs per O*NET job family: the six largest, the rest as Other",
+            "widget_type": "bar_chart",
+            "data_classification": "deterministic",
+            "source_datasets": ["job_openings"],
+            "source_fields": ["onet_family"],
+            "display_order": 5
+        },
+        {
+            "widget_key": "hiring_tech_tags",
+            "widget_name": "Tech Named in Job Ads",
+            "feature_key": "intent_demand_signals",
+            "description": "Up to 30 tools and skills most mentioned in the job ads, without the company's own name or non-tech tags",
+            "widget_type": "tag_list",
+            "data_classification": "deterministic",
+            "source_datasets": ["job_openings"],
+            "source_fields": ["tags"],
+            "display_order": 6
+        },
+        {
+            "widget_key": "hiring_theme_cards",
+            "widget_name": "Hiring Signals for HP",
+            "feature_key": "intent_demand_signals",
+            "description": "One card per HP theme with jobs, from each job's O*NET code: job count, top titles and the theme's HP product, service and solution",
+            "widget_type": "signal_card",
+            "data_classification": "deterministic",
+            "source_datasets": ["job_openings"],
+            "source_fields": ["hiring_theme"],
+            "display_order": 7
         }
     ]
 }
