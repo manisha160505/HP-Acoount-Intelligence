@@ -17,7 +17,7 @@ def test_missing_urgency_component_is_recorded_with_its_basis():
     gaps = dg.collect("exec_urgency_score", widget)
 
     assert ("drivers[0].terms[0].missing_input", dg.INPUT_NOT_ON_FILE) in _codes(gaps)
-    row = [g for g in gaps if g["code"] == dg.INPUT_NOT_ON_FILE][0]
+    row = next(g for g in gaps if g["code"] == dg.INPUT_NOT_ON_FILE)
     assert "extended_company" in row["reason"]
     # The widget-level status is recorded too, and the scored term is not a gap.
     assert ("", dg.WIDGET_NOT_AVAILABLE) in _codes(gaps)

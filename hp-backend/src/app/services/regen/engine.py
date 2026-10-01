@@ -50,7 +50,15 @@ from pymongo.errors import DuplicateKeyError
 
 from app.observability import pipeline
 from app.services.extractors.datasets import DatasetFileMissing
-from app.services.regen import context as run_context, data_gaps, jobs, manifest, planner, runs, state
+from app.services.regen import (
+    context as run_context,
+    data_gaps,
+    jobs,
+    manifest,
+    planner,
+    runs,
+    state,
+)
 from app.services.regen.graph import DEFAULT, INDEX
 from app.services.regen.store import WIDGET_FIELDS, shape
 

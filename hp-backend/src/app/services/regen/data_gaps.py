@@ -60,7 +60,7 @@ def _text(value) -> str:
 
 
 def _sibling_reason(node: dict, *keys) -> str:
-    for key in keys + ("basis", "reason", "note", "notice", "label", "name"):
+    for key in (*keys, "basis", "reason", "note", "notice", "label", "name"):
         if node.get(key):
             return _text(node[key])
     return ""
@@ -164,6 +164,6 @@ def collect_all(widgets: dict) -> list[dict]:
     for key, widget in (widgets or {}).items():
         try:
             out.extend(collect(key, widget))
-        except Exception:  # noqa: BLE001 - audit data only
+        except Exception:
             logger.exception("data_gaps: could not collect for widget %s", key)
     return out
