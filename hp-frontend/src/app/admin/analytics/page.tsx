@@ -130,7 +130,7 @@ export default function AdminAnalyticsPage() {
 
       <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 -mt-12 sm:-mt-14 pb-12">
         <div
-          className="as-rise relative z-10 mb-6 bg-white p-3 rounded-2xl border border-slate-200/80 flex flex-wrap items-center justify-between gap-2 shadow-[0_12px_32px_-12px_rgba(11,19,43,0.28),0_2px_6px_-2px_rgba(11,19,43,0.08)]"
+          className="as-rise as-glass relative z-10 mb-6 p-3 rounded-2xl flex flex-wrap items-center justify-between gap-2"
           style={{ ['--as-delay' as string]: '120ms' }}
         >
           <RangePicker from={from} to={to} onChange={(f, t) => { setFrom(f); setTo(t); }} />

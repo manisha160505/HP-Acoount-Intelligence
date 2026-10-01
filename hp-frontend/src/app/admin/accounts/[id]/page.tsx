@@ -3,6 +3,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { ProtectedRoute } from '@/components/common/ProtectedRoute';
+import { ParallaxBand } from '@/components/common/motion';
 import PipelinePanel from '@/components/admin/PipelinePanel';
 import api from '@/services/api';
 import { 
@@ -371,17 +372,21 @@ export default function ManageAccountPage() {
 
   return (
     <ProtectedRoute allowedRoles={['admin']}>
-      <div className="max-w-6xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
-        
-        {/* Navigation Bar */}
-        <button
-          type="button"
-          onClick={() => router.push('/admin/platform')}
-          className="inline-flex items-center space-x-2 text-xs font-bold text-gray-600 hover:text-hp-navy mb-6 transition"
-        >
-          <ArrowLeft className="w-4 h-4" />
-          <span>Back to Manage Platform</span>
-        </button>
+      <div className="as-page">
+      <ParallaxBand>
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 pb-24">
+          <button
+            type="button"
+            onClick={() => router.push('/admin/platform')}
+            className="as-rise inline-flex items-center space-x-2 text-xs font-bold text-slate-300 hover:text-white transition"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            <span>Back to Manage Platform</span>
+          </button>
+        </div>
+      </ParallaxBand>
+      {/* The workspace floats over the band's lower edge. */}
+      <div className="relative max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 -mt-16 pb-12">
 
         {isLoading ? (
           <div className="bg-white rounded-2xl p-12 border border-gray-200 shadow-sm flex flex-col items-center justify-center space-y-3">
@@ -403,10 +408,10 @@ export default function ManageAccountPage() {
             </button>
           </div>
         ) : account ? (
-          <div className="space-y-6">
+          <div className="space-y-6 as-feature-in">
             
             {/* Account Title Banner */}
-            <div className="bg-white rounded-2xl p-8 border border-gray-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="as-glass-strong rounded-2xl p-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div className="flex items-center space-x-4">
                 <div className="w-12 h-12 rounded-xl bg-hp-navy/10 text-hp-navy flex items-center justify-center font-extrabold text-lg uppercase">
                   {account.name.substring(0, 2)}
@@ -527,7 +532,7 @@ export default function ManageAccountPage() {
                     </div>
 
                     {saveDetailsSuccess && (
-                      <div className="mb-6 bg-emerald-50 border-l-4 border-emerald-500 p-4 rounded-r-lg flex items-center justify-between text-emerald-800 text-xs font-semibold shadow-sm">
+                      <div className="mb-6 bg-emerald-50 as-fade border border-emerald-200 p-4 rounded-xl flex items-center justify-between text-emerald-800 text-xs font-semibold shadow-sm">
                         <div className="flex items-center space-x-2">
                           <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0" />
                           <span>{saveDetailsSuccess}</span>
@@ -539,7 +544,7 @@ export default function ManageAccountPage() {
                     )}
 
                     {saveDetailsError && (
-                      <div className="mb-6 bg-red-50 border-l-4 border-red-500 p-4 rounded-r-lg flex items-center justify-between text-red-800 text-xs font-semibold shadow-sm">
+                      <div className="mb-6 bg-red-50 as-fade border border-red-200 p-4 rounded-xl flex items-center justify-between text-red-800 text-xs font-semibold shadow-sm">
                         <div className="flex items-center space-x-2">
                           <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0" />
                           <span>{saveDetailsError}</span>
@@ -648,7 +653,7 @@ export default function ManageAccountPage() {
 
                     {/* Feedback Messages */}
                     {uploadSuccess && (
-                      <div className="bg-emerald-50 border-l-4 border-emerald-500 p-4 rounded-r-lg flex items-center justify-between text-emerald-800 text-xs font-semibold shadow-sm">
+                      <div className="bg-emerald-50 as-fade border border-emerald-200 p-4 rounded-xl flex items-center justify-between text-emerald-800 text-xs font-semibold shadow-sm">
                         <div className="flex items-center space-x-2">
                           <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0" />
                           <span>{uploadSuccess}</span>
@@ -660,7 +665,7 @@ export default function ManageAccountPage() {
                     )}
 
                     {uploadError && (
-                      <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-r-lg flex items-center justify-between text-red-800 text-xs font-semibold shadow-sm">
+                      <div className="bg-red-50 as-fade border border-red-200 p-4 rounded-xl flex items-center justify-between text-red-800 text-xs font-semibold shadow-sm">
                         <div className="flex items-center space-x-2">
                           <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0" />
                           <span>{uploadError}</span>
@@ -954,7 +959,7 @@ export default function ManageAccountPage() {
                     </div>
 
                     {instructionsSuccess && (
-                      <div className="bg-emerald-50 border-l-4 border-emerald-500 p-4 rounded-r-lg flex items-center justify-between text-emerald-800 text-xs font-semibold shadow-sm">
+                      <div className="bg-emerald-50 as-fade border border-emerald-200 p-4 rounded-xl flex items-center justify-between text-emerald-800 text-xs font-semibold shadow-sm">
                         <div className="flex items-center space-x-2">
                           <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0" />
                           <span>{instructionsSuccess}</span>
@@ -966,7 +971,7 @@ export default function ManageAccountPage() {
                     )}
 
                     {instructionsError && (
-                      <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-r-lg flex items-center justify-between text-red-800 text-xs font-semibold shadow-sm">
+                      <div className="bg-red-50 as-fade border border-red-200 p-4 rounded-xl flex items-center justify-between text-red-800 text-xs font-semibold shadow-sm">
                         <div className="flex items-center space-x-2">
                           <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0" />
                           <span>{instructionsError}</span>
@@ -1049,7 +1054,7 @@ export default function ManageAccountPage() {
                     </div>
 
                     {guardrailsSuccess && (
-                      <div className="bg-emerald-50 border-l-4 border-emerald-500 p-4 rounded-r-lg flex items-center justify-between text-emerald-800 text-xs font-semibold shadow-sm">
+                      <div className="bg-emerald-50 as-fade border border-emerald-200 p-4 rounded-xl flex items-center justify-between text-emerald-800 text-xs font-semibold shadow-sm">
                         <div className="flex items-center space-x-2">
                           <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0" />
                           <span>{guardrailsSuccess}</span>
@@ -1061,7 +1066,7 @@ export default function ManageAccountPage() {
                     )}
 
                     {guardrailsError && (
-                      <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-r-lg flex items-center justify-between text-red-800 text-xs font-semibold shadow-sm">
+                      <div className="bg-red-50 as-fade border border-red-200 p-4 rounded-xl flex items-center justify-between text-red-800 text-xs font-semibold shadow-sm">
                         <div className="flex items-center space-x-2">
                           <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0" />
                           <span>{guardrailsError}</span>
@@ -1225,6 +1230,7 @@ export default function ManageAccountPage() {
           </div>
         </div>
       )}
+      </div>
     </ProtectedRoute>
   );
 }

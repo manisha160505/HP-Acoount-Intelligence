@@ -176,7 +176,7 @@ export function MyActivityPanel({ open, onClose, userName }: {
       <button type="button" aria-label="Close" onClick={onClose}
         className={`as-backdrop${state} absolute inset-0 bg-slate-900/40 backdrop-blur-[2px] cursor-default`} />
 
-      <div className={`as-sheet${state} relative h-full w-full max-w-2xl bg-gray-50 shadow-2xl flex flex-col`}>
+      <div className={`as-sheet${state} as-page relative h-full w-full max-w-2xl shadow-2xl flex flex-col`}>
         <ParallaxBand scrollRef={scrollRef} fadeOnScroll={false}>
           <div className="px-6 pt-5 pb-5 flex items-start justify-between gap-4">
             <div>
@@ -193,7 +193,7 @@ export function MyActivityPanel({ open, onClose, userName }: {
             </button>
           </div>
         </ParallaxBand>
-        <div className="px-6 py-3 bg-white border-b border-gray-200">
+        <div className="px-6 py-3 bg-white/80 backdrop-blur-md border-b border-slate-200/70">
           <RangePicker compact from={from} to={to} onChange={(f, t2) => { setFrom(f); setTo(t2); }} />
         </div>
 

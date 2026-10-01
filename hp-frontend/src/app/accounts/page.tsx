@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ProtectedRoute } from '@/components/common/ProtectedRoute';
-import { ParallaxBand, SlidingSegments } from '@/components/common/motion';
+import { CountUpText, ParallaxBand, SlidingSegments, growDelay } from '@/components/common/motion';
 import api from '@/services/api';
 import { CompanyAccount } from '@/types/account';
 import {
@@ -98,7 +98,7 @@ export default function AccountSelectionPage() {
 
   return (
     <ProtectedRoute allowedRoles={['user', 'admin']}>
-      <div className="as-page min-h-[calc(100vh-4rem)] bg-[#F4F6F8]">
+      <div className="as-page min-h-[calc(100vh-4rem)]">
         {/* Header band: continues the navbar's ink, with parallax depth. */}
         <ParallaxBand>
           <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 pt-10 pb-20 sm:pt-14 sm:pb-24">
@@ -117,7 +117,7 @@ export default function AccountSelectionPage() {
         <div className="relative max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 -mt-12 sm:-mt-14 pb-16">
           {/* Controls, floating over the band's edge */}
           <div
-            className="as-rise relative z-10 bg-white rounded-2xl border border-slate-200/80 p-3 sm:p-4 shadow-[0_12px_32px_-12px_rgba(11,19,43,0.28),0_2px_6px_-2px_rgba(11,19,43,0.08)]"
+            className="as-rise as-glass relative z-10 rounded-2xl p-3 sm:p-4"
             style={{ ['--as-delay' as string]: '120ms' }}
           >
             <div className="relative">
@@ -130,7 +130,7 @@ export default function AccountSelectionPage() {
                 onKeyDown={(e) => { if (e.key === 'Escape') setSearch(''); }}
                 placeholder="Search by company name"
                 aria-label="Search accounts"
-                className="w-full pl-10 pr-16 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-800 placeholder-slate-500 transition-[background-color,box-shadow,border-color] duration-200 focus:bg-white focus:border-[#0096D6]/50 focus:outline-none focus:ring-4 focus:ring-[#0096D6]/15"
+                className="w-full pl-10 pr-16 py-3 bg-white/70 border border-slate-200/80 rounded-xl text-sm text-slate-800 placeholder-slate-500 transition-[background-color,box-shadow,border-color] duration-200 focus:bg-white focus:border-[#0096D6]/50 focus:outline-none focus:ring-4 focus:ring-[#0096D6]/15"
               />
               <div className="absolute right-2.5 top-1/2 -translate-y-1/2 flex items-center">
                 {search ? (
@@ -291,11 +291,11 @@ function AccountRow({ account, index, opening, dimmed, onOpen }: {
               <span className="hidden sm:block w-24 h-1.5 rounded-full bg-slate-100 overflow-hidden" aria-hidden>
                 <span
                   className="as-meter-fill block h-full rounded-full bg-gradient-to-r from-[#007DB8] to-[#00B0FF]"
-                  style={{ width: `${Math.max(2, Math.min(100, (score / max) * 100))}%` }}
+                  style={{ width: `${Math.max(2, Math.min(100, (score / max) * 100))}%`, ['--as-d' as string]: `${growDelay(index, 140, 26, 8)}ms` }}
                 />
               </span>
               <span className="w-14 text-right text-sm font-bold text-slate-900 tabular-nums">
-                {score}<span className="text-[11px] font-semibold text-slate-400">/{max}</span>
+                <CountUpText text={score} delay={growDelay(index, 140, 26, 8)} /><span className="text-[11px] font-semibold text-slate-400">/{max}</span>
               </span>
             </>
           ) : (

@@ -10,6 +10,7 @@ import { NORTHSTAR_SIDEBAR_GROUPS } from '@/lib/features';
 import { activeAccountFrom, dashboardHref } from '@/lib/accountSelection';
 import { track, stopFeatureTime } from '@/lib/track';
 import { MyActivityPanel } from '@/components/analytics/MyActivityPanel';
+import { CountUpText, ScoreRing, growDelay, useParallax } from '@/components/common/motion';
 import { Activity as ActivityIcon } from 'lucide-react';
 import { 
   WidgetResponse, 
@@ -479,6 +480,9 @@ function HpRecommendationCard({ rec, xray }: { rec: any; xray?: boolean }) {
 export default function UserDashboardPage() {
   const { user, logout } = useAuth();
   const router = useRouter();
+  // The sidebar's light layer drifts with the pointer, like the header bands.
+  const sidebarRef = useRef<HTMLElement>(null);
+  useParallax(sidebarRef);
 
   const [accounts, setAccounts] = useState<CompanyAccount[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState<string>('');
@@ -850,11 +854,13 @@ export default function UserDashboardPage() {
         {/* LEFT FIXED SIDEBAR — NORTHSTAR EXACT LAYOUT                                    */}
         {/* ============================================================================== */}
         <aside 
-          className={`bg-[#0B132B] text-white flex flex-col justify-between transition-all duration-300 z-50 flex-shrink-0 border-r border-slate-800/80 ${
+          ref={sidebarRef}
+          className={`relative bg-[#0B132B] text-white flex flex-col justify-between transition-all duration-300 z-50 flex-shrink-0 border-r border-slate-800/80 ${
             isSidebarCollapsed ? 'w-16' : 'w-64'
           }`}
         >
-          <div className="flex flex-col h-full overflow-hidden">
+          <div className="as-side-glow absolute -inset-6 pointer-events-none" aria-hidden />
+          <div className="relative flex flex-col h-full overflow-hidden">
             
             {/* Top Brand Header */}
             <div className="p-4 flex items-center space-x-3 border-b border-slate-800/80">
@@ -892,7 +898,7 @@ export default function UserDashboardPage() {
                     type="button"
                     disabled={isLoadingAccounts || accounts.length === 0}
                     onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                    className="w-full flex items-center justify-between p-2.5 bg-[#1C2541] hover:bg-slate-800 text-white rounded-xl border border-slate-700/80 transition text-left text-xs font-bold disabled:opacity-50 shadow-inner"
+                    className="as-glass-dark w-full flex items-center justify-between p-2.5 hover:bg-white/5 text-white rounded-xl transition text-left text-xs font-bold disabled:opacity-50"
                   >
                     <div className="flex items-center space-x-2.5 truncate">
                       <div className="p-1.5 bg-slate-800 text-hp-accent rounded-lg">
@@ -916,7 +922,7 @@ export default function UserDashboardPage() {
 
                   {/* Dropdown Menu */}
                   {isDropdownOpen && (
-                    <div className="absolute left-0 mt-2 w-full bg-[#1C2541] border border-slate-700 rounded-xl shadow-2xl z-50 overflow-hidden">
+                    <div className="animate-fade-in as-glass-dark absolute left-0 mt-2 w-full rounded-xl z-50 overflow-hidden">
                       <div className="p-2 border-b border-slate-800">
                         <div className="relative">
                           <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-2.5" />
@@ -1090,7 +1096,7 @@ export default function UserDashboardPage() {
                     <span className={`px-1.5 py-0.5 rounded font-mono text-[10px] ${
                       hasScore ? 'bg-amber-200 text-amber-900' : 'bg-slate-200 text-slate-700'
                     }`}>
-                      {hasScore ? `${urgency.score}/${urgency.max_score ?? 100}` : 'N/A'}
+                      {hasScore ? <><CountUpText text={urgency.score} />/{urgency.max_score ?? 100}</> : 'N/A'}
                     </span>
                   </div>
                 );
@@ -1180,7 +1186,12 @@ export default function UserDashboardPage() {
                 </p>
               </div>
             ) : (
-              <div className="space-y-6">
+              // Keyed on feature, account and load state, so each switch - and
+              // the moment its data arrives - settles in rather than snapping.
+              <div
+                key={`${activeFeatureKey}|${selectedAccountId}|${isLoadingWidgets ? 'loading' : 'ready'}`}
+                className="space-y-6 as-feature-in"
+              >
                 
                 {/* Provenance Map Explorer Table when X-Ray ON */}
                 {isXRayOn && selectedAccount && (
@@ -1445,27 +1456,27 @@ export default function UserDashboardPage() {
                           </span>
                         </div>
 
-                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+                        <div className="as-stagger grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
 
                           {/* The firmographic bands. Kept first and labelled as
                               bands so the contrast with the filed figures is
                               immediate rather than buried in a tooltip. */}
                           {/* Sahaj 1.c: a box with no data is dropped, not shown as N/A. */}
                           {hasEmployeeBand && (
-                            <div className="relative bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col justify-between min-h-[7rem]">
+                            <div className="as-lift relative bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col justify-between min-h-[7rem]">
                               <span className="text-[11px] text-slate-500 block">Total Employees</span>
                               <span className="text-lg font-semibold text-slate-900 leading-tight">
-                                {metricsData?.employee_count}
+                                <CountUpText text={metricsData?.employee_count} />
                               </span>
                               <span className="text-[10px] text-slate-400">Band · Firmographics</span>
                             </div>
                           )}
 
                           {hasRevenueBand && (
-                            <div className="relative bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col justify-between min-h-[7rem]">
+                            <div className="as-lift relative bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col justify-between min-h-[7rem]">
                               <span className="text-[11px] text-slate-500 block">Yearly Revenue Range</span>
                               <span className="text-lg font-semibold text-slate-900 leading-tight">
-                                {metricsData?.revenue}
+                                <CountUpText text={metricsData?.revenue} />
                               </span>
                               <span className="text-[10px] text-slate-400">Band · Firmographics</span>
                             </div>
@@ -1474,10 +1485,10 @@ export default function UserDashboardPage() {
                           {/* Job postings - a count, not a band. Same selection as
                               Hiring Signals: account country, last 12 months, open and closed. */}
                           {hiringData && hiringData.job_postings_12m > 0 && (
-                            <div className="relative bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col justify-between min-h-[7rem]">
+                            <div className="as-lift relative bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col justify-between min-h-[7rem]">
                               <span className="text-[11px] text-slate-500 block">Job postings (last 12 months)</span>
                               <span className="text-lg font-semibold text-slate-900 leading-tight">
-                                {hiringData.job_postings_12m}
+                                <CountUpText text={hiringData.job_postings_12m} />
                               </span>
                               <span className="text-[10px] text-slate-400">Count · Job postings</span>
                             </div>
@@ -1485,7 +1496,7 @@ export default function UserDashboardPage() {
 
                           {/* Every figure the account actually filed. */}
                           {reportedMetrics.map((m: any, i: number) => (
-                            <div key={m.evidence_id || i} className="relative bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col justify-between min-h-[7rem]">
+                            <div key={m.evidence_id || i} className="as-lift relative bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col justify-between min-h-[7rem]">
                               <div className="flex items-start justify-between gap-1">
                                 <span className="text-[11px] text-slate-500 block leading-snug" title={`${m.metric} (${m.period})`}>
                                   {m.period} {m.metric}
@@ -1499,7 +1510,7 @@ export default function UserDashboardPage() {
                               </div>
 
                               <span className="text-lg font-semibold text-slate-900 leading-tight break-words">
-                                {m.value_text}
+                                <CountUpText text={m.value_text} />
                                 {m.change_text && (
                                   <span className={`ml-1.5 text-[11px] font-normal ${m.direction === 'up' ? 'text-emerald-700' : m.direction === 'down' ? 'text-rose-700' : 'text-slate-500'}`}>
                                     {m.change_text}
@@ -1598,11 +1609,17 @@ export default function UserDashboardPage() {
                           </div>
 
                           <div className="flex flex-col sm:flex-row items-center gap-6">
-                            <div className={`w-24 h-24 rounded-full border-4 flex flex-col items-center justify-center flex-shrink-0 shadow-inner ${
+                            {/* The ring fills to the score on the same clock the
+                                number counts on. */}
+                            <div className={`relative w-24 h-24 rounded-full flex flex-col items-center justify-center flex-shrink-0 shadow-inner ${
                               urgencyData?.score != null
-                                ? 'border-amber-400 bg-amber-50/50'
-                                : 'border-slate-300 bg-slate-50'
+                                ? 'bg-amber-50/50'
+                                : 'border-4 border-slate-300 bg-slate-50'
                             }`}>
+                              {urgencyData?.score != null && (
+                                <ScoreRing value={urgencyData.score} max={urgencyData.max_score ?? 100}
+                                  className="stroke-amber-400" trackClassName="stroke-amber-100" />
+                              )}
                               <span
                                 className={`font-extrabold ${
                                   urgencyData?.score != null ? 'text-3xl text-slate-800' : 'text-base text-slate-400'
@@ -1616,7 +1633,7 @@ export default function UserDashboardPage() {
                                   ? `Not published: ${urgencyData?.coverage_percent}% of the weighted driver coverage is available, and the minimum is ${urgencyData?.coverage_minimum}%.`
                                   : undefined}
                               >
-                                {urgencyData?.score ?? '-'}
+                                {urgencyData?.score != null ? <CountUpText text={urgencyData.score} /> : '-'}
                               </span>
                               <span className="text-[10px] font-bold text-slate-400">/100</span>
                             </div>
@@ -1653,7 +1670,7 @@ export default function UserDashboardPage() {
                                     ...(d.caveats ?? []).map((c: string) => `Caveat: ${c}`),
                                   ]) as string[],
                                 };
-                                }).map((driver: any) => (
+                                }).map((driver: any, driverIdx: number) => (
                                 <div key={driver.id} className="relative">
                                   <div className="flex justify-between items-center font-bold text-slate-700 text-[11px] mb-1">
                                     <div className="flex items-center space-x-1.5">
@@ -1694,12 +1711,12 @@ export default function UserDashboardPage() {
                                       </div>
                                     </div>
 
-                                    <span className="font-mono text-slate-500 font-bold">{driver.scoreText}</span>
+                                    <span className="font-mono text-slate-500 font-bold"><CountUpText text={driver.scoreText} first delay={growDelay(driverIdx)} /></span>
                                   </div>
 
                                   {/* Progress Bar */}
                                   <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
-                                    <div className={`${driver.barColor} h-2 rounded-full transition-all duration-500`} style={{ width: driver.progressPct }}></div>
+                                    <div className={`as-grow ${driver.barColor} h-2 rounded-full transition-all duration-500`} style={{ width: driver.progressPct, ['--as-d' as string]: `${growDelay(driverIdx)}ms` }}></div>
                                   </div>
 
                                   {/* Popover Card Modal */}
@@ -2559,9 +2576,9 @@ export default function UserDashboardPage() {
                                                 {label}{weight ? ` (${Math.round(weight * 100)}%)` : ''}
                                               </span>
                                               <div className="flex-1 h-1.5 bg-slate-200 rounded-full overflow-hidden">
-                                                <div className="h-1.5 bg-hp-navy/60 rounded-full" style={{ width: `${val * 10}%` }}></div>
+                                                <div className="as-grow h-1.5 bg-hp-navy/60 rounded-full" style={{ width: `${val * 10}%` }}></div>
                                               </div>
-                                              <span className="text-[10px] font-mono text-slate-400 w-9 text-right flex-shrink-0">{val}/10</span>
+                                              <span className="text-[10px] font-mono text-slate-400 w-9 text-right flex-shrink-0"><CountUpText text={val} />/10</span>
                                             </div>
                                             {/* Recency has no line of its own: its
                                                 basis is the event's date, and the
@@ -2729,7 +2746,7 @@ export default function UserDashboardPage() {
                                 {sg.confirmed ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> : <Minus className="w-3.5 h-3.5 text-slate-300" />}
                                 {sg.signal}
                               </span>
-                              <span className="font-mono text-xs font-extrabold text-slate-900">{sg.max != null ? `${sg.max}/100` : '—'}</span>
+                              <span className="font-mono text-xs font-extrabold text-slate-900">{sg.max != null ? <><CountUpText text={sg.max} />/100</> : '—'}</span>
                             </div>
                             {sg.topics.length > 0 && (
                               <div className="flex flex-wrap gap-1 mt-1.5">
@@ -2775,9 +2792,9 @@ export default function UserDashboardPage() {
                       </div>
                       <div className="flex items-center space-x-3 flex-shrink-0">
                         <div className="w-24 bg-slate-200 h-1.5 rounded-full overflow-hidden">
-                          <div className={`${barClass} h-1.5 rounded-full`} style={{ width: `${Math.min(100, Math.max(0, item.composite_score ?? 0))}%` }}></div>
+                          <div className={`as-grow ${barClass} h-1.5 rounded-full`} style={{ width: `${Math.min(100, Math.max(0, item.composite_score ?? 0))}%`, ['--as-d' as string]: `${growDelay(idx)}ms` }}></div>
                         </div>
-                        <span className="font-mono font-bold text-slate-900 w-8 text-right">{item.composite_score}</span>
+                        <span className="font-mono font-bold text-slate-900 w-8 text-right"><CountUpText text={item.composite_score} delay={growDelay(idx)} /></span>
                         <span className="text-[10px] text-slate-400 font-medium w-12">{'Intent'}</span>
                       </div>
                     </div>
@@ -2901,7 +2918,7 @@ export default function UserDashboardPage() {
                                       </div>
                                     ))}
                                     <div className="absolute inset-0 flex items-end justify-around">
-                                      {bu.units.map((u: any) => {
+                                      {bu.units.map((u: any, colIdx: number) => {
                                         const pct = Math.min(100, Math.max(0, u.bombora_max ?? 0));
                                         return (
                                           <div
@@ -2911,11 +2928,11 @@ export default function UserDashboardPage() {
                                             onMouseLeave={() => setHoveredIntentCat(null)}
                                           >
                                             <div
-                                              className={`w-14 rounded-t-md cursor-default ${THEME_STYLE[u.category]?.bar || CATEGORY_STYLE[u.category]?.bar || 'bg-slate-400'}`}
-                                              style={{ height: `${pct}%` }}
+                                              className={`as-grow-y w-14 rounded-t-md cursor-default ${THEME_STYLE[u.category]?.bar || CATEGORY_STYLE[u.category]?.bar || 'bg-slate-400'}`}
+                                              style={{ height: `${pct}%`, ['--as-d' as string]: `${growDelay(colIdx, 120, 70)}ms` }}
                                             ></div>
                                             <span className="absolute text-[11px] font-bold text-slate-700" style={{ bottom: `calc(${pct}% + 6px)` }}>
-                                              {u.bombora_max ?? '\u2014'}
+                                              {u.bombora_max != null ? <CountUpText text={u.bombora_max} delay={growDelay(colIdx, 120, 70)} /> : '\u2014'}
                                             </span>
 
                                           </div>
@@ -3108,7 +3125,7 @@ export default function UserDashboardPage() {
                                       </div>
                                     ))}
                                     <div className="absolute inset-0 flex items-end justify-around">
-                                      {chartCats.map((c: any) => {
+                                      {chartCats.map((c: any, colIdx: number) => {
                                         const pct = Math.min(100, Math.max(0, c.primary.score ?? 0));
                                         const noisy = (c.primary.quality_flags || []).length > 0;
                                         const p = c.primary || {};
@@ -3120,10 +3137,10 @@ export default function UserDashboardPage() {
                                             onMouseLeave={() => setHoveredIntentCat(null)}
                                           >
                                             <div
-                                              className={`w-14 rounded-t-md cursor-default ${CATEGORY_STYLE[c.category]?.bar || 'bg-slate-400'} ${noisy ? 'opacity-40' : ''}`}
-                                              style={{ height: `${pct}%` }}
+                                              className={`as-grow-y w-14 rounded-t-md cursor-default ${CATEGORY_STYLE[c.category]?.bar || 'bg-slate-400'} ${noisy ? 'opacity-40' : ''}`}
+                                              style={{ height: `${pct}%`, ['--as-d' as string]: `${growDelay(colIdx, 120, 70)}ms` }}
                                             ></div>
-                                            <span className="absolute text-[11px] font-bold text-slate-700" style={{ bottom: `calc(${pct}% + 6px)` }}>{c.primary.score ?? '—'}</span>
+                                            <span className="absolute text-[11px] font-bold text-slate-700" style={{ bottom: `calc(${pct}% + 6px)` }}>{c.primary.score != null ? <CountUpText text={c.primary.score} delay={growDelay(colIdx, 120, 70)} /> : '—'}</span>
 
                                             {/* Hover detail: the category file's own fields for this category,
                                                 each attributed and taken as supplied. */}
@@ -3281,9 +3298,9 @@ export default function UserDashboardPage() {
                                   {p ? (
                                     <div className="flex items-center gap-3">
                                       <div className="flex-1 bg-slate-100 h-2.5 rounded-full overflow-hidden">
-                                        <div className={`${style.bar} h-2.5 rounded-full ${noisy ? 'opacity-40' : ''}`} style={{ width: `${Math.min(100, Math.max(0, p.score ?? 0))}%` }}></div>
+                                        <div className={`as-grow ${style.bar} h-2.5 rounded-full ${noisy ? 'opacity-40' : ''}`} style={{ width: `${Math.min(100, Math.max(0, p.score ?? 0))}%`, ['--as-d' as string]: '120ms' }}></div>
                                       </div>
-                                      <span className="text-base font-extrabold text-slate-900 flex-shrink-0">{p.score ?? '—'}/100</span>
+                                      <span className="text-base font-extrabold text-slate-900 flex-shrink-0">{p.score != null ? <CountUpText text={p.score} delay={120} /> : '—'}/100</span>
                                     </div>
                                   ) : (
                                     // No HP Category Intent file for this account. The card still
@@ -3599,19 +3616,19 @@ export default function UserDashboardPage() {
                                 <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
                                   <h3 className="text-sm font-bold text-slate-900 mb-4">What they&apos;re hiring for</h3>
                                   <div className="space-y-2.5">
-                                    {bars.map((b: any) => (
+                                    {bars.map((b: any, barIdx: number) => (
                                       <div key={b.family} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_2rem] items-center gap-3">
                                         <span className="text-xs text-slate-700 truncate" title={b.family}>{b.family}</span>
                                         <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden">
-                                          <div className="h-full bg-hp-navy rounded-full" style={{ width: `${(b.count / maxBar) * 100}%` }} />
+                                          <div className="as-grow h-full bg-hp-navy rounded-full" style={{ width: `${(b.count / maxBar) * 100}%`, ['--as-d' as string]: `${growDelay(barIdx)}ms` }} />
                                         </div>
-                                        <span className="text-xs font-bold text-slate-900 text-right tabular-nums">{b.count}</span>
+                                        <span className="text-xs font-bold text-slate-900 text-right tabular-nums"><CountUpText text={b.count} delay={growDelay(barIdx)} /></span>
                                       </div>
                                     ))}
                                   </div>
                                   <div className="flex justify-between border-t border-slate-200 mt-4 pt-3 text-xs font-bold text-slate-900">
                                     <span>Total postings</span>
-                                    <span className="tabular-nums">{families?.total}</span>
+                                    <span className="tabular-nums"><CountUpText text={families?.total} /></span>
                                   </div>
                                 </div>
                               )}
@@ -5787,7 +5804,7 @@ export default function UserDashboardPage() {
 
                             {Object.keys(evaluation.dimensions || {}).length > 0 ? (
                               <div className="space-y-2.5">
-                                {Object.entries(evaluation.dimensions).map(([k, v]: any) => {
+                                {Object.entries(evaluation.dimensions).map(([k, v]: any, dimIdx: number) => {
                                   const weight = evaluation.dimension_weights?.[k];
                                   const padded = (evaluation.dimensions_padded || []).includes(k);
                                   const floored = (evaluation.severe_failures || [])
@@ -5800,12 +5817,12 @@ export default function UserDashboardPage() {
                                       </span>
                                       <div className="flex-1 bg-slate-100 rounded-full h-4 overflow-hidden">
                                         <div
-                                          className={`${padded ? 'bg-slate-300' : scoreColor(v)} h-full rounded-full transition-all duration-500`}
-                                          style={{ width: `${v}%` }}
+                                          className={`as-grow ${padded ? 'bg-slate-300' : scoreColor(v)} h-full rounded-full transition-all duration-500`}
+                                          style={{ width: `${v}%`, ['--as-d' as string]: `${growDelay(dimIdx)}ms` }}
                                         />
                                       </div>
                                       <span className="text-[11px] font-semibold text-slate-700 w-8 text-right">
-                                        {v}
+                                        <CountUpText text={v} delay={growDelay(dimIdx)} />
                                       </span>
                                       <span className="text-[10px] text-slate-400 w-16">
                                         {padded ? 'Not scored' : scoreLabel(v)}

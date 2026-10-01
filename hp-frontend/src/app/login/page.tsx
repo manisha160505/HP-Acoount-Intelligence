@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/providers/AuthProvider';
 import { homeRouteFor } from '@/lib/accountSelection';
+import { ParallaxBand } from '@/components/common/motion';
 import { Shield, User as UserIcon, Lock, Mail, AlertCircle, Loader2 } from 'lucide-react';
 
 export default function LoginPage() {
@@ -61,8 +62,8 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0B132B] text-white flex flex-col justify-center py-12 sm:px-6 lg:px-8">
-      <div className="sm:mx-auto sm:w-full sm:max-w-md text-center">
+    <ParallaxBand fadeOnScroll={false} className="min-h-screen text-white flex flex-col justify-center py-12 sm:px-6 lg:px-8">
+      <div className="as-rise sm:mx-auto sm:w-full sm:max-w-md text-center">
         <div className="inline-flex items-center justify-center bg-hp-navy text-white p-3 rounded-full text-3xl font-extrabold tracking-widest shadow-2xl border-2 border-white/20">
           HP
         </div>
@@ -74,8 +75,8 @@ export default function LoginPage() {
         </p>
       </div>
 
-      <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
-        <div className="bg-[#1C2541] py-8 px-4 shadow-2xl rounded-2xl sm:px-10 border border-slate-700/80">
+      <div className="as-rise mt-8 sm:mx-auto sm:w-full sm:max-w-md" style={{ ['--as-delay' as string]: '90ms' }}>
+        <div className="as-glass-dark py-8 px-4 rounded-2xl sm:px-10">
           
           {/* Role Selector Tabs */}
           <div className="flex bg-[#0B132B] p-1 rounded-xl mb-6 border border-slate-800">
@@ -107,7 +108,7 @@ export default function LoginPage() {
 
           {/* Error Banner */}
           {error && (
-            <div className="mb-4 bg-red-950/80 border-l-4 border-red-500 p-3.5 rounded-r-lg flex items-start space-x-3">
+            <div className="mb-4 bg-red-950/80 as-fade border border-red-500/40 p-3.5 rounded-xl flex items-start space-x-3">
               <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
               <p className="text-xs text-red-200 font-medium">{error}</p>
             </div>
@@ -179,6 +180,6 @@ export default function LoginPage() {
 
         </div>
       </div>
-    </div>
+    </ParallaxBand>
   );
 }
