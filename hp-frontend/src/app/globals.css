@@ -39,3 +39,72 @@ body {
     background-image: linear-gradient(90deg, #e2e8f0, #f1f5f9);
   }
 }
+
+/* ---------------------------------------------------------------------------
+   1-Pager: print, and therefore PDF
+   ---------------------------------------------------------------------------
+   Build spec 3.5: "The 1-Pager is rendered on screen from the JSON above and
+   exported to PDF from the same structure. Render from the JSON, never from a
+   model-generated blob of HTML or markdown."
+
+   So there is no second renderer and no generated markup. The document on
+   screen IS the document that prints; the seller's own print dialog writes the
+   PDF. One set of fields, one layout, nothing that can drift between what was
+   checked and what was sent.
+
+   `size` is deliberately NOT set. The spec asks for "one page, A4 and US
+   Letter", and Letter is 18mm shorter than A4 - forcing either one would make
+   the other wrong. Leaving it to the print dialog means the seller gets their
+   own paper, and the 14mm margin plus the 350-500 word budget (gate G12, which
+   the specification describes as "what fits on one page at readable body
+   size") keeps it inside the shorter of the two.
+*/
+@page {
+  margin: 14mm;
+}
+
+.print-only {
+  display: none;
+}
+
+@media print {
+  /* Everything that is not the document leaves the page. Visibility rather
+     than display, so the printed element keeps its position in the flow. */
+  body * {
+    visibility: hidden;
+  }
+  .onepager-print,
+  .onepager-print * {
+    visibility: visible;
+  }
+  .onepager-print {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    background: #fff;
+    color: #000;
+    font-size: 10.5pt;
+    line-height: 1.45;
+  }
+  .onepager-print .print-only {
+    display: block;
+  }
+  .no-print {
+    display: none !important;
+  }
+  /* A pillar split across the fold is unreadable as a pillar. */
+  .onepager-pillar {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  /* The browser's own URL footnotes would push the page over. */
+  a[href]::after {
+    content: "";
+  }
+}

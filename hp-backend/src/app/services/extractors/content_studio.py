@@ -1,5 +1,4 @@
 import hashlib
-import html as _html
 import json
 import logging
 import re
@@ -37,6 +36,7 @@ from app.services.extractors.stakeholder_map import (
 from app.services.hp import (
     buyer_personas as bp,
     case_studies as cs,
+    content_audit,
     content_gates,
 )
 from app.services.regen import context as run_context, store as widget_store
@@ -357,7 +357,7 @@ def _read_dataset_records(account_id: str, dataset_key: str) -> list[dict]:
 # takes seller input; the other four key on the account's data alone.
 
 # Bump when the prompt changes so cached assets are regenerated.
-CONTENT_PROMPT_VERSION = "2026-09-30.1"    # spec 30 Sep: eight personas, rules 10/11, structured 1-Pager
+CONTENT_PROMPT_VERSION = "2026-10-01.1"    # tuning row 8: estate, intent, signals, plays and filings as evidence
 
 # The one mandated section an HP case study belongs in. Named rather than
 # repeated, because the contract, the fallback template and the attach all have
@@ -375,47 +375,28 @@ CONTEXT_MAX_CHARS = 2000
 # Every type returns the same JSON shape, so one validator covers all seven.
 # The three-paragraph shape shared by Email and Branded Emailer; the two differ
 # only in how they are composed and rendered.
-def _email_shape(body_line: str, budget_line: str) -> str:
-    """The email shape, with the body paragraph count and word budget supplied.
+# Spec Section 3.4's email. One shape, because there is one email format: the
+# builder here used to be parameterised so Branded Emailer could keep
+# HP_ABX_v3_final's 110-word cap while `email` moved to 120-180, and Branded
+# Emailer was retired with Section 1.2.
+_EMAIL_SHAPE = ("An outreach email written as HP (\"At HP, we ...\"). "
+                "subject_line: MUST use the format 'Re: [specific initiative or challenge]' - it "
+                "starts with 'Re: ' and then names the specific initiative or challenge this email "
+                "is about, taken from the evidence. Not a generic subject, and under 80 characters. "
+                "opening (one or two sentences): the hook - one specific account fact "
+                "or hiring signal from the evidence, stated with confidence. "
+                "body_sections: 2-3 short paragraphs, NO headings. The first restates the opening "
+                "evidence as the need and names the one HP line with ONE concrete capability that "
+                "meets it; each further paragraph carries another concrete item from the evidence "
+                "or another capability - never an adjective in place of one. "
+                "cta (one sentence): a LOW-FRICTION next step - ask for a briefing, a "
+                "workshop, an assessment or a short focused discussion. Never claim an existing "
+                "meeting, project or prior conversation unless the evidence states one. "
+                "120-180 words in total across opening, body_sections and cta. Past 180 words none "
+                "of these roles will read it. "
+                "The salutation and sign-off are added automatically - do not "
+                "write 'Dear', 'Sincerely' or a signature.")
 
-    Two formats share this shape and they no longer share a budget. `email` is
-    one of the three the 30 Sep build specification governs, and Section 3.4
-    sets it at 120-180 words across opening, body and ask - wider than the 110
-    HP_ABX_v3_final set, and wide enough that one body paragraph cannot fill it
-    without padding. `branded_emailer` is not one of the three, is not in the
-    picker, and keeps the terms it was built to.
-    """
-    return ("An outreach email written as HP (\"At HP, we ...\"). "
-            "subject_line: MUST use the format 'Re: [specific initiative or challenge]' - it "
-            "starts with 'Re: ' and then names the specific initiative or challenge this email "
-            "is about, taken from the evidence. Not a generic subject, and under 80 characters. "
-            "opening (one or two sentences): the hook - one specific account fact "
-            "or hiring signal from the evidence, stated with confidence. "
-            + body_line
-            + " cta (one sentence): a LOW-FRICTION next step - ask for a briefing, a "
-            "workshop, an assessment or a short focused discussion. Never claim an existing "
-            "meeting, project or prior conversation unless the evidence states one. "
-            + budget_line
-            + " The salutation and sign-off are added automatically - do not "
-            "write 'Dear', 'Sincerely' or a signature.")
-
-
-# Spec Section 3.4: "body: 2-3 short paragraphs. Each carries a concrete item
-# from the evidence or a concrete capability."
-_SPEC_EMAIL_SHAPE = _email_shape(
-    "body_sections: 2-3 short paragraphs, NO headings. The first restates the opening evidence "
-    "as the need and names the one HP line with ONE concrete capability that meets it; each "
-    "further paragraph carries another concrete item from the evidence or another capability - "
-    "never an adjective in place of one.",
-    "120-180 words in total across opening, body_sections and cta. Past 180 words none of these "
-    "roles will read it.")
-
-# HP_ABX_v3_final's shape, kept for the format that is not in the picker.
-_EMAIL_SHAPE = _email_shape(
-    "body_sections (paragraph 2): EXACTLY ONE paragraph, no heading, two or three "
-    "sentences, at most 60 words - restate the paragraph-1 evidence as the need, then "
-    "name the one HP line with ONE concrete capability that meets it.",
-    "AT MOST 110 words in total.")
 
 # The five HP business units, named as the Opportunity Map and Intent & Demand
 # name their plays.
@@ -430,6 +411,22 @@ LIVE_SIGNAL_TOPICS_MAX = 5
 # What the seller may pick (Sahaj, 27 Sep), in this order.
 OFFERED_CONTENT_TYPES = ("email", "linkedin_message", "one_pager")
 
+# Spec 1.1: three formats, and Section 1.2 says the rest leave the code rather
+# than the dropdown. These are the names they had, kept so a stored asset reads
+# as "Branded Emailer" rather than as a bare key, and so an attempt to generate
+# one says it was retired rather than that it never existed.
+#
+# Their contracts are gone. An asset generated under one still renders: the
+# plain text and the branded HTML were composed at generation time and stored
+# on the record, so nothing re-reads a contract to display it.
+RETIRED_CONTENT_TYPES = {
+    "linkedin": "LinkedIn Post",
+    "exec_brief": "Executive Brief",
+    "follow_up": "Follow-up Note",
+    "branded_emailer": "Branded Emailer",
+    "landing_page": "Landing Page",
+}
+
 CONTENT_TYPE_CONTRACTS = {
     # Spec Section 3.4. The budget - 120-180 words - is NOT carried here: it
     # lives in `content_gates.WORD_BUDGETS`, which is the specification's own
@@ -441,30 +438,7 @@ CONTENT_TYPE_CONTRACTS = {
         "required": ["subject_line", "opening", "body_sections", "cta"],
         "sections": (1, 3), "subject_max": 80, "email_shaped": True,
         "subject_prefix": "Re: ",
-        "shape": _SPEC_EMAIL_SHAPE,
-    },
-    "linkedin": {
-        "title": "LinkedIn Post", "subtitle": "Social selling content for LinkedIn",
-        "words": (150, 200),
-        "required": ["headline", "opening", "body_sections", "cta"],
-        "optional": ["hashtags"],
-        # HP_ABX_v3_final: "LinkedIn Post = 2-3 variants, each 150-200 words".
-        # The only format the spec asks to be produced more than once, so the
-        # seller compares finished posts and publishes one.
-        "variants": 3,
-        "sections": (1, 3), "public": True,
-        "shape": ("A public LinkedIn post the seller publishes on their own feed, in the first person. "
-                  "People in this persona's ROLE are the audience - write for them, never to one person. "
-                  "headline: the hook - ONE line under 120 characters, shown before '...see more'; a "
-                  "sharp observation or question for this role, not a slogan. "
-                  "opening: one or two short sentences that set up the insight from one evidence item. "
-                  "body_sections: 2-3 very short paragraphs of one or two sentences each, NO headings. "
-                  "One of them may instead be a short list of 2-3 points, each on its own line "
-                  "starting with '\u2022 '. "
-                  "cta: one closing question that invites people in this role to comment. "
-                  "hashtags: 2-3 specific hashtags for this topic and role - never #HP, #Innovation or "
-                  "other generic tags - and keep hashtags OUT of every other field. "
-                  "150-200 words in total."),
+        "shape": _EMAIL_SHAPE,
     },
     # Sahaj, 27 Sep: "Formats that we need to support - email, linkedin
     # message, One pager on how HP portfolio can deliver value for the
@@ -525,52 +499,6 @@ CONTENT_TYPE_CONTRACTS = {
                   "that matters to this persona - omit the key entirely if no line is earned. cta: "
                   "the ask, one sentence, bounded by the committee angle. 350-500 words in total. "
                   "No subject_line and no proof point - a case study is attached afterwards."),
-    },
-    "exec_brief": {
-        "title": "Executive Brief", "subtitle": "2-page intelligence brief for leadership",
-        "words": (350, 550),
-        "headings": True,
-        "required": ["headline", "opening", "body_sections", "cta"],
-        "sections": (3, 5),
-        "shape": ("An executive intelligence brief for HP leadership preparing to engage this account. "
-                  "headline; opening is the one-paragraph bottom line; 3-5 body_sections each WITH a "
-                  "heading (account snapshot, the persona and their remit, the evidence, the recommended "
-                  "HP angle or discovery plan, risks and unknowns); cta is the recommended internal "
-                  "next step. 350-550 words. Third person throughout. No subject_line."),
-    },
-    "follow_up": {
-        "title": "Follow-up Note", "subtitle": "Post-meeting follow-up with next steps",
-        "words": (None, 150),
-        "required": ["subject_line", "opening", "body_sections", "cta"],
-        "sections": (1, 2), "subject_max": 80, "email_shaped": True,
-        "subject_prefix": "Re: ",
-        "shape": ("A short post-meeting follow-up email written as HP. subject_line; opening thanks briefly and "
-                  "restates the one thing discussed that matters - drawn from the seller's additional "
-                  "context if supplied, otherwise from the evidence; 1-2 body_sections with agreed next "
-                  "steps; cta confirms the next meeting or action. Under 150 words. No headline. The "
-                  "salutation and sign-off are added automatically."),
-    },
-    "branded_emailer": {
-        "title": "Branded Emailer", "subtitle": "HP-branded email with visual preview and HTML download",
-        "words": (None, 110),
-        "required": ["subject_line", "opening", "body_sections", "cta"],
-        "sections": (1, 2), "subject_max": 80, "email_shaped": True,
-        "subject_prefix": "Re: ",
-        # Greets the role ("Dear CIO,") and carries no sign-off - the sender is the
-        # From line of the branded layout.
-        "greeting_role": True, "signoff": False,
-        "shape": _EMAIL_SHAPE,
-    },
-    "landing_page": {
-        "title": "Landing Page", "subtitle": "HP-branded landing page with visual preview and HTML download",
-        "words": (None, 300),
-        "headings": True,
-        "required": ["headline", "opening", "body_sections", "cta"],
-        "sections": (3, 4),
-        "shape": ("Copy for an HP-branded landing page. headline is the hero line; opening is the hero "
-                  "sub-paragraph; 3-4 body_sections each WITH a short heading, as page sections; cta is "
-                  "the primary button label plus one sentence. Under 300 words. Return copy only - the "
-                  "layout is rendered separately. No subject_line."),
     },
 }
 
@@ -645,6 +573,99 @@ def _account_evidence(firmo_records: list[dict],
     if industry:
         items.append(("Industry", industry))
     return name, items
+
+
+# How much of each published surface reaches the prompt. Deliberately small:
+# Rule 6 asks the opening to name the ONE item that matters "not a tour of the
+# account", and an evidence block with twenty lines in it is a tour waiting to
+# happen. These are the counts at which a seller still recognises their own
+# account and the model still has to choose.
+EVIDENCE_TECH_FAMILIES = 5
+EVIDENCE_INTENT_THEMES = 3
+EVIDENCE_SIGNALS = 3
+EVIDENCE_PLAYS = 3
+EVIDENCE_FILINGS = 2
+
+
+def _wdata(db, account_id: str, key: str) -> dict:
+    """One published widget's data, or {} when it has not been built."""
+    return (widget_store.get(account_id, key, db=db) or {}).get("data") or {}
+
+
+def _published_evidence(db, account_id: str) -> list[tuple[str, str]]:
+    """The account's own published intelligence, as labelled evidence lines.
+
+    Tuning row 8, Column 4. Each line comes from the widget that owns that
+    judgement rather than from the dataset underneath it, so the copy cannot
+    contradict the dashboard: if Live Signals gated a headline out, Content
+    Studio never sees it, and if the Opportunity Map dropped a play for having
+    no timing signal, no email is written around it.
+
+    Every line is skipped when its widget has nothing to say. An account with
+    no technographics simply has no technology line - there is no placeholder
+    and nothing is inferred from the absence.
+    """
+    items: list[tuple[str, str]] = []
+
+    # -- the installed estate -------------------------------------------------
+    tech = _wdata(db, account_id, "tech_stack_matrix")
+    families = ((tech.get("stack_view") or {}).get("families") or [])
+    total = tech.get("total_tech_count")
+    if total and families:
+        named = ", ".join(
+            "%s %s" % (f.get("family"), f.get("count"))
+            for f in families[:EVIDENCE_TECH_FAMILIES] if f.get("family"))
+        basis = (tech.get("technology_basis") or {}).get("basis") or "detected estate"
+        items.append(("Technology estate",
+                      "%s technologies in the %s; by family - %s"
+                      % (total, basis, named)))
+
+    # -- research intent ------------------------------------------------------
+    intent = _wdata(db, account_id, "intent_category_summary")
+    themes = [t for t in (intent.get("themes") or []) if t.get("theme")]
+    if themes:
+        provider = (intent.get("provider") or {}).get("name") or "the intent provider"
+        as_of = (intent.get("observation") or {}).get("as_of") or ""
+        named = "; ".join(
+            "%s (%s topics, %s intensity)"
+            % (t.get("theme"), t.get("topic_count"), str(t.get("intensity") or "").lower())
+            for t in themes[:EVIDENCE_INTENT_THEMES])
+        # The disclaimer travels with the line. Research activity read as a
+        # buying decision is the misreading this data invites, and the model
+        # is the last place it should be introduced.
+        items.append(("Research intent",
+                      "%s research activity%s - %s. This is research, not "
+                      "confirmed buying intent."
+                      % (provider, " as of " + as_of if as_of else "", named)))
+
+    # -- catalysts the Live Signals gate published ----------------------------
+    triggers = (_wdata(db, account_id, "opportunity_trigger_signals").get("triggers")
+                or _wdata(db, account_id, "news_signals_feed").get("signals") or [])
+    headlines = [" ".join(str(t.get("headline") or "").split())
+                 for t in triggers if t.get("headline")]
+    if headlines:
+        items.append(("Published signals",
+                      "; ".join(headlines[:EVIDENCE_SIGNALS])))
+
+    # -- qualified opportunities ---------------------------------------------
+    plays = _wdata(db, account_id, "opportunity_narrative_plays").get("opportunity_plays") or []
+    named_plays = ["%s (%s)" % (p.get("title"), str(p.get("priority") or "").lower())
+                   for p in plays[:EVIDENCE_PLAYS] if p.get("title")]
+    if named_plays:
+        items.append(("Qualified opportunities",
+                      "the Opportunity Map carries %d play%s for this account - %s"
+                      % (len(plays), "" if len(plays) == 1 else "s",
+                         "; ".join(named_plays))))
+
+    # -- filings --------------------------------------------------------------
+    filings = (_wdata(db, account_id, "exec_key_metrics").get("filings_on_record")
+               or {}).get("filings") or []
+    titles = [" ".join(str(f.get("title") or f.get("headline") or "").split())
+              for f in filings if (f.get("title") or f.get("headline"))]
+    if titles:
+        items.append(("Filings on record", "; ".join(titles[:EVIDENCE_FILINGS])))
+
+    return items
 
 
 def _is_named_person(persona: dict) -> bool:
@@ -1073,9 +1094,10 @@ def _parse_pillars(raw_pillars, labels: dict[str, str]) -> tuple[list[dict], lis
     return out, dropped
 
 
-def _validate_asset(raw, contract: dict, persona: dict, labels: dict[str, str],
+def _validate_asset(raw, contract: dict, persona: dict, labels: dict[str, str],  # noqa: PLR0913, PLR0917 - one argument per source of truth the validator consults
                     ground, report: GroundingReport, banned_names: list[str],
-                    industry: str = "") -> tuple[dict | None, list[str], list[str]]:
+                    industry: str = "",
+                    audit: list | None = None) -> tuple[dict | None, list[str], list[str]]:
     """Python owns the truth. Returns (clean_asset, hard_faults, style_warnings).
 
     A hard fault - an unsourced figure, a claim about a person no dataset
@@ -1272,6 +1294,10 @@ def _validate_asset(raw, contract: dict, persona: dict, labels: dict[str, str],
         known_names=banned_names, competitors=COMPETITORS,
         industry=industry, required_keys=contract["required"],
         dropped_labels=dropped_labels)
+    # The raw findings, for the audit ledger. A list the caller owns, because
+    # only the caller knows which account this is - see `content_audit`.
+    if audit is not None:
+        audit.extend(findings)
     for finding in content_gates.rejects(findings):
         faults.append("%s: %s" % (finding["gate"], _gate_detail(finding)))
     for finding in content_gates.regenerates(findings):
@@ -1318,126 +1344,14 @@ def contract_key(contract: dict) -> str:
     return ""
 
 
-# --- HTML rendering for the two branded types ---------------------------------------
-# The model returns copy only; the layout is composed here from named fields, the
-# same way scale_statement is composed in the opportunity map - so nothing in the
-# markup can drift from what passed the grounding gate. Inline CSS only, no
-# external assets, so the file the seller downloads is self-contained.
-HTML_CONTENT_TYPES = {"branded_emailer", "landing_page"}
-_HP_BLUE = "#0096D6"
-_HP_NAVY = "#0D2A4B"
-_HTML_STYLE = f"""
-  body{{margin:0;background:#F2F4F7;font-family:Arial,Helvetica,sans-serif;color:#1F2933;-webkit-font-smoothing:antialiased}}
-  .wrap{{max-width:640px;margin:0 auto;background:#fff}}
-  .page .wrap{{max-width:960px}}
-  .bar{{background:{_HP_NAVY};color:#fff;padding:14px 32px;font-size:13px;letter-spacing:.08em;text-transform:uppercase;display:flex;justify-content:space-between;align-items:center}}
-  .bar b{{font-size:18px;letter-spacing:0}}
-  .hero{{background:{_HP_BLUE};color:#fff;padding:40px 32px}}
-  .page .hero{{padding:72px 48px}}
-  .hero h1{{margin:0 0 12px;font-size:28px;line-height:1.2}}
-  .page .hero h1{{font-size:40px;max-width:720px}}
-  .hero p{{margin:0;font-size:16px;line-height:1.5;max-width:640px;opacity:.95}}
-  .sec{{padding:24px 32px;border-bottom:1px solid #E5E8EC}}
-  .page .grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:0;padding:24px 24px}}
-  .page .grid .sec{{border:1px solid #E5E8EC;margin:12px;border-radius:8px}}
-  .sec h2{{margin:0 0 8px;font-size:15px;color:{_HP_NAVY};text-transform:uppercase;letter-spacing:.06em}}
-  .sec p{{margin:0;font-size:15px;line-height:1.6}}
-  .cta{{padding:32px;text-align:center}}
-  .btn{{display:inline-block;background:{_HP_BLUE};color:#fff;text-decoration:none;padding:14px 28px;border-radius:4px;font-weight:bold;font-size:15px}}
-  .cta p{{margin:12px 0 0;font-size:14px;color:#52606D}}
-  .foot{{padding:20px 32px;font-size:11px;color:#7B8794;line-height:1.5}}
-  .tag{{display:inline-block;background:#E6F5FC;color:{_HP_NAVY};font-size:11px;padding:3px 8px;border-radius:3px;margin-right:6px}}
-"""
-
-
-# Branded emailer: blue accent bar, HP mark, greeting and paragraphs - the same
-# body the Content Studio preview shows under its From / To / Subject header.
-# No flexbox and a solid-colour fallback for the gradient, for email clients.
-_EMAIL_STYLE = f"""
-  body{{margin:0;padding:24px 12px;background:#F2F4F7;font-family:Arial,Helvetica,sans-serif;color:#334155;-webkit-font-smoothing:antialiased}}
-  .card{{max-width:640px;margin:0 auto;background:#fff;border:1px solid #E2E8F0;border-radius:12px;overflow:hidden}}
-  .accent{{height:6px;background:{_HP_BLUE};background:linear-gradient(90deg,{_HP_BLUE},#00629B)}}
-  .content{{padding:24px 28px 28px;font-size:15px;line-height:1.7}}
-  .brand{{margin-bottom:20px}}
-  .mark{{display:inline-block;vertical-align:middle;width:28px;height:28px;line-height:28px;border-radius:50%;background:{_HP_BLUE};color:#fff;text-align:center;font-weight:bold;font-style:italic;font-size:13px}}
-  .brandname{{display:inline-block;vertical-align:middle;margin-left:8px;font-size:12px;font-weight:bold;color:#0F172A}}
-  .content p{{margin:0 0 18px}}
-  .content p:last-child{{margin-bottom:0}}
-"""
-
-
-def _render_branded_email(record: dict) -> str:
-    g = record.get("generated") or {}
-    e = _html.escape
-    paras = ([record.get("greeting") or "", g.get("opening") or ""]
-             + [sec.get("text") or "" for sec in (g.get("body_sections") or [])]
-             + [g.get("cta") or ""])
-    body = "".join(f"<p>{e(x)}</p>" for x in paras if x)
-    subject = e(g.get("subject_line") or record.get("topic") or "HP")
-    return (
-        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
-        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
-        f"<title>{subject}</title><style>{_EMAIL_STYLE}</style></head><body>"
-        "<div class=\"card\"><div class=\"accent\"></div><div class=\"content\">"
-        "<div class=\"brand\"><span class=\"mark\">hp</span><span class=\"brandname\">HP</span></div>"
-        f"{body}</div></div></body></html>"
-    )
-
-
-def _split_cta(cta: str) -> tuple[str, str]:
-    """'Book a briefing - one sentence' -> ('Book a briefing', 'one sentence').
-    Falls back to the whole string as the label."""
-    for sep in (" - ", " – ", " — ", ": "):
-        if sep in cta:
-            label, rest = cta.split(sep, 1)
-            if 2 <= len(label.split()) <= 7:
-                return label.strip(), rest.strip()
-    return cta.strip(), ""
-
-
-def render_asset_html(record: dict) -> str | None:
-    """Self-contained HTML for a branded_emailer or landing_page record; None
-    for every other type."""
-    ctype = record.get("content_type")
-    if ctype not in HTML_CONTENT_TYPES:
-        return None
-    if ctype == "branded_emailer":
-        return _render_branded_email(record)
-    g = record.get("generated") or {}
-    e = _html.escape
-    persona = (record.get("persona") or {}).get("title") or ""
-    topic = record.get("topic") or ""
-    headline = g.get("headline") or g.get("subject_line") or topic
-    opening = g.get("opening") or ""
-    sections = g.get("body_sections") or []
-    btn, cta_rest = _split_cta(g.get("cta") or "")
-    products = g.get("hp_products") or []
-
-    sec_html = "".join(
-        "<div class=\"sec\">" + (f"<h2>{e(sec.get('heading'))}</h2>" if sec.get("heading") else "")
-        + f"<p>{e(sec.get('text') or '')}</p></div>"
-        for sec in sections
-    )
-    if ctype == "landing_page":
-        sec_html = f"<div class=\"grid\">{sec_html}</div>"
-    tags = "".join(f"<span class=\"tag\">{e(x)}</span>" for x in products)
-    title_tag = e(g.get("subject_line") or headline)
-    body_cls = "page" if ctype == "landing_page" else "mail"
-
-    return (
-        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
-        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
-        f"<title>{title_tag}</title><style>{_HTML_STYLE}</style></head>"
-        f"<body class=\"{body_cls}\"><div class=\"wrap\">"
-        f"<div class=\"bar\"><b>HP</b><span>{e(persona)}</span></div>"
-        f"<div class=\"hero\"><h1>{e(headline)}</h1><p>{e(opening)}</p></div>"
-        f"{sec_html}"
-        f"<div class=\"cta\"><a class=\"btn\" href=\"#\">{e(btn) or 'Talk to HP'}</a>"
-        + (f"<p>{e(cta_rest)}</p>" if cta_rest else "") + "</div>"
-        f"<div class=\"foot\">{tags}<br>Prepared for {e(persona)} · Topic: {e(topic)} · "
-        "© HP Inc. Draft generated from account intelligence; review before sending.</div>"
-        "</div></body></html>"
-    )
+# The branded-emailer and landing-page HTML renderer lived here: ~130 lines of
+# inline CSS and markup composing an HP-branded email and page from the named
+# fields. Both formats were retired with spec 1.2 and nothing else used it, so
+# `rendered_html` is None on everything generated from now on.
+#
+# The field itself stays on the record. An asset generated under either format
+# still displays: its HTML was composed at generation time and stored, and the
+# UI reads it from there.
 
 
 def _safe_fallback_asset(contract: dict, persona: dict, company_name: str, topic: str,
@@ -1512,6 +1426,33 @@ def _safe_fallback_asset(contract: dict, persona: dict, company_name: str, topic
         }
         asset["body_sections"] = [{"heading": h, "text": texts.get(h, body)} for h in req]
     return asset
+
+
+def _record_gate_audit(db, gate_attempts, *, account_id: str, persona_id: str,
+                       content_type: str, asset_id: str, published: bool) -> None:
+    """Each attempt's findings, tagged with what became of that attempt.
+
+    The last attempt that produced an asset is the one the seller sees; every
+    attempt before it was rejected and regenerated. Recording only the
+    published one would leave `audit_line_eligibility.csv` empty on a batch
+    where the model tried four times to sell Poly to a CFO - and Section 6
+    calls that "the one to check first".
+    """
+    if not gate_attempts:
+        return
+    survivor = max((i for i, (_f, ok) in enumerate(gate_attempts) if ok),
+                   default=None)
+    for index, (findings, _ok) in enumerate(gate_attempts):
+        if index == survivor:
+            outcome = (content_audit.OUTCOME_PUBLISHED if published
+                       else content_audit.OUTCOME_WITHHELD)
+        elif survivor is None:
+            outcome = content_audit.OUTCOME_WITHHELD
+        else:
+            outcome = content_audit.OUTCOME_REGENERATED
+        content_audit.record(db, findings, account_id=account_id,
+                             persona_id=persona_id, content_type=content_type,
+                             outcome=outcome, asset_id=asset_id)
 
 
 def _attach_proof_point(asset: dict, proof: dict, contract: dict) -> None:
@@ -1636,6 +1577,12 @@ def _build_generation_context(db, account_id: str, persona_id: str, content_type
     content_type = str(content_type or "").strip().lower()
     contract = CONTENT_TYPE_CONTRACTS.get(content_type)
     if not contract:
+        if content_type in RETIRED_CONTENT_TYPES:
+            raise ValueError(
+                "%s is no longer generated - the three formats are %s"
+                % (RETIRED_CONTENT_TYPES[content_type],
+                   ", ".join(CONTENT_TYPE_CONTRACTS[k]["title"]
+                             for k in OFFERED_CONTENT_TYPES)))
         raise ValueError(f"Unknown content_type '{content_type}'")
     topic = str(topic or "").strip()[:TOPIC_MAX_CHARS]
     if not topic:
@@ -1664,6 +1611,13 @@ def _build_generation_context(db, account_id: str, persona_id: str, content_type
                  for c in hiring_clusters]
         account_items.append(("Open hiring", f"{len(job_records)} open postings; HP-relevant roles - "
                               + "; ".join(parts)))
+
+    # The rest of the account's published intelligence - the estate, the intent
+    # themes, the gated signals, the qualified plays, the filings. Tuning row 8,
+    # Column 4. Added after hiring so the two oldest lines keep their labels:
+    # an asset stored yesterday cites [A1] and [A2], and those must still mean
+    # the business description and the industry when it is re-read.
+    account_items += _published_evidence(db, account_id)
 
     account_block, a_labels = _label_block("A", account_items)
     persona_block, p_labels = _label_block("P", _persona_evidence(persona))
@@ -1913,6 +1867,10 @@ def generate_content_asset(account_id: str, persona_id: str, content_type: str,
                    f"on the topic \"{topic}\". Return JSON matching the schema.")
 
     attempts: list[list[str]] = []
+    # Every attempt's raw gate findings, paired with whether that attempt
+    # produced a publishable asset. Written to the audit ledger below, once the
+    # loop has finished and it is known which attempt actually stood.
+    gate_attempts: list[tuple[list, bool]] = []
 
     def _draft(extra_instruction: str = "") -> tuple[dict | None, list[str], list[str]]:
         """One generate -> validate -> bounded-retry cycle. Returns
@@ -1929,9 +1887,11 @@ def generate_content_asset(account_id: str, persona_id: str, content_type: str,
         if llm_res is None:
             return None, ["model returned nothing - the LLM API key is missing or the call failed"], []
 
+        attempt_findings: list = []
         a, f, sf = _validate_asset(llm_res, contract, persona, labels, ground, report,
-                                banned_names, industry)
+                                   banned_names, industry, audit=attempt_findings)
         attempts.append(f + sf)
+        gate_attempts.append((list(attempt_findings), a is not None))
         _consider(a, sf)
         # Bounded retry, for style warnings as well as hard faults. The model is
         # told exactly what was rejected, not asked again blindly.
@@ -1951,9 +1911,12 @@ def generate_content_asset(account_id: str, persona_id: str, content_type: str,
             retry_res = generate_gpt4o_json_completion(retry_system, user_prompt)
             if retry_res is None:
                 break
+            attempt_findings = []
             a, f, sf = _validate_asset(retry_res, contract, persona, labels, ground,
-                                        report, banned_names, industry)
+                                       report, banned_names, industry,
+                                       audit=attempt_findings)
             attempts.append(f + sf)
+            gate_attempts.append((list(attempt_findings), a is not None))
             _consider(a, sf)
 
         # Retry budget spent: publish the cleanest draft that had no hard fault,
@@ -2074,9 +2037,17 @@ def generate_content_asset(account_id: str, persona_id: str, content_type: str,
         "is_fallback": is_fallback,
         "generated_at": now.isoformat(),
     }
+    # Spec Section 6: "Every gate produces a machine-readable audit row."
+    # Written here rather than inside the loop because only now is it known
+    # which attempt stood - the last publishable one - and a row that cannot
+    # say whether the seller saw the draft is a row nobody can act on.
+    _record_gate_audit(db, gate_attempts, account_id=account_id,
+                       persona_id=str(persona.get("id") or ""),
+                       content_type=content_type, asset_id=record["asset_id"],
+                       published=not is_fallback)
+
     record["greeting"] = _compose_greeting(persona, contract) if contract.get("email_shaped") else None
     record["plain_text"] = _compose_plain_text(record, contract)
-    record["rendered_html"] = render_asset_html(record)
 
     # The remaining variants, each composed the same way so the seller can copy
     # any of them. `record` itself stays the first variant, so every existing
