@@ -35,70 +35,30 @@ _URL_RE = re.compile(r"https?://\S+")
 _QUESTION_RE = re.compile(r"\?")
 
 
+# Spec 1.2, the formats that dropped out: "Website Copy, Tech Blog ... Social
+# Post, Message Planks, Campaign Idea - Remove from FORMAT_CRITERIA. Remove
+# from the Format control. Do not leave the code path in 'just in case' - a
+# dead branch that silently changes the dimension count is how a scoring bug
+# ships."
+#
+# They were kept so an evaluation stored under one would still read. That
+# reason does not survive checking: an evaluation stores its own
+# `format_label`, so re-reading one never consults this table. What the
+# contracts actually bought was the ability to score against a rubric no seller
+# can choose.
+#
+# The names stay, so a stored evaluation reads as "Social Post" rather than as
+# a bare key, and so an attempt to USE one says it was retired rather than that
+# it never existed.
+RETIRED_FORMATS = {
+    "social_post": "Social Post",
+    "website_copy": "Website Copy",
+    "tech_blog": "Tech Blog",
+    "message_planks": "Message Planks",
+    "campaign_idea": "Campaign Idea",
+}
+
 FORMATS = {
-    "social_post": {
-        "rewrite": {
-            "required": ["headline", "opening", "body_sections", "cta"],
-            "optional": ["hashtags"],
-            "sections": (1, 3),
-            "public": True,
-            "shape": ("A public social post the seller publishes on their own feed, first person. "
-                      "People in this ROLE are the audience - write for them, never to one person, "
-                      "never name a contact and NEVER greet anyone. headline: the hook, ONE line "
-                      "under 120 characters, shown before '...see more' - a sharp observation or "
-                      "question for this role, not a slogan. opening: one or two short sentences. "
-                      "body_sections: 2-3 very short paragraphs of one or two sentences each, no "
-                      "headings; one of them may instead be a short list of 2-3 points, each on its "
-                      "own line starting with '\u2022 '. cta: one closing question that invites "
-                      "people in this role to comment. hashtags: 2-3 specific tags for this topic "
-                      "and role, never generic ones, and keep hashtags OUT of every other field. "
-                      "120-200 words in total."),
-        },
-        "label": "Social Post",
-        "criteria": ("Evaluate thumb-stop power, credibility signals, and tone "
-                     "appropriateness for social media."),
-        "max_words": 120,
-        "wants_next_step": False,
-        "wants_subject": False,
-    },
-    "website_copy": {
-        "rewrite": {
-            "required": ["headline", "opening", "body_sections", "cta"],
-            "sections": (3, 4),
-            "headings": True,
-            "shape": ("Web page copy. headline; opening summary paragraph; 3-4 body_sections each "
-                      "WITH a heading, written so a reader or an answer engine can extract a direct "
-                      "answer from each one; cta is the recommended action. Keep claims citable and "
-                      "attributed. No subject_line."),
-        },
-        "label": "Website Copy",
-        "criteria": ("Evaluate for GEO/AEO readiness: structured answers, citable "
-                     "claims with attribution, entity-rich language, CTA clarity, "
-                     "scannability, and factual accuracy."),
-        "max_words": 800,
-        "wants_next_step": True,
-        "wants_subject": False,
-        "wants_headings": True,
-    },
-    "tech_blog": {
-        "rewrite": {
-            "required": ["headline", "opening", "body_sections", "cta"],
-            "sections": (3, 5),
-            "headings": True,
-            "shape": ("A technical blog article. headline; opening that states the question the piece "
-                      "answers; 3-5 body_sections each WITH a heading, each opening with a quotable "
-                      "one-sentence answer before the detail; cta closes with the practical takeaway. "
-                      "Name products and entities precisely. No subject_line."),
-        },
-        "label": "Tech Blog",
-        "criteria": ("Evaluate for GEO/AEO readiness: answer extraction patterns, "
-                     "product/entity naming, quotable technical claims, readability, "
-                     "technical depth balance, and thought leadership value."),
-        "max_words": 1500,
-        "wants_next_step": False,
-        "wants_subject": False,
-        "wants_headings": True,
-    },
     "linkedin_message": {
         "rewrite": {
             "required": ["opening", "body_sections", "cta"],
@@ -159,40 +119,6 @@ FORMATS = {
         "wants_subject": True,
         "subject_max_chars": 80,
     },
-    "message_planks": {
-        "rewrite": {
-            "required": ["headline", "body_sections"],
-            "sections": (2, 5),
-            "headings": True,
-            "shape": ("Reusable message planks. headline names the theme; 2-5 body_sections, each a "
-                      "self-contained plank WITH a short heading, written so any one can be lifted "
-                      "into another asset unchanged. Consistent voice across planks. No subject_line "
-                      "and no cta."),
-        },
-        "label": "Message Planks",
-        "criteria": ("Evaluate consistency across planks, modularity, persona "
-                     "alignment, and reusability."),
-        "min_planks": 2,
-        "wants_next_step": False,
-        "wants_subject": False,
-    },
-    "campaign_idea": {
-        "rewrite": {
-            "required": ["headline", "opening", "body_sections", "cta"],
-            "sections": (2, 4),
-            "headings": True,
-            "shape": ("A campaign concept. headline is the campaign theme; opening is the rationale "
-                      "tied to account evidence; 2-4 body_sections each WITH a heading covering the "
-                      "channels and what runs on each; cta is the recommended first move. "
-                      "No subject_line."),
-        },
-        "label": "Campaign Idea",
-        "criteria": ("Evaluate theme coherence, multi-channel potential, "
-                     "differentiation, and creative stretch."),
-        "max_words": 400,
-        "wants_next_step": False,
-        "wants_subject": False,
-    },
     # Sahaj, 27 Sep: "In Message evaluator - we can limit to only 3 formats -
     # Email, LinkedIn Message and One pager exec brief - on how HP can help the
     # Customer". The same four sections, in the same order, as Content Studio's
@@ -250,6 +176,11 @@ def normalize_format(value: str) -> str:
     for key, spec in FORMATS.items():
         if spec["label"].lower() == str(value or "").strip().lower():
             return key
+    if raw in RETIRED_FORMATS:
+        raise FormatError(
+            "%s was retired - the evaluator scores %s"
+            % (RETIRED_FORMATS[raw],
+               ", ".join(FORMATS[k]["label"] for k in OFFERED_FORMATS)))
     raise FormatError("unknown format %r - expected one of %s"
                       % (value, ", ".join(FORMAT_KEYS)))
 
@@ -257,15 +188,17 @@ def normalize_format(value: str) -> str:
 def normalize_offered_format(value: str) -> str:
     """The format of a NEW evaluation. Only the three the seller can pick.
 
-    `normalize_format` stays wide on purpose: an evaluation stored months ago
-    under `social_post` still has to read back, and its format key still has to
-    resolve to a label and a rubric. But accepting eight on the way IN was a
-    door nobody meant to leave open - `POST .../evaluate` with
-    "format": "tech_blog" was scored against criteria for a format the dropdown
-    does not offer and Section 2.3 has no row for.
+    `normalize_format` and this once differed: the reader stayed wide so an
+    evaluation stored under a retired format could resolve to a label, while
+    this one narrowed the door. Spec 1.2 closed that gap from the other side -
+    the retired formats left the table entirely, and a stored evaluation reads
+    back off its own `format_label` rather than off this module.
 
-    So the narrow check lives at the entry point and the wide reader stays where
-    reading happens.
+    What is left of the distinction is the error a caller gets: `normalize_format`
+    tells a retired key apart from a nonsense one, and this adds the rule that
+    only the three offered formats may start a NEW evaluation. They are the same
+    three today; they are kept apart because a format could be defined and not
+    yet offered, and that should fail as "not offered" rather than "unknown".
     """
     key = normalize_format(value)
     if key not in OFFERED_FORMATS:

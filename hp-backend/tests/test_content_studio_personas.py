@@ -183,10 +183,29 @@ class TestTheRuleEachKindIsHeldTo:
             assert "Do NOT claim the role exists" not in _prompt(persona)
 
     def test_a_public_post_outranks_every_kind(self):
+        """The rule, not the format.
+
+        LinkedIn Post was retired with spec 1.2, so there is no longer a
+        contract in the table that sets `public`. The RULE stays: Section 1.3
+        is explicit that a public post must never inherit the personalisation
+        of a LinkedIn Message, and warns the failure would be invisible in
+        testing because the copy still reads fine. If the format ever comes
+        back it must come back to this.
+        """
+        public_contract = dict(cs.CONTENT_TYPE_CONTRACTS["linkedin_message"],
+                               public=True)
         for persona in EVERY_KIND:
-            prompt = _prompt(persona, "linkedin")
-            assert "THIS IS A PUBLIC POST" in prompt
-            assert "Never name, address or describe an individual" in prompt
+            rule = cs._persona_rule(persona["kind"], "ACME Corp", public_contract,
+                                    persona.get("is_filled", False))
+            assert "THIS IS A PUBLIC POST" in rule
+            assert "Never name, address or describe an individual" in rule
+
+    def test_no_offered_format_is_a_public_post(self):
+        """Which is the other half of Section 1.3: the override cannot fire on
+        any format a seller can actually pick."""
+        for key in cs.OFFERED_CONTENT_TYPES:
+            assert not cs.CONTENT_TYPE_CONTRACTS[key].get("public")
+        assert "linkedin" in cs.RETIRED_CONTENT_TYPES
 
 
 class TestWhoMayBeNamedInTheCopy:
@@ -212,10 +231,20 @@ class TestTheGreeting:
             CLIENT_EMPTY, cs.CONTENT_TYPE_CONTRACTS["email"])
         assert greeting == "Dear [Head of Procurement Name],"
 
-    def test_a_branded_emailer_greets_the_role_itself(self):
-        greeting = cs._compose_greeting(
-            CLIENT_EMPTY, cs.CONTENT_TYPE_CONTRACTS["branded_emailer"])
+    def test_a_format_that_greets_the_role_names_the_role(self):
+        """Branded Emailer was the only contract that set `greeting_role`, and
+        it was retired with spec 1.2. The behaviour is still here because the
+        flag is a property of a format rather than of that one format: a
+        branded layout carries the sender in its From line, so the body greets
+        the role. Tested against a contract carrying the flag."""
+        contract = dict(cs.CONTENT_TYPE_CONTRACTS["email"], greeting_role=True)
+        greeting = cs._compose_greeting(CLIENT_EMPTY, contract)
         assert greeting == "Dear Head of Procurement,"
+
+    def test_without_that_flag_the_greeting_leaves_a_placeholder(self):
+        greeting = cs._compose_greeting(
+            CLIENT_EMPTY, cs.CONTENT_TYPE_CONTRACTS["email"])
+        assert greeting == "Dear [Head of Procurement Name],"
 
 
 class TestTheHiringProxyBlock:

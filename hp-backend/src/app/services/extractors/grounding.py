@@ -33,6 +33,11 @@ HP_PRODUCT_LINES = [
     "HP Wolf Security",
     "Poly Collaboration",
     "Poly Studio",
+    # Confirmed by HP, 1 Oct: Poly Lens and HP Poly Room Compute are sellable
+    # lines in their own right, not features inside Poly Studio. Spec 2.3
+    # offers all four to the AV & Collaboration Systems Manager.
+    "Poly Lens",
+    "HP Poly Room Compute",
     "HP Enterprise Print / MPS",
     "HP Enterprise Printing & MPS",
     # 3D. The line existed everywhere except here: the opportunity map has a
@@ -220,6 +225,13 @@ HP_LINE_TOKENS = [
       "elite /", "elite and pro"),
      "HP Elite / Pro PCs"),
     (("wolf",), "HP Wolf Security"),
+    # The Poly lines, most specific first. The bare ("poly",) rule below is a
+    # catch-all and would otherwise claim all four: before these existed, a
+    # model returning "Poly Studio" was stored as "Poly Collaboration", so the
+    # distinction spec 2.3 draws between them never survived the way in.
+    (("poly lens",), "Poly Lens"),
+    (("poly room compute", "room compute", "poly room"), "HP Poly Room Compute"),
+    (("poly studio",), "Poly Studio"),
     (("poly",), "Poly Collaboration"),
     # 3D BEFORE print, and the order is load-bearing: every 3D name contains
     # the word "print". Same reason "ink" is spelled out above rather than left

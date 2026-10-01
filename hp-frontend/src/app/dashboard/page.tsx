@@ -5925,6 +5925,40 @@ export default function UserDashboardPage() {
                                   ))}
                                 </div>
                               )}
+                              {(evaluation.hp_lines_named || []).length > 0 && (
+                                <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-700 space-y-1.5">
+                                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                                    What Brand Recall and Impact were judged against
+                                  </p>
+                                  <p>
+                                    <span className="font-semibold">HP lines named:</span>{' '}
+                                    {evaluation.hp_lines_named.join(', ')}
+                                  </p>
+                                  {(evaluation.rulebook_positioning || []).length > 0 ? (
+                                    <p>
+                                      <span className="font-semibold">Rulebook positioning:</span>{' '}
+                                      {evaluation.rulebook_positioning
+                                        .map((r: any) => r.offering)
+                                        .filter(Boolean).join(' · ')}
+                                    </p>
+                                  ) : (
+                                    <p className="text-slate-500">
+                                      The Rulebook carries no positioning for these lines.
+                                    </p>
+                                  )}
+                                  {(evaluation.proof_available || []).length > 0 ? (
+                                    <p>
+                                      <span className="font-semibold">HP proof available:</span>{' '}
+                                      {evaluation.proof_available.map((p: any) => p.text).join(' ')}
+                                    </p>
+                                  ) : (
+                                    <p className="text-slate-500">
+                                      No HP case study fits these lines, so an unproved claim
+                                      should be cut rather than softened.
+                                    </p>
+                                  )}
+                                </div>
+                              )}
                               {(evaluation.chunk_fidelity_faults || []).length > 0 && (
                                 <p className="mt-3 text-xs text-amber-700">
                                   The phrase chunks below do not cover the whole message:{' '}
@@ -6114,6 +6148,14 @@ export default function UserDashboardPage() {
                             <h3 className="text-sm font-semibold text-slate-800">
                               Step F &mdash; Summary
                             </h3>
+                            {evaluation.format_notes && (
+                              <p className="text-sm text-slate-600 leading-relaxed">
+                                <span className="font-semibold text-slate-700">
+                                  As {evaluation.format_label ? `a ${evaluation.format_label}` : 'this format'}:
+                                </span>{' '}
+                                {evaluation.format_notes}
+                              </p>
+                            )}
                             {evaluation.summary && (
                               <p className="text-sm text-slate-600 leading-relaxed">{evaluation.summary}</p>
                             )}
@@ -7287,6 +7329,24 @@ export default function UserDashboardPage() {
                               ? (variants.find(v => v.variant_index === activeVariantIndex) || variants[0])
                               : null;
                             const g = (activeVariant?.generated) || generatedAsset.generated || {};
+                            // Spec 3.5's brand template needs the account and the date. Both are
+                            // read off the asset where it carries them and off the page where it
+                            // does not, so an asset generated before this existed still prints.
+                            const onePagerAccount =
+                              generatedAsset.company_name
+                              || evalOptions?.company_name
+                              || selectedAccount?.name
+                              || 'this account';
+                            const onePagerDate = generatedAsset.generated_at
+                              ? new Date(generatedAsset.generated_at).toLocaleDateString(undefined,
+                                  { year: 'numeric', month: 'long', day: 'numeric' })
+                              : '';
+                            // G12 is the overflow rule. 3.5 says an overflowing 1-Pager is out of
+                            // budget rather than something to shrink, and 3.4 fixes the budget at
+                            // 350-500 words because that is "what fits on one page at readable
+                            // body size" - so the word-budget warning IS the overflow warning.
+                            const onePagerOverBudget = (generatedAsset.style_warnings || [])
+                              .find((w: string) => w.startsWith('G12'));
                             const gr = generatedAsset.grounding_report || {};
                             const labels: [string, any][] = Object.entries(
                               (activeVariant?.evidence_labels) || generatedAsset.evidence_labels || {});
@@ -7332,8 +7392,21 @@ export default function UserDashboardPage() {
                                 </div>
                               )}
 
+                              {/* Spec 3.5: an overflowing 1-Pager "is out of budget - fail it
+                                  back to regeneration rather than shrinking the type". The budget
+                                  is G12's, because 3.4 sets 350-500 words as what fits on one
+                                  page. Surfaced here rather than blocking: the seller asked for
+                                  this asset, and a one-word overrun is theirs to judge. */}
+                              {generatedAsset.content_type === 'one_pager' && onePagerOverBudget && (
+                                <div className="no-print rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                                  {onePagerOverBudget}. The one-page budget is what fits on A4 and
+                                  US Letter at readable size &mdash; regenerate rather than shrink
+                                  the type.
+                                </div>
+                              )}
+
                               {/* Card header: type and persona, with Copy / Download HTML */}
-                              <div className="flex items-center justify-between gap-3">
+                              <div className="no-print flex items-center justify-between gap-3">
                                 <div className="flex items-center gap-2 min-w-0 text-sm font-semibold text-slate-900">
                                   <PenTool className="w-4 h-4 text-hp-navy shrink-0" />
                                   <span className="truncate">
@@ -7360,6 +7433,17 @@ export default function UserDashboardPage() {
                                       {copiedAssetId === generatedAsset.asset_id ? 'Copied' : 'Copy'}
                                     </button>
                                   )}
+                                  {generatedAsset.content_type === 'one_pager'
+                                      && (g.pillars || []).length > 0 && (
+                                      <button
+                                        onClick={() => window.print()}
+                                        title="Opens the print dialog. Choose Save as PDF for a one-page file."
+                                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-slate-200 text-xs font-medium text-slate-600 hover:border-slate-300"
+                                      >
+                                        <Download className="w-3.5 h-3.5" />
+                                        Print / Save as PDF
+                                      </button>
+                                    )}
                                   {generatedAsset.rendered_html && (
                                     <button
                                       onClick={() => downloadHtml(generatedAsset)}
@@ -7373,7 +7457,99 @@ export default function UserDashboardPage() {
                               </div>
 
                               {/* The asset */}
-                              {generatedAsset.content_type === 'branded_emailer' ? (
+                              {generatedAsset.content_type === 'one_pager' && (g.pillars || []).length > 0 ? (
+                                /* Spec 3.5. This block is both the on-screen document and the
+                                   printed one - `onepager-print` is what the print stylesheet
+                                   keeps and everything else on the page is hidden. Rendered from
+                                   the structured fields, never from generated markup. */
+                                <div className="onepager-print bg-white border border-slate-200 rounded-2xl p-8 space-y-5 text-sm text-slate-800 leading-relaxed">
+
+                                  {/* HP brand template: on paper only. On screen the card already
+                                      sits under an HP-branded page. */}
+                                  <div className="print-only" style={{ marginBottom: '14px' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '2px solid #0096D6', paddingBottom: '8px' }}>
+                                      <span style={{ fontWeight: 800, fontStyle: 'italic', fontSize: '15pt', color: '#0096D6', letterSpacing: '-0.5px' }}>hp</span>
+                                      <span style={{ fontSize: '8.5pt', color: '#52606D' }}>
+                                        {onePagerAccount} &middot; Prepared by HP
+                                      </span>
+                                    </div>
+                                  </div>
+
+                                  {/* Title and subtitle */}
+                                  {g.headline && (
+                                    <h4 className="text-xl font-extrabold text-slate-900 leading-snug">{g.headline}</h4>
+                                  )}
+                                  {g.subtitle && (
+                                    <p className="-mt-3 text-[13px] text-slate-500">{g.subtitle}</p>
+                                  )}
+
+                                  {/* Why now */}
+                                  {(g.why_now || g.opening) && (
+                                    <div className="space-y-1">
+                                      <h5 className="text-[10px] font-black uppercase tracking-wider text-hp-navy">Why now</h5>
+                                      <p>{g.why_now || g.opening}</p>
+                                    </div>
+                                  )}
+
+                                  {/* The pillars, as pillars. Challenge and HP response are
+                                      separate claims and are shown as separate claims - merged
+                                      into one paragraph there is no way to see that a pillar
+                                      asserts something HP does without saying what prompted it. */}
+                                  <div className="space-y-4">
+                                    {(g.pillars || []).map((p: any, i: number) => (
+                                      <div key={i} className="onepager-pillar space-y-1 border-l-2 border-slate-200 pl-3">
+                                        <h5 className="text-[10px] font-black uppercase tracking-wider text-hp-navy">
+                                          {p.heading}
+                                        </h5>
+                                        <p>{p.challenge}</p>
+                                        {p.hp_response && (
+                                          <p className="text-slate-700">{p.hp_response}</p>
+                                        )}
+                                        {(p.evidence_used || []).length > 0 && (
+                                          <p className="text-[10px] font-mono text-slate-400">
+                                            {p.evidence_used.map((label: string) => `[${label}]`).join(' ')}
+                                          </p>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+
+                                  {/* The one HP play */}
+                                  {g.hp_play && (
+                                    <div className="space-y-1">
+                                      <h5 className="text-[10px] font-black uppercase tracking-wider text-hp-navy">The HP play</h5>
+                                      <p>{g.hp_play}</p>
+                                    </div>
+                                  )}
+
+                                  {/* Proof. Python attaches this after the line is settled - the
+                                      model is never shown a case study. */}
+                                  {(g.proof_point || generatedAsset.hp_proof_point) && (
+                                    <div className="space-y-1">
+                                      <h5 className="text-[10px] font-black uppercase tracking-wider text-hp-navy">Proof point</h5>
+                                      <p>{g.proof_point || generatedAsset.hp_proof_point}</p>
+                                    </div>
+                                  )}
+
+                                  {/* The ask */}
+                                  {g.cta && <p className="font-semibold text-slate-900">{g.cta}</p>}
+
+                                  {/* Provenance, on paper only. A seller forwarding this
+                                      internally needs to know where it came from. The contact's
+                                      name appears only where the client named one for the role -
+                                      on an UNFILLED persona the document is addressed to the
+                                      role, and 3.5 says the footer follows that. */}
+                                  <div className="print-only" style={{ marginTop: '18px', borderTop: '1px solid #CBD2D9', paddingTop: '6px', fontSize: '7.5pt', color: '#7B8794', lineHeight: 1.5 }}>
+                                    <div>
+                                      Prepared for {generatedAsset.persona?.title}
+                                      {generatedAsset.persona?.full_name ? ` · ${generatedAsset.persona.full_name}` : ''}
+                                    </div>
+                                    <div>
+                                      Generated from HP Account Intelligence &mdash; {onePagerAccount} &mdash; {onePagerDate}
+                                    </div>
+                                  </div>
+                                </div>
+                              ) : generatedAsset.content_type === 'branded_emailer' ? (
                                 <div className="rounded-xl border border-slate-200 overflow-hidden bg-white">
                                   <div className="bg-slate-50 px-4 py-3 text-[13px] leading-relaxed">
                                     <p>
