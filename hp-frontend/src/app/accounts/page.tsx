@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { ProtectedRoute } from '@/components/common/ProtectedRoute';
 import { CountUpText, ParallaxBand, SlidingSegments, growDelay } from '@/components/common/motion';
 import api from '@/services/api';
+import { NO_SIGNAL } from '@/lib/placeholders';
 import { CompanyAccount } from '@/types/account';
 import {
   URGENCY_FILTERS,
@@ -300,10 +301,9 @@ function AccountRow({ account, index, opening, dimmed, onOpen }: {
             </>
           ) : (
             <span
-              className="whitespace-nowrap sm:w-[10.25rem] text-right text-[11px] font-semibold text-slate-500"
-              title="Not generated yet, or withheld because too little of the account is measured"
+              className="whitespace-nowrap sm:w-[10.25rem] text-right text-[11px] font-semibold text-slate-400"
             >
-              Not scored
+              {NO_SIGNAL}
             </span>
           )}
           <ArrowRight className="as-row-arrow w-4 h-4 text-[#0096D6]" aria-hidden />

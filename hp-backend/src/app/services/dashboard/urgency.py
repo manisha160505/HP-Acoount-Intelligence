@@ -104,6 +104,10 @@ FORMULA_AUTHORITY = (
     "Logic', supplied by the client. This supersedes the delivery-authored "
     "20/25/15/15/25 formula that stood here previously.")
 
+# Client-facing wording for a component with no input (client, 1 Oct). Matches
+# the frontend's NO_SIGNAL placeholder.
+NO_SIGNAL = "No signal observed"
+
 MISSING_INPUT_RULE = (
     "Missing inputs contribute 0 points only to the affected component; the "
     "remaining components are still calculated and the overall score still "
@@ -480,11 +484,11 @@ def rationale_lines(driver: dict) -> list:
     """
     lines = ["Weight %s%% of the total." % _round_half_up(driver.get("weight", 0) * 100, 1)]
     for term in driver.get("terms") or []:
-        line = "%s: %s/%s - %s" % (term.get("label"), term.get("points"),
-                                   term.get("max_points"), term.get("basis"))
-        if term.get("missing_input"):
-            line += " (no input on file - scores 0 by the missing-input rule)"
-        lines.append(line)
+        # A component with no input reads "No signal observed" (client, 1 Oct);
+        # its real basis stays on the term and in the generation's data_gaps.
+        basis = NO_SIGNAL if term.get("missing_input") else term.get("basis")
+        lines.append("%s: %s/%s - %s" % (term.get("label"), term.get("points"),
+                                         term.get("max_points"), basis))
     lines.extend(driver.get("notes") or [])
     lines.extend("Caveat: %s" % c for c in (driver.get("caveats") or []))
     # A basis can quote the account's own data, which may carry typographic
