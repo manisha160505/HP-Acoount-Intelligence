@@ -48,6 +48,21 @@ ROLE_FILLED = {
     "source": "Apollo",
     "matched_alias": "CTO",
 }
+# One of the eight, filled. `ROLE_FILLED` above is deliberately NOT one of
+# them - it is the CTO, and it is kept to prove the scope lock holds.
+ROLE_IN_SCOPE = {
+    "target_persona": "VP / Head of Information Technology",
+    "department": "IT",
+    "buying_committee_angle": "Economic Buyer",
+    "contact_name": "Adam Neal",
+    "actual_job_title": "Head of IT",
+    "work_email": "adam.neal@example.com",
+    "phone_number": "",
+    "linkedin_url": "http://www.linkedin.com/in/example",
+    "contact_status": "Work email only; phone missing",
+    "source": "Apollo",
+    "matched_alias": "Head of IT",
+}
 ROLE_EMPTY = {
     "target_persona": "Head of Procurement",
     "department": "Procurement",
@@ -181,23 +196,54 @@ class TestMessageEvaluatorPersonaPaths:
                                          [{"Prospect full_name": "Adam Neal"}])
         assert out == []
 
-    def test_client_roles_are_the_second_path(self, monkeypatch):
+    def test_the_client_roles_are_the_eight_and_carry_their_card(self, monkeypatch):
+        """The audience narrowed on 30 Sep: spec Section 4.2 makes it one of
+        the eight persona_ids, and each one carries the hardcoded card."""
         from app.services.extractors import message_evaluator as me
         monkeypatch.setattr(personas, "read_dataset_records",
-                            lambda _a, _k: [dict(ROLE_FILLED), dict(ROLE_EMPTY)])
+                            lambda _a, _k: [dict(ROLE_IN_SCOPE), dict(ROLE_EMPTY)])
         out = me._personas_from_client_roles("acct")
+        assert [p["persona_id"] for p in out] == ["vp-it", "head-procurement"]
         assert [p["is_named_person"] for p in out] == [True, False]
         assert out[1]["name"] is None
         assert out[1]["title"] == "Head of Procurement"
         assert "no contact identified" in out[1]["evidence_note"]
+        assert out[0]["card"]["persona_id"] == "vp-it"
+        # LITE shape: the behavioural state is mode-dependent, and the widget
+        # is written once for both modes.
+        assert "behavioural_state" not in out[0]["card"]
 
-    def test_a_filled_role_carries_the_client_s_own_angle(self, monkeypatch):
+    def test_a_role_outside_the_eight_is_not_offered(self, monkeypatch):
+        """The CTO is one of the twenty-four roles `company_personas` carries
+        that this programme does not evaluate against. Section 2.3's
+        eligibility matrix has no row for it, so a stimulus scored against it
+        could not be judged at all."""
         from app.services.extractors import message_evaluator as me
         monkeypatch.setattr(personas, "read_dataset_records",
                             lambda _a, _k: [dict(ROLE_FILLED)])
+        assert me._personas_from_client_roles("acct") == []
+
+    def test_the_angle_comes_from_the_pack_not_the_export(self, monkeypatch):
+        """Section 2.2 assigns the eight angles explicitly, so a reworded
+        `buying_committee_angle` in a later delivery cannot move one."""
+        from app.services.extractors import message_evaluator as me
+        role = dict(ROLE_IN_SCOPE, buying_committee_angle="Something Else")
+        monkeypatch.setattr(personas, "read_dataset_records",
+                            lambda _a, _k: [role])
         out = me._personas_from_client_roles("acct")
         assert out[0]["influence_type"] == "Economic Buyer"
         assert out[0]["sources"]["name"] == personas.DATASET_KEY
+
+    def test_the_card_is_the_same_on_every_account(self, monkeypatch):
+        """T19. The card is hardcoded; only whether the role is filled varies."""
+        import json
+
+        from app.services.extractors import message_evaluator as me
+        monkeypatch.setattr(personas, "read_dataset_records",
+                            lambda _a, _k: [dict(ROLE_IN_SCOPE)])
+        first = me._personas_from_client_roles("account-one")[0]["card"]
+        second = me._personas_from_client_roles("account-two")[0]["card"]
+        assert json.dumps(first, sort_keys=True) == json.dumps(second, sort_keys=True)
 
     def test_the_hiring_proxy_still_names_nobody(self):
         from app.services.extractors import message_evaluator as me

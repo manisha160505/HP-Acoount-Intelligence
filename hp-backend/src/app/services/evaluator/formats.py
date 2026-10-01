@@ -116,12 +116,19 @@ FORMATS = {
                       "including the greeting, which is added automatically - do not write one."),
         },
         "label": "LinkedIn Message",
-        "criteria": ("Evaluate personalization depth, brevity, relevance to the "
-                     "recipient, and reply-worthiness."),
+        # Spec Section 4.5. "A generic opener that could be sent to anyone is
+        # the primary failure mode" is the sentence that does the work here -
+        # brevity is easy to score and personalisation is what this format is
+        # for.
+        "criteria": ("Evaluate personalisation depth, brevity and reply-worthiness. This "
+                     "is a 1:1 private message, not a public post: a generic opener that "
+                     "could be sent to anyone is the primary failure mode. Penalise "
+                     "anything over ~110 words."),
         # LinkedIn caps connection notes at 300 characters; a message that
         # cannot be sent is a structural failure, not a style note.
         "max_chars": 300,
-        "max_words": 80,
+        # 110, from Section 4.5 and Content Studio's G12 budget for this format.
+        "max_words": 110,
         "wants_next_step": True,
         "wants_subject": False,
     },
@@ -140,9 +147,14 @@ FORMATS = {
                       "'Sincerely' or a signature."),
         },
         "label": "Email",
-        "criteria": ("Evaluate subject line strength (if present), personalization, "
-                     "CTA clarity, and skim-readability."),
-        "max_words": 250,
+        # Spec Section 4.5, verbatim in substance. The word ceiling moved with
+        # it: the specification penalises "length beyond ~180 words", which is
+        # also the top of Content Studio's G12 budget for this format, so a
+        # draft written there is judged here against the rule it was written to.
+        "criteria": ("Evaluate subject line strength, personalisation depth, CTA clarity "
+                     "and skim-readability. Penalise length beyond ~180 words and any "
+                     "greeting boilerplate."),
+        "max_words": 180,
         "wants_next_step": True,
         "wants_subject": True,
         "subject_max_chars": 80,
@@ -200,9 +212,19 @@ FORMATS = {
                       "subject_line."),
         },
         "label": "One-Pager Exec Brief",
-        "criteria": ("Evaluate whether it states the customer's challenge from evidence, how HP "
-                     "helps, credible proof, and one clear next step - in scannable sections."),
-        "max_words": 400,
+        # Spec Section 4.5. This entry is new in the 30 Sep specification and it
+        # is written against the structured contract Content Studio now
+        # produces: the pillars, the single HP play, and the one-page limit are
+        # all things the generator is gated on, so the evaluator judges the same
+        # properties rather than a different idea of a good one-pager.
+        "criteria": ("Evaluate whether it works as a standalone leave-behind: does the "
+                     "title and \"why now\" carry the argument on their own, is each pillar "
+                     "evidence-backed rather than asserted, is there exactly one HP play "
+                     "rather than a portfolio tour, and does it fit one page. Penalise "
+                     "benefit lists, unsupported pillars, and any pillar that could appear "
+                     "in a brief for a different account."),
+        # 500, matching Content Studio's G12 budget for the format.
+        "max_words": 500,
         "wants_headings": True,
         "wants_next_step": True,
         "wants_subject": False,
@@ -230,6 +252,27 @@ def normalize_format(value: str) -> str:
             return key
     raise FormatError("unknown format %r - expected one of %s"
                       % (value, ", ".join(FORMAT_KEYS)))
+
+
+def normalize_offered_format(value: str) -> str:
+    """The format of a NEW evaluation. Only the three the seller can pick.
+
+    `normalize_format` stays wide on purpose: an evaluation stored months ago
+    under `social_post` still has to read back, and its format key still has to
+    resolve to a label and a rubric. But accepting eight on the way IN was a
+    door nobody meant to leave open - `POST .../evaluate` with
+    "format": "tech_blog" was scored against criteria for a format the dropdown
+    does not offer and Section 2.3 has no row for.
+
+    So the narrow check lives at the entry point and the wide reader stays where
+    reading happens.
+    """
+    key = normalize_format(value)
+    if key not in OFFERED_FORMATS:
+        raise FormatError(
+            "format %r is not offered for evaluation - expected one of %s"
+            % (value, ", ".join(FORMATS[k]["label"] for k in OFFERED_FORMATS)))
+    return key
 
 
 def criteria_for(fmt: str) -> str:

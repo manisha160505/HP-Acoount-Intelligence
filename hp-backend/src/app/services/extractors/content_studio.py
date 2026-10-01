@@ -34,7 +34,11 @@ from app.services.extractors.stakeholder_map import (
     score_hp_relevance,
     seniority_band,
 )
-from app.services.hp import case_studies as cs
+from app.services.hp import (
+    buyer_personas as bp,
+    case_studies as cs,
+    content_gates,
+)
 from app.services.regen import context as run_context, store as widget_store
 
 logger = logging.getLogger(__name__)
@@ -208,38 +212,61 @@ def _derive_named_personas(db, account_id: str) -> list[dict]:
 
 
 def _derive_client_personas(account_id: str) -> list[dict]:
-    """Spec row 1b: the client's own target roles for this account.
+    """The client's eight target roles for this account, FILLED or UNFILLED.
 
-    The named tier above is Source A only, and the 220-account contact file is
-    Apollo, so on most accounts that tier is empty and the persona list fell
-    through to seven generic archetypes that say nothing about the account.
-    The client's buying committee is better than an archetype in both
-    directions: it is the role THEY want reached, and for two thirds of them it
-    carries the person who holds it.
+    Spec Section 1.4. Eight fixed roles replace the five-tier derivation, and
+    exactly one distinction survives from it, because it changes what the copy
+    is allowed to say: whether a named contact for that role exists at this
+    account.
 
-    A role nobody fills is still offered - writing to "the Head of Procurement
-    we have not identified yet" is a real task - but it is never given a name,
-    and the subtitle says plainly that no contact was found.
+    The eight are not a new vocabulary - they are eight of the thirty-two
+    target roles `company_personas` already carries, present on all 220
+    delivered files, with the contact where one was found. So this narrows the
+    client's own list rather than inventing a lookup, and `buyer_personas`
+    owns the matching.
+
+    A role nobody fills is still offered: writing to "the Head of Procurement
+    we have not identified yet" is a real task, and the specification expects
+    it to be the common case - fill rates across the delivered files run from
+    8% (AV & Collaboration) to 61% (CFO). It is never given a name.
+
+    Ordered by the pack, not by the file, so the picker reads the same on
+    every account.
     """
-    roles = personas.read_roles(account_id)
+    by_persona = {}
+    for role in personas.read_roles(account_id):
+        persona_id = bp.match_role(role["target_persona"])
+        # The other twenty-four roles are not this programme's personas.
+        if persona_id and persona_id not in by_persona:
+            by_persona[persona_id] = role
+
     out = []
-    for role in roles:
-        angle = role["buying_committee_angle"]
+    for persona_id in bp.PERSONA_IDS:
+        role = by_persona.get(persona_id)
+        if role is None:
+            continue
+        card = bp.card(persona_id)
+        angle = card["committee_angle"]
         if role["is_filled"]:
             subtitle = " · ".join(p for p in (
                 role["contact_name"], role["actual_job_title"] or None,
-                angle or None) if p)
+                angle) if p)
         else:
             subtitle = " · ".join(p for p in (
-                role["department"] or None, angle or None,
+                card["department"], angle,
                 "no contact identified for this role") if p)
         out.append({
-            "id": personas.role_id(role["target_persona"]),
+            "id": persona_id,
             "kind": "client_role",
             "source": personas.DATASET_KEY,
-            "title": role["target_persona"],
+            # The pack's title, not the file's: HP may reword a title in the
+            # export, and a reworded title must not change what is written.
+            "title": card["title"],
             "subtitle": subtitle,
-            "department": role["department"],
+            "department": card["department"],
+            # The angle comes from the pack too. The file carries one, but the
+            # specification assigns these eight explicitly in Section 2.2 and
+            # two of them are deliberately not what the file would say.
             "buying_committee_persona": angle,
             "full_name": role["contact_name"] or None,
             "actual_job_title": role["actual_job_title"] or None,
@@ -330,12 +357,15 @@ def _read_dataset_records(account_id: str, dataset_key: str) -> list[dict]:
 # takes seller input; the other four key on the account's data alone.
 
 # Bump when the prompt changes so cached assets are regenerated.
-CONTENT_PROMPT_VERSION = "2026-09-27.1"    # client target roles: their own header, evidence lines and rule
+CONTENT_PROMPT_VERSION = "2026-09-30.1"    # spec 30 Sep: eight personas, rules 10/11, structured 1-Pager
 
 # The one mandated section an HP case study belongs in. Named rather than
 # repeated, because the contract, the fallback template and the attach all have
 # to agree on the exact string or the section is silently never found.
 PROOF_POINTS_HEADING = "Proof Points"
+# The 1-Pager's HP play is a section of the rendered document as well as a key
+# of the structured one, and the two have to agree on the string.
+HP_PLAY_HEADING = "The HP Play"
 ASSET_HISTORY_MAX = 20
 RETRY_ROUNDS = 2
 TOPIC_MAX_CHARS = 200
@@ -345,20 +375,47 @@ CONTEXT_MAX_CHARS = 2000
 # Every type returns the same JSON shape, so one validator covers all seven.
 # The three-paragraph shape shared by Email and Branded Emailer; the two differ
 # only in how they are composed and rendered.
-_EMAIL_SHAPE = ("A three-paragraph outreach email written as HP (\"At HP, we ...\"). "
-                  "subject_line: MUST use the format 'Re: [specific initiative or challenge]' - it "
-                  "starts with 'Re: ' and then names the specific initiative or challenge this email "
-                  "is about, taken from the evidence. Not a generic subject, and under 80 characters. "
-                  "opening (paragraph 1, one or two sentences): the hook - one specific account fact "
-                  "or hiring signal from the evidence, stated with confidence. "
-                  "body_sections (paragraph 2): EXACTLY ONE paragraph, no heading, two or three "
-                  "sentences, at most 60 words - restate the paragraph-1 evidence as the need, then "
-                  "name the one HP line with ONE concrete capability that meets it. "
-                  "cta (paragraph 3, one sentence): a LOW-FRICTION next step - ask for a briefing, a "
-                  "workshop, an assessment or a short focused discussion. Never claim an existing "
-                  "meeting, project or prior conversation unless the evidence states one. "
-                  "AT MOST 110 words in total. The salutation and sign-off are added automatically - do not "
-                  "write 'Dear', 'Sincerely' or a signature.")
+def _email_shape(body_line: str, budget_line: str) -> str:
+    """The email shape, with the body paragraph count and word budget supplied.
+
+    Two formats share this shape and they no longer share a budget. `email` is
+    one of the three the 30 Sep build specification governs, and Section 3.4
+    sets it at 120-180 words across opening, body and ask - wider than the 110
+    HP_ABX_v3_final set, and wide enough that one body paragraph cannot fill it
+    without padding. `branded_emailer` is not one of the three, is not in the
+    picker, and keeps the terms it was built to.
+    """
+    return ("An outreach email written as HP (\"At HP, we ...\"). "
+            "subject_line: MUST use the format 'Re: [specific initiative or challenge]' - it "
+            "starts with 'Re: ' and then names the specific initiative or challenge this email "
+            "is about, taken from the evidence. Not a generic subject, and under 80 characters. "
+            "opening (one or two sentences): the hook - one specific account fact "
+            "or hiring signal from the evidence, stated with confidence. "
+            + body_line
+            + " cta (one sentence): a LOW-FRICTION next step - ask for a briefing, a "
+            "workshop, an assessment or a short focused discussion. Never claim an existing "
+            "meeting, project or prior conversation unless the evidence states one. "
+            + budget_line
+            + " The salutation and sign-off are added automatically - do not "
+            "write 'Dear', 'Sincerely' or a signature.")
+
+
+# Spec Section 3.4: "body: 2-3 short paragraphs. Each carries a concrete item
+# from the evidence or a concrete capability."
+_SPEC_EMAIL_SHAPE = _email_shape(
+    "body_sections: 2-3 short paragraphs, NO headings. The first restates the opening evidence "
+    "as the need and names the one HP line with ONE concrete capability that meets it; each "
+    "further paragraph carries another concrete item from the evidence or another capability - "
+    "never an adjective in place of one.",
+    "120-180 words in total across opening, body_sections and cta. Past 180 words none of these "
+    "roles will read it.")
+
+# HP_ABX_v3_final's shape, kept for the format that is not in the picker.
+_EMAIL_SHAPE = _email_shape(
+    "body_sections (paragraph 2): EXACTLY ONE paragraph, no heading, two or three "
+    "sentences, at most 60 words - restate the paragraph-1 evidence as the need, then "
+    "name the one HP line with ONE concrete capability that meets it.",
+    "AT MOST 110 words in total.")
 
 # The five HP business units, named as the Opportunity Map and Intent & Demand
 # name their plays.
@@ -374,13 +431,17 @@ LIVE_SIGNAL_TOPICS_MAX = 5
 OFFERED_CONTENT_TYPES = ("email", "linkedin_message", "one_pager")
 
 CONTENT_TYPE_CONTRACTS = {
+    # Spec Section 3.4. The budget - 120-180 words - is NOT carried here: it
+    # lives in `content_gates.WORD_BUDGETS`, which is the specification's own
+    # table, and a miss there is "regenerate once" rather than a hard fault.
+    # Carried in both places it would be both, and a 119-word email would be
+    # withheld from the seller instead of rewritten.
     "email": {
         "title": "Email", "subtitle": "Personalized executive outreach email",
-        "words": (None, 110),
         "required": ["subject_line", "opening", "body_sections", "cta"],
-        "sections": (1, 2), "subject_max": 80, "email_shaped": True,
+        "sections": (1, 3), "subject_max": 80, "email_shaped": True,
         "subject_prefix": "Re: ",
-        "shape": _EMAIL_SHAPE,
+        "shape": _SPEC_EMAIL_SHAPE,
     },
     "linkedin": {
         "title": "LinkedIn Post", "subtitle": "Social selling content for LinkedIn",
@@ -409,37 +470,61 @@ CONTENT_TYPE_CONTRACTS = {
     # message, One pager on how HP portfolio can deliver value for the
     # customer". A direct message to one person, not a post: no headline, no
     # hashtags, short enough to send as a connection note.
+    # Spec Section 3.4: 60-110 words, one or two body paragraphs, and no
+    # `greeting` key in the contract at all - "a separate greeting key is the
+    # most common route to a 'Hi there,' on an unfilled role". There never was
+    # one here. The budget is G12's, as above.
     "linkedin_message": {
         "title": "LinkedIn Message", "subtitle": "Short direct message to one contact",
-        "words": (None, 80),
         "required": ["opening", "body_sections", "cta"],
-        "sections": (1, 1),
+        "sections": (1, 2),
         "shape": ("A direct LinkedIn message to one person - NOT a public post, so no headline and "
                   "no hashtags. opening: one personalised line that references something real "
-                  "about their remit or the account's evidence. body_sections: exactly one short "
-                  "paragraph naming the one HP line and the ONE capability that meets it. cta: one "
-                  "specific, low-friction ask. AT MOST 80 words in total. Do not write a "
+                  "about their remit or the account's evidence - a generic opener that could be "
+                  "sent to anyone is the failure this format is judged on. body_sections: one or "
+                  "two short paragraphs naming the one HP line and the ONE capability that meets "
+                  "it. cta: one specific, low-friction ask. 60-110 words in total. Do not write a "
                   "greeting or a sign-off."),
     },
+    # Spec Section 3.4: "This format does not exist in any current build. It is
+    # a structured document, not prose, and the structure is what makes it
+    # checkable." So it supersedes HP_ABX_v3_final's four fixed headings
+    # (Account Challenge; How HP Helps; Proof Points; Next Step) with title,
+    # subtitle, why_now, 2-3 evidence-backed pillars, the HP play and the ask.
+    #
+    # The structure is additive. `_validate_asset` projects it onto the
+    # headline/opening/body_sections/cta envelope every renderer and the stored
+    # asset history already read, so nothing downstream needs a second path and
+    # a one-pager saved before today still renders.
+    #
+    # `proof_point` is the one key in the specification's contract the model
+    # does NOT get. Rule 4 makes the HP line something it has to earn from the
+    # remit and the evidence, so it is never shown a case study up front -
+    # `_attach_proof_point` adds one afterwards, chosen from the line it
+    # settled on. Handing it the study would hand it the product to work
+    # backwards from, which is the failure that rule exists to prevent.
     "one_pager": {
         "title": "One-Pager", "subtitle": "How HP's portfolio can deliver value for this customer",
-        "words": (None, 400),
+        "structured": True,
         "headings": True,
-        "required": ["headline", "opening", "body_sections", "cta"],
-        # HP_ABX_v3_final: "One-Pager = maximum 400 words with four sections in
-        # this order: Account Challenge; How HP Helps; Proof Points; Next Step."
-        # The order is mandated, so the headings are fixed rather than left to
-        # the model, and `required_headings` re-checks what came back.
-        "sections": (4, 4),
-        "required_headings": ["Account Challenge", "How HP Helps",
-                              PROOF_POINTS_HEADING, "Next Step"],
-        "shape": ("A one-page solution overview for the account. headline; opening summary paragraph; "
-                  "EXACTLY 4 body_sections, each WITH a heading, and the headings must be exactly "
-                  "these four in this order: 'Account Challenge' (the situation the evidence shows); "
-                  "'How HP Helps' (what HP proposes); 'Proof Points' (the supporting evidence - if no "
-                  "HP proof point is available, say what the account evidence supports and no more); "
-                  "'Next Step' (why now and the recommended action); cta is the recommended action. "
-                  "AT MOST 400 words. No subject_line."),
+        "required": ["headline", "subtitle", "why_now", "pillars", "cta"],
+        "optional": ["hp_play"],
+        # The derived body: 2-3 pillars, then the HP play and the Proof Points
+        # section Python attaches - so between two and five sections.
+        "sections": (2, 5),
+        "shape": ("A one-page executive brief for the account, returned as structure rather than "
+                  "prose. headline: the title - under 70 characters, names the account and the "
+                  "subject, not a slogan. subtitle: one line saying who this is for and what it "
+                  "covers. why_now: 2-3 sentences on the account-specific trigger, drawn only from "
+                  "the evidence. pillars: EXACTLY 2 or 3 - each with a short specific heading, a "
+                  "'challenge' saying what the evidence shows, an 'hp_response' naming ONE concrete "
+                  "HP capability that answers it (not a benefit list), and its own 'evidence_used' "
+                  "citing at least one label. A pillar with no evidence is not a pillar; if the "
+                  "evidence supports only one, return one and say so in why_now rather than pad to "
+                  "two. hp_play: the single HP line the evidence earns and the one thing about it "
+                  "that matters to this persona - omit the key entirely if no line is earned. cta: "
+                  "the ask, one sentence, bounded by the committee angle. 350-500 words in total. "
+                  "No subject_line and no proof point - a case study is attached afterwards."),
     },
     "exec_brief": {
         "title": "Executive Brief", "subtitle": "2-page intelligence brief for leadership",
@@ -577,26 +662,70 @@ def _is_named_person(persona: dict) -> bool:
     return kind == "named" or (kind == "client_role" and bool(persona.get("is_filled")))
 
 
+# Rules 10 and 11 are per-persona, and a persona outside the eight has neither
+# a matrix row nor an assigned angle. Rather than leave the rule blank - which
+# reads to the model as "no constraint" - the fallback states the whole line
+# list and the general rule, which is what the prompt said before the matrix
+# existed. Only a legacy saved asset can reach it.
+def _allowed_lines_for(persona: dict) -> str:
+    try:
+        return ", ".join(bp.allowed_lines(persona["id"]))
+    except bp.UnknownPersona:
+        return HP_LINES_FOR_PROMPT
+
+
+def _denied_lines_for(persona: dict) -> str:
+    try:
+        denied = bp.denied_lines(persona["id"])
+    except bp.UnknownPersona:
+        return "none recorded for this persona - Rule 4 still applies in full"
+    return ", ".join(denied) or "none"
+
+
+def _angle_for(persona: dict) -> str:
+    try:
+        return bp.angle(persona["id"])
+    except bp.UnknownPersona:
+        return (persona.get("buying_committee_persona")
+                or "not supplied - ask for a conversation")
+
+
 def _persona_evidence(persona: dict) -> list[tuple[str, str]]:
     """What the model may know about the target, shaped by persona kind."""
     kind = persona["kind"]
-    items = [("Role", persona["title"])]
+    # The pack supplies its own "Role" line for the eight, so the client_role
+    # branch starts empty rather than seeding one and getting it twice.
+    items = [] if kind == "client_role" else [("Role", persona["title"])]
     if kind == "client_role":
-        # Each field on its own labelled line. Flattened into one "Description"
-        # blob, the department and the buying-committee angle were invisible to
-        # rule 7's citation check, and a filled role's contact name arrived as
-        # free text inside a persona the validator treated as a role type.
-        if persona.get("department"):
-            items.append(("Department", persona["department"]))
-        if persona.get("buying_committee_persona"):
-            items.append(("Buying-committee angle", persona["buying_committee_persona"]))
+        # Spec Section 3.3, slot 2: [P1]-[P5] from the pack, then the contact
+        # as [P6] and [P7] where the role is filled.
+        #
+        # The pack's goals, pain points, value drivers and decision criteria
+        # are deliberately NOT here. The specification is explicit about why:
+        # injecting them makes the model write the persona's pain points back
+        # to the persona as though they were account evidence, which reads as
+        # presumption and breaks Rule 2a. This block says who is being written
+        # to; the account block says what is true.
+        # The pack where the id is one of the eight; the persona's own fields
+        # otherwise. An asset saved before the narrowing carries an older id,
+        # and it must still render rather than raise on the way to a screen.
+        try:
+            for _label, text in bp.generation_evidence(persona["id"]):
+                field, _, value = text.partition(": ")
+                items.append((field, value))
+        except bp.UnknownPersona:
+            items.append(("Role", persona["title"]))
+            if persona.get("department"):
+                items.append(("Department", persona["department"]))
+            if persona.get("buying_committee_persona"):
+                items.append(("Buying-committee angle",
+                              persona["buying_committee_persona"]))
         if persona.get("is_filled"):
             items.append(("Name", persona.get("full_name") or "Unknown Contact"))
             if persona.get("actual_job_title"):
                 items.append(("Actual job title", persona["actual_job_title"]))
-        else:
-            items.append(("Contact", "no contact identified for this role - "
-                          + (persona.get("contact_status") or "none found")))
+        # [P6] and [P7] are omitted entirely when unfilled - not emitted empty.
+        # An empty slot invites the model to fill it.
         return items
     if kind == "named":
         items.append(("Name", persona.get("full_name") or "Unknown Contact"))
@@ -666,7 +795,17 @@ _FIELD_SCHEMA = {
     "opening": '"<first paragraph - names one specific evidence item>"',
     "cta": '"<one concrete next step>"',
     "hashtags": '["#<specific tag>", "#<specific tag>"]',
+    # The 1-Pager's structured keys (spec Section 3.4).
+    "subtitle": '"<one line: who this is for and what it covers>"',
+    "why_now": '"<2-3 sentences: the account-specific trigger, from the evidence only>"',
+    "hp_play": '"<the one HP line the evidence earns and what about it matters to this persona '
+               '- omit this key entirely if no line is earned>"',
 }
+
+_PILLAR_SCHEMA = ('{"heading": "<short, specific>", '
+                  '"challenge": "<what the evidence shows>", '
+                  '"hp_response": "<ONE concrete HP capability that answers it>", '
+                  '"evidence_used": ["A2"]}')
 GENERIC_HASHTAGS = {"#hp", "#hpinc", "#innovation", "#technology", "#business", "#success"}
 
 
@@ -683,6 +822,8 @@ def _output_schema(contract: dict) -> str:
             item = ('{"heading": "<short heading>", "text": "<paragraph>"}' if contract.get("headings")
                     else '{"text": "<paragraph>"}')
             lines.append(f'    "body_sections": [{item}]')
+        elif f == "pillars":
+            lines.append(f'    "pillars": [{_PILLAR_SCHEMA}, {_PILLAR_SCHEMA}]')
         else:
             lines.append(f'    "{f}": {_FIELD_SCHEMA[f]}')
     lines += ['    "hp_products": ["<HP line from the list above - or leave the list empty>"]',
@@ -828,7 +969,20 @@ CRITICAL RULES:
    - Do NOT write hollow abstractions: "as threats evolve", "unlock value", "drive efficiencies", "uncover opportunities".
    - No benefit lists and no superiority claims. "Robust performance, enhanced security features and streamlined manageability" and "industry-leading" say nothing about this account and nothing checkable about HP. Name ONE concrete capability instead - it beats four adjectives.
    - No "I hope this finds you well". No exclamation marks.
+   - Windows 10 support ENDED in October 2025. Never build urgency on it as though the date were still
+     ahead - no "before the deadline", no "ahead of end of support". An estate still running Windows 10
+     is a present fact and may be named as one; these roles lived through that deadline and copy that
+     puts it in the future tells them the sender was not paying attention.
 9. Omission is the default: leave out any key you cannot fill honestly. Never emit an empty string to fill a slot.
+10. PERSONA-LINE ELIGIBILITY. This persona may only be offered the HP lines listed here: {_allowed_lines_for(persona)}.
+    These lines are FORBIDDEN for this persona and must not be named, described or alluded to, however well the account evidence might seem to support them: {_denied_lines_for(persona)}.
+    A forbidden line is not a weak answer, it is a rejected one. If the only line the account evidence earns is a forbidden one, name no product and write the discovery-led piece per Rule 4. This is checked mechanically after generation.
+11. THE ASK IS BOUNDED BY THE COMMITTEE ANGLE. This persona's angle is {_angle_for(persona)}. The closing ask must stay inside it:
+    Economic Buyer -> a decision-oriented ask is acceptable.
+    Technical Buyer -> ask for an evaluation, a technical review or a pilot; never a decision and never a commercial term.
+    Finance - Budget Owner -> ask about cost, lifecycle and the shape of the case; never quote a price or a discount, and never imply a budget exists.
+    Gatekeeper - Procurement & Legal -> ask about the process only - how a vendor is evaluated, what documentation is needed. Never pitch a product to them and never ask them to choose one.
+    An ask outside the angle is a failed output even if everything else is correct.
 
 OUTPUT CONTRACT - {label}:
 {contract['shape']}
@@ -839,8 +993,89 @@ Output JSON (replace every <placeholder> with real content):
 """
 
 
+def _parse_sections(raw_sections, headed: bool) -> list[dict]:
+    """The body paragraphs, normalised to {heading, text}.
+
+    A model that returns bare strings instead of objects is accommodated - the
+    paragraphs are what matter - and an unfilled placeholder is dropped rather
+    than published. A heading on a format that has none is discarded here, so
+    nothing downstream has to know which formats carry them.
+    """
+    out = []
+    for section in (raw_sections or []):
+        if isinstance(section, str):
+            if section.strip():
+                out.append({"heading": None, "text": section.strip()})
+            continue
+        if not isinstance(section, dict):
+            continue
+        text = str(section.get("text") or "").strip()
+        if not text or _PLACEHOLDER_RE.match(text):
+            continue
+        heading = str(section.get("heading") or "").strip() if headed else ""
+        if not heading or _PLACEHOLDER_RE.match(heading):
+            heading = ""
+        out.append({"heading": heading or None, "text": text})
+    return out
+
+
+def _split_hashtags(raw_tags, cta: str) -> tuple[list[str], str]:
+    """The post's hashtags, and the closing line with them taken out.
+
+    A model asked for hashtags in their own field routinely puts them at the
+    end of the closing line instead, which reads as a stray "#HybridWork" in
+    the middle of the copy. They are moved rather than rejected. Generic tags
+    are dropped, duplicates collapse, and at most three survive.
+    """
+    if isinstance(raw_tags, str):
+        raw_tags = raw_tags.split()
+    tags_in_cta = re.findall(r"#\w+", cta)
+    cta = re.sub(r"\s*#\w+", "", cta).strip()
+    hashtags: list[str] = []
+    seen: set[str] = set()
+    for candidate in [*(raw_tags or []), *tags_in_cta]:
+        tag = "#" + re.sub(r"[^\w]", "", str(candidate).lstrip("#"))
+        low = tag.lower()
+        if len(tag) > 1 and low not in GENERIC_HASHTAGS and low not in seen:
+            seen.add(low)
+            hashtags.append(tag)
+    return hashtags[:3], cta
+
+
+def _parse_pillars(raw_pillars, labels: dict[str, str]) -> tuple[list[dict], list[tuple[str, str]]]:
+    """The 1-Pager's pillars, kept only where they are actually pillars.
+
+    A pillar with no heading or no challenge is not one. A label the prompt
+    never supplied is stripped rather than shown - a citation that looks real
+    to the seller and resolves to nothing is worse than no citation - and
+    returned alongside, because G2 rejects an invented label and cannot see one
+    that has already been removed.
+    """
+    out: list[dict] = []
+    dropped: list[tuple[str, str]] = []
+    for index, pillar in enumerate(raw_pillars or []):
+        if not isinstance(pillar, dict):
+            continue
+        heading = str(pillar.get("heading") or "").strip()
+        challenge = str(pillar.get("challenge") or "").strip()
+        if not heading or not challenge or _PLACEHOLDER_RE.match(challenge):
+            continue
+        cited = [str(x).strip().strip("[]").upper()
+                 for x in (pillar.get("evidence_used") or [])]
+        where = "pillars[%d].evidence_used" % index
+        dropped += [(where, c) for c in dict.fromkeys(cited) if c not in labels]
+        out.append({
+            "heading": heading,
+            "challenge": challenge,
+            "hp_response": str(pillar.get("hp_response") or "").strip(),
+            "evidence_used": [c for c in dict.fromkeys(cited) if c in labels],
+        })
+    return out, dropped
+
+
 def _validate_asset(raw, contract: dict, persona: dict, labels: dict[str, str],
-                    ground, report: GroundingReport, banned_names: list[str]) -> tuple[dict | None, list[str], list[str]]:
+                    ground, report: GroundingReport, banned_names: list[str],
+                    industry: str = "") -> tuple[dict | None, list[str], list[str]]:
     """Python owns the truth. Returns (clean_asset, hard_faults, style_warnings).
 
     A hard fault - an unsourced figure, a claim about a person no dataset
@@ -867,34 +1102,37 @@ def _validate_asset(raw, contract: dict, persona: dict, labels: dict[str, str],
     subject = _s("subject_line") if "subject_line" in fields else ""
     headline = _s("headline") if "headline" in fields else ""
     opening, cta, framing = _s("opening"), _s("cta"), _s("persona_framing")
-    sections: list[dict] = []
-    for s in (a.get("body_sections") or []):
-        if isinstance(s, dict):
-            t = str(s.get("text") or "").strip()
-            if t and not _PLACEHOLDER_RE.match(t):
-                heading = str(s.get("heading") or "").strip() if contract.get("headings") else ""
-                sections.append({"heading": None if (not heading or _PLACEHOLDER_RE.match(heading)) else heading,
-                                 "text": t})
-        elif isinstance(s, str) and s.strip():
-            sections.append({"heading": None, "text": s.strip()})
+    sections = _parse_sections(a.get("body_sections"), bool(contract.get("headings")))
+
+    # Spec Section 3.4: the 1-Pager is structure, not prose. Parse it, then
+    # project it onto headline / opening / body_sections / cta - the envelope
+    # every renderer, the asset history and the Message Evaluator already read.
+    # One envelope means the checks below (grounding, banned phrases, names,
+    # competitors, the word count) see this format without a second code path.
+    pillars: list[dict] = []
+    dropped_labels: list[tuple[str, str]] = []
+    subtitle = why_now = hp_play = ""
+    if contract.get("structured"):
+        subtitle, why_now, hp_play = _s("subtitle"), _s("why_now"), _s("hp_play")
+        pillars, dropped_labels = _parse_pillars(a.get("pillars"), labels)
+        # why_now IS the opening paragraph of the rendered document.
+        opening = opening or why_now
+        sections = [{"heading": p["heading"],
+                     "text": " ".join(t for t in (p["challenge"], p["hp_response"]) if t)}
+                    for p in pillars]
+        if hp_play:
+            sections.append({"heading": HP_PLAY_HEADING, "text": hp_play})
+        # The Proof Points section is appended by `_attach_proof_point`, after
+        # the HP line is settled. The model is never shown a case study.
 
     # Hashtags live in their own field; any the model left in the closing line move there.
     hashtags: list[str] = []
     if "hashtags" in fields:
-        raw_tags = a.get("hashtags") or []
-        if isinstance(raw_tags, str):
-            raw_tags = raw_tags.split()
-        tags_in_cta = re.findall(r"#\w+", cta)
-        cta = re.sub(r"\s*#\w+", "", cta).strip()
-        for t in list(raw_tags) + tags_in_cta:
-            tag = "#" + re.sub(r"[^\w]", "", str(t).lstrip("#"))
-            if len(tag) > 1 and tag.lower() not in GENERIC_HASHTAGS \
-                    and tag.lower() not in {x.lower() for x in hashtags}:
-                hashtags.append(tag)
-        hashtags = hashtags[:3]
+        hashtags, cta = _split_hashtags(a.get("hashtags"), cta)
 
     present = {"subject_line": subject, "headline": headline, "opening": opening,
-               "cta": cta, "body_sections": sections}
+               "cta": cta, "body_sections": sections,
+               "subtitle": subtitle, "why_now": why_now, "pillars": pillars}
     for k in contract["required"]:
         if not present.get(k):
             faults.append(f"{k} is missing")
@@ -924,7 +1162,11 @@ def _validate_asset(raw, contract: dict, persona: dict, labels: dict[str, str],
                 + "; HP_ABX_v3_final requires exactly "
                 + ", ".join(f'"{h}"' for h in req_headings) + " in that order")
 
-    texts = [subject, headline, opening, cta, framing, " ".join(hashtags)] \
+    # `subtitle` is the only structured field the sections do not already
+    # carry: why_now became the opening, the pillars and the play became
+    # sections. Missing from here it would be the one line in the document no
+    # gate ever read.
+    texts = [subject, headline, opening, cta, framing, subtitle, " ".join(hashtags)] \
             + [s["text"] for s in sections] + [s["heading"] or "" for s in sections]
     blob = " ".join(t for t in texts if t).lower()
 
@@ -937,7 +1179,7 @@ def _validate_asset(raw, contract: dict, persona: dict, labels: dict[str, str],
     # none of them are part of the prose the limit governs.
     wmin, wmax = contract.get("words") or (None, None)
     if wmin or wmax:
-        counted = [headline, opening, cta] + [s["text"] for s in sections] \
+        counted = [headline, subtitle, opening, cta] + [s["text"] for s in sections] \
                   + [s["heading"] or "" for s in sections]
         words = len(" ".join(t for t in counted if t).split())
         if wmax and words > wmax:
@@ -981,6 +1223,7 @@ def _validate_asset(raw, contract: dict, persona: dict, labels: dict[str, str],
 
     used = [str(x).strip().strip("[]").upper() for x in (a.get("evidence_used") or [])]
     kept_labels = [u for u in dict.fromkeys(used) if u in labels]
+    dropped_labels += [("evidence_used", u) for u in dict.fromkeys(used) if u not in labels]
     if labels and not kept_labels:
         faults.append("evidence_used cites none of the supplied labels")
 
@@ -1002,7 +1245,77 @@ def _validate_asset(raw, contract: dict, persona: dict, labels: dict[str, str],
         clean["persona_framing"] = framing
     if hashtags:
         clean["hashtags"] = hashtags
+    if contract.get("structured"):
+        # Kept alongside the projection, not instead of it: G13 checks the
+        # pillars, and Section 3.5 renders the PDF "from the JSON, never from a
+        # model-generated blob" - which is only possible while the structure
+        # survives storage.
+        clean["subtitle"] = subtitle
+        clean["why_now"] = why_now
+        clean["pillars"] = pillars
+        if hp_play:
+            clean["hp_play"] = hp_play
+
+    # Spec Section 6 (C8): the gate suite runs on every generation before the
+    # seller sees it. It runs LAST, on the cleaned asset, so it judges what
+    # would actually be published rather than what the model first returned.
+    #
+    # The checks above and the gates overlap deliberately - both look at
+    # unsourced figures, both look at banned phrases - and that is cheaper than
+    # deciding which one owns each rule. What the gates add is the persona:
+    # the eligibility matrix and the committee angle, neither of which the
+    # validator above can see.
+    findings = content_gates.run(
+        clean, persona_id=persona.get("id") or "", content_type=contract_key(contract),
+        filled=_is_named_person(persona), corpus=ground,
+        supplied_labels=list(labels), label_texts=labels,
+        known_names=banned_names, competitors=COMPETITORS,
+        industry=industry, required_keys=contract["required"],
+        dropped_labels=dropped_labels)
+    for finding in content_gates.rejects(findings):
+        faults.append("%s: %s" % (finding["gate"], _gate_detail(finding)))
+    for finding in content_gates.regenerates(findings):
+        soft.append("%s: %s" % (finding["gate"], _gate_detail(finding)))
+    if faults:
+        return None, faults, soft
     return clean, [], soft
+
+
+def _gate_detail(finding: dict) -> str:
+    """One line a seller or a retry prompt can act on.
+
+    These strings go back to the model as rewrite notes, so each one says what
+    is wrong AND what to do instead. A gate that reports only the offending
+    token ("Poly Collaboration") tells a rewrite nothing.
+    """
+    if finding.get("detail"):
+        return str(finding["detail"])
+    if finding.get("denied_line_named"):
+        return ("%s is not a line this persona may be offered - name no HP product at "
+                "all and write the discovery-led version" % finding["denied_line_named"])
+    if finding.get("leaked_name"):
+        return ("names \"%s\" - no contact has been identified in this role, so write to "
+                "the role and name nobody" % finding["leaked_name"])
+    if finding.get("invalid_label"):
+        return ("%s cites %s, which the prompt never supplied - cite only the labels in the "
+                "evidence block" % (finding.get("where_found") or "evidence_used",
+                                    finding["invalid_label"]))
+    if finding.get("offending_token"):
+        return ("the figure %s is not in the evidence - remove it or use only figures the "
+                "evidence states" % finding["offending_token"])
+    if finding.get("phrase"):
+        return "filler phrase \"%s\" - say the specific thing instead" % finding["phrase"]
+    if finding.get("violation_type"):
+        return str(finding["violation_type"])
+    return finding["gate"]
+
+
+def contract_key(contract: dict) -> str:
+    """The content-type key for a contract, for the gates' word budgets."""
+    for key, spec in CONTENT_TYPE_CONTRACTS.items():
+        if spec is contract:
+            return key
+    return ""
 
 
 # --- HTML rendering for the two branded types ---------------------------------------
@@ -1168,6 +1481,24 @@ def _safe_fallback_asset(contract: dict, persona: dict, company_name: str, topic
         asset["subject_line"] = f"Re: {subject_core}"[:contract.get("subject_max") or 80]
     if "headline" in set(_content_fields(contract)):
         asset["headline"] = f"{company_name}: {subject_core}"
+    if contract.get("structured"):
+        # The structured 1-Pager, composed rather than generated. Both pillars
+        # carry an empty `hp_response`: this path names no HP capability at
+        # all, because there is no model here to earn one and rule 4 will not
+        # be satisfied by a template. The second pillar is the limit of what
+        # the evidence supports, stated as such.
+        asset["subtitle"] = f"Prepared for {role} at {company_name}"
+        asset["why_now"] = opening
+        cited = asset["evidence_used"]
+        asset["pillars"] = [
+            {"heading": "What was reported", "challenge": trigger,
+             "hp_response": "", "evidence_used": cited},
+            {"heading": "What it depends on", "challenge": body,
+             "hp_response": "", "evidence_used": cited},
+        ]
+        asset["body_sections"] = [{"heading": p["heading"], "text": p["challenge"]}
+                                  for p in asset["pillars"]]
+        return asset
     if contract.get("headings"):
         # A headed format needs its mandated sections; the template fills the
         # ones it can stand behind and says nothing it cannot.
@@ -1206,6 +1537,27 @@ def _attach_proof_point(asset: dict, proof: dict, contract: dict) -> None:
     """
     asset["hp_proof_point"] = proof["text"]
     asset["hp_proof_point_detail"] = proof
+
+    if contract.get("structured"):
+        # The structured 1-Pager has no mandated headings, so there is nothing
+        # to replace: the Proof Points section is appended. `proof_point` is
+        # the specification's key for it (Section 3.4) and Python fills it, for
+        # the reason in the docstring above.
+        asset["proof_point"] = proof["text"]
+        sections = asset.get("body_sections") or []
+        if any(str(sec.get("heading") or "").strip() == PROOF_POINTS_HEADING
+               for sec in sections):
+            return
+        _lo, wmax = content_gates.WORD_BUDGETS.get(contract_key(contract), (None, None))
+        if wmax and content_gates.asset_word_count(asset) + len(proof["text"].split()) > wmax:
+            # Past the budget is past one page, and Section 3.5 says an
+            # overflowing 1-Pager is out of budget rather than something to
+            # shrink. The study stays on `hp_proof_point`, which the UI shows
+            # beside the copy, so nothing is lost - it just is not in the page.
+            return
+        asset["body_sections"] = [*sections, {"heading": PROOF_POINTS_HEADING,
+                                              "text": proof["text"]}]
+        return
 
     headings = contract.get("required_headings") or []
     if PROOF_POINTS_HEADING not in headings:
@@ -1508,6 +1860,7 @@ def generate_content_asset(account_id: str, persona_id: str, content_type: str,
     # The chosen angle is part of the cache key: picking a different angle must
     # regenerate, not serve the asset written for the previous one.
     selected_angle = str(selected_angle or "").strip()[:TOPIC_MAX_CHARS]
+    industry = ctx.get("industry") or ""
     fingerprint = ctx["fingerprint"] if not selected_angle else hashlib.sha1(
         (ctx["fingerprint"] + "|" + selected_angle.lower()).encode("utf-8")).hexdigest()
 
@@ -1576,7 +1929,8 @@ def generate_content_asset(account_id: str, persona_id: str, content_type: str,
         if llm_res is None:
             return None, ["model returned nothing - the LLM API key is missing or the call failed"], []
 
-        a, f, sf = _validate_asset(llm_res, contract, persona, labels, ground, report, banned_names)
+        a, f, sf = _validate_asset(llm_res, contract, persona, labels, ground, report,
+                                banned_names, industry)
         attempts.append(f + sf)
         _consider(a, sf)
         # Bounded retry, for style warnings as well as hard faults. The model is
@@ -1597,7 +1951,8 @@ def generate_content_asset(account_id: str, persona_id: str, content_type: str,
             retry_res = generate_gpt4o_json_completion(retry_system, user_prompt)
             if retry_res is None:
                 break
-            a, f, sf = _validate_asset(retry_res, contract, persona, labels, ground, report, banned_names)
+            a, f, sf = _validate_asset(retry_res, contract, persona, labels, ground,
+                                        report, banned_names, industry)
             attempts.append(f + sf)
             _consider(a, sf)
 
@@ -1766,27 +2121,32 @@ def extract_content_studio(account_id: str) -> list[dict]:
 
     results = []
 
-    # 1. Target Personas, in spec order: named (Source A, via Stakeholder Map)
-    #    -> role-type proxy (Source B, job_openings) -> generic archetype.
-    named_personas = _derive_named_personas(db, account_id)
-    client_personas = _derive_client_personas(account_id)
-    role_proxy_personas = _derive_role_proxy_personas(job_records)
-    # The archetypes are the last resort they were always meant to be: a
-    # generic "CIO / IT Leadership" is only worth offering when the account has
-    # no client target list to offer instead.
-    archetypes = [] if client_personas else ARCHETYPE_PERSONAS
-    target_personas = (named_personas + client_personas
-                       + role_proxy_personas + archetypes)
+    # 1. Target Personas: the client's eight, and only the eight (spec
+    #    Section 1.4). The five-tier fallback that used to sit here - named
+    #    contacts, then hiring-derived role proxies, then seven generic
+    #    archetypes - offered roles the programme does not write to, and the
+    #    eligibility matrix in Section 2.3 has no row for any of them, so an
+    #    asset generated for one could not be checked.
+    #
+    #    `_derive_named_personas`, `_derive_role_proxy_personas` and
+    #    `ARCHETYPE_PERSONAS` stay in the module and stay in `_persona_by_id`:
+    #    an asset already saved under one of their ids still has to render.
+    #    They are simply no longer offered.
+    target_personas = _derive_client_personas(account_id)
+    filled = sum(1 for p in target_personas if p["is_filled"])
     persona_sources = {
-        "named": len(named_personas),
-        "client_role": len(client_personas),
-        "role_proxy": len(role_proxy_personas),
-        "archetype": len(archetypes),
+        # Section 4.3 asks for this flag by name, so a later switch to
+        # account-derived persona fields is one visible line rather than an
+        # inference from the data.
+        "source": bp.PERSONA_CARD_SOURCE,
+        "pack_version": bp.PERSONA_PACK_VERSION,
+        "client_role": len(target_personas),
+        "filled": filled,
+        "unfilled": len(target_personas) - filled,
     }
-    pipeline.step("personas", "", named=len(named_personas),
-                  client_roles=len(client_personas),
-                  filled=sum(1 for p in client_personas if p["is_filled"]),
-                  role_proxy=len(role_proxy_personas), archetype=len(archetypes))
+    pipeline.step("personas", "", offered=len(target_personas), filled=filled,
+                  unfilled=len(target_personas) - filled,
+                  source=bp.PERSONA_CARD_SOURCE)
 
     # 2. Content Types - the three the client asked for (Sahaj, 27 Sep). The
     #    other contracts stay defined so assets already generated still render.

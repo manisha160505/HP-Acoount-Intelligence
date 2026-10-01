@@ -154,7 +154,17 @@ NODES = (
          datasets=("firmographics", "job_openings", "prospect_contacts",
                    "company_personas"),
          upstream=("stakeholder_roster", "news"),
-         logic_version=2,
+         # 3: the 30 Sep build specification, Section 1.4. The picker offers the
+         # client's eight target roles and nothing else - the named, role-proxy
+         # and archetype tiers are gone from the assembly - and
+         # `persona_sources` reports the pack rather than four tier counts.
+         # All Python, so nothing else here would have moved the fingerprint.
+         #
+         # The pack is a logic input in its own right: editing a persona card or
+         # a row of the eligibility matrix changes what this widget offers, so
+         # it has to invalidate the widget without anyone remembering to bump.
+         logic_refs=("app.services.hp.buyer_personas:PERSONA_PACK_VERSION",),
+         logic_version=3,
          run=f"{_P}:content_persona"),
     Node("news", "recent_news_signals",
          widgets=("news_relevance_summary", "news_signals_feed"),
@@ -219,6 +229,17 @@ NODES = (
          datasets=("firmographics", "prospect_contacts", "company_personas",
                    "job_openings"),
          upstream=("stakeholder_roster", "stakeholder_talking_points"),
+         # 2: the 30 Sep build specification, Sections 4.2 and 4.3. The audience
+         # is the client's eight target roles and each one now carries its
+         # hardcoded card, replacing the contacts -> client roles -> hiring
+         # fallback chain. All Python, so nothing else here would have moved the
+         # fingerprint.
+         #
+         # The pack is a logic input for the same reason it is one on
+         # `content_persona`: the card IS the widget's content now, so editing a
+         # card has to invalidate it without anyone remembering to bump.
+         logic_refs=("app.services.hp.buyer_personas:PERSONA_PACK_VERSION",),
+         logic_version=2,
          run=f"{_P}:evaluator_personas"),
     Node("tech_recs", "tech_landscape",
          widgets=("technographic_hp_recommendations",),

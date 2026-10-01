@@ -44,6 +44,12 @@ IMPROVE = "Improve"
 CHANGE = "Change"
 VERDICTS = (KEEP, IMPROVE, CHANGE)
 
+# Spec Section 4.6 names the chunk vocabulary as colours: "red (3+ issues, must
+# change) - yellow (improvable) - green (keep)". That is this build's three
+# verdicts under different names, so the colour is derived rather than stored as
+# a second field the model could disagree with.
+VERDICT_COLOURS = {KEEP: "green", IMPROVE: "yellow", CHANGE: "red"}
+
 FACTUAL = "factual_grounding"
 STYLE = "style"
 
@@ -127,6 +133,7 @@ def verify_phrases(raw_phrases, sources, max_chunks=None):
             "start": span[0],
             "end": span[1],
             "verdict": verdict,
+            "color": VERDICT_COLOURS[verdict],
             "problem_type": problem_type,
             "comment": _text(item.get("comment") or item.get("reason") or item.get("note")),
             "suggestion": _text(item.get("suggestion") or item.get("rewrite")),
@@ -138,11 +145,60 @@ def verify_phrases(raw_phrases, sources, max_chunks=None):
     phrases.sort(key=lambda p: p["start"])
     if max_chunks:
         for extra in phrases[max_chunks:]:
-            dropped.append({"reason": "over the LITE chunk limit",
+            dropped.append({"reason": "over the chunk limit for this mode",
                             "chunk": extra["chunk"][:160]})
         phrases = phrases[:max_chunks]
 
     return phrases, dropped
+
+
+def chunk_fidelity(phrases, stimulus: str) -> list:
+    """G14: do the located chunks reconstruct the message? Returns faults.
+
+    Every chunk here has already been located in the draft by `verify_phrases`,
+    so each one is verbatim by construction. What is not established is that the
+    SET is complete, and that is the failure the specification is worried about:
+    a seller reading the highlighted view takes an uncovered sentence for text
+    nobody objected to, and Step R rewrites from the chunks, so an uncovered
+    sentence is also a sentence the rewrite cannot touch.
+
+    Coverage is checked here rather than in `content_gates` because only this
+    module knows where each chunk sits. The whitespace BETWEEN chunks is part of
+    the message and is not a gap - the specification's "contiguous" is about
+    substance, and a chunker that splits on sentence boundaries leaves a space
+    behind every time. So the reconstruction keeps those separators, and
+    `g14_chunk_fidelity` then catches what a coverage walk cannot: an overlap,
+    or a span that reaches past the end.
+    """
+    from app.services.hp import content_gates
+
+    text = str(stimulus or "")
+    spans = [(p["start"], p["end"]) for p in (phrases or [])
+             if p.get("start") is not None and p.get("end") is not None]
+    if not spans:
+        return ["no chunk could be located in the message"]
+
+    faults, parts, cursor = [], [], 0
+    for start, end in spans:
+        gap = text[cursor:start]
+        if gap.strip():
+            faults.append("the chunks skip %r" % gap.strip()[:80])
+        else:
+            parts.append(gap)
+        parts.append(text[start:end])
+        cursor = max(cursor, end)
+
+    tail = text[cursor:]
+    if tail.strip():
+        faults.append("the chunks stop before the end of the message (%r)"
+                      % tail.strip()[:80])
+    else:
+        parts.append(tail)
+
+    if not faults:
+        faults += [f.get("detail") or f["gate"]
+                   for f in content_gates.g14_chunk_fidelity(parts, text)]
+    return faults
 
 
 # ---------------------------------------------------------------------------

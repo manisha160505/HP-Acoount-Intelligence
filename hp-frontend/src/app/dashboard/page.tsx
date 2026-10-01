@@ -5158,16 +5158,22 @@ export default function UserDashboardPage() {
                     }
                   };
 
-                  // Score presentation, matching the reference app's bands.
+                  // Score presentation. The bands are the build specification's
+                  // rubric (Section 4.5) and they are six, not five: the previous
+                  // table started Strong at 80, so a 76 read as Good where the
+                  // specification calls it Strong. `score_band` on the server uses
+                  // the same table - these have to agree or the bar and the badge
+                  // disagree on the same number.
                   const scoreColor = (n: number) =>
-                    n >= 80 ? 'bg-green-500' : n >= 60 ? 'bg-teal-500'
+                    n >= 90 ? 'bg-emerald-600' : n >= 75 ? 'bg-green-500' : n >= 60 ? 'bg-teal-500'
                       : n >= 40 ? 'bg-amber-500' : n >= 20 ? 'bg-orange-500' : 'bg-rose-500';
                   const scoreLabel = (n: number) =>
-                    n >= 80 ? 'Strong' : n >= 60 ? 'Good' : n >= 40 ? 'Fair'
-                      : n >= 20 ? 'Weak' : 'Poor';
+                    n >= 90 ? 'Exceptional' : n >= 75 ? 'Strong' : n >= 60 ? 'Good'
+                      : n >= 40 ? 'Average' : n >= 20 ? 'Weak' : 'Poor';
                   const scoreBadge = (n: number | null) =>
                     n == null ? 'border-slate-200 text-slate-400'
-                      : n >= 80 ? 'border-green-300 text-green-700 bg-green-50'
+                      : n >= 90 ? 'border-emerald-300 text-emerald-700 bg-emerald-50'
+                      : n >= 75 ? 'border-green-300 text-green-700 bg-green-50'
                       : n >= 60 ? 'border-teal-300 text-teal-700 bg-teal-50'
                       : n >= 40 ? 'border-amber-300 text-amber-700 bg-amber-50'
                       : 'border-rose-300 text-rose-700 bg-rose-50';
@@ -5416,27 +5422,26 @@ export default function UserDashboardPage() {
                                 </ul>
                               </div>
 
-                              <div>
-                                <p className="text-sm font-semibold text-slate-700 mb-1.5">Pain Points</p>
-                                {(chosenPersona.pain_points || []).length > 0 ? (
-                                  <ul className="space-y-1 text-xs text-slate-600">
-                                    {chosenPersona.pain_points.map((x: string, i: number) => (
-                                      <li key={i}>&ndash; {x}</li>
-                                    ))}
-                                  </ul>
-                                ) : (
-                                  <p className="text-xs text-slate-400">Not available for this contact</p>
-                                )}
-                              </div>
-
-                              <div>
-                                <p className="text-sm font-semibold text-slate-700 mb-1.5">Opening Angle</p>
-                                {chosenPersona.opening_angle ? (
-                                  <p className="text-xs text-slate-600">{chosenPersona.opening_angle}</p>
-                                ) : (
-                                  <p className="text-xs text-slate-400">Not available</p>
-                                )}
-                              </div>
+                              {/* Step B, spec Section 4.3. Every list here is the hardcoded
+                                  persona card - identical on all 220 accounts - and it is
+                                  labelled as a persona reference rather than as intelligence
+                                  about this buyer. The account-derived blocks below keep their
+                                  own labels. */}
+                              {(['goals', 'pain_points', 'value_drivers', 'decision_criteria'] as const).map((field) => {
+                                const items: string[] = chosenPersona.card?.[field] || [];
+                                if (items.length === 0) return null;
+                                const heading = field === 'decision_criteria'
+                                  ? 'They decide by asking'
+                                  : field.replace(/_/g, ' ').replace(/^./, (c: string) => c.toUpperCase());
+                                return (
+                                  <div key={field}>
+                                    <p className="text-sm font-semibold text-slate-700 mb-1.5">{heading}</p>
+                                    <ul className="space-y-1 text-xs text-slate-600">
+                                      {items.map((x, i) => <li key={i}>&ndash; {x}</li>)}
+                                    </ul>
+                                  </div>
+                                );
+                              })}
 
                               <div>
                                 <p className="text-sm font-semibold text-slate-700 mb-1.5">Account Signals</p>
@@ -5452,8 +5457,65 @@ export default function UserDashboardPage() {
                               </div>
                             </div>
 
+                            {chosenPersona.card && (
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-5">
+                                <div>
+                                  <p className="text-sm font-semibold text-slate-700 mb-1.5">
+                                    What does not land
+                                  </p>
+                                  <ul className="space-y-1 text-xs text-slate-600">
+                                    {(chosenPersona.card.does_not_resonate || []).map((x: string, i: number) => (
+                                      <li key={i}>&ndash; {x}</li>
+                                    ))}
+                                  </ul>
+                                </div>
+                                <div>
+                                  <p className="text-sm font-semibold text-slate-700 mb-1.5">
+                                    Objections they raise
+                                  </p>
+                                  <ul className="space-y-1 text-xs text-slate-600">
+                                    {(chosenPersona.card.typical_objections || []).map((x: string, i: number) => (
+                                      <li key={i}>&ndash; {x}</li>
+                                    ))}
+                                  </ul>
+                                </div>
+                                <div className="md:col-span-2 text-xs text-slate-600 space-y-1">
+                                  <p>
+                                    <span className="font-semibold text-slate-700">Preferred tone:</span>{' '}
+                                    {chosenPersona.card.content_preferences?.tone}
+                                  </p>
+                                  <p>
+                                    <span className="font-semibold text-slate-700">Preferred format:</span>{' '}
+                                    {chosenPersona.card.content_preferences?.format}
+                                  </p>
+                                  <p>
+                                    <span className="font-semibold text-slate-700">Measured on:</span>{' '}
+                                    {(chosenPersona.card.content_preferences?.key_metrics || []).join(', ')}
+                                  </p>
+                                  <p>
+                                    <span className="font-semibold text-slate-700">
+                                      What HP can and cannot address for this role:
+                                    </span>{' '}
+                                    {chosenPersona.card.hp_opportunity}
+                                  </p>
+                                </div>
+                                <p className="md:col-span-2 rounded-lg bg-slate-50 border border-slate-200 px-3 py-2 text-[11px] text-slate-600">
+                                  <span className="font-semibold">
+                                    Evidence grade: {chosenPersona.card.evidence_grade}.
+                                  </span>{' '}
+                                  {chosenPersona.card.confidence_explanation}{' '}
+                                  This card is a persona reference, identical on every account
+                                  &mdash; not intelligence about this buyer. The account reaches
+                                  the evaluation through the evidence below and through the
+                                  scoring itself.
+                                </p>
+                              </div>
+                            )}
+
                             <div>
-                              <p className="text-sm font-semibold text-slate-700 mb-1.5">HP Opportunity</p>
+                              <p className="text-sm font-semibold text-slate-700 mb-1.5">
+                                HP Opportunity at this account
+                              </p>
                               {(evalOptions.account_context?.hp_opportunity || []).length > 0 ? (
                                 <p className="text-xs text-slate-600 leading-relaxed">
                                   {evalOptions.account_context.hp_opportunity.map((o: any, i: number) => (
@@ -5493,7 +5555,9 @@ export default function UserDashboardPage() {
                                       {src === 'account_contact' ? 'This account’s contact record'
                                         : src === 'account_evidence' ? 'Account evidence'
                                         : src === 'hiring_role_proxy' ? 'Open job postings (role proxy)'
-                                        : 'Not available'}
+                                        : src === 'company_personas' ? 'The client’s target buying committee'
+                                        : src === 'not_available' ? 'Not available'
+                                        : String(src)}
                                     </span>
                                   </p>
                                 ))}
@@ -5553,25 +5617,59 @@ export default function UserDashboardPage() {
 
                             {Object.keys(evaluation.dimensions || {}).length > 0 ? (
                               <div className="space-y-2.5">
-                                {Object.entries(evaluation.dimensions).map(([k, v]: any) => (
-                                  <div key={k} className="flex items-center gap-3">
-                                    <span className="text-xs font-medium text-slate-600 w-28 text-right capitalize">
-                                      {k.replace(/_/g, ' ')}
-                                    </span>
-                                    <div className="flex-1 bg-slate-100 rounded-full h-4 overflow-hidden">
-                                      <div
-                                        className={`${scoreColor(v)} h-full rounded-full transition-all duration-500`}
-                                        style={{ width: `${v}%` }}
-                                      />
+                                {Object.entries(evaluation.dimensions).map(([k, v]: any) => {
+                                  const weight = evaluation.dimension_weights?.[k];
+                                  const padded = (evaluation.dimensions_padded || []).includes(k);
+                                  const floored = (evaluation.severe_failures || [])
+                                    .find((f: any) => f.dimension === k);
+                                  return (
+                                    <div key={k} className="space-y-1">
+                                      <div className="flex items-center gap-3">
+                                      <span className="text-xs font-medium text-slate-600 w-28 text-right capitalize">
+                                        {k.replace(/_/g, ' ')}
+                                      </span>
+                                      <div className="flex-1 bg-slate-100 rounded-full h-4 overflow-hidden">
+                                        <div
+                                          className={`${padded ? 'bg-slate-300' : scoreColor(v)} h-full rounded-full transition-all duration-500`}
+                                          style={{ width: `${v}%` }}
+                                        />
+                                      </div>
+                                      <span className="text-[11px] font-semibold text-slate-700 w-8 text-right">
+                                        {v}
+                                      </span>
+                                      <span className="text-[10px] text-slate-400 w-16">
+                                        {padded ? 'Not scored' : scoreLabel(v)}
+                                      </span>
+                                      {/* A dimension outside this objective's formula is scored
+                                          and shown and weighs nothing - say so, or a low bar
+                                          reads as something that pulled the composite down. */}
+                                      <span className="text-[10px] w-20">
+                                        {weight === 0
+                                          ? <span className="text-slate-400">no weight</span>
+                                          : weight != null
+                                            ? <span className="text-slate-500 font-mono">&times;{weight}</span>
+                                            : null}
+                                      </span>
+                                      {floored && (
+                                        <span
+                                          className="text-[10px] font-semibold text-rose-600"
+                                          title={floored.detail}
+                                        >
+                                          capped &mdash; {floored.gate}
+                                        </span>
+                                      )}
+                                      </div>
+                                      {/* Spec 4.10 asks for a rationale per
+                                          dimension. Seven bars and no reasons is
+                                          a score, not feedback. */}
+                                      {evaluation.dimension_rationales?.[k] && !padded && (
+                                        <p className="ml-[7.75rem] -mt-1 text-[11px] text-slate-500 leading-snug">
+                                          {evaluation.dimension_rationales[k]}
+                                        </p>
+                                      )}
                                     </div>
-                                    <span className="text-[11px] font-semibold text-slate-700 w-8 text-right">
-                                      {v}
-                                    </span>
-                                    <span className="text-[10px] text-slate-400 w-16">
-                                      {scoreLabel(v)}
-                                    </span>
-                                  </div>
-                                ))}
+                                  );
+                                })}
                               </div>
                             ) : (
                               <p className="text-xs text-slate-500">
@@ -5606,6 +5704,70 @@ export default function UserDashboardPage() {
                                 <p className="mt-3 text-xs font-semibold text-rose-600">
                                   Composite withheld &mdash; {evaluation.dimension_problems.join('; ')}
                                 </p>
+                              )}
+                              {(evaluation.dimensions_padded || []).length > 0 && (
+                                <p className="mt-3 text-xs text-slate-600">
+                                  The model did not return{' '}
+                                  <span className="font-semibold capitalize">
+                                    {evaluation.dimensions_padded
+                                      .map((d: string) => d.replace(/_/g, ' ')).join(', ')}
+                                  </span>
+                                  . Shown at 50 so the rest of the evaluation still publishes &mdash;
+                                  that is a placeholder, not a score.
+                                </p>
+                              )}
+                              {(evaluation.severe_failures || []).length > 0 && (
+                                <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2.5 space-y-1">
+                                  <p className="text-[10px] font-bold uppercase tracking-wider text-rose-700">
+                                    Severe failure
+                                  </p>
+                                  {evaluation.severe_failures.map((f: any, i: number) => (
+                                    <p key={i} className="text-xs text-rose-800">
+                                      {f.detail}
+                                      {f.model_score != null && (
+                                        <span className="text-rose-600">
+                                          {' '}(scored {f.model_score} before the cap)
+                                        </span>
+                                      )}
+                                      {f.quote && (
+                                        <span className="block text-[11px] italic text-rose-700 mt-0.5">
+                                          &ldquo;{f.quote}&rdquo;
+                                        </span>
+                                      )}
+                                    </p>
+                                  ))}
+                                </div>
+                              )}
+                              {(evaluation.chunk_fidelity_faults || []).length > 0 && (
+                                <p className="mt-3 text-xs text-amber-700">
+                                  The phrase chunks below do not cover the whole message:{' '}
+                                  {evaluation.chunk_fidelity_faults.join('; ')}. Anything not
+                                  highlighted was not reviewed.
+                                </p>
+                              )}
+                              {evaluation.persona_card?.behavioural_state && (
+                                <div className="mt-3 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2.5 text-xs text-indigo-900 space-y-1">
+                                  <p className="text-[10px] font-bold uppercase tracking-wider text-indigo-700">
+                                    Assumed entry state &mdash; {evaluation.persona_card.behavioural_state.name}
+                                  </p>
+                                  <p>
+                                    Trust {evaluation.persona_card.behavioural_state.trust_level},{' '}
+                                    {String(evaluation.persona_card.behavioural_state.response_bias).toLowerCase()} bias.{' '}
+                                    {evaluation.persona_card.behavioural_state.messaging_approach}.
+                                  </p>
+                                  <p>
+                                    <span className="font-semibold">Would move them forward:</span>{' '}
+                                    {evaluation.persona_card.behavioural_state.fast_track_trigger}
+                                  </p>
+                                  <p>
+                                    <span className="font-semibold">Holds them back:</span>{' '}
+                                    {evaluation.persona_card.behavioural_state.key_blocker}
+                                  </p>
+                                  <p className="text-[10px] text-indigo-600">
+                                    A default for this role, not something observed about this
+                                    reader.
+                                  </p>
+                                </div>
                               )}
                             </div>
 
@@ -7108,6 +7270,9 @@ export default function UserDashboardPage() {
                                     </div>
                                   )}
                                   {g.headline && <h4 className="text-lg font-extrabold text-slate-900">{g.headline}</h4>}
+                                  {/* The 1-Pager's subtitle: who the document is for and what it
+                                      covers. Only the structured contract carries it. */}
+                                  {g.subtitle && <p className="-mt-2 text-[13px] text-slate-500">{g.subtitle}</p>}
                                   <p>{g.opening}</p>
                                   {(g.body_sections || []).map((sec: any, i: number) => (
                                     <div key={i} className="space-y-1">
