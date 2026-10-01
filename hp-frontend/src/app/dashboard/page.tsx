@@ -1955,12 +1955,34 @@ export default function UserDashboardPage() {
                                                 <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 block">
                                                   Supporting claims ({(p.sources || []).length})
                                                 </span>
-                                                {(p.sources || []).map((s: any, si: number) => (
-                                                  <div key={si} className="text-[10px] text-slate-600 leading-relaxed">
-                                                    &ldquo;{s.source_text}&rdquo;
-                                                    <span className="text-slate-400"> - {s.label}</span>
-                                                  </div>
-                                                ))}
+                                                {/* One short point per source, in the source's own
+                                                    words (priorities.claim_point). The whole registered
+                                                    text stays on hover. A payload built before
+                                                    claim_point existed falls back to that text. */}
+                                                <div className="space-y-2.5">
+                                                  {(p.sources || []).map((s: any, si: number) => {
+                                                    // One point for a short source, 3-6 for a long
+                                                    // paragraph (priorities.claim_points).
+                                                    const points: string[] = s.claim_points?.length
+                                                      ? s.claim_points
+                                                      : [s.claim_point || s.source_text];
+                                                    return (
+                                                      <div key={si} title={s.claim_points?.length || s.claim_point ? s.source_text : undefined}>
+                                                        <ul className="space-y-1">
+                                                          {points.map((point, pi) => (
+                                                            <li key={pi} className="flex gap-2">
+                                                              <span className="text-hp-navy flex-shrink-0 text-[11px] leading-snug">&bull;</span>
+                                                              <span className="text-[11px] text-slate-700 leading-snug min-w-0">{point}</span>
+                                                            </li>
+                                                          ))}
+                                                        </ul>
+                                                        <span className="block text-[10px] text-slate-400 truncate mt-0.5 pl-4">
+                                                          {s.label}
+                                                        </span>
+                                                      </div>
+                                                    );
+                                                  })}
+                                                </div>
                                               </div>
                                             </div>
                                           )}

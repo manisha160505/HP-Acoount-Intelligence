@@ -218,3 +218,178 @@ class TestThePriorityCardAsBullets:
             {"label": "Hiring", "points": 3, "max_points": 5,
              "basis": "roles \u2014 engineering \u2013 design"}]})
         assert chr(8212) not in " ".join(lines) and chr(8211) not in " ".join(lines)
+
+
+class TestSupportingClaimsArePoints:
+    """1 Oct: a supporting claim is one short point, never a paragraph."""
+
+    FIRMO = (
+        "Accenture plc is a global professional services firm that delivers a "
+        "wide array of strategy, consulting, interactive, technology, and "
+        "operations services worldwide. Its cybersecurity portfolio includes "
+        "cyber defense, applied and managed security, operational technology "
+        "(OT) security, security strategy and risk management, and "
+        "industry-specific security products. Additionally, Accenture provides "
+        "cloud solutions, ecosystem development, marketing st"
+    )
+
+    def test_the_sentence_about_the_priority_is_chosen(self):
+        wanted = priorities._content_words("Strengthen cybersecurity and security")
+        point = priorities.claim_point(self.FIRMO, wanted)
+        assert point.startswith("Its cybersecurity portfolio")
+        assert point in self.FIRMO or point[:-1] in self.FIRMO
+
+    def test_a_cut_off_fragment_is_never_the_point(self):
+        point = priorities.claim_point(self.FIRMO, priorities._content_words("marketing"))
+        assert "marketing st" not in point
+
+    def test_a_long_sentence_ends_at_a_clause_with_no_ellipsis(self):
+        long = ("We offer " + ", ".join("service line %d" % i for i in range(20))
+                + ", and more.")
+        point = priorities.claim_point(long, set())
+        assert len(point.split()) <= priorities.CLAIM_POINT_MAX_WORDS
+        assert point.endswith(".") and "..." not in point and "…" not in point
+
+    def test_a_short_sentence_is_left_whole(self):
+        text = "Revenue grew 8% in local currency."
+        assert priorities.claim_point(text, set()) == text
+
+    def test_empty_text_gives_no_point(self):
+        assert priorities.claim_point("", {"cloud"}) == ""
+
+    def test_the_registered_text_is_kept_beside_the_point(self):
+        row = {"evidence_id": "e1", "source_text": self.FIRMO}
+        out = priorities._source(row, {"cybersecurity"})
+        assert out["source_text"] == self.FIRMO
+        assert out["claim_point"] and len(out["claim_point"]) < len(self.FIRMO)
+
+    def test_inc_does_not_end_a_sentence(self):
+        text = ("Advantest partnered with PDF Solutions Inc. focused on "
+                "cloud-based software solutions. It also tests memory.")
+        point = priorities.claim_point(text, {"cloud"})
+        assert point == ("Advantest partnered with PDF Solutions Inc. focused on "
+                         "cloud-based software solutions.")
+
+    def test_an_inline_bullet_is_a_break(self):
+        text = ("Its main strategy focuses on: • Improving service quality "
+                "for customers through operational excellence.")
+        point = priorities.claim_point(text, {"service", "quality"})
+        assert point == ("Improving service quality for customers through "
+                         "operational excellence.")
+        assert "•" not in point
+
+    def test_a_heading_run_into_the_text_is_dropped(self):
+        text = ("About Accenture Accenture helps the world's leading enterprises "
+                "reinvent by building their digital core.")
+        assert priorities.claim_point(text, {"digital"}).startswith("Accenture helps")
+
+    def test_a_cut_off_point_after_a_lead_in_is_used_not_the_lead_in(self):
+        text = ("Its main strategy focuses on: • Improving service quality "
+                "for customers through operational excellence, resource "
+                "development, and innovation ASTRA Infra has continued to strive c")
+        point = priorities.claim_point(text, {"operational", "excellence"})
+        assert point == ("Improving service quality for customers through "
+                         "operational excellence, resource development.")
+
+    def test_a_connective_opener_is_dropped(self):
+        text = ("Furthermore, Advantest has established strategic alliances "
+                "with STMicroelectronics.")
+        assert priorities.claim_point(text, {"alliances"}).startswith("Advantest has")
+
+    def test_a_long_sentence_ends_before_a_trailing_which_clause(self):
+        text = ("ASTRA Infra has continued to implement its main operational "
+                "excellence strategy across every toll road concession it runs "
+                "which focuses on service quality resource development and "
+                "innovation for customers.")
+        point = priorities.claim_point(text, {"excellence"})
+        assert point.endswith("concession it runs.")
+        assert len(point.split()) <= priorities.CLAIM_POINT_MAX_WORDS
+
+    def test_a_point_starts_with_a_capital(self):
+        text = "agreement to acquire a majority stake in Dragos is our strategy."
+        assert priorities.claim_point(text, {"dragos"})[0] == "A"
+
+    def test_reading_the_widget_never_changes_the_stored_payload(self):
+        stored = {"priorities": [{"title": "Grow cybersecurity", "sources": [
+            {"evidence_id": "e1", "source_text": self.FIRMO}]}]}
+        shown = priorities.with_claim_points(stored)
+        assert "claim_point" not in stored["priorities"][0]["sources"][0]
+        assert shown["priorities"][0]["sources"][0]["claim_point"]
+        assert shown["priorities"][0]["sources"][0]["source_text"] == self.FIRMO
+
+    def test_a_section_heading_run_into_the_text_is_dropped(self):
+        text = ("Transformational Leadership To prepare future leaders who are "
+                "capable of leading change.")
+        assert priorities.claim_point(text, {"leaders"}).startswith("To prepare")
+
+    def test_a_company_name_opening_a_sentence_is_not_a_heading(self):
+        text = "Advantest Corporation designs automatic test equipment."
+        assert priorities.claim_point(text, {"test"}) == text
+
+    def test_a_trailing_list_marker_is_dropped(self):
+        text = "Increasing focus on professional IT services for the segment; d."
+        assert priorities.claim_point(text, {"services"}).endswith("segment.")
+
+    def test_a_leading_and_is_dropped(self):
+        text = "and operational dashboards that increase traffic monitoring productivity."
+        assert priorities.claim_point(text, {"dashboards"}).startswith("Operational")
+
+    def test_a_cut_never_leaves_an_adjective_without_its_noun(self):
+        text = ("Our strategy is to be the reinvention partner of choice for our "
+                "clients and lead in the safe, widespread adoption of AI, and to "
+                "be the most client-focused firm.")
+        point = priorities.claim_point(text, {"strategy"})
+        assert not point.endswith("the safe.")
+        assert point.endswith(("our clients.", "adoption of AI."))
+
+
+class TestALongSourceIsSeveralPoints:
+    """1 Oct: a long paragraph becomes 3 to 6 points; a short source stays one."""
+
+    LONG = " ".join([
+        "Accenture plc is a global professional services firm.",
+        "It offers application services such as agile transformation and DevOps.",
+        "Its cybersecurity portfolio includes cyber defense and managed security.",
+        "It also provides cloud solutions and ecosystem development.",
+        "The company supports talent and organizational development.",
+        "Accenture operates digital commerce and infrastructure services.",
+        "It offers OT security and security strategy services.",
+        "It provides intelligent automation including robotic process automation.",
+        "Accenture supports engineering and research digitization.",
+        "Accenture runs managed edge and IoT device services.",
+    ])
+
+    def test_a_short_source_is_one_point(self):
+        text = "Revenue grew 8% in local currency."
+        assert priorities.claim_points(text, {"revenue"}) == [text]
+
+    def test_a_long_source_is_capped_at_six(self):
+        wanted = {"accenture", "services", "security", "cloud", "provides", "offers"}
+        points = priorities.claim_points(self.LONG, wanted)
+        assert 3 <= len(points) <= 6
+
+    def test_a_long_source_gives_at_least_three(self):
+        points = priorities.claim_points(self.LONG, {"cybersecurity"})
+        assert len(points) == 3
+        assert any("cybersecurity" in p for p in points)
+
+    def test_points_keep_the_source_order(self):
+        points = priorities.claim_points(self.LONG, {"security"})
+        assert points == sorted(points, key=self.LONG.index)
+
+    def test_every_point_is_short_and_finished(self):
+        for point in priorities.claim_points(self.LONG, {"security"}):
+            assert len(point.split()) <= priorities.CLAIM_POINT_MAX_WORDS + 8
+            assert point.endswith(".") and not point.endswith("...")
+
+    def test_the_source_carries_the_list_and_the_single_point(self):
+        out = priorities._source({"evidence_id": "e1", "source_text": self.LONG},
+                                 {"security"})
+        assert len(out["claim_points"]) >= 3 and out["claim_point"]
+
+    def test_a_cut_never_drops_the_verb_after_an_aside(self):
+        text = ("Advantest Corporation, a Japanese entity founded in Tokyo in "
+                "1954, specializes in the research, development, manufacturing, "
+                "and global sale of automated test equipment.")
+        point = priorities.claim_point(text, {"advantest"})
+        assert "specializes" in point
