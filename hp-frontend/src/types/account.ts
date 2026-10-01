@@ -6,6 +6,10 @@ export interface CompanyAccount {
   status: AccountStatus;
   created_at: string;
   updated_at: string;
+  // Sent by /accounts/user-list only: the committed exec_urgency_score, the
+  // number the Executive Dashboard shows. Null when not generated or withheld.
+  urgency_score?: number | null;
+  urgency_max_score?: number | null;
 }
 
 export type DatasetKey = 

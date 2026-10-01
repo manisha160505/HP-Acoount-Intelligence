@@ -7,7 +7,7 @@ export default function UserHomePage() {
   const router = useRouter();
 
   useEffect(() => {
-    router.replace('/dashboard');
+    router.replace('/accounts');
   }, [router]);
 
   return (

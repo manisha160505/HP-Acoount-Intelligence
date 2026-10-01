@@ -3,6 +3,7 @@
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/providers/AuthProvider';
+import { homeRouteFor } from '@/lib/accountSelection';
 
 export default function RootPage() {
   const { user, isAuthenticated, isLoading } = useAuth();
@@ -12,10 +13,8 @@ export default function RootPage() {
     if (!isLoading) {
       if (!isAuthenticated) {
         router.push('/login');
-      } else if (user?.role === 'admin') {
-        router.push('/admin/platform');
       } else {
-        router.push('/dashboard');
+        router.push(homeRouteFor(user?.role));
       }
     }
   }, [isLoading, isAuthenticated, user, router]);

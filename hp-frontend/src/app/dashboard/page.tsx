@@ -7,6 +7,7 @@ import { useAuth } from '@/providers/AuthProvider';
 import api, { postStream } from '@/services/api';
 import { CompanyAccount } from '@/types/account';
 import { NORTHSTAR_SIDEBAR_GROUPS } from '@/lib/features';
+import { activeAccountFrom, dashboardHref } from '@/lib/accountSelection';
 import { track, stopFeatureTime } from '@/lib/track';
 import { MyActivityPanel } from '@/components/analytics/MyActivityPanel';
 import { Activity as ActivityIcon } from 'lucide-react';
@@ -476,6 +477,7 @@ function HpRecommendationCard({ rec, xray }: { rec: any; xray?: boolean }) {
 
 export default function UserDashboardPage() {
   const { user, logout } = useAuth();
+  const router = useRouter();
 
   const [accounts, setAccounts] = useState<CompanyAccount[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState<string>('');
@@ -666,9 +668,18 @@ export default function UserDashboardPage() {
     try {
       const response = await api.get<CompanyAccount[]>('/accounts/user-list');
       setAccounts(response.data);
-      if (response.data.length > 0) {
-        setSelectedAccountId(response.data[0].id);
-        setSelectedAccount(response.data[0]);
+      // The active account is the one in the URL, put there by the Account
+      // Selection screen or the dropdown below - which is what lets it survive
+      // a refresh. Read from window.location rather than useSearchParams, which
+      // would need a Suspense boundary for one parameter. With no account, or
+      // one that is no longer active, send the seller to choose one rather
+      // than opening whichever account sorts first.
+      const match = activeAccountFrom(response.data, window.location.search);
+      if (match) {
+        setSelectedAccountId(match.id);
+        setSelectedAccount(match);
+      } else {
+        router.replace('/accounts');
       }
     } catch (err: any) {
       const msg = err.response?.data?.detail || 'Failed to load accessible account list.';
@@ -676,7 +687,7 @@ export default function UserDashboardPage() {
     } finally {
       setIsLoadingAccounts(false);
     }
-  }, []);
+  }, [router]);
 
   // Fetch Widget Contracts for Selected Account + Feature
   const fetchWidgetContracts = useCallback(async (accId: string, featureKey: string) => {
@@ -712,7 +723,9 @@ export default function UserDashboardPage() {
   // run would otherwise send.
   const lastTrackedView = useRef('');
   useEffect(() => {
-    if (isLoadingAccounts) return;
+    // No account means the page is on its way back to Account Selection; a
+    // view recorded now would count a dashboard the seller never saw.
+    if (isLoadingAccounts || !selectedAccountId) return;
     const key = `${activeFeatureKey}|${selectedAccountId}`;
     if (key === lastTrackedView.current) return;
     lastTrackedView.current = key;
@@ -758,6 +771,8 @@ export default function UserDashboardPage() {
     setSelectedAccountId(acc.id);
     setSelectedAccount(acc);
     setIsDropdownOpen(false);
+    // Keep the URL on the active account so a refresh reopens this one.
+    router.replace(dashboardHref(acc.id), { scroll: false });
   };
 
   const getDownloadUrl = (datasetKey: string) => {
@@ -858,9 +873,18 @@ export default function UserDashboardPage() {
             {/* Target Account Selector Section */}
             {!isSidebarCollapsed && (
               <div className="p-3 border-b border-slate-800/80">
-                <span className="text-[9px] font-extrabold text-gray-400 uppercase tracking-widest block mb-1.5 px-1">
-                  Target Account
-                </span>
+                <div className="flex items-center justify-between mb-1.5 px-1">
+                  <span className="text-[9px] font-extrabold text-gray-400 uppercase tracking-widest">
+                    Target Account
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => router.push('/accounts')}
+                    className="text-[10px] font-bold text-hp-accent hover:underline"
+                  >
+                    All accounts
+                  </button>
+                </div>
 
                 <div className="relative">
                   <button
