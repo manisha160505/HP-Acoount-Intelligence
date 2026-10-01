@@ -9,8 +9,9 @@
  * zero is drawn as an empty track rather than left out.
  */
 
-import React, { useEffect } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ChevronRight, X } from 'lucide-react';
+import { CountUp, Reveal, SlidingSegments, prefersReducedMotion } from '@/components/common/motion';
 
 // Dates are UTC calendar days, inclusive at both ends - the API's contract.
 export function utcDay(offsetDays = 0): string {
@@ -52,11 +53,13 @@ export function formatDuration(seconds: number): string {
   return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m`;
 }
 
-/** A headline number. With `onClick` the whole tile opens the list behind it. */
-export function StatTile({ label, value, hint, Icon, onClick }: {
+/** A headline number. With `onClick` the whole tile opens the list behind it.
+ *  A numeric value counts up to itself; `index` staggers a row of tiles. */
+export function StatTile({ label, value, hint, Icon, onClick, index = 0 }: {
   label: string; value: React.ReactNode; hint?: string; Icon: React.FC<{ className?: string }>;
-  onClick?: () => void;
+  onClick?: () => void; index?: number;
 }) {
+  const stagger = { ['--as-i' as string]: index } as React.CSSProperties;
   const body = (
     <>
       <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-gray-500">
@@ -64,19 +67,22 @@ export function StatTile({ label, value, hint, Icon, onClick }: {
         <span>{label}</span>
         {onClick && <ChevronRight className="w-3.5 h-3.5 ml-auto text-gray-300 group-hover:text-hp-navy transition-colors" />}
       </div>
-      <div className="mt-2 text-3xl font-extrabold text-gray-900 tabular-nums truncate group-hover:text-hp-blue transition-colors">{value}</div>
+      <div className="mt-2 text-3xl font-extrabold text-gray-900 tabular-nums truncate group-hover:text-hp-blue transition-colors">
+        {typeof value === 'number' ? <CountUp value={value} /> : value}
+      </div>
       {hint && <div className="mt-1 text-[11px] text-gray-500 truncate">{hint}</div>}
     </>
   );
   if (!onClick) {
-    return <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">{body}</div>;
+    return <div className="as-tile bg-white rounded-2xl border border-gray-200 shadow-sm p-5" style={stagger}>{body}</div>;
   }
   return (
     <button
       type="button"
       onClick={onClick}
-      title="See the users behind this number"
-      className="group text-left bg-white rounded-2xl border border-gray-200 shadow-sm p-5 hover:border-hp-navy/50 hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-hp-navy transition"
+      title="See what is behind this number"
+      style={stagger}
+      className="as-tile as-tile-btn group text-left bg-white rounded-2xl border border-gray-200 shadow-sm p-5 hover:border-hp-navy/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-hp-navy"
     >
       {body}
     </button>
@@ -85,11 +91,11 @@ export function StatTile({ label, value, hint, Icon, onClick }: {
 
 export function Card({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
   return (
-    <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
-      <h2 className="text-sm font-bold text-gray-900">{title}</h2>
+    <Reveal className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
+      <h2 key={title} className="as-swap text-sm font-bold text-gray-900">{title}</h2>
       {subtitle && <p className="text-[11px] text-gray-500 mt-0.5">{subtitle}</p>}
       <div className="mt-4">{children}</div>
-    </div>
+    </Reveal>
   );
 }
 
@@ -110,18 +116,18 @@ export function HorizontalBars({ rows }: { rows: BarRow[] }) {
   const max = Math.max(1, ...rows.map(r => r.value));
   return (
     <div className="space-y-2" role="list">
-      {rows.map(r => {
+      {rows.map((r, i) => {
         const clickable = !!r.onClick && r.value > 0;
         const cells = (
           <>
             <span className="text-xs font-semibold text-gray-700 truncate">{r.label}</span>
-            <div className="h-3.5 bg-gray-100 rounded-sm">
-              {r.value > 0 && (
-                <div
-                  className="h-full bg-hp-blue rounded-r group-hover:bg-hp-dark transition-colors"
-                  style={{ width: `${(r.value / max) * 100}%` }}
-                />
-              )}
+            <div className="h-3.5 bg-gray-100 rounded-sm overflow-hidden">
+              {/* Always rendered, scaled to the value, so a new measure or
+                  range glides from the old length instead of jumping. */}
+              <div
+                className="as-bar-x h-full bg-hp-blue rounded-sm group-hover:bg-hp-dark"
+                style={{ transform: `scaleX(${r.value / max})`, ['--as-i' as string]: Math.min(i, 12) }}
+              />
             </div>
             <span className={`text-xs tabular-nums text-right ${r.value ? 'font-bold text-gray-900' : 'text-gray-400'} ${clickable ? 'group-hover:text-hp-blue group-hover:underline' : ''}`}>
               {r.display ?? r.value}
@@ -155,7 +161,7 @@ export function DailyColumns({ points, format = String, unit, onPointClick }: {
   return (
     <div>
       <div className="flex items-end gap-[2px] h-32 border-b border-gray-200">
-        {points.map(p => (
+        {points.map((p, i) => (
           <div
             key={p.date}
             className={`group relative flex-1 h-full flex items-end ${onPointClick && p.value ? 'cursor-pointer' : ''}`}
@@ -166,8 +172,11 @@ export function DailyColumns({ points, format = String, unit, onPointClick }: {
             onKeyDown={onPointClick && p.value ? e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onPointClick(p.date); } } : undefined}
           >
             <div
-              className="w-full bg-hp-blue group-hover:bg-hp-dark rounded-t transition-colors"
-              style={{ height: p.value ? `${Math.max(3, (p.value / max) * 100)}%` : '0' }}
+              className="as-bar-y w-full h-full bg-hp-blue group-hover:bg-hp-dark rounded-t"
+              style={{
+                transform: `scaleY(${p.value ? Math.max(0.03, p.value / max) : 0})`,
+                ['--as-i' as string]: Math.min(i, 40),
+              }}
             />
           </div>
         ))}
@@ -194,7 +203,7 @@ export function RangePicker({ from, to, onChange, compact = false }: {
           key={p.days}
           type="button"
           onClick={() => onChange(utcDay(-(p.days - 1)), utcDay(0))}
-          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors duration-200 active:scale-95 ${
             activePreset === p.days ? 'bg-hp-navy text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
           }`}
         >
@@ -215,20 +224,13 @@ export function Toggle<T extends string>({ value, options, onChange }: {
   value: T; options: { key: T; label: string }[]; onChange: (v: T) => void;
 }) {
   return (
-    <div className="inline-flex rounded-lg bg-gray-100 p-0.5">
-      {options.map(o => (
-        <button
-          key={o.key}
-          type="button"
-          onClick={() => onChange(o.key)}
-          className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition ${
-            value === o.key ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-800'
-          }`}
-        >
-          {o.label}
-        </button>
-      ))}
-    </div>
+    <SlidingSegments
+      size="sm"
+      ariaLabel="Measure"
+      value={value}
+      onChange={onChange}
+      options={options.map(o => ({ value: o.key, label: o.label }))}
+    />
   );
 }
 
@@ -243,51 +245,67 @@ export interface UserListRow {
   detail?: string;
 }
 
+export interface DetailRow {
+  key: string;
+  primary: React.ReactNode;
+  secondary?: React.ReactNode;
+  /** The number this row contributes (e.g. "12 views"). */
+  value?: string;
+  /** Secondary detail under the value. */
+  detail?: string;
+}
+
 /**
- * The people behind a number on the Analytics page. Rows arrive already
- * sorted by the caller; the count in the header always equals the number
- * that was clicked.
+ * The list behind a clicked number. Rows arrive already sorted by the caller;
+ * `count` names how many there are, so it can match the number clicked.
  */
-export function UserListDialog({ title, subtitle, rows, onClose }: {
-  title: string; subtitle?: string; rows: UserListRow[]; onClose: () => void;
+export function DetailDialog({ title, count, subtitle, rows, emptyText = 'Nothing in this range.', onClose }: {
+  title: string; count: string; subtitle?: string; rows: DetailRow[]; emptyText?: string; onClose: () => void;
 }) {
+  // The parent unmounts the dialog on close, so the exit plays here first.
+  const [closing, setClosing] = useState(false);
+  const timer = useRef<number>();
+  const close = useCallback(() => {
+    if (prefersReducedMotion()) { onClose(); return; }
+    setClosing(true);
+    window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(onClose, 180);
+  }, [onClose]);
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, [close]);
+  const state = closing ? ' is-closing' : '';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label={title}>
-      <button type="button" aria-label="Close" onClick={onClose}
-        className="absolute inset-0 bg-slate-900/50 backdrop-blur-[1px] cursor-default" />
-      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col border border-gray-200 animate-fade-in">
+    // Above the My Activity slide-over, which is itself z-50.
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label={title}>
+      <button type="button" aria-label="Close" onClick={close}
+        className={`as-backdrop${state} absolute inset-0 bg-slate-900/50 backdrop-blur-[2px] cursor-default`} />
+      <div className={`as-dialog${state} relative bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col border border-gray-200`}>
         <div className="flex items-start justify-between gap-4 px-6 py-4 border-b border-gray-200">
           <div className="min-w-0">
             <h3 className="text-base font-bold text-gray-900">{title}</h3>
-            <p className="text-[11px] text-gray-500 mt-0.5">
-              {rows.length} user{rows.length === 1 ? '' : 's'}{subtitle ? ` · ${subtitle}` : ''}
-            </p>
+            <p className="text-[11px] text-gray-500 mt-0.5">{count}{subtitle ? ` · ${subtitle}` : ''}</p>
           </div>
-          <button type="button" onClick={onClose} className="text-gray-400 hover:text-gray-700 rounded-lg p-1" title="Close (Esc)">
+          <button type="button" onClick={close} className="text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg p-1 transition-colors" title="Close (Esc)">
             <X className="w-5 h-5" />
           </button>
         </div>
         <div className="overflow-y-auto">
           {rows.length === 0 ? (
-            <p className="px-6 py-10 text-center text-xs text-gray-500">Nobody in this range.</p>
+            <p className="px-6 py-10 text-center text-xs text-gray-500">{emptyText}</p>
           ) : (
             <ul className="divide-y divide-gray-100">
-              {rows.map(r => (
-                <li key={r.user_id} className="px-6 py-3 flex items-center justify-between gap-4">
+              {rows.map((r, i) => (
+                <li key={r.key} className="as-row px-6 py-3 flex items-center justify-between gap-4"
+                  style={{ ['--as-i' as string]: Math.min(i, 10) }}>
                   <div className="min-w-0">
-                    <div className="text-sm font-bold text-gray-900 truncate">
-                      {r.name || r.email}
-                      {!r.is_active && (
-                        <span className="ml-2 align-middle inline-flex px-1.5 py-0.5 rounded text-[10px] font-bold bg-gray-100 text-gray-600">Deactivated</span>
-                      )}
-                    </div>
-                    <div className="text-[11px] text-gray-500 truncate">{r.email}</div>
+                    <div className="text-sm font-bold text-gray-900 truncate">{r.primary}</div>
+                    {r.secondary && <div className="text-[11px] text-gray-500 truncate">{r.secondary}</div>}
                   </div>
                   {(r.value || r.detail) && (
                     <div className="text-right shrink-0">
@@ -302,5 +320,34 @@ export function UserListDialog({ title, subtitle, rows, onClose }: {
         </div>
       </div>
     </div>
+  );
+}
+
+/** The people behind a number on the Analytics page. */
+export function UserListDialog({ title, subtitle, rows, onClose }: {
+  title: string; subtitle?: string; rows: UserListRow[]; onClose: () => void;
+}) {
+  return (
+    <DetailDialog
+      title={title}
+      subtitle={subtitle}
+      count={`${rows.length} user${rows.length === 1 ? '' : 's'}`}
+      emptyText="Nobody in this range."
+      onClose={onClose}
+      rows={rows.map(r => ({
+        key: r.user_id,
+        primary: (
+          <>
+            {r.name || r.email}
+            {!r.is_active && (
+              <span className="ml-2 align-middle inline-flex px-1.5 py-0.5 rounded text-[10px] font-bold bg-gray-100 text-gray-600">Deactivated</span>
+            )}
+          </>
+        ),
+        secondary: r.email,
+        value: r.value,
+        detail: r.detail,
+      }))}
+    />
   );
 }
