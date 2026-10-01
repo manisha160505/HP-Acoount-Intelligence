@@ -11,7 +11,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ChevronRight, X } from 'lucide-react';
-import { CountUp, Reveal, SlidingSegments, prefersReducedMotion } from '@/components/common/motion';
+import { CountUp, CountUpText, Reveal, SlidingSegments, growDelay, prefersReducedMotion } from '@/components/common/motion';
 
 // Dates are UTC calendar days, inclusive at both ends - the API's contract.
 export function utcDay(offsetDays = 0): string {
@@ -68,13 +68,14 @@ export function StatTile({ label, value, hint, Icon, onClick, index = 0 }: {
         {onClick && <ChevronRight className="w-3.5 h-3.5 ml-auto text-gray-300 group-hover:text-hp-navy transition-colors" />}
       </div>
       <div className="mt-2 text-3xl font-extrabold text-gray-900 tabular-nums truncate group-hover:text-hp-blue transition-colors">
-        {typeof value === 'number' ? <CountUp value={value} /> : value}
+        {typeof value === 'number' ? <CountUp value={value} delay={index * 55} />
+          : typeof value === 'string' ? <CountUpText text={value} first delay={index * 55} /> : value}
       </div>
       {hint && <div className="mt-1 text-[11px] text-gray-500 truncate">{hint}</div>}
     </>
   );
   if (!onClick) {
-    return <div className="as-tile bg-white rounded-2xl border border-gray-200 shadow-sm p-5" style={stagger}>{body}</div>;
+    return <div className="as-tile as-glass rounded-2xl p-5" style={stagger}>{body}</div>;
   }
   return (
     <button
@@ -82,7 +83,7 @@ export function StatTile({ label, value, hint, Icon, onClick, index = 0 }: {
       onClick={onClick}
       title="See what is behind this number"
       style={stagger}
-      className="as-tile as-tile-btn group text-left bg-white rounded-2xl border border-gray-200 shadow-sm p-5 hover:border-hp-navy/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-hp-navy"
+      className="as-tile as-tile-btn as-glass group text-left rounded-2xl p-5 hover:border-hp-navy/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-hp-navy"
     >
       {body}
     </button>
@@ -91,7 +92,7 @@ export function StatTile({ label, value, hint, Icon, onClick, index = 0 }: {
 
 export function Card({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
   return (
-    <Reveal className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
+    <Reveal className="as-glass-strong rounded-2xl p-6">
       <h2 key={title} className="as-swap text-sm font-bold text-gray-900">{title}</h2>
       {subtitle && <p className="text-[11px] text-gray-500 mt-0.5">{subtitle}</p>}
       <div className="mt-4">{children}</div>
@@ -118,6 +119,7 @@ export function HorizontalBars({ rows }: { rows: BarRow[] }) {
     <div className="space-y-2" role="list">
       {rows.map((r, i) => {
         const clickable = !!r.onClick && r.value > 0;
+        const delay = growDelay(i);
         const cells = (
           <>
             <span className="text-xs font-semibold text-gray-700 truncate">{r.label}</span>
@@ -126,11 +128,11 @@ export function HorizontalBars({ rows }: { rows: BarRow[] }) {
                   range glides from the old length instead of jumping. */}
               <div
                 className="as-bar-x h-full bg-hp-blue rounded-sm group-hover:bg-hp-dark"
-                style={{ transform: `scaleX(${r.value / max})`, ['--as-i' as string]: Math.min(i, 12) }}
+                style={{ transform: `scaleX(${r.value / max})`, ['--as-d' as string]: `${delay}ms` }}
               />
             </div>
             <span className={`text-xs tabular-nums text-right ${r.value ? 'font-bold text-gray-900' : 'text-gray-400'} ${clickable ? 'group-hover:text-hp-blue group-hover:underline' : ''}`}>
-              {r.display ?? r.value}
+              <CountUpText text={r.display ?? r.value} first delay={delay} />
             </span>
           </>
         );
@@ -175,7 +177,7 @@ export function DailyColumns({ points, format = String, unit, onPointClick }: {
               className="as-bar-y w-full h-full bg-hp-blue group-hover:bg-hp-dark rounded-t"
               style={{
                 transform: `scaleY(${p.value ? Math.max(0.03, p.value / max) : 0})`,
-                ['--as-i' as string]: Math.min(i, 40),
+                ['--as-d' as string]: `${growDelay(i, 80, 12, 40)}ms`,
               }}
             />
           </div>
@@ -284,9 +286,9 @@ export function DetailDialog({ title, count, subtitle, rows, emptyText = 'Nothin
     // Above the My Activity slide-over, which is itself z-50.
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label={title}>
       <button type="button" aria-label="Close" onClick={close}
-        className={`as-backdrop${state} absolute inset-0 bg-slate-900/50 backdrop-blur-[2px] cursor-default`} />
-      <div className={`as-dialog${state} relative bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col border border-gray-200`}>
-        <div className="flex items-start justify-between gap-4 px-6 py-4 border-b border-gray-200">
+        className={`as-backdrop${state} absolute inset-0 bg-slate-900/40 backdrop-blur-md cursor-default`} />
+      <div className={`as-dialog${state} as-glass-strong relative rounded-2xl w-full max-w-lg max-h-[80vh] flex flex-col`}>
+        <div className="flex items-start justify-between gap-4 px-6 py-4 border-b border-slate-200/70">
           <div className="min-w-0">
             <h3 className="text-base font-bold text-gray-900">{title}</h3>
             <p className="text-[11px] text-gray-500 mt-0.5">{count}{subtitle ? ` · ${subtitle}` : ''}</p>

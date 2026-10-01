@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { ProtectedRoute } from '@/components/common/ProtectedRoute';
+import { PageHero } from '@/components/common/motion';
 import { useAuth } from '@/providers/AuthProvider';
 import api from '@/services/api';
 import { parseApiError } from '@/lib/apiError';
@@ -124,23 +125,16 @@ export default function AdminUsersPage() {
 
   return (
     <ProtectedRoute allowedRoles={['admin']}>
-      <div className="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
-
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-8">
-          <div>
-            <h1 className="text-2xl font-extrabold text-gray-900 tracking-tight flex items-center gap-2">
-              <Users className="w-7 h-7 text-hp-navy" />
-              <span>Users</span>
-            </h1>
-            <p className="text-xs text-gray-500 mt-1 font-medium">
-              Add sellers and control who can sign in. Deactivated users keep their usage history.
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
+      <div className="as-page">
+      <PageHero
+        title="Users"
+        subtitle="Add sellers and control who can sign in. Deactivated users keep their usage history."
+        actions={
+          <>
             <button
               type="button"
               onClick={fetchUsers}
-              className="p-2.5 text-gray-500 hover:text-hp-navy rounded-lg hover:bg-gray-100 transition"
+              className="p-2.5 text-slate-300 hover:text-white rounded-lg hover:bg-white/10 transition"
               title="Refresh user list"
             >
               <RefreshCw className="w-4 h-4" />
@@ -153,11 +147,13 @@ export default function AdminUsersPage() {
               <UserPlus className="w-4 h-4 mr-2" />
               <span>Add User</span>
             </button>
-          </div>
-        </div>
+          </>
+        }
+      />
+      <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 -mt-12 sm:-mt-14 pb-12">
 
         {successMsg && (
-          <div className="mb-6 bg-emerald-50 border-l-4 border-emerald-500 p-4 rounded-r-lg flex items-center justify-between text-emerald-800 text-xs font-semibold shadow-sm">
+          <div className="mb-6 bg-emerald-50 as-fade border border-emerald-200 p-4 rounded-xl flex items-center justify-between text-emerald-800 text-xs font-semibold shadow-sm">
             <div className="flex items-center space-x-2">
               <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0" />
               <span>{successMsg}</span>
@@ -169,7 +165,7 @@ export default function AdminUsersPage() {
         )}
 
         {error && (
-          <div className="mb-6 bg-red-50 border-l-4 border-red-500 p-4 rounded-r-lg flex items-center justify-between text-red-800 text-xs font-semibold shadow-sm">
+          <div className="mb-6 bg-red-50 as-fade border border-red-200 p-4 rounded-xl flex items-center justify-between text-red-800 text-xs font-semibold shadow-sm">
             <div className="flex items-center space-x-2">
               <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0" />
               <span>{error}</span>
@@ -290,7 +286,7 @@ export default function AdminUsersPage() {
 
             <form onSubmit={handleCreate} noValidate className="p-6 space-y-4">
               {formError && (
-                <div className="bg-red-50 border-l-4 border-red-500 p-3 rounded-r-lg flex items-center space-x-2 text-xs font-medium text-red-700">
+                <div className="bg-red-50 as-fade border border-red-200 p-3 rounded-xl flex items-center space-x-2 text-xs font-medium text-red-700">
                   <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0" />
                   <span>{formError}</span>
                 </div>
@@ -370,6 +366,7 @@ export default function AdminUsersPage() {
           </div>
         </div>
       )}
+      </div>
     </ProtectedRoute>
   );
 }

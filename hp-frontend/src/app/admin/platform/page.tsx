@@ -3,6 +3,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { ProtectedRoute } from '@/components/common/ProtectedRoute';
+import { PageHero } from '@/components/common/motion';
 import api from '@/services/api';
 import { CompanyAccount, AccountStatus } from '@/types/account';
 import { 
@@ -173,20 +174,11 @@ export default function ManagePlatformPage() {
 
   return (
     <ProtectedRoute allowedRoles={['admin']}>
-      <div className="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
-        
-        {/* Header Section */}
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-8">
-          <div>
-            <h1 className="text-2xl font-extrabold text-gray-900 tracking-tight flex items-center gap-2">
-              <Building2 className="w-7 h-7 text-hp-navy" />
-              <span>Manage Platform</span>
-            </h1>
-            <p className="text-xs text-gray-500 mt-1 font-medium">
-              Enterprise account portfolio management & entity status control
-            </p>
-          </div>
-
+      <div className="as-page">
+      <PageHero
+        title="Manage Platform"
+        subtitle="Enterprise account portfolio management & entity status control"
+        actions={
           <button
             type="button"
             onClick={() => {
@@ -199,11 +191,13 @@ export default function ManagePlatformPage() {
             <Plus className="w-4 h-4 mr-2 stroke-[3]" />
             <span>Create New Account</span>
           </button>
-        </div>
+        }
+      />
+      <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 -mt-12 sm:-mt-14 pb-12">
 
         {/* Global Feedback Notifications */}
         {successMsg && (
-          <div className="mb-6 bg-emerald-50 border-l-4 border-emerald-500 p-4 rounded-r-lg flex items-center justify-between text-emerald-800 text-xs font-semibold shadow-sm">
+          <div className="mb-6 bg-emerald-50 as-fade border border-emerald-200 p-4 rounded-xl flex items-center justify-between text-emerald-800 text-xs font-semibold shadow-sm">
             <div className="flex items-center space-x-2">
               <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0" />
               <span>{successMsg}</span>
@@ -215,7 +209,7 @@ export default function ManagePlatformPage() {
         )}
 
         {error && (
-          <div className="mb-6 bg-red-50 border-l-4 border-red-500 p-4 rounded-r-lg flex items-center justify-between text-red-800 text-xs font-semibold shadow-sm">
+          <div className="mb-6 bg-red-50 as-fade border border-red-200 p-4 rounded-xl flex items-center justify-between text-red-800 text-xs font-semibold shadow-sm">
             <div className="flex items-center space-x-2">
               <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0" />
               <span>{error}</span>
@@ -227,7 +221,7 @@ export default function ManagePlatformPage() {
         )}
 
         {/* Search Bar */}
-        <div className="bg-white p-4 rounded-2xl border border-gray-200 shadow-sm mb-6 flex items-center gap-3">
+        <div className="as-glass as-rise relative z-10 p-4 rounded-2xl mb-6 flex items-center gap-3" style={{ ['--as-delay' as string]: '120ms' }}>
           <div className="relative flex-1">
             <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
               <Search className="h-4 w-4 text-gray-400" />
@@ -403,7 +397,7 @@ export default function ManagePlatformPage() {
 
             <form onSubmit={handleCreateAccount} className="p-6 space-y-4">
               {modalError && (
-                <div className="bg-red-50 border-l-4 border-red-500 p-3 rounded-r-lg flex items-center space-x-2 text-xs font-medium text-red-700">
+                <div className="bg-red-50 as-fade border border-red-200 p-3 rounded-xl flex items-center space-x-2 text-xs font-medium text-red-700">
                   <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0" />
                   <span>{modalError}</span>
                 </div>
@@ -455,6 +449,7 @@ export default function ManagePlatformPage() {
           </div>
         </div>
       )}
+      </div>
     </ProtectedRoute>
   );
 }
