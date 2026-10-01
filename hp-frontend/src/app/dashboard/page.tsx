@@ -8,6 +8,7 @@ import api, { postStream } from '@/services/api';
 import { CompanyAccount } from '@/types/account';
 import { NORTHSTAR_SIDEBAR_GROUPS } from '@/lib/features';
 import { activeAccountFrom, dashboardHref } from '@/lib/accountSelection';
+import { NO_SIGNAL, NOT_DISCLOSED } from '@/lib/placeholders';
 import { track, stopFeatureTime } from '@/lib/track';
 import { MyActivityPanel } from '@/components/analytics/MyActivityPanel';
 import { CountUpText, ScoreRing, growDelay, useParallax } from '@/components/common/motion';
@@ -295,8 +296,6 @@ function PendingNotice({ widget, title }: { widget: any; title: string }) {
 // The product, the confidence and the approved facts are all decided in Python;
 // this only lays them out.
 function HpRecommendationCard({ rec, xray }: { rec: any; xray?: boolean }) {
-  const withheld: Record<string, number> = rec.withheld_summary || {};
-  const withheldEntries = Object.entries(withheld);
   const conf = String(rec.confidence || '');
   const confClass =
     conf === 'Confirmed' ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
@@ -419,12 +418,7 @@ function HpRecommendationCard({ rec, xray }: { rec: any; xray?: boolean }) {
         );
       })()}
 
-      {withheldEntries.length > 0 && (
-        <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded px-3 py-2">
-          <span className="font-semibold">Withheld for this market or configuration: </span>
-          {withheldEntries.map(([reason, count]) => `${reason} (${count})`).join(', ')}
-        </p>
-      )}
+      {/* Gap reason lives in the backend (data_gaps); the client sees neutral wording. */}
 
       {rec.discovery_question && (
         <p className="text-xs text-slate-600 italic border-l-2 border-indigo-200 pl-3">
@@ -490,14 +484,6 @@ export default function UserDashboardPage() {
   const [activeFeatureKey, setActiveFeatureKey] = useState<string>('executive_dashboard');
   
   const [widgets, setWidgets] = useState<WidgetResponse[]>([]);
-  // Why a failed widget fetch needs its own state rather than an empty list:
-  // an empty list is indistinguishable from "this account has no data yet", and
-  // every panel renders that as its own polite placeholder. A 500 therefore
-  // looked exactly like a brand-new account - which is how a schema mismatch on
-  // ONE widget hid an entire generated Executive Dashboard, data intact in the
-  // database, behind "Upload firmographics.csv to view extracted company
-  // profile".
-  const [widgetsError, setWidgetsError] = useState<string>('');
   const [isLoadingAccounts, setIsLoadingAccounts] = useState(true);
   const [isLoadingWidgets, setIsLoadingLoadingWidgets] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -703,20 +689,13 @@ export default function UserDashboardPage() {
   const fetchWidgetContracts = useCallback(async (accId: string, featureKey: string) => {
     if (!accId) return;
     setIsLoadingLoadingWidgets(true);
-    setWidgetsError('');
     try {
       const response = await api.get<WidgetResponse[]>(`/accounts/${accId}/widgets/${featureKey}`);
       setWidgets(response.data);
-    } catch (err: any) {
-      // Surfaced, not swallowed. The previous version caught this and did
-      // nothing - "Non-blocking" - which meant a server error and an empty
-      // account produced the identical screen, and the only way to tell them
-      // apart was to query Mongo by hand.
+    } catch {
+      // The api client logs the failure (method, path, status, request_id);
+      // the client sees the panels' neutral wording, never a load error.
       setWidgets([]);
-      setWidgetsError(
-        err?.response?.data?.detail
-        || err?.message
-        || 'This feature could not be loaded.');
     } finally {
       setIsLoadingLoadingWidgets(false);
     }
@@ -1067,7 +1046,7 @@ export default function UserDashboardPage() {
                 * resolves on the executive dashboard and renders nothing
                 * elsewhere rather than showing a stale or empty score. Read on
                 * 'partial' too, matching the card: a payload whose composite is
-                * blocked by one unavailable driver still reports N/A honestly.
+                * blocked by one unavailable driver shows the neutral placeholder.
                 */}
               {(() => {
                 const urgencyWidget = widgets.find(w => w.widget_key === 'exec_urgency_score');
@@ -1081,7 +1060,6 @@ export default function UserDashboardPage() {
                 // component 0 and nothing blocks the composite. The null branch
                 // is kept for a payload written before that rule changed.
                 const hasScore = urgency.score != null;
-                const missing: string[] = urgency.missing_inputs ?? [];
                 return (
                   <div
                     className={`inline-flex items-center space-x-1.5 px-3 py-1 rounded-full border text-xs font-bold ${
@@ -1089,19 +1067,12 @@ export default function UserDashboardPage() {
                         ? 'bg-amber-50 text-amber-800 border-amber-200/80'
                         : 'bg-slate-50 text-slate-600 border-slate-200'
                     }`}
-                    title={
-                      hasScore
-                        ? (missing.length
-                            ? `Scored 0 for want of data: ${missing.join('; ')}`
-                            : undefined)
-                        : (urgency.unavailable_reason || undefined)
-                    }
                   >
                     <span className="text-[11px]">Urgency Score</span>
                     <span className={`px-1.5 py-0.5 rounded font-mono text-[10px] ${
                       hasScore ? 'bg-amber-200 text-amber-900' : 'bg-slate-200 text-slate-700'
                     }`}>
-                      {hasScore ? <><CountUpText text={urgency.score} />/{urgency.max_score ?? 100}</> : 'N/A'}
+                      {hasScore ? <><CountUpText text={urgency.score} />/{urgency.max_score ?? 100}</> : NO_SIGNAL}
                     </span>
                   </div>
                 );
@@ -1282,27 +1253,6 @@ export default function UserDashboardPage() {
                   </div>
                 )}
 
-                {/* A feature that failed to load says so, once, above whatever
-                    it managed to render. Without this the panels below fall
-                    back to their own "no data yet" copy and a server error is
-                    indistinguishable from an account nobody has uploaded to -
-                    which is exactly how a generated dashboard stayed hidden
-                    behind "Upload firmographics.csv". */}
-                {widgetsError && (
-                  <div className="mb-6 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4">
-                    <p className="text-xs font-black text-amber-900">
-                      This feature could not be loaded
-                    </p>
-                    <p className="mt-1 text-xs text-amber-800 leading-relaxed">
-                      {widgetsError}
-                    </p>
-                    <p className="mt-1.5 text-[11px] text-amber-700">
-                      The panels below are showing empty states because nothing was
-                      returned - not because this account has no data.
-                    </p>
-                  </div>
-                )}
-
                 {/* ============================================================================== */}
                 {/* EXECUTIVE DASHBOARD VIEW — EXACT NORTHSTAR 5 SECTIONS                          */}
                 {/* ============================================================================== */}
@@ -1344,7 +1294,7 @@ export default function UserDashboardPage() {
                   const priorityList: any[] = (prioritiesData?.priorities || []) as any[];
 
                   const displayName = summaryData?.company_name || selectedAccount.name;
-                  const displayDesc = summaryData?.business_description || `${selectedAccount.name} is an active target company account in the HP Account Intelligence platform. Upload firmographics.csv to view extracted company profile.`;
+                  const displayDesc = summaryData?.business_description || NOT_DISCLOSED;
                   const domainVal = summaryData?.domain || null;
                   const locationVal = summaryData?.hq_location || null;
                   const industryVal = summaryData?.industry_classification || null;
@@ -1384,7 +1334,7 @@ export default function UserDashboardPage() {
                                 ))}
                               </ul>
                             ) : (
-                              <p className="text-xs text-slate-600 leading-relaxed max-w-5xl">
+                              <p className={`text-xs leading-relaxed max-w-5xl ${summaryData?.business_description ? 'text-slate-600' : 'text-slate-400'}`}>
                                 {displayDesc}
                               </p>
                             )}
@@ -1410,9 +1360,9 @@ export default function UserDashboardPage() {
                               )}
 
                               {industryVal && (
-                                <div className="flex items-center space-x-1.5 text-slate-700">
-                                  <Building2 className="w-4 h-4 text-hp-navy" />
-                                  <span className="truncate max-w-md">{industryVal}</span>
+                                <div className="flex items-start space-x-1.5 text-slate-700">
+                                  <Building2 className="w-4 h-4 text-hp-navy shrink-0 mt-0.5" />
+                                  <span className="break-words">{industryVal}</span>
                                 </div>
                               )}
 
@@ -1557,14 +1507,8 @@ export default function UserDashboardPage() {
                                   <p className="text-[10px] text-slate-500 mt-2">
                                     {m.filing_label}{m.page ? `, page ${m.page}` : ''}
                                   </p>
-                                  {/* The latest filing lacked this figure, or the
-                                      filing is another entity's (Feature 1: label it). */}
-                                  {m.fallback_note && (
-                                    <p className="text-[10px] text-amber-700 mt-1.5">{m.fallback_note}</p>
-                                  )}
-                                  {m.entity_note && (
-                                    <p className="text-[10px] text-amber-700 mt-1.5">{m.entity_note}</p>
-                                  )}
+                                  {/* fallback_note / entity_note are gap reasons; they live in
+                                      the backend (data_gaps) and are not shown to the client. */}
                                   {m.quote && (
                                     <p className="text-[10px] text-slate-500 mt-2 border-t border-slate-100 pt-2 break-words">
                                       <span className="font-bold text-slate-600">Row as printed: </span>{m.quote}
@@ -1638,26 +1582,24 @@ export default function UserDashboardPage() {
                                   ? `Not published: ${urgencyData?.coverage_percent}% of the weighted driver coverage is available, and the minimum is ${urgencyData?.coverage_minimum}%.`
                                   : undefined}
                               >
-                                {urgencyData?.score != null ? <CountUpText text={urgencyData.score} /> : '-'}
+                                {urgencyData?.score != null ? <CountUpText text={urgencyData.score} /> : NO_SIGNAL}
                               </span>
                               <span className="text-[10px] font-bold text-slate-400">/100</span>
                             </div>
 
                             <div className="flex-1 w-full space-y-3 text-xs">
                               {(urgencyData?.drivers ?? []).map((d: any) => {
-                                  // Components that scored 0 because nothing
-                                  // was on file. Under the client's
-                                  // missing-input rule they look identical to
-                                  // a genuine 0, so the count is surfaced.
-                                  const missing = (d.terms ?? []).filter((t: any) => t.missing_input);
+                                  // A component with no input on file scores 0
+                                  // under the client's missing-input rule and
+                                  // is shown like any other 0: the client asked
+                                  // (1 Oct) for no partial-data flag on the card.
                                   return {
                                   id: d.key,
                                   label: d.label,
                                   available: d.available,
-                                  partial: missing.length > 0,
                                   scoreText: `${d.value}/100`,
                                   progressPct: `${d.value}%`,
-                                  barColor: missing.length > 0 ? 'bg-amber-400' : 'bg-hp-navy',
+                                  barColor: 'bg-hp-navy',
                                   // The whole working, so a seller who
                                   // disagrees with the number can see which
                                   // term to disagree with. Built in the
@@ -1669,8 +1611,7 @@ export default function UserDashboardPage() {
                                   rationale: (d.rationale_lines ?? [
                                     `Weight ${Math.round(d.weight * 100)}% of the total.`,
                                     ...(d.terms ?? []).map((t: any) =>
-                                      `${t.label}: ${t.points}/${t.max_points} - ${t.basis}${
-                                        t.missing_input ? ' (no input on file - scores 0 by the missing-input rule)' : ''}`),
+                                      `${t.label}: ${t.points}/${t.max_points} - ${t.missing_input ? NO_SIGNAL : t.basis}`),
                                     ...(d.notes ?? []),
                                     ...(d.caveats ?? []).map((c: string) => `Caveat: ${c}`),
                                   ]) as string[],
@@ -1680,18 +1621,6 @@ export default function UserDashboardPage() {
                                   <div className="flex justify-between items-center font-bold text-slate-700 text-[11px] mb-1">
                                     <div className="flex items-center space-x-1.5">
                                       <span className={driver.available ? '' : 'text-slate-400'}>{driver.label}</span>
-
-                                      {/* At least one component scored 0 for
-                                          want of data rather than for a weak
-                                          signal. That changes how the driver's
-                                          number should be read, so it belongs
-                                          on the face of the card, not only
-                                          inside the popover. */}
-                                      {driver.partial && (
-                                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">
-                                          PARTIAL DATA
-                                        </span>
-                                      )}
 
                                       {/* Interactive Info Icon Button */}
                                       <div className="relative inline-block">
@@ -1757,20 +1686,6 @@ export default function UserDashboardPage() {
                               )}
                             </div>
                           </div>
-
-                          {/* Which components scored 0 for want of data. The
-                              score always computes now - a missing input costs
-                              only its own component - so a low number can mean
-                              "little evidence" rather than "weak account", and
-                              the card has to let a reader tell them apart. */}
-                          {urgencyData && urgencyData.missing_inputs?.length > 0 && (
-                            <div className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-3 leading-relaxed">
-                              <span className="font-semibold">
-                                Scored 0 for want of data, not for a weak signal:
-                              </span>{' '}
-                              {urgencyData.missing_inputs.join('; ')}.
-                            </div>
-                          )}
 
                           {/* The arithmetic, shown adding up. The contributions
                               printed here are the same figures the API
@@ -1873,11 +1788,6 @@ export default function UserDashboardPage() {
                                               <h4 className="text-sm font-extrabold text-slate-900 leading-snug">
                                                 Catalyst {idx + 1} &ndash; {p.title}
                                               </h4>
-                                              {p.from_news_fallback && (
-                                                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 inline-block" title={p.fallback_note}>
-                                                  From recent events
-                                                </span>
-                                              )}
                                             </div>
                                             {/* The score on the face of the
                                                 card, so catalysts can be
@@ -1885,19 +1795,19 @@ export default function UserDashboardPage() {
                                                 drawers. The working stays in
                                                 the drawer. */}
                                             {p.evidence_strength && (
-                                              <span
-                                                className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full border flex-shrink-0 whitespace-nowrap cursor-help ${
-                                                  p.evidence_strength.zero_reason
-                                                    ? 'bg-slate-50 text-slate-500 border-slate-200'
-                                                    : 'bg-blue-50 text-hp-navy border-blue-200'}`}
-                                                title={p.evidence_strength.zero_reason || p.evidence_strength.formula}
-                                              >
-                                                {/* A zero with a reason is "not scored", not a failed score
-                                                    (Sahaj 1.f). The reason is on the card and in the tooltip. */}
-                                                {p.evidence_strength.zero_reason
-                                                  ? 'Not scored'
-                                                  : `${p.evidence_strength.score}/${p.evidence_strength.max_score}`}
-                                              </span>
+                                              p.evidence_strength.zero_reason ? (
+                                                /* Gap reason lives in the backend (data_gaps); the client sees neutral wording. */
+                                                <span className="text-[10px] font-medium text-slate-400 flex-shrink-0 whitespace-nowrap">
+                                                  {NO_SIGNAL}
+                                                </span>
+                                              ) : (
+                                                <span
+                                                  className="text-[10px] font-extrabold px-2 py-0.5 rounded-full border flex-shrink-0 whitespace-nowrap cursor-help bg-blue-50 text-hp-navy border-blue-200"
+                                                  title={p.evidence_strength.formula}
+                                                >
+                                                  {`${p.evidence_strength.score}/${p.evidence_strength.max_score}`}
+                                                </span>
+                                              )
                                             )}
                                           </div>
 
@@ -1921,12 +1831,6 @@ export default function UserDashboardPage() {
                                               {p.description.text}
                                             </p>
                                           ) : null}
-
-                                          {p.evidence_strength?.zero_reason && (
-                                            <p className="text-[10px] text-slate-500 leading-relaxed italic">
-                                              {p.evidence_strength.zero_reason}
-                                            </p>
-                                          )}
 
                                           {p.why_now && (
                                             <p className="text-[11px] text-slate-500 leading-relaxed">
@@ -2035,14 +1939,16 @@ export default function UserDashboardPage() {
                                                   <BarChart3 className="w-3 h-3" />
                                                   Evidence strength
                                                 </span>
-                                                <span
-                                                  className="text-[11px] font-extrabold text-slate-700 cursor-help"
-                                                  title={p.evidence_strength?.formula || prioritiesData?.evidence_strength_formula}
-                                                >
-                                                  {p.evidence_strength?.zero_reason
-                                                    ? 'Not scored'
-                                                    : `${p.evidence_strength?.score ?? 0}/${p.evidence_strength?.max_score ?? 100}`}
-                                                </span>
+                                                {p.evidence_strength?.zero_reason ? (
+                                                  <span className="text-[11px] text-slate-400">{NO_SIGNAL}</span>
+                                                ) : (
+                                                  <span
+                                                    className="text-[11px] font-extrabold text-slate-700 cursor-help"
+                                                    title={p.evidence_strength?.formula || prioritiesData?.evidence_strength_formula}
+                                                  >
+                                                    {`${p.evidence_strength?.score ?? 0}/${p.evidence_strength?.max_score ?? 100}`}
+                                                  </span>
+                                                )}
                                               </div>
 
                                               <div className="space-y-1.5 pt-1 border-t border-slate-200">
@@ -2055,11 +1961,6 @@ export default function UserDashboardPage() {
                                                     <span className="text-slate-400"> - {s.label}</span>
                                                   </div>
                                                 ))}
-                                                {p.description?.written_by === 'python' && (
-                                                  <p className="text-[10px] text-amber-700 pt-1">
-                                                    The generated description was rejected ({p.description.rejected_reason}); a plain summary is shown instead.
-                                                  </p>
-                                                )}
                                               </div>
                                             </div>
                                           )}
@@ -2076,17 +1977,7 @@ export default function UserDashboardPage() {
                             </p>
                           </div>
                         ) : (
-                          <div className="bg-slate-50 border border-dashed border-slate-200 rounded-xl p-8 text-center space-y-2">
-                            <div className="w-10 h-10 rounded-full bg-purple-100 text-purple-700 flex items-center justify-center mx-auto">
-                              <Sparkles className="w-5 h-5" />
-                            </div>
-                            <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
-                              No evidenced priority yet
-                            </h4>
-                            <p className="text-[11px] text-slate-500 max-w-md mx-auto leading-relaxed">
-                              Strategic priorities for <strong className="text-slate-800">{displayName}</strong> are read from its filed documents and signals. Upload the account&apos;s annual report or exchange filings under Compliance Filings, and they will be generated automatically.
-                            </p>
-                          </div>
+                          <p className="text-xs text-slate-400">{NO_SIGNAL}</p>
                         )}
                       </div>
 
@@ -2231,7 +2122,7 @@ export default function UserDashboardPage() {
                   }, {});
 
                   const fmtDate = (d: string) => {
-                    if (!d) return 'Date N/A';
+                    if (!d) return NOT_DISCLOSED;
                     const dt = new Date(d);
                     if (isNaN(dt.getTime())) return d;
                     return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
@@ -2269,14 +2160,6 @@ export default function UserDashboardPage() {
                       {/* Summary bar */}
                       <div className="flex flex-wrap items-center gap-2 text-xs">
                         <span className="font-semibold text-slate-700">{filteredSignals.length} Signals</span>
-                        {feedData?.not_assessed_count ? (
-                          <span
-                            className="text-[11px] text-slate-500"
-                            title="Published with their date, source and computed drivers. The relevance model did not return a judgement for these."
-                          >
-                            &middot; {feedData.not_assessed_count} awaiting a relevance judgement
-                          </span>
-                        ) : null}
                         {['Critical', 'High', 'Medium', 'Low'].map(lvl => urgencyCounts[lvl] ? (
                           <span key={lvl} className={`px-2 py-0.5 rounded-full font-medium ${
                             lvl === 'Critical' ? 'bg-red-100 text-red-700'
@@ -2307,11 +2190,7 @@ export default function UserDashboardPage() {
                         {getClassificationBadge(isScored ? 'inferred' : 'deterministic')}
                       </div>
 
-                      {!isScored && (
-                        <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-800">
-                          Relevance scoring has not run for this account, so signals are shown in date order and score filters are inactive. No scores are invented.
-                        </div>
-                      )}
+                      {/* Gap reason lives in the backend (data_gaps); the client sees neutral wording. */}
 
                       {/* Filter panel */}
                       {isFilterDrawerOpen && (
@@ -2345,7 +2224,6 @@ export default function UserDashboardPage() {
                                   type="button"
                                   disabled={!isScored}
                                   onClick={() => setMinSignalScore(v)}
-                                  title={!isScored ? 'Available once relevance scoring has run' : undefined}
                                   className={`text-[11px] px-2.5 py-1 rounded-full font-medium border transition disabled:opacity-40 disabled:cursor-not-allowed ${
                                     minSignalScore === v
                                       ? 'bg-hp-navy text-white border-hp-navy'
@@ -2443,12 +2321,7 @@ export default function UserDashboardPage() {
                                       {s.confidence !== null && s.confidence !== undefined ? (
                                         <>{s.confidence.toFixed(1)}<span className="text-slate-400 font-normal">/10</span></>
                                       ) : (
-                                        <span
-                                          className="text-slate-400 font-normal"
-                                          title="A current, de-duplicated signal about this account that the relevance model did not return. Its recency and source reliability are still computed; only the relevance judgement is missing."
-                                        >
-                                          relevance not assessed
-                                        </span>
+                                        <span className="text-slate-400 font-normal">{NO_SIGNAL}</span>
                                       )}
                                       {s.tier && (
                                         <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">{s.tier}</span>
@@ -2529,7 +2402,7 @@ export default function UserDashboardPage() {
 
                                   {/* Source chip, directly below the implication block */}
                                   <div className="mt-2.5 flex flex-wrap items-center gap-2">
-                                    {s.source_url ? (
+                                    {s.source_url && (
                                       <a
                                         href={s.source_url}
                                         target="_blank"
@@ -2540,11 +2413,6 @@ export default function UserDashboardPage() {
                                         <span>{s.source_publisher || 'Source'}</span>
                                         <ExternalLink className="w-3 h-3" />
                                       </a>
-                                    ) : (
-                                      <span className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-500 bg-slate-50 border border-slate-200 px-2 py-0.5 rounded-full">
-                                        <FileText className="w-3 h-3" />
-                                        <span>Source link not available</span>
-                                      </span>
                                     )}
                                     {s.supporting_source_count > 1 && (
                                       <span className="text-[10px] font-medium text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">
@@ -2719,7 +2587,7 @@ export default function UserDashboardPage() {
                           ))}
                         </div>
                       ) : (
-                        <span className="text-[11px] text-slate-400 block">None reported</span>
+                        <span className="text-[11px] text-slate-400 block">{NO_SIGNAL}</span>
                       )}
                       {p.keywords_matched?.length > 0 && (
                         <p className="text-[10px] text-slate-500"><span className="font-bold text-slate-400 uppercase mr-1">Keywords</span>{p.keywords_matched.join(' · ')}</p>
@@ -2728,20 +2596,15 @@ export default function UserDashboardPage() {
                         <p className="text-[10px] text-slate-500"><span className="font-bold text-slate-400 uppercase mr-1">Technologies</span>{p.related_technologies.join(' · ')}</p>
                       )}
                       <p className="text-[10px] text-slate-400">
-                        {p.first_intent_date ? `Observed ${p.first_intent_date} → ${p.latest_intent_date || p.first_intent_date}` : 'No intent dates reported'}
+                        {p.first_intent_date ? `Observed ${p.first_intent_date} → ${p.latest_intent_date || p.first_intent_date}` : NO_SIGNAL}
                       </p>
-                      {(p.quality_flags || []).map((q: any) => (
-                        <p key={q.term} className="flex items-start gap-1 text-[10px] text-amber-800 font-semibold bg-amber-50 border border-amber-200 rounded-lg p-2">
-                          <AlertCircle className="w-3 h-3 flex-shrink-0 mt-0.5" />
-                          <span>This score rests on the term &apos;{q.term}&apos; ({q.field}): {q.reason}. Read this category's score with care.</span>
-                        </p>
-                      ))}
+                      {/* quality_flags are review notes; they live in the backend, not on the client's screen. */}
                     </div>
                   );
 
                   // Steps 2-4: Bombora signals with exact scores, and the technologies that confirm them.
                   const renderSignals = (signals: any[], topicLimit: number) => {
-                    if (!signals?.length) return <p className="text-[11px] text-slate-400">No supporting intent research.</p>;
+                    if (!signals?.length) return <p className="text-[11px] text-slate-400">{NO_SIGNAL}</p>;
                     return (
                       <div className="space-y-2">
                         {signals.map((sg: any) => (
@@ -2751,7 +2614,9 @@ export default function UserDashboardPage() {
                                 {sg.confirmed ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> : <Minus className="w-3.5 h-3.5 text-slate-300" />}
                                 {sg.signal}
                               </span>
-                              <span className="font-mono text-xs font-extrabold text-slate-900">{sg.max != null ? <><CountUpText text={sg.max} />/100</> : '—'}</span>
+                              {sg.max != null
+                                ? <span className="font-mono text-xs font-extrabold text-slate-900"><CountUpText text={sg.max} />/100</span>
+                                : <span className="text-[10px] font-medium text-slate-400">{NO_SIGNAL}</span>}
                             </div>
                             {sg.topics.length > 0 && (
                               <div className="flex flex-wrap gap-1 mt-1.5">
@@ -2771,10 +2636,9 @@ export default function UserDashboardPage() {
                                   <span className="font-bold text-slate-400 uppercase mr-1">Technologies</span>
                                   {sg.technologies.map((t: any) => t.name).join(', ')}
                                   <span className="text-slate-400"> ({Array.from(new Set(sg.technologies.map((t: any) => `${t.sheet} · ${t.column}`))).join('; ')})</span>
-                                  {sg.topics.length === 0 && <span className="text-slate-400"> · no intent signal to score it</span>}
                                 </>
                               ) : (
-                                'No matching technology in the technographics data'
+                                <span className="text-slate-400">{NO_SIGNAL}</span>
                               )}
                             </p>
                           </div>
@@ -2826,10 +2690,12 @@ export default function UserDashboardPage() {
                               Intent · as of {observation.as_of}
                             </span>
                           )}
-                          {accountMatch && (
-                            <span className={`px-3 py-1 rounded-full text-[11px] border flex items-center gap-1 ${accountMatch.status === 'matched' ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-amber-50 text-amber-800 border-amber-200'}`}>
-                              {accountMatch.status === 'matched' ? <ShieldCheck className="w-3.5 h-3.5" /> : <AlertCircle className="w-3.5 h-3.5" />}
-                              {accountMatch.status === 'matched' ? `${accountMatch.provider_domain} verified` : accountMatch.status === 'mismatch' ? 'Domain mismatch' : 'Domain not verified'}
+                          {/* Only a verified match is shown; a mismatch or an unverified
+                              domain is a backend review item, not a client-facing chip. */}
+                          {accountMatch?.status === 'matched' && (
+                            <span className="px-3 py-1 rounded-full text-[11px] border flex items-center gap-1 bg-emerald-50 text-emerald-800 border-emerald-200">
+                              <ShieldCheck className="w-3.5 h-3.5" />
+                              {`${accountMatch.provider_domain} verified`}
                             </span>
                           )}
                         </div>
@@ -2936,9 +2802,13 @@ export default function UserDashboardPage() {
                                               className={`as-grow-y w-14 rounded-t-md cursor-default ${THEME_STYLE[u.category]?.bar || CATEGORY_STYLE[u.category]?.bar || 'bg-slate-400'}`}
                                               style={{ height: `${pct}%`, ['--as-d' as string]: `${growDelay(colIdx, 120, 70)}ms` }}
                                             ></div>
-                                            <span className="absolute text-[11px] font-bold text-slate-700" style={{ bottom: `calc(${pct}% + 6px)` }}>
-                                              {u.bombora_max != null ? <CountUpText text={u.bombora_max} delay={growDelay(colIdx, 120, 70)} /> : '\u2014'}
-                                            </span>
+                                            {/* A unit with no score gets no label here; the
+                                                neutral placeholder sits under its name. */}
+                                            {u.bombora_max != null && (
+                                              <span className="absolute text-[11px] font-bold text-slate-700" style={{ bottom: `calc(${pct}% + 6px)` }}>
+                                                <CountUpText text={u.bombora_max} delay={growDelay(colIdx, 120, 70)} />
+                                              </span>
+                                            )}
 
                                           </div>
                                         );
@@ -2949,8 +2819,8 @@ export default function UserDashboardPage() {
                                     {bu.units.map((u: any) => (
                                       <div key={u.category} className="w-20 text-center">
                                         <span className="text-xs block font-semibold text-slate-600">{categoryLabel(u.category)}</span>
-                                        {u.bombora_topic_count === 0 && (
-                                          <span className="text-[10px] font-semibold text-slate-400 block">No topic</span>
+                                        {(u.bombora_topic_count === 0 || u.bombora_max == null) && (
+                                          <span className="text-[10px] font-medium text-slate-400 block">{NO_SIGNAL}</span>
                                         )}
                                       </div>
                                     ))}
@@ -2985,7 +2855,7 @@ export default function UserDashboardPage() {
                                             {hovered.bombora_top_topics.map((t: any) => `${shortTopic(t.topic)} ${t.score}`).join(' \u00b7 ')}
                                           </p>
                                         ) : (
-                                          <p className="text-[10px] text-slate-500">No researched topic maps to this unit.</p>
+                                          <p className="text-[10px] text-slate-400">{NO_SIGNAL}</p>
                                         )}
                                         <p className="text-[9px] text-slate-400">Composite scores as supplied by Bombora.</p>
                                       </div>
@@ -3035,7 +2905,7 @@ export default function UserDashboardPage() {
                                       <p className="text-[11px] font-semibold text-slate-600">
                                         {researched
                                           ? <>{u.bombora_topic_count} researched topic{u.bombora_topic_count === 1 ? '' : 's'}</>
-                                          : <span className="text-slate-400">No researched topic maps to this</span>}
+                                          : <span className="text-slate-400 font-normal">{NO_SIGNAL}</span>}
                                       </p>
 
                                       {u.bombora_top_topics?.length > 0 && (
@@ -3090,15 +2960,7 @@ export default function UserDashboardPage() {
                           </div>
                         </div>
                       )}
-                      {categoryFile && !categoryFileMatched && categoryFile.note && (
-                        <div className="bg-white rounded-2xl p-5 border border-amber-200 shadow-sm flex items-start gap-3">
-                          <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
-                          <div className="space-y-1">
-                            <h3 className="text-sm font-extrabold text-slate-900">Category file not attached</h3>
-                            <p className="text-xs text-slate-600 leading-relaxed">{categoryFile.note}</p>
-                          </div>
-                        </div>
-                      )}
+                      {/* Gap reason lives in the backend (data_gaps); the client sees neutral wording. */}
 
                       {summaryData && (
                         <>
@@ -3116,9 +2978,11 @@ export default function UserDashboardPage() {
                                 <Layers className="w-4 h-4 text-hp-navy" />
                                 <span>HP CATEGORY INTENT SCORES</span>
                               </h3>
-                              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-50 text-slate-600 border border-slate-200">
-                                {categoryFileMatched ? 'HP Category Intent file' : 'No category file for this account'}
-                              </span>
+                              {categoryFileMatched && (
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-50 text-slate-600 border border-slate-200">
+                                  HP Category Intent file
+                                </span>
+                              )}
                             </div>
                             {chartCats.length > 0 ? (
                               <div className="overflow-x-auto">
@@ -3145,7 +3009,9 @@ export default function UserDashboardPage() {
                                               className={`as-grow-y w-14 rounded-t-md cursor-default ${CATEGORY_STYLE[c.category]?.bar || 'bg-slate-400'} ${noisy ? 'opacity-40' : ''}`}
                                               style={{ height: `${pct}%`, ['--as-d' as string]: `${growDelay(colIdx, 120, 70)}ms` }}
                                             ></div>
-                                            <span className="absolute text-[11px] font-bold text-slate-700" style={{ bottom: `calc(${pct}% + 6px)` }}>{c.primary.score != null ? <CountUpText text={c.primary.score} delay={growDelay(colIdx, 120, 70)} /> : '—'}</span>
+                                            {c.primary.score != null
+                                              ? <span className="absolute text-[11px] font-bold text-slate-700" style={{ bottom: `calc(${pct}% + 6px)` }}><CountUpText text={c.primary.score} delay={growDelay(colIdx, 120, 70)} /></span>
+                                              : <span className="absolute text-[10px] font-medium text-slate-400 text-center leading-tight" style={{ bottom: `calc(${pct}% + 6px)` }}>{NO_SIGNAL}</span>}
 
                                             {/* Hover detail: the category file's own fields for this category,
                                                 each attributed and taken as supplied. */}
@@ -3158,16 +3024,8 @@ export default function UserDashboardPage() {
                                     {chartCats.map((c: any) => (
                                       <div key={c.category} className="w-20 text-center">
                                         <span className="text-xs block font-semibold text-slate-600">{categoryLabel(c.category)}</span>
-                                        {(c.primary.quality_flags || []).length > 0 && (
-                                          <span
-                                            className="text-[10px] font-semibold text-amber-700 block"
-                                            title={(c.primary.quality_flags || []).map((q: any) => `'${q.term}' (${q.field}): ${q.reason}`).join('; ')}
-                                          >
-                                            Check the keyword
-                                          </span>
-                                        )}
                                         {!c.primary.has_signal && c.primary.score != null && (
-                                          <span className="text-[10px] font-semibold text-slate-400 block">No buying stage</span>
+                                          <span className="text-[10px] font-medium text-slate-400 block">{NO_SIGNAL}</span>
                                         )}
                                       </div>
 
@@ -3192,12 +3050,12 @@ export default function UserDashboardPage() {
                                     return (
                                               <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-left space-y-1.5">
                                                 <p className="text-[11px] font-extrabold text-slate-900">
-                                                  {categoryLabel(c.category)} &middot; {p.score ?? '—'}/100
+                                                  {categoryLabel(c.category)} &middot; {p.score != null ? `${p.score}/100` : <span className="font-medium text-slate-400">{NO_SIGNAL}</span>}
                                                 </p>
                                                 <div className="space-y-1">
                                                   <p className="flex items-baseline justify-between gap-2 text-[10px]">
                                                     <span className="font-bold text-slate-400 uppercase tracking-wider">Buying Stage</span>
-                                                    <span className="font-semibold text-slate-600 text-right">{p.stage || 'No stage'}</span>
+                                                    <span className={`text-right ${p.stage ? 'font-semibold text-slate-600' : 'text-slate-400'}`}>{p.stage || NO_SIGNAL}</span>
                                                   </p>
                                                 </div>
 
@@ -3224,14 +3082,8 @@ export default function UserDashboardPage() {
                                                   <span className="font-bold text-slate-400 uppercase tracking-wider block">Observed</span>
                                                   {p.first_intent_date
                                                     ? `${p.first_intent_date} \u2192 ${p.latest_intent_date || p.first_intent_date}`
-                                                    : 'No intent dates reported'}
-                                                  
+                                                    : NO_SIGNAL}
                                                 </p>
-                                                {(p.quality_flags || []).map((q: any) => (
-                                                  <p key={q.term} className="text-[10px] text-amber-800 font-semibold bg-amber-50 border border-amber-200 rounded p-1.5 leading-snug">
-                                                    Score rests on the term &apos;{q.term}&apos; ({q.field}): {q.reason}.
-                                                  </p>
-                                                ))}
                                                 <p className="text-[9px] text-slate-400 leading-snug pt-0.5 border-t border-slate-100">
                                                   All values as supplied by the HP Category Intent file.
                                                 </p>
@@ -3241,13 +3093,10 @@ export default function UserDashboardPage() {
                                 </div>
                               </div>
                             ) : (
-                              <p className="text-xs text-slate-500">{categoryFile?.note || 'Upload the HP Category Intent file to see category scores.'}</p>
+                              <p className="text-xs text-slate-400">{NO_SIGNAL}</p>
                             )}
                             <p className="text-[11px] text-slate-500">
                               Scores as received from the HP Category Intent file, shown for every HP category, ordered by score. Hover a bar for that category&apos;s buying stage and the topics and keywords behind it. Supporting Bombora signals add context and never change these scores.
-                              {categoryFile?.top_check && !categoryFile.top_check.consistent && (
-                                <span className="text-amber-700 font-semibold"> The file&apos;s stated top category ({categoryFile.top_check.stated_category}) does not match its scores ({categoryFile.top_check.recomputed_category}).</span>
-                              )}
                             </p>
                           </div>
 
@@ -3263,7 +3112,7 @@ export default function UserDashboardPage() {
                                 ...(p?.keywords_matched || []),
                               ];
                               return (
-                                <div key={cat.category} className={`bg-white p-5 rounded-2xl border shadow-xs flex flex-col gap-4 ${noisy ? 'border-amber-200' : 'border-slate-200'}`}>
+                                <div key={cat.category} className="bg-white p-5 rounded-2xl border shadow-xs flex flex-col gap-4 border-slate-200">
                                   {/* Header: category chip, the file's own direction, buying stage */}
                                   <div className="flex items-center justify-between gap-2">
                                     <div className="flex items-center gap-2.5 min-w-0">
@@ -3271,7 +3120,7 @@ export default function UserDashboardPage() {
                                     </div>
                                     {p && (
                                       <span title="Buying Stage, as supplied by the category file" className={`text-[11px] font-bold px-2.5 py-1 rounded-md border flex-shrink-0 ${hasSignal(p.stage) ? 'bg-blue-50 text-hp-navy border-blue-200' : 'bg-slate-50 text-slate-500 border-slate-200'}`}>
-                                        {p.stage || 'No stage'}
+                                        {p.stage || NO_SIGNAL}
                                       </span>
                                     )}
                                   </div>
@@ -3292,7 +3141,7 @@ export default function UserDashboardPage() {
                                         )}
                                       </div>
                                     ) : (
-                                      <p className="text-[11px] text-slate-500">No Bombora topic maps to this unit.</p>
+                                      <p className="text-[11px] text-slate-400">{NO_SIGNAL}</p>
                                     );
                                   })()}
 
@@ -3305,15 +3154,14 @@ export default function UserDashboardPage() {
                                       <div className="flex-1 bg-slate-100 h-2.5 rounded-full overflow-hidden">
                                         <div className={`as-grow ${style.bar} h-2.5 rounded-full ${noisy ? 'opacity-40' : ''}`} style={{ width: `${Math.min(100, Math.max(0, p.score ?? 0))}%`, ['--as-d' as string]: '120ms' }}></div>
                                       </div>
-                                      <span className="text-base font-extrabold text-slate-900 flex-shrink-0">{p.score != null ? <CountUpText text={p.score} delay={120} /> : '—'}/100</span>
+                                      {p.score != null
+                                        ? <span className="text-base font-extrabold text-slate-900 flex-shrink-0"><CountUpText text={p.score} delay={120} />/100</span>
+                                        : <span className="text-[11px] text-slate-400 flex-shrink-0">{NO_SIGNAL}</span>}
                                     </div>
                                   ) : (
-                                    // No HP Category Intent file for this account. The card still
-                                    // carries the Bombora research and the HP play, so it is shown
-                                    // rather than collapsed to an empty box.
-                                    <p className="text-[11px] text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5">
-                                      No HP Category Intent file for this account, so there is no category score. The intent research below still applies.
-                                    </p>
+                                    // No category score for this account. The card still carries the
+                                    // Bombora research and the HP play, so it is shown, not collapsed.
+                                    <p className="text-[11px] text-slate-400">{NO_SIGNAL}</p>
                                   )}
 
                                   {/* Signal topics as pills */}
@@ -3327,14 +3175,8 @@ export default function UserDashboardPage() {
                                           ))}
                                         </div>
                                       ) : (
-                                        <p className="text-[11px] text-slate-400">None reported</p>
+                                        <p className="text-[11px] text-slate-400">{NO_SIGNAL}</p>
                                       )}
-                                      {(p.quality_flags || []).map((q: any) => (
-                                        <p key={q.term} className="flex items-start gap-1.5 text-[10px] text-amber-800 font-semibold bg-amber-50 border border-amber-200 rounded-lg p-2">
-                                          <AlertCircle className="w-3 h-3 flex-shrink-0 mt-0.5" />
-                                          <span>This score rests on the term &apos;{q.term}&apos; ({q.field}): {q.reason}. Read this category&apos;s score with care.</span>
-                                        </p>
-                                      ))}
                                     </div>
                                   )}
 
@@ -3344,7 +3186,9 @@ export default function UserDashboardPage() {
                                       <Target className="w-4 h-4 text-slate-400 mt-0.5 flex-shrink-0" />
                                       <div className="min-w-0">
                                         <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Mapped HP Play</span>
-                                        <span className="text-sm font-bold text-slate-900 leading-tight block">{cat.hp_play || 'No HP play mapped'}</span>
+                                        {cat.hp_play
+                                          ? <span className="text-sm font-bold text-slate-900 leading-tight block">{cat.hp_play}</span>
+                                          : <span className="text-sm text-slate-400 leading-tight block">{NO_SIGNAL}</span>}
                                       </div>
                                     </div>
                                   </div>
@@ -3431,14 +3275,18 @@ export default function UserDashboardPage() {
                           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 text-[11px] bg-slate-50/60 p-4 rounded-xl border border-slate-200/80">
                             {[
                               { label: 'Intent sources', value: `${provider ? `${provider.name} ${provider.product}` : 'Bombora'} (topics) · Predictleads (HP category scores)` },
-                              { label: 'Account / domain match', value: accountMatch?.status === 'matched' ? `${accountMatch.provider_domain} = account domain` : (accountMatch?.note || 'Not verified') },
-                              { label: 'Observation date', value: observation?.as_of ? `${observation.as_of} (Date Stamp ${observation.date_stamp})` : (observation?.note || 'Not supplied'), title: observation?.note },
-                              { label: 'Refreshed', value: shortDate(observation?.refreshed_at) || 'Not recorded' },
-                              { label: 'Mapping rules', value: dictionaryVersion || 'Not recorded' }
+                              // Gap notes (accountMatch.note, observation.note) live in the
+                              // backend; an absent value reads as NOT_DISCLOSED.
+                              { label: 'Account / domain match', value: accountMatch?.status === 'matched' ? `${accountMatch.provider_domain} = account domain` : null },
+                              { label: 'Observation date', value: observation?.as_of ? `${observation.as_of} (Date Stamp ${observation.date_stamp})` : null },
+                              { label: 'Refreshed', value: shortDate(observation?.refreshed_at) },
+                              { label: 'Mapping rules', value: dictionaryVersion || null }
                             ].map((f) => (
-                              <div key={f.label} className="space-y-0.5 min-w-0" title={f.title || ''}>
+                              <div key={f.label} className="space-y-0.5 min-w-0">
                                 <span className="text-slate-400 font-bold uppercase text-[10px] block">{f.label}</span>
-                                <span className="font-semibold text-slate-800 block break-words">{f.value}</span>
+                                {f.value
+                                  ? <span className="font-semibold text-slate-800 block break-words">{f.value}</span>
+                                  : <span className="text-slate-400 block">{NOT_DISCLOSED}</span>}
                               </div>
                             ))}
                           </div>
@@ -3540,11 +3388,12 @@ export default function UserDashboardPage() {
                             {(excludedTopics.length > 0 || duplicatesRemoved.length > 0) && (
                               <div className="bg-slate-50 rounded-xl p-4 border border-slate-200 text-[11px] text-slate-600 space-y-1">
                                 <span className="text-slate-500 font-bold uppercase text-[10px] block">Not in any summary</span>
+                                {/* exclusion_reason stays in the payload; the client sees the topic only. */}
                                 {excludedTopics.map((t: any) => (
-                                  <div key={`x-${t.topic_name}`}><span className="font-semibold capitalize">{t.topic_name}</span>: {t.exclusion_reason}</div>
+                                  <div key={`x-${t.topic_name}`}><span className="font-semibold capitalize">{t.topic_name}</span></div>
                                 ))}
                                 {duplicatesRemoved.map((d: any, i: number) => (
-                                  <div key={`d-${i}`}><span className="font-semibold capitalize">{d.topic_name}</span>: duplicate row (score {d.composite_score ?? 'n/a'}) removed; kept score {d.kept_score ?? 'n/a'}</div>
+                                  <div key={`d-${i}`}><span className="font-semibold capitalize">{d.topic_name}</span>: duplicate row (score {d.composite_score ?? NO_SIGNAL}) removed; kept score {d.kept_score ?? NO_SIGNAL}</div>
                                 ))}
                               </div>
                             )}
@@ -3925,9 +3774,10 @@ export default function UserDashboardPage() {
                                     <div className="space-y-2.5">
                                       {play.checks && (
                                         <div className="flex flex-wrap gap-x-4 gap-y-1 pt-1">
-                                          {Object.entries(play.checks).map(([name, passed]: [string, any]) => (
-                                            <span key={name} className={`text-[10px] ${passed ? 'text-emerald-700' : 'text-amber-700'}`}>
-                                              {passed ? '\u2713' : '\u2717'} {name.replace(/_/g, ' ')}
+                                          {/* Failed checks stay in the payload (and data_gaps); only passed ones are shown. */}
+                                          {Object.entries(play.checks).filter(([, passed]: [string, any]) => passed).map(([name]: [string, any]) => (
+                                            <span key={name} className="text-[10px] text-emerald-700">
+                                              {'\u2713'} {name.replace(/_/g, ' ')}
                                             </span>
                                           ))}
                                         </div>
@@ -4059,12 +3909,12 @@ export default function UserDashboardPage() {
                               {/* C 07: "leave out the recommendation or label the missing
                                   condition clearly." This is the labelling branch. */}
                               {(play.unverified_conditions || []).length > 0 && (
-                                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-1">
-                                  <span className="text-[10px] font-semibold text-amber-700 uppercase tracking-wider block">
-                                    Confirm before using
+                                <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-1">
+                                  <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider block">
+                                    Points to confirm
                                   </span>
                                   {play.unverified_conditions.map((c: string, j: number) => (
-                                    <p key={j} className="text-[12px] text-amber-900 leading-relaxed">{c}</p>
+                                    <p key={j} className="text-[12px] text-slate-700 leading-relaxed">{c}</p>
                                   ))}
                                 </div>
                               )}
@@ -4106,13 +3956,12 @@ export default function UserDashboardPage() {
                         <div className="space-y-3 pt-2">
                           <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-600 flex items-center gap-2">
                             <Compass className="w-3.5 h-3.5 text-slate-400" />
-                            <span>Discovery / evidence gaps</span>
+                            <span>Discovery areas</span>
                             <span className="text-slate-400">({discoveryAreas.length})</span>
                           </h3>
                           <p className="text-[11px] text-slate-400 max-w-3xl leading-relaxed">
-                            The data raises these areas but does not support them as HP
-                            opportunities. They carry no recommendation - only what the
-                            evidence shows, what is missing, and what to confirm.
+                            Areas worth exploring with the account: what the evidence shows
+                            and what to confirm.
                           </p>
 
                           {discoveryAreas.map((area: any, i: number) => (
@@ -4236,7 +4085,7 @@ export default function UserDashboardPage() {
                                             </a>
                                           )}
                                         </div>
-                                        <p className="text-xs text-slate-500 font-normal leading-snug">{c.title || 'Title unspecified'}</p>
+                                        <p className="text-xs text-slate-500 font-normal leading-snug">{c.title || NOT_DISCLOSED}</p>
                                         <p className="text-[11px] text-slate-400 font-normal">{c.normalized_department}</p>
                                       </div>
                                     </div>
@@ -4252,13 +4101,13 @@ export default function UserDashboardPage() {
                                         <Mail className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
                                         {c.email
                                           ? <a href={`mailto:${c.email}`} className="text-hp-navy font-medium truncate hover:underline">{c.email}</a>
-                                          : <span className="text-slate-400 italic">Email not available</span>}
+                                          : <span className="text-slate-400">{NOT_DISCLOSED}</span>}
                                       </div>
                                       <div className="flex items-center gap-2 flex-wrap">
                                         <Phone className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
                                         {c.phone
                                           ? <span className="text-slate-700 font-normal">{c.phone}</span>
-                                          : <span className="text-slate-400 italic">Phone not available</span>}
+                                          : <span className="text-slate-400">{NOT_DISCLOSED}</span>}
                                         {c.contact_location && (
                                           <span className="text-[10px] font-medium text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">{c.contact_location}</span>
                                         )}
@@ -4278,7 +4127,7 @@ export default function UserDashboardPage() {
                                         <p className="text-xs text-slate-700 font-normal leading-relaxed">{tp.how_to_open}</p>
                                       </div>
                                     ) : (
-                                      <p className="text-[11px] text-slate-400 italic">No opening angle generated for this contact.</p>
+                                      <p className="text-[11px] text-slate-400">{NO_SIGNAL}</p>
                                     )}
 
                                     {/* Label / value rows */}
@@ -4366,13 +4215,13 @@ export default function UserDashboardPage() {
                         <span className="text-slate-500">Email: </span>
                         {c.email
                           ? <a href={`mailto:${c.email}`} className="text-hp-navy font-medium hover:underline">{c.email}</a>
-                          : <span className="text-slate-400 italic">not available</span>}
+                          : <span className="text-slate-400">{NOT_DISCLOSED}</span>}
                       </p>
                       <p className="text-slate-600 font-normal flex items-center gap-1.5 flex-wrap">
                         <span className="text-slate-500">Phone: </span>
                         {c.phone
                           ? <span>{c.phone}</span>
-                          : <span className="text-slate-400 italic">not available</span>}
+                          : <span className="text-slate-400">{NOT_DISCLOSED}</span>}
                         {c.contact_location && (
                           <span className="text-[10px] font-medium text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">{c.contact_location}</span>
                         )}
@@ -4406,7 +4255,7 @@ export default function UserDashboardPage() {
                               <span className="text-sm font-bold text-slate-900">{c.full_name}</span>
                             </div>
                             <p className="text-xs text-slate-500 font-normal leading-snug">
-                              {c.title || 'Title unspecified'} &middot; <span className="text-slate-400">{c.normalized_department}</span>
+                              {c.title || NOT_DISCLOSED} &middot; <span className="text-slate-400">{c.normalized_department}</span>
                             </p>
                           </div>
                           <div className="hidden sm:flex items-center gap-1.5 flex-wrap justify-end flex-shrink-0">
@@ -4444,7 +4293,7 @@ export default function UserDashboardPage() {
                                 </ul>
                               </div>
                             ) : (
-                              <p className="text-[11px] text-slate-400 italic">No talking points generated for this contact.</p>
+                              <p className="text-[11px] text-slate-400">{NO_SIGNAL}</p>
                             )}
 
                             {Array.isArray(tp.pain_points) && tp.pain_points.length > 0 && (
@@ -4700,8 +4549,8 @@ export default function UserDashboardPage() {
                                 subset a rule matched into the HP categories below. They are
                                 not equal - saying so here stops a reader assuming the cards
                                 account for the whole stack. */}
-                            {mapData.total_detected_technologies ?? '--'} technologies detected in {selectedAccount?.name || 'Target Account'}&apos;s technographics export
-                            {typeof mapData.mapped_signal_count === 'number' && (
+                            {mapData.total_detected_technologies == null ? NO_SIGNAL : <>{mapData.total_detected_technologies} technologies detected in {selectedAccount?.name || 'Target Account'}&apos;s technographics export</>}
+                            {typeof mapData.mapped_signal_count === 'number' && mapData.total_detected_technologies != null && (
                               <> &middot; {mapData.mapped_signal_count} map to the {mapData.total_categories ?? 7} HP categories below</>
                             )}
                           </p>
@@ -4779,23 +4628,23 @@ export default function UserDashboardPage() {
                                     (see tech_landscape.py: "No hardcoded fallback"); an
                                     absent value now reads as absent. */}
                                 <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider block">TECHNOLOGIES IN EXPORT</span>
-                                <div className="text-xl font-black font-mono text-slate-900">{mapData.total_detected_technologies ?? '--'}</div>
+                                <div className="text-xl font-black font-mono text-slate-900">{mapData.total_detected_technologies ?? <span className="text-xs font-normal font-sans text-slate-400">{NO_SIGNAL}</span>}</div>
                               </div>
                               <div className="bg-slate-50/80 p-3.5 rounded-xl border border-slate-200 space-y-1">
                                 <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider block">MAPPED TO HP CATEGORIES</span>
                                 <div className="text-xl font-black font-mono text-slate-900">
                                   {typeof mapData.mapped_signal_count === 'number' && typeof mapData.total_detected_technologies === 'number'
                                     ? `${mapData.mapped_signal_count}/${mapData.total_detected_technologies}`
-                                    : '--'}
+                                    : <span className="text-xs font-normal font-sans text-slate-400">{NO_SIGNAL}</span>}
                                 </div>
                               </div>
                               <div className="bg-blue-50/60 p-3.5 rounded-xl border border-blue-200/80 space-y-1">
                                 <span className="text-[10px] font-extrabold text-blue-800 uppercase tracking-wider block">HP-MAPPED CATEGORIES</span>
-                                <div className="text-xl font-black font-mono text-hp-navy">{mapData.hp_mapped_categories ?? '--'}</div>
+                                <div className="text-xl font-black font-mono text-hp-navy">{mapData.hp_mapped_categories ?? <span className="text-xs font-normal font-sans text-slate-400">{NO_SIGNAL}</span>}</div>
                               </div>
                               <div className="bg-emerald-50/60 p-3.5 rounded-xl border border-emerald-200/80 space-y-1">
                                 <span className="text-[10px] font-extrabold text-emerald-800 uppercase tracking-wider block">WHITESPACE CATEGORIES</span>
-                                <div className="text-xl font-black font-mono text-emerald-700">{mapData.whitespace_categories ?? '--'}</div>
+                                <div className="text-xl font-black font-mono text-emerald-700">{mapData.whitespace_categories ?? <span className="text-xs font-normal font-sans text-slate-400">{NO_SIGNAL}</span>}</div>
                               </div>
                             </div>
                           </div>
@@ -4947,7 +4796,7 @@ export default function UserDashboardPage() {
                                                     and a seller should be able to tell. */}
                                                 {vendor.hp_play.product_source === 'positioning' && (
                                                   <span className="text-[9px] font-medium text-slate-400 normal-case">
-                                                    general positioning &middot; no rulebook rule
+                                                    general positioning
                                                   </span>
                                                 )}
                                               </span>
@@ -5646,9 +5495,6 @@ export default function UserDashboardPage() {
                                   {chosenPersona.department && <li>&ndash; Department: {chosenPersona.department}</li>}
                                   {chosenPersona.seniority_band && <li>&ndash; Seniority: {chosenPersona.seniority_band}</li>}
                                   {chosenPersona.influence_type && <li>&ndash; Influence: {chosenPersona.influence_type}</li>}
-                                  {!chosenPersona.is_named_person && (
-                                    <li className="text-amber-700">&ndash; Role type, not a named person</li>
-                                  )}
                                 </ul>
                               </div>
 
@@ -5682,7 +5528,7 @@ export default function UserDashboardPage() {
                                     ))}
                                   </ul>
                                 ) : (
-                                  <p className="text-xs text-slate-400">Not available</p>
+                                  <p className="text-xs text-slate-400">{NO_SIGNAL}</p>
                                 )}
                               </div>
                             </div>
@@ -5766,7 +5612,7 @@ export default function UserDashboardPage() {
                                 </p>
                               ) : (
                                 <p className="text-xs text-slate-400">
-                                  No HP deck-usage rule matched this account&apos;s verified evidence.
+                                  {NO_SIGNAL}
                                 </p>
                               )}
                             </div>
@@ -5784,9 +5630,9 @@ export default function UserDashboardPage() {
                                     <span className={src === 'not_available' ? 'text-slate-400' : 'text-indigo-600'}>
                                       {src === 'account_contact' ? 'This account’s contact record'
                                         : src === 'account_evidence' ? 'Account evidence'
-                                        : src === 'hiring_role_proxy' ? 'Open job postings (role proxy)'
+                                        : src === 'hiring_role_proxy' ? 'Open job postings'
                                         : src === 'company_personas' ? 'The client’s target buying committee'
-                                        : src === 'not_available' ? 'Not available'
+                                        : src === 'not_available' ? NO_SIGNAL
                                         : String(src)}
                                     </span>
                                   </p>
@@ -5796,7 +5642,7 @@ export default function UserDashboardPage() {
                                   .map(([field, src]: any) => (
                                     <p key={field} className="text-slate-700">
                                       <span className="font-medium capitalize">{field.replace(/_/g, ' ')}:</span>{' '}
-                                      <span className={src === 'Not available' ? 'text-slate-400' : 'text-indigo-600'}>{src}</span>
+                                      <span className={src === 'Not available' ? 'text-slate-400' : 'text-indigo-600'}>{src === 'Not available' ? NO_SIGNAL : src}</span>
                                     </p>
                                   ))}
                               </div>
@@ -5832,12 +5678,9 @@ export default function UserDashboardPage() {
                       {evaluation && ['scores', 'phrases', 'summary'].includes(evaluatorStep) && (
                         <div className="space-y-5">
 
-                          {!evaluation.ai_available && (
-                            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                              AI scoring was unavailable. The coded checks below still ran. No
-                              dimension scores or composite are shown, rather than estimated ones.
-                            </div>
-                          )}
+                          {/* ai_available, padded dimensions, withheld composite or
+                              reaction and dropped chunks stay in the evaluation record;
+                              the client sees neutral wording, never a placeholder 50. */}
 
                           {/* Step D - dimension scores */}
                           <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-4">
@@ -5861,14 +5704,14 @@ export default function UserDashboardPage() {
                                       <div className="flex-1 bg-slate-100 rounded-full h-4 overflow-hidden">
                                         <div
                                           className={`as-grow ${padded ? 'bg-slate-300' : scoreColor(v)} h-full rounded-full transition-all duration-500`}
-                                          style={{ width: `${v}%`, ['--as-d' as string]: `${growDelay(dimIdx)}ms` }}
+                                          style={{ width: `${padded ? 0 : v}%`, ['--as-d' as string]: `${growDelay(dimIdx)}ms` }}
                                         />
                                       </div>
                                       <span className="text-[11px] font-semibold text-slate-700 w-8 text-right">
-                                        <CountUpText text={v} delay={growDelay(dimIdx)} />
+                                        {padded ? null : <CountUpText text={v} delay={growDelay(dimIdx)} />}
                                       </span>
-                                      <span className="text-[10px] text-slate-400 w-16">
-                                        {padded ? 'Not scored' : scoreLabel(v)}
+                                      <span className="text-[10px] text-slate-400 w-24">
+                                        {padded ? NO_SIGNAL : scoreLabel(v)}
                                       </span>
                                       {/* A dimension outside this objective's formula is scored
                                           and shown and weighs nothing - say so, or a low bar
@@ -5903,7 +5746,7 @@ export default function UserDashboardPage() {
                               </div>
                             ) : (
                               <p className="text-xs text-slate-500">
-                                No dimension scores were published for this evaluation.
+                                {NO_SIGNAL}
                               </p>
                             )}
 
@@ -5911,14 +5754,14 @@ export default function UserDashboardPage() {
                               <div className="flex items-center gap-4 flex-wrap">
                                 <div className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border-2 ${scoreBadge(evaluation.composite)}`}>
                                   <span className="text-2xl font-bold">
-                                    {evaluation.composite_available ? evaluation.composite : '—'}
+                                    {evaluation.composite_available ? evaluation.composite : <span className="text-sm font-medium">{NO_SIGNAL}</span>}
                                   </span>
-                                  <div>
-                                    <span className="text-[10px] uppercase tracking-wide font-semibold">/ 100</span>
-                                    <p className="text-xs font-medium">
-                                      {evaluation.composite_available ? evaluation.score_band : 'Unavailable'}
-                                    </p>
-                                  </div>
+                                  {evaluation.composite_available && (
+                                    <div>
+                                      <span className="text-[10px] uppercase tracking-wide font-semibold">/ 100</span>
+                                      <p className="text-xs font-medium">{evaluation.score_band}</p>
+                                    </div>
+                                  )}
                                 </div>
                                 <div className="text-xs text-slate-500">
                                   <p className="font-medium text-slate-600 mb-0.5">
@@ -5930,22 +5773,6 @@ export default function UserDashboardPage() {
                                   </p>
                                 </div>
                               </div>
-                              {(evaluation.dimension_problems || []).length > 0 && (
-                                <p className="mt-3 text-xs font-semibold text-rose-600">
-                                  Composite withheld &mdash; {evaluation.dimension_problems.join('; ')}
-                                </p>
-                              )}
-                              {(evaluation.dimensions_padded || []).length > 0 && (
-                                <p className="mt-3 text-xs text-slate-600">
-                                  The model did not return{' '}
-                                  <span className="font-semibold capitalize">
-                                    {evaluation.dimensions_padded
-                                      .map((d: string) => d.replace(/_/g, ' ')).join(', ')}
-                                  </span>
-                                  . Shown at 50 so the rest of the evaluation still publishes &mdash;
-                                  that is a placeholder, not a score.
-                                </p>
-                              )}
                               {(evaluation.severe_failures || []).length > 0 && (
                                 <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2.5 space-y-1">
                                   <p className="text-[10px] font-bold uppercase tracking-wider text-rose-700">
@@ -6001,13 +5828,6 @@ export default function UserDashboardPage() {
                                     </p>
                                   )}
                                 </div>
-                              )}
-                              {(evaluation.chunk_fidelity_faults || []).length > 0 && (
-                                <p className="mt-3 text-xs text-amber-700">
-                                  The phrase chunks below do not cover the whole message:{' '}
-                                  {evaluation.chunk_fidelity_faults.join('; ')}. Anything not
-                                  highlighted was not reviewed.
-                                </p>
                               )}
                               {evaluation.persona_card?.behavioural_state && (
                                 <div className="mt-3 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2.5 text-xs text-indigo-900 space-y-1">
@@ -6069,14 +5889,12 @@ export default function UserDashboardPage() {
                               </p>
                             </div>
                           )}
-                          {(evaluation.reaction_withheld || []).length > 0 && (
-                            <div className="bg-amber-50 rounded-xl border border-amber-200 p-5">
-                              <h3 className="text-sm font-semibold text-amber-800 mb-1">
-                                Persona Reaction withheld
+                          {!evaluation.reaction && (evaluation.reaction_withheld || []).length > 0 && (
+                            <div className="bg-white rounded-xl border border-slate-200 p-5">
+                              <h3 className="text-sm font-semibold text-slate-700 mb-1">
+                                Persona Reaction
                               </h3>
-                              {evaluation.reaction_withheld.map((f: string, i: number) => (
-                                <p key={i} className="text-xs text-amber-800">&bull; {f}</p>
-                              ))}
+                              <p className="text-xs text-slate-400">{NO_SIGNAL}</p>
                             </div>
                           )}
 
@@ -6085,15 +5903,9 @@ export default function UserDashboardPage() {
                             <h3 className="text-sm font-semibold text-slate-800">
                               Step E &mdash; Phrase-Level Analysis
                             </h3>
-                            {evaluation.phrases_dropped > 0 && (
-                              <p className="text-xs text-slate-500">
-                                {evaluation.phrases_dropped} returned chunk(s) were dropped because they
-                                could not be located in your message.
-                              </p>
-                            )}
                             {(evaluation.phrases || []).length === 0 ? (
                               <p className="text-xs text-slate-500">
-                                No phrase-level feedback was produced for this message.
+                                {NO_SIGNAL}
                               </p>
                             ) : (
                               <div className="overflow-x-auto">
@@ -6486,16 +6298,9 @@ export default function UserDashboardPage() {
 
                       {/* Objection accordion */}
                       {!objectionsReady ? (
-                        <div className="bg-amber-50/60 border border-amber-200/80 rounded-2xl p-6 text-center space-y-3">
-                          <div className="w-10 h-10 rounded-full bg-amber-100 text-amber-800 flex items-center justify-center mx-auto border border-amber-300">
-                            <Sparkles className="w-5 h-5 text-amber-600" />
-                          </div>
-                          <h4 className="text-xs font-bold text-amber-900 uppercase tracking-wider">
-                            No objections generated
-                          </h4>
-                          <p className="text-xs text-amber-800 max-w-xl mx-auto leading-relaxed">
-                            {reframesData.notice || 'Objection generation has not run for this account. The incumbent evidence below is shown as extracted; no objections are invented.'}
-                          </p>
+                        /* reframesData.notice keeps the reason; the client sees neutral wording. */
+                        <div className="bg-slate-50 border border-slate-200 rounded-2xl p-6 text-center">
+                          <p className="text-xs text-slate-400">{NO_SIGNAL}</p>
                         </div>
                       ) : (
                         <div className="space-y-3">
@@ -6542,13 +6347,6 @@ export default function UserDashboardPage() {
                                     <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                                       <p className="text-xs font-semibold text-blue-700 uppercase tracking-wider mb-2">Evidence</p>
                                       <p className="text-xs text-blue-900 font-mono leading-relaxed break-words">{card.evidence}</p>
-                                      {card.not_in_technographics && (
-                                        <p className="text-[11px] text-blue-700/80 mt-2 leading-relaxed">
-                                          No vendor for this area appears in this account&apos;s technographics
-                                          export. That is a limit of what this dataset reports &mdash; it is not
-                                          evidence that no such vendor or process exists.
-                                        </p>
-                                      )}
                                     </div>
 
                                     <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
@@ -6613,7 +6411,7 @@ export default function UserDashboardPage() {
                                         <span className="text-slate-400">
                                           {raiserIsContact
                                             ? ' \u2014 a title in this account\u2019s contacts who would own this subject. They have not raised this objection.'
-                                            : ' \u2014 no contact in this account\u2019s data clearly owns this area, so the area itself is named.'}
+                                            : ''}
                                         </span>
                                       </p>
                                     </div>
@@ -6777,11 +6575,6 @@ export default function UserDashboardPage() {
                                   ))}
                                 </div>
                               )}
-                              {!pillarsData.umbrella_headline && (
-                                <p className="text-[10px] text-amber-700 mt-2">
-                                  Headline withheld — it introduced material the pillars do not support.
-                                </p>
-                              )}
                             </div>
                           </section>
 
@@ -6853,15 +6646,9 @@ export default function UserDashboardPage() {
                                         {/* Denominator is what the model PROPOSED, so a pillar
                                             that had claims discarded reads 3/5, not 3/3. Amber
                                             whenever anything was dropped. */}
-                                        <span
-                                          title={sourced.dropped > 0
-                                            ? `${sourced.dropped} proposed proof point(s) cited evidence that did not resolve and were discarded`
-                                            : undefined}
-                                          className={`rounded-full px-3 py-1 text-[11px] font-semibold whitespace-nowrap h-fit ${
-                                            (sourced.proposed ?? sourced.total) > 0 && sourced.sourced === (sourced.proposed ?? sourced.total)
-                                              ? 'bg-slate-100 text-slate-600 border border-slate-200'
-                                              : 'bg-amber-50 text-amber-700 border border-amber-200'}`}>
-                                          {sourced.sourced}/{sourced.proposed ?? sourced.total} sourced
+                                        {/* Discarded proof points stay in `sourced.dropped`; not shown. */}
+                                        <span className="rounded-full px-3 py-1 text-[11px] font-semibold whitespace-nowrap h-fit bg-slate-100 text-slate-600 border border-slate-200">
+                                          {sourced.sourced} sourced
                                         </span>
                                       </div>
                                     </button>
@@ -6915,11 +6702,10 @@ export default function UserDashboardPage() {
 
                                         <div className="border-t border-slate-200 mt-5 pt-4">
                                           <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400 mb-2.5">
-                                            Proof points ({sourced.total} shown, {sourced.sourced} sourced
-                                            {sourced.dropped > 0 && ` · ${sourced.dropped} discarded as unverifiable`})
+                                            Proof points ({sourced.total} shown, {sourced.sourced} sourced)
                                           </p>
                                           {sourced.total === 0 ? (
-                                            <p className="text-xs text-slate-400">No proof point survived validation.</p>
+                                            <p className="text-xs text-slate-400">{NO_SIGNAL}</p>
                                           ) : (
                                             <ul className="space-y-2">
                                               {(p.proof_points || []).map((pr: any, j: number) => (
@@ -7045,18 +6831,8 @@ export default function UserDashboardPage() {
                         </>
                       ) : (
                         <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center">
-                          <p className="text-sm font-semibold text-slate-700">No message house yet</p>
-                          <p className="text-xs text-slate-500 mt-1 max-w-lg mx-auto leading-relaxed">
-                            It is built from this account&apos;s firmographics, technology, intent
-                            and news evidence, and appears once that data has been indexed.
-                            Uploading or replacing any of those files rebuilds it automatically.
-                          </p>
-                          {cmIndex && cmIndex.status !== 'READY' && (
-                            <p className="text-xs text-slate-400 mt-2">
-                              Retrieval index: {cmIndex.status}
-                              {cmIndex.blocked_reason ? ` — ${cmIndex.blocked_reason}` : ''}
-                            </p>
-                          )}
+                          {/* Index status and blocked_reason are in the admin Pipeline tab. */}
+                          <p className="text-sm text-slate-400">{NO_SIGNAL}</p>
                         </div>
                       )}
                     </div>
@@ -7142,7 +6918,7 @@ export default function UserDashboardPage() {
                   };
 
                   const personaKindLabel = (kind?: string) =>
-                    kind === 'named' ? 'Named contact' : kind === 'role_proxy' ? 'Hiring proxy' : kind === 'archetype' ? 'Archetype' : null;
+                    kind === 'named' ? 'Named contact' : kind === 'role_proxy' || kind === 'archetype' ? 'Target role' : null;
 
                   const activePersonaObj = targetPersonas.find(p => p.id === selectedPersona) || targetPersonas[0];
                   const activeFormatObj = contentTypes.find(c => c.id === selectedContentType) || contentTypes[0];
@@ -7399,18 +7175,7 @@ export default function UserDashboardPage() {
                               {/* Deterministic template, not generated copy. The spec
                                   requires the safe fallback be offered rather than
                                   nothing - and that it never read as model output. */}
-                              {generatedAsset.is_fallback && (
-                                <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
-                                  <p className="text-[11px] font-bold uppercase tracking-wider text-amber-900">
-                                    Safe template - not AI-generated
-                                  </p>
-                                  <p className="text-xs text-amber-800 leading-relaxed mt-1">
-                                    Live generation could not produce a grounded draft for this brief, so
-                                    this is the deterministic template built from verified account fields
-                                    only. Edit it before sending, or try generating again.
-                                  </p>
-                                </div>
-                              )}
+                              {/* is_fallback stays on the asset (and in data_gaps); not flagged on screen. */}
 
                               {/* Variant switcher */}
                               {variants.length > 1 && (
@@ -7706,15 +7471,12 @@ export default function UserDashboardPage() {
                                   <span className="font-mono font-extrabold text-[10px] text-slate-500 uppercase block">HP lines &amp; framing</span>
                                   {generatedAsset.topic && <div className="text-slate-500">Topic: {generatedAsset.topic}</div>}
                                   <div className="font-semibold text-slate-800">
-                                    {(g.hp_products || []).length > 0 ? g.hp_products.join(', ') : 'No product named — discovery-led'}
+                                    {(g.hp_products || []).length > 0 ? g.hp_products.join(', ') : 'Discovery-led'}
                                   </div>
                                   {g.persona_framing && <div className="italic text-slate-600">{g.persona_framing}</div>}
                                   <div className="text-slate-500">
                                     Grounding: {gr.numbers_checked ?? 0} number(s) checked, {(gr.numbers_rejected || []).length} rejected &middot; {(gr.urls_rejected || []).length} URL(s) stripped
                                   </div>
-                                  {generatedAsset.persona?.kind === 'role_proxy' && (
-                                    <div className="text-amber-800">Role-type proxy from open hiring — no individual is known to hold this role.</div>
-                                  )}
                                   {/* Where the Proof Points section came from. The sentence
                                       itself is already in the copy above; what a seller needs
                                       here is the customer and the public HP page behind it,
@@ -8074,11 +7836,6 @@ export default function UserDashboardPage() {
                                         <Sparkles className="w-3.5 h-3.5 text-amber-500" />
                                         <span>{msg.personaTitle || 'ABM Strategy Assistant'}</span>
                                       </span>
-                                      {msg.available === false && (
-                                        <span className="text-[10px] font-bold text-amber-800 bg-amber-50 px-2.5 py-0.5 rounded-full border border-amber-200">
-                                          Not in the evidence
-                                        </span>
-                                      )}
                                     </div>
 
                                     {/* The answer is plain text with UPPERCASE
@@ -8341,14 +8098,7 @@ export default function UserDashboardPage() {
                               <div className="w-8 h-8 rounded-full bg-slate-200/70 text-slate-500 flex items-center justify-center mx-auto">
                                 <Info className="w-4 h-4" />
                               </div>
-                              <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider">
-                                {widget.data_classification === 'deterministic' ? 'Dataset Not Uploaded / Empty' : 'Derived / Inferred Placeholder'}
-                              </h4>
-                              <p className="text-[11px] text-slate-500 max-w-sm mx-auto leading-relaxed">
-                                {widget.data_classification === 'deterministic'
-                                  ? `No raw CSV data uploaded yet for source datasets (${widget.source_datasets.join(', ')}). Upload datasets in Admin Data tab.`
-                                  : `Derived outputs for ${widget.widget_name} are not built yet.`}
-                              </p>
+                              <p className="text-xs text-slate-400">{NO_SIGNAL}</p>
                             </div>
 
                           </div>

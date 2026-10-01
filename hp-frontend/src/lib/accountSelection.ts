@@ -1,3 +1,4 @@
+import { NO_SIGNAL } from './placeholders';
 /**
  * Search, urgency filter and pagination for the account picker.
  *
@@ -52,7 +53,7 @@ export const URGENCY_FILTERS: { value: UrgencyFilter; label: string }[] = [
   { value: '41-60', label: '41–60' },
   { value: '21-40', label: '21–40' },
   { value: '0-20', label: '0–20' },
-  { value: 'unscored', label: 'Not scored' },
+  { value: 'unscored', label: NO_SIGNAL },
 ];
 
 export function matchesUrgency(score: number | null | undefined, filter: UrgencyFilter): boolean {

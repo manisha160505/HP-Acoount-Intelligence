@@ -163,9 +163,14 @@ class TestTheUrgencyExplanation:
         assert chr(8212) not in joined
         assert chr(8211) not in joined
 
-    def test_a_missing_input_still_says_so(self):
-        lines = self._driver()["rationale_lines"]
-        assert any("missing-input rule" in line for line in lines)
+    def test_a_missing_input_reads_neutrally(self):
+        """Client, 1 Oct: no partial-data wording on screen. The line reads "No
+        signal observed"; the real basis stays on the term (and in data_gaps)."""
+        driver = self._driver()
+        assert "Print estate: 0.0/25 - No signal observed" in driver["rationale_lines"]
+        assert not any("missing-input" in line or "no print vendor" in line
+                       for line in driver["rationale_lines"])
+        assert driver["terms"][1]["basis"] == "no print vendor in the export"
 
     def test_the_weight_leads(self):
         assert self._driver()["rationale_lines"][0].startswith("Weight ")

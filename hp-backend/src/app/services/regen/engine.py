@@ -50,7 +50,15 @@ from pymongo.errors import DuplicateKeyError
 
 from app.observability import pipeline
 from app.services.extractors.datasets import DatasetFileMissing
-from app.services.regen import context as run_context, jobs, manifest, planner, runs, state
+from app.services.regen import (
+    context as run_context,
+    data_gaps,
+    jobs,
+    manifest,
+    planner,
+    runs,
+    state,
+)
 from app.services.regen.graph import DEFAULT, INDEX
 from app.services.regen.store import WIDGET_FIELDS, shape
 
@@ -623,6 +631,9 @@ class Engine:
             "quality": quality,
             "degraded_retries": retries,
             "widgets": widgets,
+            # Why each placeholder field is empty - the client sees neutral
+            # wording, the reason is kept here. Audit only, outside the hash.
+            "data_gaps": data_gaps.collect_all(widgets),
             "index": extra,
             "soft_reads": dict(ctx.soft_reads),
             # Which file rows the run read - audit only, outside the fingerprint.
