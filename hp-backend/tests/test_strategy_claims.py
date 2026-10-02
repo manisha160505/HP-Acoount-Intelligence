@@ -531,7 +531,7 @@ class TestARecommendationMayPlan:
         ok, failures, _ = _check(
             [*FACTS, _recommendation("Lead with Poly Studio on the first call.")],
             ground)
-        assert not ok
+        assert not ok, failures
 
     def test_it_still_may_not_state_an_account_figure(self, ground):
         """A number that is not the plan's own schedule is an account claim,

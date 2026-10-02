@@ -246,7 +246,7 @@ def _as_type(raw) -> str:
 # Validation
 # ---------------------------------------------------------------------------
 
-def validate(segments: list, *, widget_keys, section_texts: dict,  # noqa: PLR0913, PLR0917 - the whole grounding context, passed explicitly
+def validate(segments: list, *, widget_keys, section_texts: dict,
              corpus, company: str = "", payload: str = "",
              question: str = "") -> tuple:
     """(ok, failures, resolved_keys).
