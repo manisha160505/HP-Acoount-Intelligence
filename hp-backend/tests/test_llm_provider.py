@@ -91,6 +91,94 @@ def test_vertex_embeddings_send_key_in_header_and_wait_out_a_429(monkeypatch):
     assert "g-key" not in url and "params" not in kw
 
 
+def test_vertex_without_a_key_uses_adc_tokens_not_a_key_header():
+    s = _settings(LLM_PROVIDER="vertex", GEMINI_API_KEY="", VERTEX_PROJECT="291820970173")
+    assert s.vertex_keyless and s.llm_configured
+    kw = s.llm_client_kwargs
+    from app.core.google_auth import access_token
+    assert kw["api_key"] is access_token                     # called per request
+    assert "default_headers" not in kw
+    assert "/projects/291820970173/" in kw["base_url"]
+
+
+def test_vertex_keyless_needs_a_project_and_a_key_still_wins():
+    assert not _settings(LLM_PROVIDER="vertex", GEMINI_API_KEY="",
+                         VERTEX_PROJECT="").llm_configured
+    with_key = _settings(LLM_PROVIDER="vertex", VERTEX_PROJECT="123")
+    assert not with_key.vertex_keyless
+    assert with_key.llm_client_kwargs["default_headers"] == {"x-goog-api-key": "g-key"}
+    assert not _settings(LLM_PROVIDER="gemini", GEMINI_API_KEY="",
+                         VERTEX_PROJECT="123").llm_configured
+
+
+def test_vertex_keyless_embeddings_name_the_project_and_send_a_bearer(monkeypatch):
+    import httpx
+
+    from app.core import google_auth
+    from app.services.retrieval import client
+
+    monkeypatch.setattr(client.settings, "LLM_PROVIDER", "vertex")
+    monkeypatch.setattr(client.settings, "GEMINI_API_KEY", "")
+    monkeypatch.setattr(client.settings, "VERTEX_PROJECT", "291820970173")
+    monkeypatch.setattr(client.settings, "VERTEX_EMBEDDING_LOCATION", "asia-south1")
+    tokens = iter(["tok-1", "tok-2"])
+    monkeypatch.setattr(google_auth, "access_token", lambda: next(tokens))
+    monkeypatch.setattr(client, "VERTEX_RETRY_WAITS", (0,))
+    calls = []
+
+    def fake_post(url, headers=None, json=None, timeout=None, **kw):
+        calls.append((url, headers))
+        code = 429 if len(calls) == 1 else 200
+        body = {"predictions": [{"embeddings": {"values": [0.2]}}
+                                for _ in json["instances"]]}
+        return httpx.Response(code, json=body, request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    assert client._vertex_embed(["a"]) == [[0.2]]
+    assert calls[0][0] == ("https://asia-south1-aiplatform.googleapis.com/v1/projects/"
+                           "291820970173/locations/asia-south1/publishers/google/"
+                           "models/gemini-embedding-001:predict")
+    # a fresh token per attempt, so a long wait never resends an expired one
+    assert [h for _, h in calls] == [{"Authorization": "Bearer tok-1"},
+                                     {"Authorization": "Bearer tok-2"}]
+
+
+def test_access_token_refreshes_only_when_invalid(monkeypatch):
+    import google.auth
+
+    from app.core import google_auth
+
+    class _Creds:
+        valid, token, refreshes = False, None, 0
+
+        def refresh(self, _request):
+            self.refreshes += 1
+            self.valid, self.token = True, "t%d" % self.refreshes
+
+    creds = _Creds()
+    monkeypatch.setattr(google_auth, "_credentials", None)
+    monkeypatch.setattr(google.auth, "default", lambda **_kw: (creds, "p"))
+    assert google_auth.access_token() == "t1"
+    assert google_auth.access_token() == "t1" and creds.refreshes == 1
+    creds.valid = False                                      # expired
+    assert google_auth.access_token() == "t2"
+
+
+def test_missing_adc_is_a_clear_error(monkeypatch):
+    import google.auth
+    from google.auth.exceptions import DefaultCredentialsError
+
+    from app.core import google_auth
+
+    def no_creds(**_kw):
+        raise DefaultCredentialsError("none")
+
+    monkeypatch.setattr(google_auth, "_credentials", None)
+    monkeypatch.setattr(google.auth, "default", no_creds)
+    with pytest.raises(google_auth.GoogleAuthError, match="application-default login"):
+        google_auth.access_token()
+
+
 def test_regen_cancels_job_for_removed_node(monkeypatch):
     from app.services.regen import jobs
     from app.services.regen.engine import Engine

@@ -46,7 +46,21 @@ def _log_readiness() -> None:
         logger.exception("Could not summarise startup state.")
 
     key = settings.llm_api_key
-    if not key:
+    if settings.vertex_keyless:
+        # Fetch one token now so missing credentials show at startup, not as
+        # the first failed section. Non-fatal: deterministic widgets still run.
+        from app.core.google_auth import GoogleAuthError, access_token
+        try:
+            access_token()
+            logger.info("LLM: vertex (project %s, Application Default Credentials) - "
+                        "chat %s, retrieval %s, embeddings %s",
+                        settings.VERTEX_PROJECT.strip(), settings.chat_model,
+                        settings.retrieval_model, settings.embedding_identity)
+        except GoogleAuthError as exc:
+            logger.warning("%s AI generation will fail at the API call.", exc)
+        except Exception:
+            logger.exception("Could not get a Google access token for Vertex AI.")
+    elif not key:
         logger.warning("%s is not set - AI-inferred layers will stay empty by "
                        "design. Deterministic widgets are unaffected.",
                        settings.llm_api_key_name)

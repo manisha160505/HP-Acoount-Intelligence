@@ -10,7 +10,13 @@ pydantic-settings>=2.2.0
 python-multipart>=0.0.9
 python-dotenv>=1.0.0
 pandas>=2.2.0
-openai>=1.99.0
+# 3.10 is the version verified (2 Oct) to accept a function as api_key, which
+# keyless Vertex (core/google_auth.py) relies on to refresh its hourly token.
+openai>=3.10.0
+# Keyless Vertex AI: OAuth tokens from Application Default Credentials (the
+# VM's service account). requests is google-auth's token-refresh transport.
+google-auth>=2.30,<3
+requests>=2.31
 
 # The retrieval layer. Pinned exactly, not floated: LightRAG's storage
 # backends read their own environment variables and its query surface changed

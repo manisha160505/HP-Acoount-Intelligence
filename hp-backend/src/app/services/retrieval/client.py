@@ -120,8 +120,7 @@ def workspace_name(account_id: str, index: str) -> str:
 def _openai_client():
     from openai import OpenAI
 
-    api_key = settings.llm_api_key
-    if not api_key:
+    if not settings.llm_configured:
         raise RetrievalConfigError(
             "%s is not set - the retrieval layer cannot embed or extract"
             % settings.llm_api_key_name)
@@ -189,15 +188,19 @@ def _vertex_embed(texts: list) -> list:
     Vertex's OpenAI-compatible endpoint serves chat to an express-mode API key
     but refuses it on /embeddings ("API keys are not supported by this API"),
     while `publishers/google/models/<model>:predict` accepts it. The output
-    dimension is pinned so it always matches settings.embedding_dim."""
-    if not settings.llm_api_key:
+    dimension is pinned so it always matches settings.embedding_dim.
+    Keyless (OAuth) calls must name the project and location in the path; an
+    express key is tied to its own project and uses the short path."""
+    if not settings.llm_configured:
         raise RetrievalConfigError("%s is not set - the retrieval layer cannot embed"
                                    % settings.llm_api_key_name)
     location = (settings.VERTEX_EMBEDDING_LOCATION or "global").strip()
     host = ("aiplatform.googleapis.com" if location == "global"
             else "%s-aiplatform.googleapis.com" % location)
-    url = ("https://%s/v1/publishers/google/models/%s:predict"
-           % (host, settings.embedding_model))
+    scope = ("projects/%s/locations/%s/" % (settings.VERTEX_PROJECT.strip(), location)
+             if settings.vertex_keyless else "")
+    url = ("https://%s/v1/%spublishers/google/models/%s:predict"
+           % (host, scope, settings.embedding_model))
     vectors = []
     for start in range(0, len(texts), EMBEDDING_BATCH_NUM):
         batch = texts[start:start + EMBEDDING_BATCH_NUM]
@@ -223,12 +226,16 @@ EMBEDDING_TIMEOUT = 120
 
 
 def _vertex_post(url: str, body: dict):
-    """POST with the key in a header - never ?key=, which httpx puts in every
-    error message and so in the logs - with the short waits above."""
+    """POST with the key (or a bearer token) in a header - never ?key=, which
+    httpx puts in every error message and so in the logs - with the short waits
+    above. Headers are rebuilt per attempt so a long wait never reuses an
+    expired token."""
     import httpx
 
+    from app.core.google_auth import vertex_headers
+
     for wait in (*VERTEX_RETRY_WAITS, None):
-        response = httpx.post(url, headers={"x-goog-api-key": settings.llm_api_key},
+        response = httpx.post(url, headers=vertex_headers(settings.llm_api_key),
                               json=body, timeout=120)
         if not (response.status_code == 429 or response.status_code >= 500):
             break

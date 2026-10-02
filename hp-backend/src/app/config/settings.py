@@ -65,7 +65,10 @@ class Settings(BaseSettings):
     # that was answering 429. Every prompt here spells out its rules and its
     # JSON shape, so it has little to reason about. -1 = the model's default.
     GEMINI_THINKING_BUDGET: int = 0
-    # Vertex AI (LLM_PROVIDER=vertex). The express-mode key is GEMINI_API_KEY.
+    # Vertex AI (LLM_PROVIDER=vertex). The express-mode key is GEMINI_API_KEY;
+    # left empty, calls authenticate with Application Default Credentials (the
+    # VM's service account, or `gcloud auth application-default login`) against
+    # VERTEX_PROJECT - see core/google_auth.py.
     # Chat goes to Vertex's OpenAI-compatible endpoint, which needs the project
     # and location in its path; embeddings go to the native predict method,
     # because that endpoint's embeddings route does not accept an API key.
@@ -175,6 +178,18 @@ class Settings(BaseSettings):
         return "GEMINI_API_KEY" if self._is_google else "OPENAI_API_KEY"
 
     @property
+    def vertex_keyless(self) -> bool:
+        """Vertex with no express key: authenticate with Application Default
+        Credentials. Needs VERTEX_PROJECT, which an OAuth call must name."""
+        return (self.llm_provider == "vertex" and not self.llm_api_key
+                and bool(self.VERTEX_PROJECT.strip()))
+
+    @property
+    def llm_configured(self) -> bool:
+        """Whether model calls can be made at all: a key, or keyless Vertex."""
+        return bool(self.llm_api_key) or self.vertex_keyless
+
+    @property
     def llm_endpoint(self) -> str:
         if self.llm_provider == "vertex":
             return ("https://aiplatform.googleapis.com/v1/projects/%s/locations/%s/"
@@ -187,7 +202,13 @@ class Settings(BaseSettings):
     def llm_client_kwargs(self) -> dict:
         """Arguments for openai.OpenAI(...). A Vertex express key travels in the
         x-goog-api-key header; sent as the Bearer token Vertex rejects it (401,
-        wants OAuth). Not ?key=: a URL lands in error messages and logs."""
+        wants OAuth). Not ?key=: a URL lands in error messages and logs.
+        Without a key the SDK is given a token function instead, which it calls
+        before every request, so an hour-long run never sends an expired token."""
+        if self.vertex_keyless:
+            from app.core.google_auth import access_token
+
+            return {"base_url": self.llm_endpoint, "api_key": access_token}
         if self.llm_provider == "vertex":
             return {"base_url": self.llm_endpoint, "api_key": "vertex-express",
                     "default_headers": {"x-goog-api-key": self.llm_api_key}}

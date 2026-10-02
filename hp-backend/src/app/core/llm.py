@@ -15,8 +15,7 @@ def get_openai_client() -> OpenAI | None:
 
     Gemini is reached through its OpenAI-compatible endpoint, so the same SDK and
     the same request shapes serve both providers."""
-    api_key = settings.llm_api_key
-    if not api_key:
+    if not settings.llm_configured:
         logger.warning("%s is not set in environment or settings.", settings.llm_api_key_name)
         return None
     return OpenAI(**settings.llm_client_kwargs)
