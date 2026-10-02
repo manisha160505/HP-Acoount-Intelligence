@@ -120,6 +120,11 @@ class Settings(BaseSettings):
     # truncates the answer mid-sentence, which strips its trailing citation,
     # fails validation, and surfaces as a grounding error - a failure that
     # looks like anything except a token limit.
+    # Measured, not guessed. Raised to 32,768 to stop a 90-day plan being
+    # cut off; the model simply wrote 42,528 tokens instead, truncated
+    # anyway, and spent 400 seconds doing it. The answer to an answer that
+    # is too long is to ask for a shorter one - the prompt now does, and a
+    # truncated attempt is retried shorter - not to widen the door.
     GEMINI_MAX_OUTPUT_TOKENS: int = 16384
     GEMINI_TEMPERATURE: float = 0.3
 

@@ -43,11 +43,27 @@ from app.services.extractors.grounding import normalize_hp_product
 FACT = "FACT"
 DERIVED = "DERIVED"
 SYNTHESIS = "SYNTHESIS"
+RECOMMENDATION = "RECOMMENDATION"
 GENERAL = "GENERAL"
-CLAIM_TYPES = (FACT, DERIVED, SYNTHESIS, GENERAL)
+CLAIM_TYPES = (FACT, DERIVED, SYNTHESIS, RECOMMENDATION, GENERAL)
 
 # The two that assert something about the account and must carry evidence.
 EVIDENCED_TYPES = (FACT, DERIVED)
+
+# The two that reason instead of reporting. Both rest on other segments and
+# carry no evidence of their own; they differ only in what they may introduce,
+# and that difference is the client's own: a conclusion ABOUT the account may
+# add nothing, while advice TO THE SELLER is allowed the words advice is made
+# of. See `_recommendation_introduces`.
+REASONED_TYPES = (SYNTHESIS, RECOMMENDATION)
+
+# Named things that are not claims about the account: the channels a seller's
+# own plan is made of. "Follow up on LinkedIn" proposes a medium; it does not
+# assert that the account uses one. Deliberately short - anything that could
+# also be read as the account's own technology (a CRM, a collaboration suite
+# they might run) stays out, because there the name IS a claim.
+GENERIC_CHANNELS = frozenset({"linkedin", "inmail", "email", "webinar",
+                              "workshop", "roadshow", "newsletter"})
 
 # How a segment sits on the page. Layout is part of the contract because the
 # answer is plain text - the UI renders it with `whitespace-pre-wrap` and no
@@ -122,7 +138,27 @@ def parse(raw) -> list:
         })
     if not out:
         raise ClaimError("every segment was empty")
-    return _infer_dependencies(out)
+    return _infer_dependencies(_unique_ids(out))
+
+
+def _unique_ids(segments: list) -> list:
+    """Rename a repeated id rather than failing the answer over it.
+
+    On a long answer the model reuses one - "c10" twice in 53 segments - and
+    that cost a whole generation. A `depends_on` naming the id still resolves
+    to the first segment carrying it, which is what a reader would assume,
+    and the renamed one keeps its own text and its own dependencies.
+    """
+    seen: dict = {}
+    for segment in segments:
+        base = segment["id"]
+        if base not in seen:
+            seen[base] = 1
+            continue
+        seen[base] += 1
+        segment["id"] = "%s-%d" % (base, seen[base])
+        segment["renamed_from"] = base
+    return segments
 
 
 def _infer_dependencies(segments: list) -> list:
@@ -134,18 +170,32 @@ def _infer_dependencies(segments: list) -> list:
     the same check as a stated one, so a conclusion reaching past the facts
     above it still fails, and now fails for the right reason.
     """
-    evidenced: list = []
+    # Everything the answer evidences, read before anything is judged - the
+    # answer leads with its conclusion, so the facts a leading conclusion
+    # rests on are below it, not above.
+    everything = [s["id"] for s in segments if s["type"] in EVIDENCED_TYPES]
     carries: dict = {}
     for segment in segments:
         if segment["type"] in EVIDENCED_TYPES:
-            evidenced.append(segment["id"])
             for token in _named_entities(segment["text"]):
                 carries.setdefault(token, segment["id"])
+
+    evidenced: list = []
+    for segment in segments:
+        if segment["type"] in EVIDENCED_TYPES:
+            evidenced.append(segment["id"])
             continue
-        if segment["type"] != SYNTHESIS:
+        if segment["type"] not in REASONED_TYPES:
             continue
         if not segment["depends_on"]:
-            segment["depends_on"] = list(evidenced)
+            # Facts above it when there are any. A conclusion that OPENS the
+            # answer - the house format, not a mistake - rests on the facts
+            # below instead, and on the ones carrying what it actually names
+            # rather than on all of them: resting it on everything put eight
+            # footnote markers on every line of the answer.
+            segment["depends_on"] = (list(evidenced)
+                                     or _linked_to(segment, carries)
+                                     or list(everything))
             segment["inferred_depends_on"] = True
             continue
         # Stated some dependencies but not all of them. Trace each thing the
@@ -161,14 +211,29 @@ def _infer_dependencies(segments: list) -> list:
     return segments
 
 
+def _linked_to(segment, carries: dict) -> list:
+    """The evidenced segments carrying the things this one names, in order."""
+    linked: list = []
+    for token in sorted(_named_entities(segment["text"])):
+        owner = carries.get(token)
+        if owner and owner not in linked:
+            linked.append(owner)
+    return linked
+
+
 # A heading and a label are GENERAL claims that happen to sit on their own
 # line, and the model reaches for them as a TYPE as readily as a block - it
 # cost a whole generation the first time it did. Forgiving about which field
 # the word landed in; `validate` is where the judging happens.
 _TYPE_ALIASES = {
     "HEADING": GENERAL, "LABEL": GENERAL, "TITLE": GENERAL,
-    "CONCLUSION": SYNTHESIS, "RECOMMENDATION": SYNTHESIS,
-    "INFERENCE": DERIVED, "ADVICE": SYNTHESIS,
+    "CONCLUSION": SYNTHESIS,
+    "INFERENCE": DERIVED,
+    # RECOMMENDATION used to fold into SYNTHESIS, which is what made a plan
+    # unpublishable. These now reach the type that can carry one.
+    "ADVICE": RECOMMENDATION, "NEXT_STEP": RECOMMENDATION,
+    "NEXT STEP": RECOMMENDATION, "STEP": RECOMMENDATION,
+    "PLAN": RECOMMENDATION, "ACTION": RECOMMENDATION,
 }
 
 
@@ -182,7 +247,8 @@ def _as_type(raw) -> str:
 # ---------------------------------------------------------------------------
 
 def validate(segments: list, *, widget_keys, section_texts: dict,
-             corpus, company: str = "", payload: str = "") -> tuple:
+             corpus, company: str = "", payload: str = "",
+             question: str = "") -> tuple:
     """(ok, failures, resolved_keys).
 
     `failures` is a list of {"id", "reason"} so a repair can name the segment
@@ -205,8 +271,9 @@ def validate(segments: list, *, widget_keys, section_texts: dict,
         by_id[segment["id"]] = segment
 
     for segment in segments:
+        exempt = _company_tokens(company) | _question_tokens(question)
         reason = _segment_failure(segment, by_id, valid_keys, section_texts,
-                                  corpus, company, _company_tokens(company))
+                                  corpus, company, exempt)
         if reason:
             failures.append({"id": segment["id"], "reason": reason})
 
@@ -231,14 +298,24 @@ def validate(segments: list, *, widget_keys, section_texts: dict,
     # The whole-answer checks. Run over what would actually be published, so a
     # figure inside a segment that is about to be dropped is not held against
     # the answer that remains.
+    # Two texts, deliberately. The HP-product sweep runs over everything,
+    # recommendations included - naming an HP line the account has no evidence
+    # for is forbidden wherever it appears. The FIGURE sweep skips
+    # recommendations: their numbers are the plan's own schedule, already
+    # judged per segment by the cadence rule, and sweeping them here would
+    # reject "week 2" for not appearing in the account's data - which is
+    # exactly what made a week-by-week plan impossible to publish.
     clean_text = clean(survivors)
-    if clean_text:
-        unsourced = corpus.unsourced_numbers(clean_text)
+    figure_text = clean([s for s in survivors
+                         if s["type"] != RECOMMENDATION])
+    if figure_text:
+        unsourced = corpus.unsourced_numbers(figure_text)
         if unsourced:
             failures.append({
                 "id": _segment_carrying(survivors, unsourced[0]),
                 "reason": "it states figure(s) that are not in the evidence: %s"
                           % ", ".join(unsourced[:4])})
+    if clean_text:
         hp_fault = _unsupported_hp_line(clean_text, payload)
         if hp_fault:
             failures.append({"id": _segment_carrying(survivors, hp_fault),
@@ -267,6 +344,17 @@ def _company_tokens(company: str) -> set:
         tokens.add(word.lower())
         tokens.add(word.lower() + "'s")
     return tokens
+
+
+def _question_tokens(question: str) -> set:
+    """The words the seller used, which the answer may use back.
+
+    "Include week-by-week activities, target personas, content types, and
+    success metrics" and then the answer is rejected for naming Personas and
+    Metrics. Echoing the question is not inventing a fact about the account,
+    and these are capitalised only because they head a line.
+    """
+    return {w.lower() for w in re.findall(r"[A-Za-z]{3,}", question or "")}
 
 
 def _segment_failure(segment, by_id, valid_keys, section_texts, corpus, company,  # noqa: PLR0911 - a rule per branch; collapsing them would hide which rule fired
@@ -300,27 +388,38 @@ def _segment_failure(segment, by_id, valid_keys, section_texts, corpus, company,
                     % segment["quote"][:60])
         return ""
 
-    if segment["type"] == SYNTHESIS:
+    if segment["type"] in REASONED_TYPES:
         if not segment["depends_on"]:
-            return "it draws a conclusion but names no claim it rests on"
+            return ("it draws a conclusion but names no claim it rests on"
+                    if segment["type"] == SYNTHESIS else
+                    "it recommends something but names no claim it rests on")
         missing = [d for d in segment["depends_on"] if d not in by_id]
         if missing:
             return "it rests on %s, which is not in the answer" % ", ".join(missing[:3])
-        return _synthesis_introduces(segment, by_id, section_texts,
-                                     company_tokens)
+        if segment["type"] == SYNTHESIS:
+            return _synthesis_introduces(segment, by_id, section_texts,
+                                         company_tokens, corpus)
+        return _recommendation_introduces(segment, by_id, section_texts,
+                                          company_tokens, corpus)
 
     # GENERAL - reasoning that is not about this account, and must not read as
     # though it were.
     if company and company.lower() in segment["text"].lower():
         return ("it names %s, so it is a claim about the account and needs "
                 "evidence" % company)
-    if _DIGIT_RE.search(segment["text"]):
+    # A figure in general prose is a claim with no evidence - "most estates
+    # of 4,000 seats" is exactly what this catches. The plan's own schedule
+    # is not: "WEEK 1-2" is how a week-by-week answer is laid out, and the
+    # prompt asks for headings to be typed GENERAL, so rejecting numbered
+    # ones rejected eighteen segments of a 90-day plan at a stroke.
+    unscheduled = _digits_in(segment["text"]) - _plan_figures(segment["text"])
+    if unscheduled:
         return "it carries a figure, so it is a claim about the account"
     return ""
 
 
 def _synthesis_introduces(segment, by_id, section_texts,
-                          company_tokens=frozenset()) -> str:
+                          company_tokens=frozenset(), corpus=None) -> str:
     """Whether a conclusion smuggles in something new. "" when it does not.
 
     The rule, as the client set it: a synthesis sentence is allowed without its
@@ -339,6 +438,29 @@ def _synthesis_introduces(segment, by_id, section_texts,
     "specifically", "driven" and "plans". It published three bare facts and
     dropped the conclusion they were there to support.
     """
+    supported, supported_digits = _supported_by(segment, by_id, section_texts)
+
+    # A figure is a claim whatever its case, so it is judged on its own.
+    new_digits = _unsupported_digits(segment["text"], supported_digits, corpus)
+    if new_digits:
+        return ("it states figure(s) that are not in this account's evidence: "
+                "%s" % ", ".join(sorted(new_digits)[:3]))
+
+    named = _unsupported_names(segment["text"], supported, company_tokens,
+                               corpus)
+    if named:
+        return ("it names %s, which does not appear in this account's "
+                "evidence" % ", ".join(sorted(named)[:4]))
+    return ""
+
+
+def _supported_by(segment, by_id, section_texts) -> tuple:
+    """What the claims underneath a segment already carry: (words, figures).
+
+    Both the dependency's own text and the text of the sections it cites - a
+    conclusion resting on a fact may use any word the fact's evidence uses,
+    not only the ones the fact chose to repeat.
+    """
     supported = set()
     supported_digits = set()
     for dependency_id in segment["depends_on"]:
@@ -353,19 +475,149 @@ def _synthesis_introduces(segment, by_id, section_texts,
             supported |= _content_tokens(section)
             supported |= {w.lower() for w in re.findall(r"[A-Za-z]{3,}", section)}
             supported_digits |= _digits_in(section)
+    return supported, supported_digits
 
-    # A figure is a claim whatever its case, so it is judged on its own.
-    new_digits = _digits_in(segment["text"]) - supported_digits
+
+# The numbers a plan is made of. "week 1", "within 30 days", "three touches",
+# "a 90-day plan", "30/60/90" - each proposes something the seller should do
+# and asserts nothing about the account, so none of them is held against the
+# evidence the way an account figure is.
+_PLAN_UNITS = (
+    r"day|days|week|weeks|month|months|quarter|quarters|year|years|"
+    r"hour|hours|minute|minutes|touch|touches|email|emails|call|calls|"
+    r"meeting|meetings|session|sessions|follow-?up|follow-?ups|step|steps|"
+    r"phase|phases|sprint|sprints|wave|waves|message|messages")
+_PLAN_FIGURE_RE = re.compile(
+    # "week 2", "phase 1", and the forms a real plan uses: a range
+    # ("weeks 1-4") and a list ("weeks 2, 5 and 9").
+    r"\b(?:%s)\s*#?\s*\d+(?:\s*(?:[-,/&]|to|and|through)\s*\d+)*"
+    r"|\b\d+\s*-?\s*(?:%s)\b"     # "30 days", "90-day", "3 touches"
+    r"|\b\d+\s*/\s*\d+"           # "30/60/90"
+    % (_PLAN_UNITS, _PLAN_UNITS), re.IGNORECASE)
+
+
+def _plan_figures(text: str) -> set:
+    """The figures in `text` that are part of the plan's own schedule."""
+    found = set()
+    for match in _PLAN_FIGURE_RE.finditer(text or ""):
+        found |= _digits_in(match.group(0))
+    return found
+
+
+def _recommendation_introduces(segment, by_id, section_texts,
+                               company_tokens=frozenset(), corpus=None) -> str:
+    """Whether advice asserts something about the account. "" when it does not.
+
+    **This is not the synthesis rule relaxed.** SYNTHESIS keeps the client's
+    rule exactly as they wrote it - a conclusion may add no name, number,
+    technology, relationship or event its dependencies do not carry. This is
+    the other half of the client's own distinction, the half the single strict
+    rule left unimplemented: *a fact needs evidence, a recommendation needs
+    reasoning that rests on evidence*.
+
+    What a recommendation may do that a conclusion may not: use the vocabulary
+    of a plan. A cadence, a count of touches, a channel. "Open with a short
+    note in week 1" states nothing about the customer that could be true or
+    false of them - it is the advice itself.
+
+    What it still may not do, unchanged: name a person, a vendor, an HP line,
+    a title or a figure that purports to be the account's. Those are facts,
+    they need their own evidence, and the recommendation then rests on them.
+    """
+    supported, supported_digits = _supported_by(segment, by_id, section_texts)
+
+    new_digits = (_unsupported_digits(segment["text"], supported_digits, corpus)
+                  - _plan_figures(segment["text"]))
     if new_digits:
-        return ("it states figure(s) none of the claims it rests on carry: %s"
+        return ("it states figure(s) that are neither in this account's "
+                "evidence nor part of the plan's own schedule: %s"
                 % ", ".join(sorted(new_digits)[:3]))
 
-    named = _named_entities(segment["text"]) - supported - set(company_tokens)
+    named = _unsupported_names(segment["text"], supported,
+                               set(company_tokens) | GENERIC_CHANNELS, corpus)
     if named:
-        return ("it names %s, which is in none of the claims it rests on - "
-                "state that as a FACT with its own evidence first"
-                % ", ".join(sorted(named)[:4]))
+        return ("it names %s, which does not appear in this account's "
+                "evidence" % ", ".join(sorted(named)[:4]))
     return ""
+
+
+def _unsupported_digits(text: str, supported_digits: set, corpus) -> set:
+    """Figures in `text` that are in neither the dependencies nor the corpus.
+
+    The corpus is `context.build()` - every contributing feature's published
+    output. A figure that appears anywhere in it is a figure the platform
+    holds, whether or not the sentence citing it listed that section.
+    """
+    unsupported = set()
+    for token in _digits_in(text) - supported_digits:
+        if not _corpus_has_digit(token, corpus):
+            unsupported.add(token)
+    return unsupported
+
+
+def _corpus_has_digit(token: str, corpus) -> bool:
+    """Whether the account's evidence carries this figure.
+
+    Normalised the way `grounding` normalises - it stores "10,001" as "10001",
+    so the two have to be flattened the same way before they are compared.
+    """
+    if corpus is None:
+        return False
+    flat = re.sub(r"[,\s]", "", str(token or "")).rstrip(".")
+    if not flat:
+        return False
+    numbers = getattr(corpus, "numbers", set())
+    percents = getattr(corpus, "percents", set())
+    if flat in numbers or flat in percents:
+        return True
+    # "36" should be found by evidence reading "36.0", and the reverse.
+    return "." in flat and flat.split(".")[0] in numbers
+
+
+def _unsupported_names(text: str, supported: set, exempt, corpus) -> set:
+    """Named things in `text` that are in neither the dependencies nor the
+    corpus.
+
+    Matched on a word boundary against the corpus blob rather than as a
+    substring: "sap" must not be satisfied by "sapphire". Possessives are
+    tried both ways, because a conclusion writes "Kaspersky's agent" and the
+    evidence says "Kaspersky".
+    """
+    unsupported = set()
+    for word in _named_entities(text) - supported - set(exempt or ()):
+        if not _corpus_has_name(word, corpus):
+            unsupported.add(word)
+    return unsupported
+
+
+def _corpus_has_name(word: str, corpus) -> bool:
+    blob = getattr(corpus, "blob", "") if corpus is not None else ""
+    if not blob or not word:
+        return False
+    # "workstations'" and "Kaspersky's" are both the word itself.
+    for form in {word, re.sub(r"['\u2019]s?$", "", word)}:
+        if form and re.search(r"\b%s\b" % re.escape(form), blob):
+            return True
+    return False
+
+
+def _is_title_case(words: list) -> bool:
+    """Whether this reads as a heading rather than as a sentence.
+
+    Judged on the words that could carry a name at all - the first is
+    capitalised by grammar and ALL-CAPS runs are labels already. Most of them
+    capitalised means the capitals are layout.
+
+    Deliberately hard to trigger. A looser version swallowed "Approach Mike
+    Higgins in week 1" - two capitals out of three words - and let an
+    invented person through, which is the one thing this check exists to
+    stop. A real heading is longer than that and almost entirely capitalised.
+    """
+    eligible = [w for w in words[1:] if len(w) >= 3 and not w.isupper()]
+    if len(eligible) < 4:
+        return False
+    capitalised = sum(1 for w in eligible if w[0].isupper())
+    return capitalised / len(eligible) > 0.7
 
 
 def _named_entities(text: str) -> set:
@@ -376,8 +628,20 @@ def _named_entities(text: str) -> set:
     and are already accounted for by the block type.
     """
     found = set()
-    for sentence in re.split(r"(?<=[.!?])\s+", text or ""):
+    # Clauses, not only sentences: a bullet reads "Content: Send an
+    # introductory email", and the word after the colon is capitalised for
+    # the same reason the first word of a sentence is. Treating it as a name
+    # rejected an otherwise good plan for "naming" send.
+    for sentence in re.split(r"(?<=[.!?:;])\s+", text or ""):
         words = re.findall(r"[A-Za-z][\w'-]*", sentence)
+        if _is_title_case(words):
+            # A heading or a label: every word is capitalised because of how
+            # it sits on the page, not because it names anything. Reading
+            # these as names turned "Target Personas" and "Discovery &
+            # Awareness" into invented vendors and rejected the plan's own
+            # scaffolding. What a label names is still swept by the HP-product
+            # check and by every claim segment that discusses it.
+            continue
         for index, word in enumerate(words):
             if index == 0 or len(word) < 3 or word.isupper():
                 continue
@@ -386,7 +650,7 @@ def _named_entities(text: str) -> set:
                 # kept so either spelling in a dependency covers the other.
                 lowered = word.lower()
                 found.add(lowered)
-                found.add(re.sub(r"['\u2019]s$", "", lowered))
+                found.add(re.sub(r"['\u2019]s?$", "", lowered))
     line = normalize_hp_product(text)
     if line:
         found |= {w.lower() for w in re.findall(r"[A-Za-z]{3,}", line)}
@@ -477,7 +741,7 @@ def _sections_for(segment, by_id) -> list:
     """
     if segment["type"] in EVIDENCED_TYPES:
         return list(segment["sections"])
-    if segment["type"] != SYNTHESIS:
+    if segment["type"] not in REASONED_TYPES:
         return []
     out = []
     for dependency_id in segment["depends_on"]:
@@ -556,9 +820,12 @@ def repair_notes(failures: list) -> str:
     for failure in failures[:8]:
         lines.append("  - segment %s: %s" % (failure["id"], failure["reason"]))
     lines.append("A segment that states a fact about the account needs its "
-                 "section AND a verbatim quote from that section. A segment "
-                 "that only draws a conclusion needs depends_on, and must add "
-                 "no name, number or technology its dependencies do not carry.")
+                 "section AND a verbatim quote from that section. A SYNTHESIS "
+                 "or RECOMMENDATION needs depends_on, and may reason freely - "
+                 "but every name, number and product it uses must appear "
+                 "somewhere in the ACCOUNT DATA. If you want to name something "
+                 "the data does not contain, you cannot: say what the data "
+                 "does hold instead.")
     return "\n".join(lines)
 
 
@@ -583,7 +850,7 @@ def surviving(segments: list, failures: list) -> list:
     order = {s["id"]: i for i, s in enumerate(segments)}
     kept.sort(key=lambda s: order.get(s["id"], 0))
     kept = _drop_empty_headings(kept)
-    if not any(s["type"] in (FACT, DERIVED, SYNTHESIS) for s in kept):
+    if not any(s["type"] in (FACT, DERIVED, *REASONED_TYPES) for s in kept):
         return []
     return kept
 
@@ -600,9 +867,15 @@ def _drop_empty_headings(segments: list) -> list:
         if segment["block"] not in (BLOCK_HEADING, BLOCK_LABEL):
             out.append(segment)
             continue
-        has_content = any(
-            later["block"] not in (BLOCK_HEADING, BLOCK_LABEL)
-            for later in segments[index + 1:])
+        # Only as far as the next heading. Looking all the way down kept
+        # "WEEK 5-8" on screen with nothing under it, on the strength of
+        # "WEEK 9-12" further along having survived.
+        has_content = False
+        for later in segments[index + 1:]:
+            if later["block"] in (BLOCK_HEADING, BLOCK_LABEL):
+                break
+            has_content = True
+            break
         if has_content:
             out.append(segment)
     return out

@@ -72,7 +72,22 @@ logger = logging.getLogger(__name__)
 #    a name, not by a five-point evidence list and three things to do about it.
 #    Also: read the whole account, not the one obvious section. The answer that
 #    prompted this cited 2 sections out of ~23.
-PROMPT_VERSION = 6
+# 7: RECOMMENDATION is its own segment type. Advice used to be SYNTHESIS, which
+#    may introduce nothing its dependencies do not carry - so every "week 1"
+#    and "three touches" was read as an unsupported account figure and deleted.
+#    Asked for a 90-day plan, the platform published the residue: a RECOMMENDED
+#    NEXT STEPS heading over fourteen facts and no steps. Also: the platform's
+#    own scores are no longer quoted as though they were facts about the
+#    customer, and a pile of one-line facts no longer counts as an answer.
+# 8: a conclusion's specifics are checked against the WHOLE payload, not
+#    against the two or three facts it listed as dependencies. The rule was
+#    right and the lookup was wrong: a sentence naming a vendor that is in the
+#    account's data was rejected as an invention because the sentence had not
+#    cited that section. Writing a fact was safe and writing a sentence that
+#    meant something was a coin toss, so the model stopped answering and
+#    recited the dashboard instead - six "facts", three of them advice quoted
+#    out of the Objection Playbook, and an empty ANSWER block.
+PROMPT_VERSION = 8
 
 MAX_HISTORY_TURNS = 12
 MAX_VALIDATION_ATTEMPTS = 3
@@ -206,11 +221,28 @@ FACT - states something about the account: a name, title, vendor, number, date, 
 DERIVED - an account statement you worked out from the data rather than read off it: a count, a
   comparison between two things in the evidence, a restatement. Same requirements as FACT.
 
-SYNTHESIS - your conclusion, recommendation or judgement, drawn from segments already in the list.
-  Needs "depends_on": the ids of the segments it rests on. Needs NO sections and NO quote.
-  It may summarise, compare or conclude - and it may name nothing the segments it depends on do
-  not already carry. A new vendor, number, person, event or relationship in a SYNTHESIS is
-  rejected: put that in a FACT with its own evidence first, then conclude from it.
+SYNTHESIS - your conclusion or judgement ABOUT THE ACCOUNT, drawn from segments already in the
+  list. Needs "depends_on": the ids of the segments it rests on. Needs NO sections and NO quote.
+  Write it as prose. You may reason, weigh, compare and conclude in your own words, and you may
+  name any person, vendor, product, figure or event THAT APPEARS ANYWHERE IN THE ACCOUNT DATA -
+  not only the ones the segments you depend on happened to mention. You do not need a separate
+  FACT for every specific you refer to while reasoning.
+  What is rejected is a specific the ACCOUNT DATA does not contain at all: a vendor it never
+  names, a number it never states, a person it never lists. If you want to say it and it is not
+  in the data, you cannot - say what the data does hold instead.
+
+RECOMMENDATION - what the SELLER should do: who to approach, what to open with, what to send and
+  when. Needs "depends_on", exactly like SYNTHESIS. Needs NO sections and NO quote.
+  This is where a plan goes, and it is allowed the language a plan is made of - a cadence, a
+  count of touches, a sequence, a channel. "Open with a short note in week 1", "three touches
+  over 30 days", "follow up on LinkedIn" are all fine: they propose something you are advising,
+  and they assert nothing about the customer that could be true or false of them.
+  Like SYNTHESIS, it may name anything that appears anywhere in the ACCOUNT DATA, and it is
+  rejected only for a specific the data does not contain at all - a person it never lists, a
+  vendor it never names, a figure it never states. An HP product it does not recommend is still
+  out of bounds wherever it appears.
+  Use RECOMMENDATION for every line under RECOMMENDED NEXT STEPS:, and for any sentence that
+  tells the seller what to do. Use SYNTHESIS for a conclusion about the account itself.
 
 GENERAL - how this kind of situation usually works, said about the world and not about this
   account. No sections, no quote. It may not name {company} and may not carry a figure - if you
@@ -223,6 +255,15 @@ HP RULES:
 - You represent HP Inc. Never describe a competitor's product as ours.
 - Name an HP product only if it appears in the evidence.
 - Never claim {company} already uses HP unless the evidence says so.
+
+NEVER REPEAT THE PLATFORM'S OWN SCORING. The account data carries numbers this platform computed
+about its own output - relevance scores, priority and tier labels, urgency and confidence scores,
+rankings, match percentages. They are there to help YOU decide what matters. They are not facts
+about the customer and no seller can use one in front of one.
+"Mike Higgins has an HP relevance score of 100 and a high priority" is a sentence about our
+dashboard. Say what it means instead: that he is the person to start with, and why - his role,
+what his organisation is doing, what the account has said it is prioritising. Use the scores to
+choose who and what to talk about; never quote them.
 
 IF THE EVIDENCE DOES NOT ANSWER THE QUESTION: say plainly that the platform does not hold it, and
 name the closest thing it does hold. That is a correct answer, not a failure.
@@ -249,6 +290,9 @@ WORKED EXAMPLE. Three facts and the conclusion they earn:
     "sections": ["opportunity_narrative_plays"], "quote": "Critical"}},
   {{"id": "c4", "type": "SYNTHESIS", "block": "paragraph",
     "text": "So the workstation line has the strongest case of the three.",
+    "depends_on": ["c2", "c3"]}},
+  {{"id": "c5", "type": "RECOMMENDATION", "block": "bullet",
+    "text": "Open on the CAD estate in week 1, then send the workstation one-pager three days later.",
     "depends_on": ["c2", "c3"]}}
 ]}}
 
@@ -258,10 +302,17 @@ characters you can find by searching the section - a vendor name, a title, a
 status, a figure. Do not write a sentence of your own there; it is compared
 against the section and a sentence you composed is not in it.
 
-And read the SYNTHESIS rule off c4: it names nothing c2 and c3 do not already
-name. If you want to recommend an HP line, the line has to appear in a FACT
-with its own section and quote FIRST - then conclude from that FACT. A
-conclusion is where you reason, never where you introduce.
+Read the SYNTHESIS rule off c4: it is ordinary prose, it carries no section
+and no quote, and everything it refers to is in the account data. It would be
+just as valid naming something from a section c2 and c3 never cited - the test
+is whether the ACCOUNT DATA holds it, not whether a neighbouring segment
+mentioned it. Invent nothing; refer to anything that is there.
+
+Read the RECOMMENDATION rule off c5: "week 1" and "three days" are the plan's
+own schedule and need no evidence, while "CAD estate" and "workstation" are
+there only because c2 and c3 put them there. That is the whole difference -
+a recommendation may invent the PLAN freely and may invent nothing about the
+CUSTOMER.
 
 Inside "text", never use a double quote - the answer is one JSON object and a
 stray quote breaks it. Write a quoted phrase with single quotes, or none.
@@ -288,6 +339,21 @@ ANSWER:
     LABEL on its own line. Cover every part that was asked about.
   Pick the shape that fits. A page in answer to "who is the CEO" is as wrong as two sentences in
   answer to "how should I approach this account".
+
+  KEEP A PLAN THE SIZE OF A PLAN. A campaign plan is phases, not a diary: three or four phases
+  with a handful of lines each, not twelve separately numbered weeks each with its own activities,
+  personas, content and metrics. Say a thing once - if a persona or a play belongs to three
+  phases, name it in the phase where it matters and refer back. An answer that runs past about
+  thirty segments is being padded, and a long answer that gets cut off is worth nothing to the
+  seller, so length is not free.
+
+  A LIST OF FACTS IS NOT AN ANSWER. If the question asks who to approach, what to say, how to
+  go in, or what to do, the ANSWER block must contain at least one SYNTHESIS or RECOMMENDATION
+  that actually answers it - in the seller's own words, naming the person or the play and saying
+  why. Facts belong underneath, under FACTS:, as the support for that answer.
+  Do not write one line per field of the data. Nine stakeholders each getting their own sentence
+  is a directory, not an answer: name the one or two who matter for THIS question and say what
+  to do about them. The seller can open the dashboard for the rest.
   DRAW ON THE WHOLE ACCOUNT, not just the obvious section. Who to approach is also about what they
   care about, what they already run and what they will push back on; the evidence for that is
   spread across the sections below, and an answer that reads one of them is a thinner answer than
@@ -1053,10 +1119,25 @@ def _answer_advisor(timer, turn, messages) -> dict:
             with timer.step("generation", attempt=attempt + 1):
                 raw = _answer_once(turn["company"], turn["question"],
                                    turn["payload"], messages, correction)
+        except gemini.GeminiTruncated as exc:
+            # Cut off at the output limit. Worth one more go asking for less,
+            # rather than ending the question with attempts still unspent -
+            # the seller gets "I could not finish that answer" for something
+            # the platform could answer in fewer words.
+            logger.warning("strategy chat: %s", exc)
+            attempts.append({"attempt": attempt + 1, "accepted": False,
+                             "reason": str(exc)})
+            correction = (
+                "Your previous answer was cut off at the output limit. Answer "
+                "the same question in materially fewer segments and shorter "
+                "text: keep the structure and the specifics that matter, drop "
+                "the repetition, and do not restate a fact you have already "
+                "stated. Completing a shorter answer is worth more than "
+                "starting a longer one.")
+            continue
         except gemini.GeminiUnavailable as exc:
-            # Truncation included, and named rather than left to the validator,
-            # which would have rejected the cut-off answer for a missing
-            # citation and spent the remaining attempts reproducing it.
+            # The model failed outright - a content filter, a 5xx, an empty
+            # answer. Not retried: nothing about asking again would differ.
             logger.error("strategy chat: %s", exc)
             return _unavailable_for(turn, str(exc), attempts,
                                     cause=CAUSE_MODEL)
@@ -1111,7 +1192,8 @@ def _revalidate(turn: dict, segments: list) -> tuple:
         section_texts=_section_texts(turn["payload"]),
         corpus=_corpus_for(turn["payload"]),
         company=turn["company"],
-        payload=turn["payload"])
+        payload=turn["payload"],
+        question=turn["question"])
     return ok, failures, cited, segments
 
 
@@ -1216,7 +1298,8 @@ def _check_segments(turn: dict, raw: str) -> tuple:
         section_texts=_section_texts(turn["payload"]),
         corpus=_corpus_for(turn["payload"]),
         company=turn["company"],
-        payload=turn["payload"])
+        payload=turn["payload"],
+        question=turn["question"])
     return ok, failures, cited, segments
 
 
