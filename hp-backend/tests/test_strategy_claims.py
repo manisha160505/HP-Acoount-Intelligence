@@ -541,8 +541,31 @@ class TestARecommendationMayPlan:
         assert not ok
         assert "4200" in failures[0]["reason"]
 
-    def test_it_rests_on_something_like_any_conclusion(self, ground):
+    def test_it_needs_no_sibling_fact(self, ground):
+        """Advice stands on the account's evidence, not on a neighbouring
+        segment.
+
+        Requiring a dependency deleted whole plans: a model that writes a
+        90-day plan as advice, without interleaving FACTs, had every line
+        rejected for resting on nothing while every name in it sat in the
+        payload. A SYNTHESIS still needs one - that is the client's rule
+        about conclusions, and it is untouched."""
         bare = _recommendation("Just call them.", depends_on=())
+        ok, failures, _ = _check([bare], ground)
+        assert ok, failures
+
+    def test_but_a_bare_one_is_still_checked_against_the_evidence(self, ground):
+        """No dependencies does not mean no grounding - the specifics are
+        checked against the payload instead."""
+        bare = _recommendation("Open with Mike Higgins at Trellix.",
+                               depends_on=())
+        ok, failures, _ = _check([bare], ground)
+        assert not ok
+        assert "does not appear in this account's evidence" in failures[0]["reason"]
+
+    def test_a_conclusion_still_needs_one(self, ground):
+        bare = {"id": "c9", "type": "SYNTHESIS", "block": "paragraph",
+                "text": "So that is the way in.", "depends_on": []}
         ok, failures, _ = _check([bare], ground)
         assert not ok
         assert "names no claim it rests on" in failures[0]["reason"]
