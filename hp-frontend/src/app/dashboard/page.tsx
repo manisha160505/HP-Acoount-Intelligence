@@ -79,8 +79,7 @@ import {
   CheckCircle2,
   Minus,
   BarChart3,
-  Briefcase,
-  AlertTriangle
+  Briefcase
 } from 'lucide-react';
 
 const ICON_MAP: Record<string, React.FC<{ className?: string }>> = {
@@ -7841,19 +7840,6 @@ export default function UserDashboardPage() {
                                         rendered as written rather than parsed
                                         as markdown - except for the evidence
                                         tags, which become footnote markers. */}
-                                    {(msg.dropped ?? 0) > 0 && (
-                                      <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
-                                        <AlertTriangle className="w-3.5 h-3.5 text-amber-600 mt-0.5 shrink-0" />
-                                        <p className="text-[11px] text-amber-900 leading-snug">
-                                          <span className="font-bold">This answer is incomplete.</span>{' '}
-                                          {msg.dropped} {msg.dropped === 1 ? 'statement' : 'statements'}{' '}
-                                          could not be matched to this account&apos;s evidence and{' '}
-                                          {msg.dropped === 1 ? 'was' : 'were'} removed. Ask again, or
-                                          ask it more narrowly.
-                                        </p>
-                                      </div>
-                                    )}
-
                                     <AnswerWithCitations
                                       text={msg.text}
                                       citations={msg.citations || []}

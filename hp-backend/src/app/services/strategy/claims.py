@@ -65,6 +65,32 @@ REASONED_TYPES = (SYNTHESIS, RECOMMENDATION)
 GENERIC_CHANNELS = frozenset({"linkedin", "inmail", "email", "webinar",
                               "workshop", "roadshow", "newsletter"})
 
+# Ordinary English that a plan capitalises because it heads a line - "Key
+# Plays:", "Initial Outreach:" - and that names nothing about the account.
+#
+# A heuristic was tried first: skip any clause that reads as Title Case. It
+# was measured against the real account and bought nothing - the same lines
+# passed without it - while letting "Open with Mike Higgins at Trellix"
+# through, three capitals out of four words. A short, explicit list of the
+# plan's own vocabulary does the same job and cannot swallow a name.
+GENERIC_PLAN_WORDS = frozenset({
+    # The schedule's own words, capitalised because they head a line:
+    # "Phase 1:", "Week 2:". `_PLAN_FIGURE_RE` already treats their numbers
+    # as the plan's own; these are the words beside them.
+    "phase", "phases", "week", "weeks", "day", "days", "month", "months",
+    "quarter", "quarters", "stage", "stages", "wave", "waves", "step", "steps",
+    "awareness", "discovery", "engagement", "education", "exploration",
+    "nurturing", "proposal", "proposals", "acceleration", "advancement",
+    "outreach", "cadence", "sequence", "touchpoint", "touchpoints",
+    "play", "plays", "makers", "holders", "evaluators", "stakeholders",
+    "testimonials", "calculators", "roadmap", "pilot", "overview",
+    "overviews", "brief", "briefs", "briefing", "sheet", "sheets",
+    "study", "studies", "paper", "papers", "guide", "guides",
+    "document", "documents", "summary", "summaries", "framework",
+    "frameworks", "outline", "outlines", "infographic", "demo", "demos",
+    "video", "videos", "brochure", "template", "templates", "agenda",
+})
+
 # How a segment sits on the page. Layout is part of the contract because the
 # answer is plain text - the UI renders it with `whitespace-pre-wrap` and no
 # markdown parser, so paragraph breaks and ALL-CAPS labels are the only
@@ -389,10 +415,17 @@ def _segment_failure(segment, by_id, valid_keys, section_texts, corpus, company,
         return ""
 
     if segment["type"] in REASONED_TYPES:
-        if not segment["depends_on"]:
-            return ("it draws a conclusion but names no claim it rests on"
-                    if segment["type"] == SYNTHESIS else
-                    "it recommends something but names no claim it rests on")
+        if not segment["depends_on"] and segment["type"] == SYNTHESIS:
+            # A conclusion ABOUT the account must rest on tagged evidence -
+            # the client's rule, unchanged.
+            return "it draws a conclusion but names no claim it rests on"
+        # Advice needs no sibling FACT. Every specific in it is checked
+        # against the account's evidence either way, and demanding a
+        # dependency as well deleted whole plans: a model that writes a
+        # 90-day plan as advice, without interleaving facts, had every line
+        # of it rejected for "resting on nothing" while every name and
+        # figure in it was sitting in the payload. It simply shows no
+        # citation, which is honest - it is advice, not a claim.
         missing = [d for d in segment["depends_on"] if d not in by_id]
         if missing:
             return "it rests on %s, which is not in the answer" % ", ".join(missing[:3])
@@ -533,8 +566,9 @@ def _recommendation_introduces(segment, by_id, section_texts,
                 "evidence nor part of the plan's own schedule: %s"
                 % ", ".join(sorted(new_digits)[:3]))
 
-    named = _unsupported_names(segment["text"], supported,
-                               set(company_tokens) | GENERIC_CHANNELS, corpus)
+    named = _unsupported_names(
+        segment["text"], supported,
+        set(company_tokens) | GENERIC_CHANNELS | GENERIC_PLAN_WORDS, corpus)
     if named:
         return ("it names %s, which does not appear in this account's "
                 "evidence" % ", ".join(sorted(named)[:4]))
@@ -601,25 +635,6 @@ def _corpus_has_name(word: str, corpus) -> bool:
     return False
 
 
-def _is_title_case(words: list) -> bool:
-    """Whether this reads as a heading rather than as a sentence.
-
-    Judged on the words that could carry a name at all - the first is
-    capitalised by grammar and ALL-CAPS runs are labels already. Most of them
-    capitalised means the capitals are layout.
-
-    Deliberately hard to trigger. A looser version swallowed "Approach Mike
-    Higgins in week 1" - two capitals out of three words - and let an
-    invented person through, which is the one thing this check exists to
-    stop. A real heading is longer than that and almost entirely capitalised.
-    """
-    eligible = [w for w in words[1:] if len(w) >= 3 and not w.isupper()]
-    if len(eligible) < 4:
-        return False
-    capitalised = sum(1 for w in eligible if w[0].isupper())
-    return capitalised / len(eligible) > 0.7
-
-
 def _named_entities(text: str) -> set:
     """Tokens that assert a thing: proper nouns, and HP lines however spelled.
 
@@ -634,14 +649,6 @@ def _named_entities(text: str) -> set:
     # rejected an otherwise good plan for "naming" send.
     for sentence in re.split(r"(?<=[.!?:;])\s+", text or ""):
         words = re.findall(r"[A-Za-z][\w'-]*", sentence)
-        if _is_title_case(words):
-            # A heading or a label: every word is capitalised because of how
-            # it sits on the page, not because it names anything. Reading
-            # these as names turned "Target Personas" and "Discovery &
-            # Awareness" into invented vendors and rejected the plan's own
-            # scaffolding. What a label names is still swept by the HP-product
-            # check and by every claim segment that discusses it.
-            continue
         for index, word in enumerate(words):
             if index == 0 or len(word) < 3 or word.isupper():
                 continue
