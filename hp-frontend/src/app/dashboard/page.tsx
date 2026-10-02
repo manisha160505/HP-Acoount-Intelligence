@@ -534,9 +534,11 @@ export default function UserDashboardPage() {
   const [opportunitiesOnly, setOpportunitiesOnly] = useState(false);
   const [techSearch, setTechSearch] = useState('');
   const [techCategoryFilter, setTechCategoryFilter] = useState('ALL');
-  // Full technology stack accordion - many groups open at once, the same
-  // shape the stakeholder departments use.
-  const [expandedTechGroups, setExpandedTechGroups] = useState<Record<string, boolean>>({});
+  // The two technology accordions keep no open/closed state here. They are
+  // native <details>, so the browser owns it and a click on the row always
+  // works - the React-state version did not respond at all on this panel,
+  // and nothing in this file explained why. <details> removes the question:
+  // there is no handler to miss and no state to lose.
   // Technographic Map stack view filters (Caterpillar-style layout, Sahaj 27 Sep).
   const [stackFamilyFilter, setStackFamilyFilter] = useState<string>('ALL');
   const [stackSourceFilter, setStackSourceFilter] = useState<string>('ALL');
@@ -5036,20 +5038,24 @@ export default function UserDashboardPage() {
                             ) : (sv.families || []).map((f: any) => {
                               const items = shownTechs.filter((t: any) => t.family === f.family);
                               if (!items.length) return null;
-                              const hasHp = items.some((t: any) => t.hp);
-                              const open = filtering || (expandedTechGroups[f.family] ?? hasHp);
+                              // Every group starts closed and opens on a click, with no
+                              // React state in the way. A filter opens what it matched by
+                              // mounting the group open; the key carries the same flag, so
+                              // clearing the filter remounts everything closed. Between
+                              // those two moments the browser owns open/closed, which is
+                              // the point - the row cannot stop responding.
+                              const autoOpen = filtering;
                               return (
-                                <div key={f.family} className="space-y-2">
-                                  <button type="button"
-                                    onClick={() => setExpandedTechGroups(prev => ({ ...prev, [f.family]: !open }))}
-                                    className="w-full flex items-center gap-2 text-left">
+                                <details key={`${f.family}:${autoOpen}`} open={autoOpen}
+                                  className="group space-y-2">
+                                  <summary
+                                    className="as-summary w-full flex items-center gap-2 text-left">
                                     <span className="text-xs font-extrabold uppercase tracking-wider text-slate-700">{f.family}</span>
                                     <span className="text-[10px] font-bold bg-slate-100 text-slate-500 px-1.5 rounded">{items.length}</span>
                                     <span className="flex-1" />
-                                    {open ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
-                                  </button>
-                                  {open && (
-                                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2.5">
+                                    <ChevronDown className="as-chevron w-4 h-4 text-slate-400" />
+                                  </summary>
+                                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2.5">
                                       {items.map((t: any) => (
                                         <div key={t.name}
                                           className={`rounded-lg border px-3 py-2.5 space-y-1.5 ${t.hp ? 'border-blue-200 bg-white' : 'border-slate-200 bg-white'}`}>
@@ -5072,9 +5078,8 @@ export default function UserDashboardPage() {
                                           )}
                                         </div>
                                       ))}
-                                    </div>
-                                  )}
-                                </div>
+                                  </div>
+                                </details>
                               );
                             })}
                           </div>
@@ -5119,18 +5124,15 @@ export default function UserDashboardPage() {
                           ) : (
                             <div className="divide-y divide-slate-100">
                               {visibleTechGroups.map((g: any) => {
-                                // A search opens the groups it matched; otherwise closed.
-                                const isOpen = techQuery
-                                  ? true
-                                  : (expandedTechGroups[g.category] || false);
+                                // Same as the families above: a search opens what it
+                                // matched, otherwise closed, and the row itself is a
+                                // <summary> the browser toggles.
+                                const autoOpen = !!techQuery;
                                 return (
-                                  <div key={g.category} className="py-2">
-                                    <button
-                                      type="button"
-                                      onClick={() => setExpandedTechGroups(prev => ({
-                                        ...prev, [g.category]: !prev[g.category],
-                                      }))}
-                                      className="w-full flex items-center gap-2 text-left group"
+                                  <details key={`${g.category}:${autoOpen}`} open={autoOpen}
+                                    className="group py-2">
+                                    <summary
+                                      className="as-summary group w-full flex items-center gap-2 text-left"
                                     >
                                       <span className="text-xs font-semibold text-slate-800 group-hover:text-hp-navy transition">
                                         {g.category}
@@ -5139,15 +5141,12 @@ export default function UserDashboardPage() {
                                         {g.count}
                                       </span>
                                       <span className="flex-1" />
-                                      {isOpen
-                                        ? <ChevronUp className="w-4 h-4 text-slate-400" />
-                                        : <ChevronDown className="w-4 h-4 text-slate-400" />}
-                                    </button>
+                                      <ChevronDown className="as-chevron w-4 h-4 text-slate-400" />
+                                    </summary>
                                     {g.note && (
                                       <p className="text-[11px] text-slate-400 mt-0.5">{g.note}</p>
                                     )}
-                                    {isOpen && (
-                                      <div className="flex flex-wrap gap-1.5 mt-2">
+                                    <div className="flex flex-wrap gap-1.5 mt-2">
                                         {(g.technologies || []).map((t: string) => (
                                           <span
                                             key={t}
@@ -5157,9 +5156,8 @@ export default function UserDashboardPage() {
                                             {t}
                                           </span>
                                         ))}
-                                      </div>
-                                    )}
-                                  </div>
+                                    </div>
+                                  </details>
                                 );
                               })}
                             </div>

@@ -359,3 +359,13 @@ button.bg-hp-navy:not(:disabled):hover {
   .as-glass, .as-glass-strong { background: #ffffff; }
   .as-glass-dark { background: #1C2541; }
 }
+
+/* The two technology accordions are native <details>, so the browser owns
+   open/closed and the row cannot stop responding to a click. These rules do
+   what the markup used to: hide the default disclosure triangle and point the
+   chevron up when the group is open. Plain CSS rather than Tailwind variants,
+   so nothing depends on the JIT having seen the class. */
+.as-summary { cursor: pointer; list-style: none; }
+.as-summary::-webkit-details-marker { display: none; }
+.as-chevron { transition: transform 160ms ease; }
+details[open] > .as-summary .as-chevron { transform: rotate(180deg); }
