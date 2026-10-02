@@ -71,6 +71,11 @@ class Settings(BaseSettings):
     # because that endpoint's embeddings route does not accept an API key.
     VERTEX_PROJECT: str = ""
     VERTEX_LOCATION: str = "global"
+    # Optional comma-separated chat regions, e.g. "global,asia-south1,us-central1".
+    # Vertex serves gemini-2.5-flash from a shared pool per region, so a 429 in
+    # one region moves the call to the next instead of waiting. Empty = only
+    # VERTEX_LOCATION. Same model everywhere (checked 2 Oct).
+    VERTEX_LOCATIONS: str = ""
     # Embeddings go to a regional host: on the global one every request waited
     # ~12 s before its first byte (28 Sep, 1 or 16 texts alike), regional hosts
     # answer in under a second. asia-south1 is where the GCP VM runs.
@@ -180,6 +185,20 @@ class Settings(BaseSettings):
     def llm_api_key_name(self) -> str:
         """The env var a missing key is reported under."""
         return "GEMINI_API_KEY" if self._is_google else "OPENAI_API_KEY"
+
+    @property
+    def vertex_chat_locations(self) -> list[str]:
+        """The regions chat calls rotate over, in order, never empty."""
+        listed = [loc.strip() for loc in self.VERTEX_LOCATIONS.split(",") if loc.strip()]
+        return listed or [(self.VERTEX_LOCATION or "global").strip()]
+
+    def vertex_chat_endpoint(self, location: str) -> str:
+        """Vertex's OpenAI-compatible endpoint in one region. Regional hosts
+        are <region>-aiplatform; `global` is the bare host."""
+        host = ("aiplatform.googleapis.com" if location == "global"
+                else "%s-aiplatform.googleapis.com" % location)
+        return ("https://%s/v1/projects/%s/locations/%s/endpoints/openapi"
+                % (host, self.VERTEX_PROJECT.strip(), location))
 
     @property
     def llm_endpoint(self) -> str:

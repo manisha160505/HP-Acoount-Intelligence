@@ -1,5 +1,6 @@
 import json
 import logging
+import threading
 import time
 
 from openai import APIStatusError, OpenAI, RateLimitError
@@ -34,6 +35,40 @@ def _retryable(exc) -> bool:
         isinstance(exc, APIStatusError) and exc.status_code >= 500)
 
 
+_chat_lock = threading.Lock()
+_chat_turn = 0
+
+
+def _regional_clients(client) -> list:
+    """The client once per Vertex chat region, starting one further along on
+    each call so concurrent sections spread over the regions. The copies skip
+    the SDK's own retries: a 429 should move on to the next region at once.
+    One region (or another provider) is just the client as it was."""
+    global _chat_turn
+    locations = settings.vertex_chat_locations
+    if settings.llm_provider != "vertex" or len(locations) == 1:
+        return [client]
+    with _chat_lock:
+        start = _chat_turn % len(locations)
+        _chat_turn += 1
+    return [client.with_options(base_url=settings.vertex_chat_endpoint(loc),
+                                max_retries=0)
+            for loc in locations[start:] + locations[:start]]
+
+
+def _create_in_some_region(client, kwargs):
+    """One chat call, moving to the next region on a 429; the last region's
+    429 is raised so the waits in create_completion take over."""
+    clients = _regional_clients(client)
+    for i, regional in enumerate(clients):
+        try:
+            return regional.chat.completions.create(**kwargs)
+        except RateLimitError:
+            if i == len(clients) - 1:
+                raise
+    raise AssertionError("unreachable")
+
+
 def create_completion(client, **kwargs):
     """The SDK's chat completion call with the provider's request options and
     the short in-call waits above. Every model call goes through here, so this
@@ -46,7 +81,7 @@ def create_completion(client, **kwargs):
     kwargs = {**settings.llm_request_extra, **kwargs}
     for wait in (*RATE_LIMIT_WAITS, None):
         try:
-            response = client.chat.completions.create(**kwargs)
+            response = _create_in_some_region(client, kwargs)
         except Exception as exc:
             if not _retryable(exc):
                 raise
@@ -54,8 +89,9 @@ def create_completion(client, **kwargs):
                 if isinstance(exc, RateLimitError):
                     run_context.note_quota_exhausted()
                 raise
-            logger.info("LLM answered %s - waiting %ds before sending it again",
-                        getattr(exc, "status_code", "error"), wait)
+            logger.info("LLM answered %s (%d region(s) tried) - waiting %ds before "
+                        "sending it again", getattr(exc, "status_code", "error"),
+                        len(settings.vertex_chat_locations), wait)
             time.sleep(wait)
             continue
         if not kwargs.get("stream"):

@@ -74,6 +74,7 @@ EMBEDDING_MAX_ASYNC = 8
 # Vertex express mode rate-limits far lower than Azure did: eight concurrent
 # batches drew 429s on the first production build (28 Sep).
 VERTEX_EMBEDDING_MAX_ASYNC = 2
+VERTEX_EMBEDDING_MAX_ASYNC_CAP = 16
 EMBEDDING_BATCH_NUM = 32
 
 
@@ -395,9 +396,11 @@ async def build_rag(account_id: str, index: str, for_query: bool = False):
             func=_embedding_func,
         ),
         embedding_batch_num=EMBEDDING_BATCH_NUM,
-        # Two concurrent batches per region: each region has its own limit.
-        embedding_func_max_async=(VERTEX_EMBEDDING_MAX_ASYNC
-                                  * len(settings.vertex_embedding_locations)
+        # Two concurrent batches per region (each has its own limit), capped:
+        # a long region list should not open dozens of connections at once.
+        embedding_func_max_async=(min(VERTEX_EMBEDDING_MAX_ASYNC
+                                      * len(settings.vertex_embedding_locations),
+                                      VERTEX_EMBEDDING_MAX_ASYNC_CAP)
                                   if settings.llm_provider == "vertex"
                                   else EMBEDDING_MAX_ASYNC),
         # Long enough for one request to sit out its own 429 waits. See
