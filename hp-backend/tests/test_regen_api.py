@@ -223,7 +223,69 @@ def test_account_pipeline_groups_every_section_with_reasons(env):
 
     summary = client.get("/api/v1/regeneration/accounts-summary").json()
     row = next(a for a in summary["accounts"] if a["account_id"] == acct)
-    assert row["counts"]["NEVER_RUN"] == len(DEFAULT.order) and row["needs_run"] > 0
+    assert row["counts"].get("NEVER_RUN", 0) == body["counts"]["NEVER_RUN"]
+    assert row["counts"].get("NO_DATA", 0) == body["counts"]["NO_DATA"]
+    assert row["needs_run"] == body["needs_run"] > 0
+
+
+def test_sections_with_no_data_say_what_to_upload(env):
+    client, db, acct = env
+    _data(db, acct, "firmographics")
+    body = client.get("/api/v1/accounts/%s/pipeline" % acct).json()
+
+    # Built from nothing this account has: NO_DATA, not "never run", and not
+    # counted as work a Submit would do.
+    no_data = body["groups"]["NO_DATA"]
+    assert no_data
+    for s in no_data:
+        assert s["has_data"] is False
+        assert s["reasons"][0]["category"] == "no_data"
+        assert "upload at least one of" in s["reasons"][0]["detail"]
+    assert body["needs_run"] == sum(body["counts"][k] for k in
+                                    ("FAILED", "STALE", "NEVER_RUN", "DEGRADED"))
+
+    # Every unprovided dataset once, with who reads it; the blocking ones first.
+    gaps = body["data_gaps"]
+    keys = [g["dataset"] for g in gaps]
+    assert "firmographics" not in keys and len(keys) == len(set(keys))
+    assert gaps[0]["blocks"]
+    assert all(g["sections"] for g in gaps)
+
+    # A section with some of its data still lists the rest as not provided.
+    groups = [s for v in body["groups"].values() for s in v]
+    partial = next(s for s in groups if s["has_data"] and s["datasets_not_provided"])
+    assert all(d["dataset"] != "firmographics" for d in partial["datasets_not_provided"])
+
+    summary = client.get("/api/v1/regeneration/accounts-summary").json()
+    row = next(a for a in summary["accounts"] if a["account_id"] == acct)
+    assert [g["dataset"] for g in row["data_gaps"]] == keys
+
+    # Uploading the data turns it back into ordinary work.
+    _data(db, acct, *keys)
+    after = client.get("/api/v1/accounts/%s/pipeline" % acct).json()
+    assert after["counts"]["NO_DATA"] == 0 and after["data_gaps"] == []
+
+
+def test_live_counts_running_and_queued_jobs_per_account(env):
+    client, db, acct = env
+    assert client.get("/api/v1/regeneration/live").json()["accounts"] == {}
+
+    first, second, third = DEFAULT.order[:3]
+    for node in (first, second, third):
+        jobs.enqueue(db, acct, node, jobs.trigger("manual"), run_id=ObjectId())
+    db[jobs.COLLECTION].update_one({"account_id": acct, "node_id": first},
+                                   {"$set": {"status": jobs.RUNNING,
+                                             "progress": {"done": 1, "total": 4}}})
+    # Handed back for missing files: shown as files missing, not queued.
+    db[jobs.COLLECTION].update_one({"account_id": acct, "node_id": third},
+                                   {"$set": {"not_runnable_on": ["w1"]}})
+
+    body = client.get("/api/v1/regeneration/live").json()
+    row = body["accounts"][acct]
+    assert row["running"] == 1 and row["queued"] == 1
+    assert row["running_job"]["node_id"] == first
+    assert row["running_job"]["progress"] == {"done": 1, "total": 4}
+    assert body["queue"]["paused"] is False and body["at"]
 
 
 def test_index_rebuild_preview_names_only_index_sections(env):

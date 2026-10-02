@@ -25,6 +25,7 @@ NEVER = "never_run"
 FAILED = "failed"
 FORCED = "forced"
 FILES_MISSING = "files_missing"
+NO_DATA = "no_data"
 
 CATEGORY_LABELS = {
     DATA: "Data file changed",
@@ -40,6 +41,7 @@ CATEGORY_LABELS = {
     FAILED: "Last run failed",
     FORCED: "Forced re-run",
     FILES_MISSING: "Files missing on server",
+    NO_DATA: "Data not provided",
 }
 
 # What the admin page calls each node. Features are what sellers see; a node is
@@ -223,6 +225,20 @@ def files_missing(rows: list) -> dict:
     return _reason(FILES_MISSING, "%d file(s) not on this server" % len(rows),
                    "upload them again before running: %s" % shown,
                    key="files_missing")
+
+
+def dataset_label(key: str) -> str:
+    from app.schemas.account_data import DATASET_REGISTRY
+    return (DATASET_REGISTRY.get(key) or {}).get("display_name") or key
+
+
+def no_data(dataset_keys: list) -> dict:
+    """Not one file uploaded for anything the section is built from, so there
+    is nothing to generate from. Names what would unblock it."""
+    names = [dataset_label(k) for k in dataset_keys]
+    return _reason(NO_DATA, "No data uploaded for this section",
+                   "upload at least one of: %s" % ", ".join(names),
+                   key="no_data")
 
 
 def categories(reasons: list) -> list:

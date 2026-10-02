@@ -392,6 +392,15 @@ def live(db, account_id: str) -> dict:
         {"account_id": account_id, "status": {"$in": list(LIVE)}})}
 
 
+def live_all(db) -> list:
+    """Every live job row across accounts, without the bulky fields - what
+    the admin table polls. Served by the claim_scan index."""
+    return list(db[COLLECTION].find(
+        {"status": {"$in": list(LIVE)}},
+        {"account_id": 1, "node_id": 1, "status": 1, "progress": 1,
+         "not_runnable_on": 1}))
+
+
 def history(db, account_id: str, limit: int = 20) -> list:
     rows = db[COLLECTION].find({"account_id": account_id}).sort(
         "requested_at", DESCENDING).limit(max(1, min(int(limit), 100)))

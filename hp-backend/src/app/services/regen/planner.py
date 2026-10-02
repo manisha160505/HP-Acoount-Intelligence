@@ -45,6 +45,11 @@ BLOCKED = "BLOCKED"
 # Accenture, Advantest and Astra's filings each showed as "queued" for hours
 # while the worker kept handing them back).
 FILES_MISSING = "FILES_MISSING"
+# Not one file uploaded for anything the section is built from (its own
+# datasets or an ancestor's). Running it would spend model calls on an empty
+# account, so the planner never does unless forced; it used to show as
+# "never run", which hid that the fix is an upload, not a Submit.
+NO_DATA = "NO_DATA"
 CURRENT = "CURRENT"
 NEEDS_RUN = (FAILED, STALE, NEVER_RUN, DEGRADED)
 
@@ -134,6 +139,12 @@ def account_view(engine, account_id: str) -> dict:
         for up in engine.graph.ancestors(nid):
             closure.update(engine.graph[up].datasets)
         has_data = (not closure) or any(snapshot.rows.get(k) for k in closure)
+        if not has_data and status in NEEDS_RUN:
+            status = NO_DATA
+            why.insert(0, reasons.no_data(sorted(closure)))
+        # The section's own datasets with no file for this account: the data
+        # gaps to fill. It may still run on the rest, with less to go on.
+        not_provided = sorted(k for k in node.datasets if not snapshot.rows.get(k))
 
         nodes[nid] = {
             "node_id": nid,
@@ -154,13 +165,31 @@ def account_view(engine, account_id: str) -> dict:
             "upstream": list(node.upstream),
             "has_data": has_data,
             "datasets": sorted(closure),
+            "datasets_not_provided": [{"dataset": k, "label": reasons.dataset_label(k)}
+                                      for k in not_provided],
             "missing_files": [{"dataset": r.get("dataset_key") or r.get("category"),
+                               "label": reasons.dataset_label(
+                                   str(r.get("dataset_key") or r.get("category") or "")),
                                "file": r.get("original_filename") or r.get("stored_filename"),
                                "path": r.get("file_path")} for r in missing],
             "handed_back": handed_back,
         }
     return {"account_id": account_id, "nodes": nodes, "derived": derived,
-            "fingerprints": fps}
+            "fingerprints": fps, "data_gaps": data_gaps(nodes)}
+
+
+def data_gaps(nodes: dict) -> list:
+    """Every dataset some section reads but this account has no file for,
+    with the sections that read it - what to upload, in one list."""
+    gaps: dict = {}
+    for n in nodes.values():
+        for d in n["datasets_not_provided"]:
+            entry = gaps.setdefault(d["dataset"], {**d, "sections": [], "blocks": []})
+            entry["sections"].append(n["label"])
+            if n["status"] == NO_DATA:
+                entry["blocks"].append(n["label"])
+    # The ones that leave a section with nothing at all to build from first.
+    return sorted(gaps.values(), key=lambda g: (not g["blocks"], g["label"].lower()))
 
 
 def _job_view(job: dict | None) -> dict | None:

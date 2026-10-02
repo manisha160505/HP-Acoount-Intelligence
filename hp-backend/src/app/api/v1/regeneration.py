@@ -12,6 +12,7 @@ one of these endpoints was called (29 Sep):
     GET  /regeneration/queue        paused or not, and why
     POST /regeneration/queue/pause | /resume
     GET  /regeneration/accounts-summary   every account's counts by status
+    GET  /regeneration/live         running/queued jobs per account (cheap; poll)
     GET  /accounts/{id}/pipeline    one account: every section, why, progress
     POST /indexes/rebuild/preview | /indexes/rebuild   the index nodes only
 
@@ -22,14 +23,15 @@ defaults to false: a current section is only re-run when it is asked for.
 The older per-feature endpoints stay, as thin wrappers over the same run.
 """
 
-from datetime import date, datetime
+from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, date, datetime
 
 from bson import ObjectId
 from fastapi import APIRouter, Body, Depends, HTTPException, status
 
 from app.core.deps import require_admin_role, require_user_role
 from app.database.mongodb import get_db
-from app.services.regen import jobs as regen_jobs, planner, runs
+from app.services.regen import jobs as regen_jobs, planner, reasons, runs
 from app.services.regen.engine import get_engine
 from app.services.regen.graph import DEFAULT, INDEX
 
@@ -136,27 +138,64 @@ def queue_resume(current_user: dict = Depends(require_admin_role)):
     return jsonable(regen_jobs.queue_state(get_db()))
 
 
+def _summary_row(engine, account: dict) -> dict:
+    account_id = str(account["_id"])
+    view = planner.account_view(engine, account_id)
+    counts = {}
+    progress = None
+    for n in view["nodes"].values():
+        counts[n["status"]] = counts.get(n["status"], 0) + 1
+        if n["status"] == planner.RUNNING and n["job"]:
+            progress = {"node_id": n["node_id"], "label": n["label"],
+                        "progress": n["job"].get("progress")}
+    return {"account_id": account_id, "name": account.get("name"),
+            "counts": counts, "total": len(view["nodes"]),
+            "needs_run": sum(counts.get(s, 0) for s in planner.NEEDS_RUN),
+            "running": progress,
+            "data_gaps": [{"dataset": g["dataset"], "label": g["label"],
+                           "blocks": len(g["blocks"])} for g in view["data_gaps"]]}
+
+
+# account_view is a handful of Mongo round trips per account, so 220 accounts
+# one after another took long enough that the admin table sat on "-" and the
+# Refresh button looked dead. The views are read-only; run them side by side.
+SUMMARY_THREADS = 8
+
+
 @router.get("/regeneration/accounts-summary")
 def accounts_summary(current_user: dict = Depends(require_admin_role)):
     """Every account's sections counted by status. No model calls; a few
-    queries per account."""
+    queries per account. For what is running right now, poll
+    `/regeneration/live` instead - it is one query."""
     db, engine = get_db(), get_engine()
-    out = []
-    for account in db["accounts"].find({}, {"name": 1}).sort("name", 1):
-        account_id = str(account["_id"])
-        view = planner.account_view(engine, account_id)
-        counts = {}
-        progress = None
-        for n in view["nodes"].values():
-            counts[n["status"]] = counts.get(n["status"], 0) + 1
-            if n["status"] == planner.RUNNING and n["job"]:
-                progress = {"node_id": n["node_id"], "label": n["label"],
-                            "progress": n["job"].get("progress")}
-        out.append({"account_id": account_id, "name": account.get("name"),
-                    "counts": counts, "total": len(view["nodes"]),
-                    "needs_run": sum(counts.get(s, 0) for s in planner.NEEDS_RUN),
-                    "running": progress})
+    accounts = list(db["accounts"].find({}, {"name": 1}).sort("name", 1))
+    with ThreadPoolExecutor(max_workers=SUMMARY_THREADS) as pool:
+        out = list(pool.map(lambda a: _summary_row(engine, a), accounts))
     return jsonable({"accounts": out, "queue": regen_jobs.queue_state(db)})
+
+
+@router.get("/regeneration/live")
+def live_jobs(current_user: dict = Depends(require_admin_role)):
+    """What is running and queued right now, per account, from the job queue
+    alone - one query, cheap enough to poll every few seconds. Stale, failed
+    and never-run counts need fingerprints; those come from accounts-summary.
+
+    A queued job the worker handed back for missing files is not counted as
+    queued, the same as the summary (it shows there as files missing)."""
+    db = get_db()
+    accounts: dict = {}
+    for job in regen_jobs.live_all(db):
+        row = accounts.setdefault(job["account_id"],
+                                  {"running": 0, "queued": 0, "running_job": None})
+        if job["status"] == regen_jobs.RUNNING:
+            row["running"] += 1
+            row["running_job"] = {"node_id": job["node_id"],
+                                  "label": reasons.node_label(job["node_id"]),
+                                  "progress": job.get("progress")}
+        elif not job.get("not_runnable_on"):
+            row["queued"] += 1
+    return jsonable({"accounts": accounts, "queue": regen_jobs.queue_state(db),
+                     "at": datetime.now(UTC)})
 
 
 @router.get("/regeneration/{run_id}")
@@ -188,13 +227,15 @@ def account_pipeline(account_id: str, current_user: dict = Depends(require_admin
     db, engine = get_db(), get_engine()
     view = planner.account_view(engine, account_id)
     groups = {s: [] for s in (planner.RUNNING, planner.QUEUED, planner.FILES_MISSING,
-                              planner.FAILED, planner.STALE, planner.DEGRADED,
-                              planner.BLOCKED, planner.NEVER_RUN, planner.CURRENT)}
+                              planner.NO_DATA, planner.FAILED, planner.STALE,
+                              planner.DEGRADED, planner.BLOCKED, planner.NEVER_RUN,
+                              planner.CURRENT)}
     for n in view["nodes"].values():
         groups[n["status"]].append(n)
     return jsonable({"account_id": account_id, "groups": groups,
                      "counts": {k: len(v) for k, v in groups.items()},
                      "needs_run": sum(len(groups[s]) for s in planner.NEEDS_RUN),
+                     "data_gaps": view["data_gaps"],
                      "queue": regen_jobs.queue_state(db),
                      "runs": runs.recent(db, account_id, 5)})
 
