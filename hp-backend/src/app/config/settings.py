@@ -75,6 +75,13 @@ class Settings(BaseSettings):
     # ~12 s before its first byte (28 Sep, 1 or 16 texts alike), regional hosts
     # answer in under a second. asia-south1 is where the GCP VM runs.
     VERTEX_EMBEDDING_LOCATION: str = "asia-south1"
+    # Optional comma-separated list of regions to spread embedding calls over,
+    # e.g. "asia-south1,asia-southeast1,asia-northeast1,asia-east1,asia-northeast3".
+    # Vertex's embedding limit is per region, so N regions give about N times
+    # the throughput; gemini-embedding-001 returns identical vectors in every
+    # region (checked 2 Oct, cosine 1.0), so no index is rebuilt. Empty = only
+    # VERTEX_EMBEDDING_LOCATION. Asian regions only: client documents stay in Asia.
+    VERTEX_EMBEDDING_LOCATIONS: str = ""
 
     # --- Azure OpenAI (LLM_PROVIDER=openai) ----------------------------------
     OPENAI_API_KEY: str = ""
@@ -229,6 +236,13 @@ class Settings(BaseSettings):
         if self._is_google:
             return (self.GEMINI_EMBEDDING_MODEL or "gemini-embedding-001").strip()
         return (self.OPENAI_EMBEDDING_MODEL or "text-embedding-3-small").strip()
+
+    @property
+    def vertex_embedding_locations(self) -> list[str]:
+        """The regions embedding calls rotate over, in order, never empty."""
+        listed = [loc.strip() for loc in self.VERTEX_EMBEDDING_LOCATIONS.split(",")
+                  if loc.strip()]
+        return listed or [(self.VERTEX_EMBEDDING_LOCATION or "global").strip()]
 
     @property
     def embedding_dim(self) -> int:
