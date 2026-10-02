@@ -27,8 +27,8 @@ def test_gemini_is_the_default_and_resolves_everything():
     assert s.llm_provider == "gemini"
     assert s.llm_api_key == "g-key" and s.llm_api_key_name == "GEMINI_API_KEY"
     assert s.llm_endpoint.startswith("https://generativelanguage.googleapis.com/")
-    assert s.chat_model == "gemini-2.5-flash"
-    assert s.retrieval_model == "gemini-2.5-flash"          # falls back to chat
+    assert s.chat_model == "gemini-3.8-flash"
+    assert s.retrieval_model == "gemini-3.8-flash"          # falls back to chat
     assert s.embedding_identity == "gemini:gemini-embedding-001:3072"
 
 
@@ -40,7 +40,7 @@ def test_openai_is_one_setting_away():
 
 def test_a_retrieval_model_override_moves_only_retrieval():
     s = _settings(GEMINI_RETRIEVAL_MODEL="gemini-2.5-pro")
-    assert s.retrieval_model == "gemini-2.5-pro" and s.chat_model == "gemini-2.5-flash"
+    assert s.retrieval_model == "gemini-2.5-pro" and s.chat_model == "gemini-3.8-flash"
 
 
 def test_a_fenced_json_answer_is_still_read():
@@ -60,8 +60,8 @@ def test_vertex_sends_the_key_as_a_query_parameter_not_a_bearer_token():
 
 def test_vertex_names_google_models_with_their_publisher():
     s = _settings(LLM_PROVIDER="vertex", VERTEX_PROJECT="123")
-    assert s.chat_model == "google/gemini-2.5-flash"
-    assert s.retrieval_model == "google/gemini-2.5-flash"
+    assert s.chat_model == "google/gemini-3.8-flash"
+    assert s.retrieval_model == "google/gemini-3.8-flash"
     assert s.embedding_model == "gemini-embedding-001"      # native predict: no prefix
     assert s.embedding_identity == "vertex:gemini-embedding-001:3072"
 

@@ -50,8 +50,11 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str = ""
     GEMINI_ENDPOINT: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
     # Every generated feature: plays, priorities, So What, signal scoring,
-    # Content Studio, Strategy Chat answers. Flash: stable, fast, reliable JSON.
-    GEMINI_MODEL_NAME: str = "gemini-2.5-flash"
+    # Content Studio, Strategy Chat answers. Flash: fast, reliable JSON.
+    # gemini-2.5-flash is closed to new Gemini API (AI Studio) projects - a new
+    # key answers 404 "no longer available to new users" (2 Oct) - so the
+    # default is the Flash model Google names as its replacement.
+    GEMINI_MODEL_NAME: str = "gemini-3.8-flash"
     # LightRAG entity extraction and synthesis. Empty = GEMINI_MODEL_NAME.
     GEMINI_RETRIEVAL_MODEL: str = ""
     # gemini-embedding-001 returns 3072 dimensions. Changing the embedding model
@@ -213,7 +216,7 @@ class Settings(BaseSettings):
     @property
     def chat_model(self) -> str:
         if self._is_google:
-            return self._google_model(self.GEMINI_MODEL_NAME or "gemini-2.5-flash")
+            return self._google_model(self.GEMINI_MODEL_NAME or "gemini-3.8-flash")
         return (self.OPENAI_MODEL_NAME or "gpt-4o").strip()
 
     @property
