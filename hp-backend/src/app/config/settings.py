@@ -71,10 +71,22 @@ class Settings(BaseSettings):
     # because that endpoint's embeddings route does not accept an API key.
     VERTEX_PROJECT: str = ""
     VERTEX_LOCATION: str = "global"
+    # Optional comma-separated chat regions, e.g. "global,asia-south1,us-central1".
+    # Vertex serves gemini-2.5-flash from a shared pool per region, so a 429 in
+    # one region moves the call to the next instead of waiting. Empty = only
+    # VERTEX_LOCATION. Same model everywhere (checked 2 Oct).
+    VERTEX_LOCATIONS: str = ""
     # Embeddings go to a regional host: on the global one every request waited
     # ~12 s before its first byte (28 Sep, 1 or 16 texts alike), regional hosts
     # answer in under a second. asia-south1 is where the GCP VM runs.
     VERTEX_EMBEDDING_LOCATION: str = "asia-south1"
+    # Optional comma-separated list of regions to spread embedding calls over,
+    # e.g. "asia-south1,asia-southeast1,asia-northeast1,asia-east1,asia-northeast3".
+    # Vertex's embedding limit is per region, so N regions give about N times
+    # the throughput; gemini-embedding-001 returns identical vectors in every
+    # region (checked 2 Oct, cosine 1.0), so no index is rebuilt. Empty = only
+    # VERTEX_EMBEDDING_LOCATION. Asian regions only: client documents stay in Asia.
+    VERTEX_EMBEDDING_LOCATIONS: str = ""
 
     # --- Azure OpenAI (LLM_PROVIDER=openai) ----------------------------------
     OPENAI_API_KEY: str = ""
@@ -180,6 +192,20 @@ class Settings(BaseSettings):
         return "GEMINI_API_KEY" if self._is_google else "OPENAI_API_KEY"
 
     @property
+    def vertex_chat_locations(self) -> list[str]:
+        """The regions chat calls rotate over, in order, never empty."""
+        listed = [loc.strip() for loc in self.VERTEX_LOCATIONS.split(",") if loc.strip()]
+        return listed or [(self.VERTEX_LOCATION or "global").strip()]
+
+    def vertex_chat_endpoint(self, location: str) -> str:
+        """Vertex's OpenAI-compatible endpoint in one region. Regional hosts
+        are <region>-aiplatform; `global` is the bare host."""
+        host = ("aiplatform.googleapis.com" if location == "global"
+                else "%s-aiplatform.googleapis.com" % location)
+        return ("https://%s/v1/projects/%s/locations/%s/endpoints/openapi"
+                % (host, self.VERTEX_PROJECT.strip(), location))
+
+    @property
     def llm_endpoint(self) -> str:
         if self.llm_provider == "vertex":
             return ("https://aiplatform.googleapis.com/v1/projects/%s/locations/%s/"
@@ -234,6 +260,13 @@ class Settings(BaseSettings):
         if self._is_google:
             return (self.GEMINI_EMBEDDING_MODEL or "gemini-embedding-001").strip()
         return (self.OPENAI_EMBEDDING_MODEL or "text-embedding-3-small").strip()
+
+    @property
+    def vertex_embedding_locations(self) -> list[str]:
+        """The regions embedding calls rotate over, in order, never empty."""
+        listed = [loc.strip() for loc in self.VERTEX_EMBEDDING_LOCATIONS.split(",")
+                  if loc.strip()]
+        return listed or [(self.VERTEX_EMBEDDING_LOCATION or "global").strip()]
 
     @property
     def embedding_dim(self) -> int:
