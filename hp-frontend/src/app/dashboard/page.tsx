@@ -79,7 +79,8 @@ import {
   CheckCircle2,
   Minus,
   BarChart3,
-  Briefcase
+  Briefcase,
+  AlertTriangle
 } from 'lucide-react';
 
 const ICON_MAP: Record<string, React.FC<{ className?: string }>> = {
@@ -574,7 +575,7 @@ export default function UserDashboardPage() {
   // copying, emailing and the history posted back to the model. They are kept
   // apart deliberately: a tag is presentation, and nothing downstream of the
   // screen should ever see one.
-  const [chatMessages, setChatMessages] = useState<Array<{ id: string; sender: 'user' | 'assistant'; text: string; clean?: string; timestamp: string; citations?: any[]; available?: boolean; personaTitle?: string }>>([]);
+  const [chatMessages, setChatMessages] = useState<Array<{ id: string; sender: 'user' | 'assistant'; text: string; clean?: string; timestamp: string; citations?: any[]; available?: boolean; personaTitle?: string; dropped?: number }>>([]);
   const [chatPending, setChatPending] = useState(false);
   // Which stage of the answer is running. An answer takes around fifteen
   // seconds and cannot be streamed - every fact is validated against the
@@ -749,14 +750,10 @@ export default function UserDashboardPage() {
   // prospect_contacts, so a widget copy would go stale at exactly the moment a
   // new roster was uploaded. Empty list is a valid answer - an account with no
   // contacts gets no personas rather than a default set of roles.
-  useEffect(() => {
-    if (!selectedAccountId || activeFeatureKey !== 'strategy_chat') return;
-    let cancelled = false;
-    api.get(`/accounts/${selectedAccountId}/widgets/strategy_chat/personas`)
-      .then(res => { if (!cancelled) setChatPersonas(res.data?.personas || []); })
-      .catch(() => { if (!cancelled) setChatPersonas([]); });
-    return () => { cancelled = true; };
-  }, [selectedAccountId, activeFeatureKey]);
+  // The persona roster is no longer fetched: the chat is advisor-only, so
+  // nothing reads it and the request was one more round trip every time the
+  // tab opened. The endpoint is still there and still tested; restoring the
+  // picker means restoring this effect with it.
 
   const handleSelectAccount = (acc: CompanyAccount) => {
     setSelectedAccountId(acc.id);
@@ -7636,7 +7633,7 @@ export default function UserDashboardPage() {
                     let settled = false;
                     const publish = (
                       text: string, citations: any[], available: boolean,
-                      personaTitle?: string, clean?: string,
+                      personaTitle?: string, clean?: string, dropped?: number,
                     ) => {
                       settled = true;
                       setChatMessages(prev => [...prev, {
@@ -7644,16 +7641,14 @@ export default function UserDashboardPage() {
                         sender: 'assistant' as const,
                         text, clean: clean || text,
                         timestamp: stamp(), citations, available,
-                        personaTitle,
+                        personaTitle, dropped,
                       }]);
                     };
 
                     try {
                       await postStream(
                         `/accounts/${selectedAccount.id}/widgets/strategy_chat/ask/stream`,
-                        chatPersonaId
-                          ? { messages: history, mode: 'roleplay', persona_id: chatPersonaId }
-                          : { messages: history, mode: 'advisor' },
+                        { messages: history, mode: 'advisor' },
                         (event) => {
                           if (event.type === 'stage') {
                             setChatStage(STAGES[event.stage ?? ''] ?? 0);
@@ -7678,6 +7673,12 @@ export default function UserDashboardPage() {
                                 ? undefined
                                 : (event.persona as any)?.title,
                               (event.answer_clean as string) || undefined,
+                              // How much of the answer was thrown away for
+                              // want of evidence. Shown, because a gutted
+                              // answer that looks whole is worse than a short
+                              // one that admits it.
+                              ((event.generation as any)?.segments_dropped as number)
+                                || undefined,
                             );
                           } else if (event.type === 'error') {
                             publish(
@@ -7722,55 +7723,32 @@ export default function UserDashboardPage() {
 
                       {/* Grounding Bar */}
                       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
-                        {/* The mode the chat actually runs in.
+                        {/* The mode the chat runs in, and there is one.
 
-                            This was a four-option dropdown - Competitive
-                            Defender, Executive Pitcher, ABM Campaign Planner -
-                            but the selection was never sent: the request
-                            hardcodes `mode: 'advisor'`, so three of the four
-                            changed nothing when picked. Shown as a label rather
-                            than a one-item select, because a chevron invites a
-                            click that has nowhere to go.
+                            It was a four-option dropdown that sent nothing,
+                            then a real selector offering a rehearsal with each
+                            stakeholder on the account. Both are gone: the
+                            product is the advisor, and a picker whose other
+                            options nobody wants is a way to land in a mode by
+                            accident and wonder why the answers changed.
 
-                            The roleplay personas of Feature 18 are the reason
-                            this stays a distinct element. `StrategyChatRequest`
-                            already carries `mode`, so restoring a real selector
-                            is a UI change and not a contract change. */}
+                            A label rather than a one-item select, because a
+                            chevron invites a click that has nowhere to go.
+
+                            Nothing was removed behind this. The backend still
+                            has the roleplay path, its validator and its
+                            persona endpoint, and `StrategyChatRequest` still
+                            carries `mode` and `persona_id` - so putting the
+                            picker back is this block and nothing else. */}
                         <div className="flex items-center gap-2">
                           {/* Role first, name as provenance. "Chief Operating
                               Officer - from Irvan Nr's record" says the seller
                               is preparing for that person WITHOUT framing the
                               dialogue as that person speaking, which is the
                               distinction the whole feature rests on. */}
-                          <select
-                            value={chatPersonaId}
-                            onChange={(e) => {
-                              const next = e.target.value;
-                              if (next === chatPersonaId) return;
-                              // Switching ends the conversation, for the same
-                              // reason switching account does: the backend
-                              // rewrites a follow-up using the prior turns, so
-                              // "and what about the cost of that?" would be
-                              // resolved against a different role's answer.
-                              if (chatMessages.length > 0 &&
-                                  !window.confirm('Switching will clear this conversation. Continue?')) {
-                                return;
-                              }
-                              setChatPersonaId(next);
-                              setChatMessages([]);
-                              setChatInput('');
-                            }}
-                            className="px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-extrabold text-slate-800 shadow-xs focus:outline-none focus:ring-2 focus:ring-hp-blue/30"
-                          >
-                            <option value="">🤖 Strategy Advisor</option>
-                            {chatPersonas.length === 0 ? (
-                              <option value="" disabled>No contacts on this account</option>
-                            ) : chatPersonas.map((p: any) => (
-                              <option key={p.persona_id} value={p.persona_id}>
-                                🎭 {p.title}{p.name ? ` — from ${p.name}'s record` : ''}
-                              </option>
-                            ))}
-                          </select>
+                          <span className="px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-extrabold text-slate-800 shadow-xs">
+                            🤖 Strategy Advisor
+                          </span>
                         </div>
 
                         <div className="flex items-center gap-1.5 text-slate-500 font-medium">
@@ -7863,6 +7841,19 @@ export default function UserDashboardPage() {
                                         rendered as written rather than parsed
                                         as markdown - except for the evidence
                                         tags, which become footnote markers. */}
+                                    {(msg.dropped ?? 0) > 0 && (
+                                      <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+                                        <AlertTriangle className="w-3.5 h-3.5 text-amber-600 mt-0.5 shrink-0" />
+                                        <p className="text-[11px] text-amber-900 leading-snug">
+                                          <span className="font-bold">This answer is incomplete.</span>{' '}
+                                          {msg.dropped} {msg.dropped === 1 ? 'statement' : 'statements'}{' '}
+                                          could not be matched to this account&apos;s evidence and{' '}
+                                          {msg.dropped === 1 ? 'was' : 'were'} removed. Ask again, or
+                                          ask it more narrowly.
+                                        </p>
+                                      </div>
+                                    )}
+
                                     <AnswerWithCitations
                                       text={msg.text}
                                       citations={msg.citations || []}

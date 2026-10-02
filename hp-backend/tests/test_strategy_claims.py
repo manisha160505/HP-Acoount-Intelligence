@@ -486,3 +486,147 @@ class TestRoleplayIsUntouched:
                 "widget_keys": ["a_section"], "banned": []}
         result = chat._check(turn, "ANSWER: nothing to report.")
         assert len(result) == 4
+
+
+# ---------------------------------------------------------------------------
+# Advice, held to its own standard
+# ---------------------------------------------------------------------------
+
+def _recommendation(text, depends_on=("c1", "c2"), id_="c4"):
+    return {"id": id_, "type": "RECOMMENDATION", "block": "bullet",
+            "text": text, "depends_on": list(depends_on)}
+
+
+class TestARecommendationMayPlan:
+    """The failure this type was added for.
+
+    Asked for a 90-day campaign plan, the platform answered with the account's
+    revenue, its headcount and fourteen stakeholder names under a RECOMMENDED
+    NEXT STEPS heading - and not one step. Every planning sentence had been
+    rejected and `surviving()` published the wreckage.
+
+    The cause was one line: a SYNTHESIS may carry no figure its dependencies
+    do not carry, and "week 1" is a figure. A plan is made of figures, so a
+    plan could not be published at all.
+    """
+
+    @pytest.mark.parametrize("step", [
+        "Open with the design estate in week 1, then follow up a week later.",
+        "Plan three touches over 30 days before asking for a meeting.",
+        "Run a 90-day sequence: weeks 1-4 on the workstation case.",
+        "Send the first note on day 1 and a second within 10 days.",
+        "Follow up on LinkedIn if the first two emails go unanswered.",
+    ])
+    def test_the_plans_own_schedule_needs_no_evidence(self, ground, step):
+        ok, failures, _ = _check([*FACTS, _recommendation(step)], ground)
+        assert ok, failures
+
+    def test_it_still_may_not_name_a_person_nobody_cited(self, ground):
+        ok, failures, _ = _check(
+            [*FACTS, _recommendation("Approach Mike Higgins in week 1.")], ground)
+        assert not ok
+        assert "Higgins" in failures[0]["reason"] or "higgins" in failures[0]["reason"]
+
+    def test_it_still_may_not_invent_an_hp_line(self, ground):
+        ok, failures, _ = _check(
+            [*FACTS, _recommendation("Lead with Poly Studio on the first call.")],
+            ground)
+        assert not ok
+
+    def test_it_still_may_not_state_an_account_figure(self, ground):
+        """A number that is not the plan's own schedule is an account claim,
+        and needs a FACT like any other."""
+        ok, failures, _ = _check(
+            [*FACTS, _recommendation("Open on their 4200 seats of CAD.")], ground)
+        assert not ok
+        assert "4200" in failures[0]["reason"]
+
+    def test_it_rests_on_something_like_any_conclusion(self, ground):
+        bare = _recommendation("Just call them.", depends_on=())
+        ok, failures, _ = _check([bare], ground)
+        assert not ok
+        assert "names no claim it rests on" in failures[0]["reason"]
+
+    def test_it_carries_the_citations_of_what_it_rests_on(self, ground):
+        segments = claims.parse({"segments": [
+            *FACTS, _recommendation("Open on the design estate in week 1.")]})
+        rendered = claims.render(segments)
+        assert "[tech_stack_matrix, opportunity_narrative_plays]" in rendered
+
+    def test_the_whole_answer_figure_sweep_spares_the_plan(self, ground):
+        """`unsourced_numbers` runs over the published answer and would reject
+        "week 2" for not appearing in the account's data. Recommendations are
+        excluded from that sweep; facts are not."""
+        ok, failures, _ = _check(
+            [*FACTS, _recommendation("Three touches in weeks 2, 5 and 9.")], ground)
+        assert ok, failures
+
+    def test_a_plan_survives_the_retry_budget(self, ground):
+        """What the seller actually lost: when OTHER segments fail, the steps
+        must be among what `surviving` keeps.
+
+        A step resting on a fact that failed is still dropped - that part is
+        right, and is why this fails an unrelated segment rather than one the
+        recommendation depends on."""
+        unrelated = _fact("c9", "They run Microsoft Defender.",
+                          "tech_stack_matrix", "Microsoft Defender")
+        segments = claims.parse({"segments": [
+            *FACTS, unrelated,
+            _recommendation("Open in week 1 on the design estate.")]})
+        kept = claims.surviving(segments, [{"id": "c9", "reason": "x"}])
+        assert any(s["type"] == claims.RECOMMENDATION for s in kept)
+        assert not any(s["id"] == "c9" for s in kept)
+
+    @pytest.mark.parametrize("alias", ["ADVICE", "NEXT_STEP", "PLAN", "ACTION"])
+    def test_the_words_the_model_reaches_for_land_on_the_type(self, alias):
+        parsed = claims.parse({"segments": [
+            {"id": "c1", "type": alias, "block": "bullet", "text": "Do the thing.",
+             "depends_on": ["c0"]}]})
+        assert parsed[0]["type"] == claims.RECOMMENDATION
+
+
+class TestWhatAConclusionMayDrawOn:
+    """The client's rule, and where it is looked up.
+
+    The rule is unchanged: a conclusion may introduce no account fact, number,
+    technology, relationship or event that the evidence does not support. What
+    changed is WHERE "supported" is looked up. It used to mean "appears in the
+    two or three facts this sentence listed as dependencies", which rejected
+    conclusions naming things that are plainly in the account's data - and
+    taught the model that writing facts was safe and answering was not.
+
+    It now means "appears anywhere in the payload": `context.build()`, the
+    committed output of every contributing feature. Not the raw uploads, and
+    not the model's own knowledge of the company.
+    """
+
+    def test_it_may_name_something_the_evidence_holds_elsewhere(self, ground):
+        """Capex and 36 are in news_signals_feed, which neither dependency
+        cites. This is the sentence the old lookup threw away."""
+        ok, failures, _ = _check(
+            [*FACTS, _synthesis("Their Capex plans make the timing right.")],
+            ground)
+        assert ok, failures
+
+    def test_a_figure_elsewhere_in_the_evidence_is_supported(self, ground):
+        ok, failures, _ = _check(
+            [*FACTS, _synthesis("The 36 trillion capex is the backdrop.")],
+            ground)
+        assert ok, failures
+
+    def test_a_conclusion_still_may_not_carry_a_new_figure(self, ground):
+        ok, failures, _ = _check(
+            [*FACTS, _synthesis("So they should start in week 1.")], ground)
+        assert not ok
+        assert "figure" in failures[0]["reason"]
+
+    def test_a_conclusion_still_may_not_name_a_new_thing(self, ground):
+        ok, failures, _ = _check(
+            [*FACTS, _synthesis("So their Citrix estate is the way in.")], ground)
+        assert not ok
+        assert "citrix" in failures[0]["reason"].lower()
+
+    def test_a_conclusion_drawn_from_its_facts_still_passes(self, ground):
+        ok, failures, _ = _check(
+            [*FACTS, _synthesis("So the workstation case is the strongest.")], ground)
+        assert ok, failures
