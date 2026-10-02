@@ -19,3 +19,8 @@
 		reverse_proxy frontend:3000
 	}
 }
+
+zebra.34-100-196-59.sslip.io {
+	encode gzip
+	reverse_proxy zebra-frontend:3000
+}
