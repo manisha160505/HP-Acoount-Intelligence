@@ -74,6 +74,7 @@ EMBEDDING_MAX_ASYNC = 8
 # Vertex express mode rate-limits far lower than Azure did: eight concurrent
 # batches drew 429s on the first production build (28 Sep).
 VERTEX_EMBEDDING_MAX_ASYNC = 2
+VERTEX_EMBEDDING_MAX_ASYNC_CAP = 16
 EMBEDDING_BATCH_NUM = 32
 
 
@@ -193,17 +194,12 @@ def _vertex_embed(texts: list) -> list:
     if not settings.llm_api_key:
         raise RetrievalConfigError("%s is not set - the retrieval layer cannot embed"
                                    % settings.llm_api_key_name)
-    location = (settings.VERTEX_EMBEDDING_LOCATION or "global").strip()
-    host = ("aiplatform.googleapis.com" if location == "global"
-            else "%s-aiplatform.googleapis.com" % location)
-    url = ("https://%s/v1/publishers/google/models/%s:predict"
-           % (host, settings.embedding_model))
     vectors = []
     for start in range(0, len(texts), EMBEDDING_BATCH_NUM):
         batch = texts[start:start + EMBEDDING_BATCH_NUM]
         response = _vertex_post(
-            url, {"instances": [{"content": t} for t in batch],
-                  "parameters": {"outputDimensionality": settings.embedding_dim}})
+            {"instances": [{"content": t} for t in batch],
+             "parameters": {"outputDimensionality": settings.embedding_dim}})
         vectors.extend(p["embeddings"]["values"] for p in response.json()["predictions"])
     return vectors
 
@@ -222,14 +218,44 @@ VERTEX_RETRY_WAITS = (2, 5, 10, 20, 30)
 EMBEDDING_TIMEOUT = 120
 
 
-def _vertex_post(url: str, body: dict):
+def _vertex_embed_url(location: str) -> str:
+    host = ("aiplatform.googleapis.com" if location == "global"
+            else "%s-aiplatform.googleapis.com" % location)
+    return ("https://%s/v1/publishers/google/models/%s:predict"
+            % (host, settings.embedding_model))
+
+
+_location_lock = threading.Lock()
+_location_turn = 0
+
+
+def _locations_in_turn() -> list:
+    """Every embedding region, starting one further along on each call, so
+    concurrent batches land in different regions instead of all on the first."""
+    global _location_turn
+    locations = settings.vertex_embedding_locations
+    with _location_lock:
+        start = _location_turn % len(locations)
+        _location_turn += 1
+    return locations[start:] + locations[:start]
+
+
+def _vertex_post(body: dict):
     """POST with the key in a header - never ?key=, which httpx puts in every
-    error message and so in the logs - with the short waits above."""
+    error message and so in the logs - with the short waits above.
+
+    Vertex's embedding limit is per region: a 429 moves the request straight
+    on to the next region, and only when every region has answered 429 does it
+    wait. With one region this is exactly the old behaviour."""
     import httpx
 
     for wait in (*VERTEX_RETRY_WAITS, None):
-        response = httpx.post(url, headers={"x-goog-api-key": settings.llm_api_key},
-                              json=body, timeout=120)
+        for location in _locations_in_turn():
+            response = httpx.post(_vertex_embed_url(location),
+                                  headers={"x-goog-api-key": settings.llm_api_key},
+                                  json=body, timeout=120)
+            if response.status_code != 429:
+                break
         if not (response.status_code == 429 or response.status_code >= 500):
             break
         if wait is None:
@@ -237,8 +263,9 @@ def _vertex_post(url: str, body: dict):
                 from app.services.regen import context as run_context
                 run_context.note_quota_exhausted()
             break
-        logger.info("retrieval: embeddings answered %d, waiting %ds before sending "
-                    "it again", response.status_code, wait)
+        logger.info("retrieval: embeddings answered %d (%d region(s) tried), waiting "
+                    "%ds before sending it again", response.status_code,
+                    len(settings.vertex_embedding_locations), wait)
         time.sleep(wait)
     response.raise_for_status()
     return response
@@ -369,7 +396,11 @@ async def build_rag(account_id: str, index: str, for_query: bool = False):
             func=_embedding_func,
         ),
         embedding_batch_num=EMBEDDING_BATCH_NUM,
-        embedding_func_max_async=(VERTEX_EMBEDDING_MAX_ASYNC
+        # Two concurrent batches per region (each has its own limit), capped:
+        # a long region list should not open dozens of connections at once.
+        embedding_func_max_async=(min(VERTEX_EMBEDDING_MAX_ASYNC
+                                      * len(settings.vertex_embedding_locations),
+                                      VERTEX_EMBEDDING_MAX_ASYNC_CAP)
                                   if settings.llm_provider == "vertex"
                                   else EMBEDDING_MAX_ASYNC),
         # Long enough for one request to sit out its own 429 waits. See
