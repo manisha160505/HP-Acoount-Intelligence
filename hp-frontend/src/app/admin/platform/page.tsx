@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { ProtectedRoute } from '@/components/common/ProtectedRoute';
 import { PageHero } from '@/components/common/motion';
@@ -28,32 +28,66 @@ interface PipelineSummaryRow {
   total: number;
   needs_run: number;
   running?: { label: string; progress?: { done: number; total: number } | null } | null;
+  // Datasets some section reads that this account has no file for; `blocks`
+  // counts the sections left with no data at all.
+  data_gaps?: { dataset: string; label: string; blocks: number }[];
 }
 
-function PipelineCell({ row }: { row?: PipelineSummaryRow }) {
-  if (!row) return <span className="text-gray-400">—</span>;
-  const c = row.counts || {};
+// Per-account running/queued jobs from GET /regeneration/live: one query on the
+// job queue, so the table polls it every few seconds. The summary above needs
+// fingerprints and takes longer; it is re-fetched when this changes.
+interface LiveRow {
+  running: number;
+  queued: number;
+  running_job: { node_id: string; label: string; progress?: { done: number; total: number } | null } | null;
+}
+
+const LIVE_POLL_MS = 4000;
+const SUMMARY_POLL_MS = 60000;
+
+function PipelineCell({ row, live, liveLoaded }: { row?: PipelineSummaryRow; live?: LiveRow; liveLoaded: boolean }) {
+  if (!row && !live) return <span className="text-gray-400">—</span>;
+  // Running and queued come from the live poll once it has answered; the
+  // summary may be a minute old.
+  const c = { ...(row?.counts || {}) };
+  const running = liveLoaded ? (live?.running_job ?? null) : (row?.running ?? null);
+  if (liveLoaded) {
+    c.RUNNING = live?.running || 0;
+    c.QUEUED = live?.queued || 0;
+  }
   const chips: [string, number, string][] = [
     ['running', c.RUNNING || 0, 'bg-blue-100 text-blue-800'],
     ['queued', c.QUEUED || 0, 'bg-indigo-100 text-indigo-800'],
     ['files missing', c.FILES_MISSING || 0, 'bg-rose-200 text-rose-900'],
+    ['no data', c.NO_DATA || 0, 'bg-stone-200 text-stone-800'],
     ['failed', c.FAILED || 0, 'bg-red-100 text-red-800'],
     ['stale', (c.STALE || 0) + (c.DEGRADED || 0), 'bg-amber-100 text-amber-800'],
     ['never run', c.NEVER_RUN || 0, 'bg-slate-200 text-slate-700'],
   ];
   const shown = chips.filter(([, n]) => n > 0);
-  if (!shown.length) {
-    return <span className="inline-flex px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800">all current</span>;
-  }
-  const p = row.running?.progress;
+  const gaps = row?.data_gaps || [];
+  if (!shown.length && !row) return <span className="text-gray-400">—</span>;
+  const p = running?.progress;
   return (
     <div className="flex flex-wrap gap-1">
+      {!shown.length && (
+        <span className="inline-flex px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800">all current</span>
+      )}
       {shown.map(([label, n, tone]) => (
-        <span key={label} className={`inline-flex px-2 py-0.5 rounded-full text-[11px] font-bold ${tone}`}>{n} {label}</span>
+        <span key={label} className={`inline-flex px-2 py-0.5 rounded-full text-[11px] font-bold ${tone}`}
+          title={label === 'no data' ? 'Sections with no uploaded file for anything they are built from' : undefined}>
+          {n} {label}
+        </span>
       ))}
-      {row.running && (
+      {gaps.length > 0 && (
+        <span className="text-[11px] text-stone-700 w-full"
+          title={gaps.map(g => g.label + (g.blocks ? ` (${g.blocks} section(s) have no data at all)` : '')).join('\n')}>
+          Not provided: {gaps.slice(0, 3).map(g => g.label).join(', ')}{gaps.length > 3 ? ` +${gaps.length - 3} more` : ''}
+        </span>
+      )}
+      {running && (
         <span className="text-[11px] text-blue-800 w-full">
-          {row.running.label}{p ? ` ${Math.round((p.done / Math.max(1, p.total)) * 100)}%` : ''}
+          {running.label}{p ? ` ${Math.round((p.done / Math.max(1, p.total)) * 100)}%` : ''}
         </span>
       )}
     </div>
@@ -63,6 +97,13 @@ function PipelineCell({ row }: { row?: PipelineSummaryRow }) {
 export default function ManagePlatformPage() {
   const [accounts, setAccounts] = useState<CompanyAccount[]>([]);
   const [pipeline, setPipeline] = useState<Record<string, PipelineSummaryRow>>({});
+  const [live, setLive] = useState<Record<string, LiveRow>>({});
+  const [liveLoaded, setLiveLoaded] = useState(false);
+  const [pipelineLoading, setPipelineLoading] = useState(false);
+  const [pipelineError, setPipelineError] = useState<string | null>(null);
+  const [pipelineUpdatedAt, setPipelineUpdatedAt] = useState<Date | null>(null);
+  const summaryInFlight = useRef(false);
+  const liveSignature = useRef<string | null>(null);
   const [queuePaused, setQueuePaused] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(true);
@@ -81,15 +122,51 @@ export default function ManagePlatformPage() {
   const router = useRouter();
 
   const fetchPipeline = useCallback(async () => {
+    // One summary at a time: polls and clicks while one is in flight would
+    // only queue more of the same slow request.
+    if (summaryInFlight.current) return;
+    summaryInFlight.current = true;
+    setPipelineLoading(true);
     try {
       const res = await api.get<{ accounts: PipelineSummaryRow[]; queue: { paused: boolean; reason?: string } }>(
         '/regeneration/accounts-summary');
       setPipeline(Object.fromEntries(res.data.accounts.map(r => [r.account_id, r])));
       setQueuePaused(res.data.queue?.paused ? (res.data.queue.reason || 'paused') : null);
-    } catch {
-      // The table still works without the column.
+      setPipelineError(null);
+      setPipelineUpdatedAt(new Date());
+    } catch (err: any) {
+      // The table still works without the column, but say so.
+      setPipelineError(err.response?.data?.detail || err.message || 'Could not load pipeline status.');
+    } finally {
+      summaryInFlight.current = false;
+      setPipelineLoading(false);
     }
   }, []);
+
+  const fetchLive = useCallback(async () => {
+    try {
+      const res = await api.get<{ accounts: Record<string, LiveRow>; queue: { paused: boolean; reason?: string } }>(
+        '/regeneration/live');
+      const rows = res.data.accounts || {};
+      setLive(rows);
+      setLiveLoaded(true);
+      setQueuePaused(res.data.queue?.paused ? (res.data.queue.reason || 'paused') : null);
+      // A job started or finished: the stale / failed / current counts moved
+      // too, and only the summary knows them.
+      const signature = Object.entries(rows)
+        .map(([id, r]) => `${id}:${r.running}:${r.queued}:${r.running_job?.node_id ?? ''}`)
+        .sort().join('|');
+      if (liveSignature.current !== null && liveSignature.current !== signature) fetchPipeline();
+      liveSignature.current = signature;
+    } catch {
+      // The next poll tries again; the summary still shows its own counts.
+    }
+  }, [fetchPipeline]);
+
+  const refreshPipeline = useCallback(() => {
+    fetchLive();
+    fetchPipeline();
+  }, [fetchLive, fetchPipeline]);
 
   const fetchAccounts = useCallback(async (search = '') => {
     setIsLoading(true);
@@ -110,9 +187,27 @@ export default function ManagePlatformPage() {
     fetchAccounts(searchQuery);
   }, [searchQuery, fetchAccounts]);
 
+  // Live while the tab is visible: running/queued every few seconds, the full
+  // summary every minute (and whenever the live poll sees a change). Coming
+  // back to the tab refreshes both at once.
   useEffect(() => {
-    fetchPipeline();
-  }, [fetchPipeline]);
+    refreshPipeline();
+    const liveTimer = setInterval(() => {
+      if (document.visibilityState === 'visible') fetchLive();
+    }, LIVE_POLL_MS);
+    const summaryTimer = setInterval(() => {
+      if (document.visibilityState === 'visible') fetchPipeline();
+    }, SUMMARY_POLL_MS);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') refreshPipeline();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(liveTimer);
+      clearInterval(summaryTimer);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [refreshPipeline, fetchLive, fetchPipeline]);
 
   const handleCreateAccount = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -286,11 +381,14 @@ export default function ManagePlatformPage() {
                     <th className="py-3.5 px-6">
                       <span className="inline-flex items-center gap-1.5">
                         Pipeline
-                        <button type="button" onClick={fetchPipeline} title="Refresh pipeline status"
-                          className="text-gray-500 hover:text-hp-navy">
-                          <RefreshCw className="w-3 h-3" />
+                        <button type="button" onClick={refreshPipeline} disabled={pipelineLoading}
+                          title={pipelineUpdatedAt ? `Refresh pipeline status (updated ${pipelineUpdatedAt.toLocaleTimeString()})` : 'Refresh pipeline status'}
+                          className="text-gray-500 hover:text-hp-navy disabled:cursor-wait">
+                          <RefreshCw className={`w-3 h-3 ${pipelineLoading ? 'animate-spin' : ''}`} />
                         </button>
+                        {liveLoaded && <span className="normal-case font-semibold text-emerald-700" title={`Running and queued update every ${LIVE_POLL_MS / 1000}s`}>· live</span>}
                         {queuePaused && <span className="normal-case text-amber-700" title={queuePaused}>· queue paused</span>}
+                        {pipelineError && <span className="normal-case text-red-700" title={pipelineError}>· status failed to load</span>}
                       </span>
                     </th>
                     <th className="py-3.5 px-6">Last Updated</th>
@@ -324,7 +422,7 @@ export default function ManagePlatformPage() {
                       </td>
 
                       <td className="py-4 px-6">
-                        <PipelineCell row={pipeline[account.id]} />
+                        <PipelineCell row={pipeline[account.id]} live={live[account.id]} liveLoaded={liveLoaded} />
                       </td>
 
                       <td className="py-4 px-6 text-gray-500">

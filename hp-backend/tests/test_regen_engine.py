@@ -744,8 +744,10 @@ def test_mirror_keeps_account_widgets_in_step_and_never_goes_backwards(h):
 def test_status_reports_every_lifecycle(h):
     acct = h.account()
     assert h.lifecycle(acct, "A") == state.NEVER_GENERATED
-    assert h.status(acct, "A") == planner.NEVER_RUN
+    # Nothing uploaded: the fix is an upload, so it says so instead of "never run".
+    assert h.status(acct, "A") == planner.NO_DATA
     h.upload(acct, "d1", "x\n1\n")
+    assert h.status(acct, "A") == planner.NEVER_RUN
     h.submit(acct, features=["fa"])
     assert h.status(acct, "A") == planner.QUEUED
     job = jobs.claim(h.db, "w9")
