@@ -55,6 +55,9 @@ none of its own. On a typical account most of the eight types will not fire.
 
 import logging
 import re
+import threading
+from bisect import bisect_right
+from collections import OrderedDict
 
 from app.services.hp.product_rules import _is_excluded, token_present
 
@@ -142,6 +145,106 @@ def _match_terms(row: dict) -> list:
     return list(row.get("signal_tokens") or []) +         list(row.get("observable_terms") or [])
 
 
+class _Corpus:
+    """One evidence list, prepared once for every rule that is matched on it.
+
+    `_fired_by` used to lower-case every cell and rebuild every term's pattern
+    once per (rule, cell, term): measured on one account, 162 rules against
+    2,039 cells was 6 million `token_present` calls and 12 minutes. Here each
+    cell is lower-cased and exclusion-checked once, the live cells are joined
+    into one string, and each distinct term is found with one `str.find` scan
+    of it rather than one regex call per cell. The five features that match
+    the same account share the corpus.
+
+    The answer is the one `token_present` gives, cell by cell. Its pattern is
+    the lower-cased term as a literal, with no a-z/0-9 character either side;
+    `_at_word_boundary` checks exactly that. Cells are joined with NUL, which
+    is not a-z/0-9 (so a cell's first and last characters see "nothing" either
+    side, as in its own string) and which a match cannot span unless the term
+    itself contains one - such a term takes the per-cell regex instead.
+    """
+
+    __slots__ = ("_by_term", "_joined", "_live", "_lowered", "_starts")
+
+    def __init__(self, texts: tuple):
+        self._lowered = [text.lower() for text in texts]
+        self._live = [i for i, text in enumerate(texts)
+                      if text and not _is_excluded(text)]
+        self._starts, offset = [], 0
+        for i in self._live:
+            self._starts.append(offset)
+            offset += len(self._lowered[i]) + 1
+        self._joined = _SEPARATOR.join(self._lowered[i] for i in self._live)
+        self._by_term: dict = {}
+
+    def cells_with(self, term) -> tuple:
+        """Indices of the live cells `term` is present in, ascending."""
+        found = self._by_term.get(term)
+        if found is None:
+            if not term or not self._live:
+                found = ()          # token_present is never reached for these
+            elif _SEPARATOR in term.lower():
+                found = self._cells_by_regex(term)
+            else:
+                found = self._cells_by_find(term.lower())
+            self._by_term[term] = found
+        return found
+
+    def _cells_by_find(self, needle: str) -> tuple:
+        joined, starts, live = self._joined, self._starts, self._live
+        found, pos, width = [], 0, len(needle)
+        while True:
+            at = joined.find(needle, pos)
+            if at < 0:
+                return tuple(found)
+            if _at_word_boundary(joined, at, at + width):
+                k = bisect_right(starts, at) - 1
+                found.append(live[k])
+                if k + 1 == len(starts):
+                    return tuple(found)
+                pos = starts[k + 1]          # this cell is in; go to the next
+            else:
+                pos = at + 1                 # as the regex would: next position
+
+    def _cells_by_regex(self, term) -> tuple:
+        pattern = re.compile(r"(?<![a-z0-9])" + re.escape(term.lower())
+                             + r"(?![a-z0-9])")
+        return tuple(i for i in self._live if pattern.search(self._lowered[i]))
+
+
+_SEPARATOR = "\x00"
+_WORD_CHARS = frozenset("abcdefghijklmnopqrstuvwxyz0123456789")
+
+
+def _at_word_boundary(text: str, start: int, end: int) -> bool:
+    """`(?<![a-z0-9])` before `start` and `(?![a-z0-9])` at `end`."""
+    return ((start == 0 or text[start - 1] not in _WORD_CHARS)
+            and (end >= len(text) or text[end] not in _WORD_CHARS))
+
+
+# Keyed by the cells' text itself, not by the list object, so a list that is
+# rebuilt, copied or changed can never be answered from another's entry. Small:
+# one entry per account being worked on, and the worker runs a few at a time.
+_CORPUS_CACHE: "OrderedDict[tuple, _Corpus]" = OrderedDict()
+_CORPUS_CACHE_SIZE = 16
+_CORPUS_LOCK = threading.Lock()
+
+
+def _corpus_for(texts: tuple) -> _Corpus:
+    with _CORPUS_LOCK:
+        corpus = _CORPUS_CACHE.get(texts)
+        if corpus is not None:
+            _CORPUS_CACHE.move_to_end(texts)
+            return corpus
+    corpus = _Corpus(texts)
+    with _CORPUS_LOCK:
+        corpus = _CORPUS_CACHE.setdefault(texts, corpus)
+        _CORPUS_CACHE.move_to_end(texts)
+        while len(_CORPUS_CACHE) > _CORPUS_CACHE_SIZE:
+            _CORPUS_CACHE.popitem(last=False)
+    return corpus
+
+
 def _fired_by(row_or_tokens, evidence) -> tuple:
     """(evidence indices, the distinct terms that matched).
 
@@ -150,19 +253,20 @@ def _fired_by(row_or_tokens, evidence) -> tuple:
 
     The matched terms come back too, because how many DIFFERENT terms recognised
     a rule turns out to matter more than how many cells did. See `_rank`.
+
+    A cell counts when it has text, is not one of the excluded look-alikes, and
+    at least one term is present in it on word boundaries (`token_present`).
     """
     tokens = (_match_terms(row_or_tokens) if isinstance(row_or_tokens, dict)
               else list(row_or_tokens or []))
-    hits, matched = [], set()
-    for i, item in enumerate(evidence or []):
-        text = _evidence_text(item)
-        if not text or _is_excluded(text):
-            continue
-        fired = [t for t in tokens if token_present(t, text)]
-        if fired:
-            hits.append(i)
-            matched.update(fired)
-    return hits, matched
+    corpus = _corpus_for(tuple(_evidence_text(item) for item in (evidence or [])))
+    hits, matched = set(), set()
+    for term in tokens:
+        cells = corpus.cells_with(term)
+        if cells:
+            matched.add(term)
+            hits.update(cells)
+    return sorted(hits), matched
 
 
 def route(book: dict, evidence) -> list:
