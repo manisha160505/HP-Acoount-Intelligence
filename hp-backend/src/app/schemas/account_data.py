@@ -72,14 +72,21 @@ DATASET_REGISTRY = {
         "canonical_filename": "social_media.csv",
         "allowed_extensions": [".csv"]
     },
+    # Both of these are Bombora exports, and the name has to say so. The
+    # admin screen lists a dataset with no file as "Not provided: Intent
+    # Score, Intent Topics", which reads as "this account has no intent" -
+    # and on 44 accounts that is wrong. They have no Bombora, and the HP
+    # category intent file (`hp_category_intent`, a separate key, present on
+    # 218 of 220) is driving the feature perfectly well. Naming the source
+    # turns a verdict on the account into a note about one supplier.
     "intent_topics": {
-        "display_name": "Intent Topics",
+        "display_name": "Intent Topics (Bombora)",
         "type": "single_file_csv",
         "canonical_filename": "intent_topics.csv",
         "allowed_extensions": [".csv"]
     },
     "intent_score": {
-        "display_name": "Intent Score",
+        "display_name": "Intent Score (Bombora)",
         "type": "single_file_csv",
         "canonical_filename": "intent_score.csv",
         "allowed_extensions": [".csv"]

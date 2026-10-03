@@ -293,6 +293,20 @@ def _cell_list(value) -> list[str]:
     return [p for p in (_cell(x) for x in v.split("|")) if p] if v else []
 
 
+def _same_site(a: str, b: str) -> bool:
+    """Whether one domain sits under the other.
+
+    `pilipinas.shell.com.ph` and `shell.com.ph` are one organisation filed two
+    ways. `posco-inc.com` and `posco.com` are NOT - they are different
+    registered domains that merely look alike, and this must not match them:
+    deciding those are the same account is a judgement about the account, and
+    belongs in a confirmed alias, not in a string rule.
+    """
+    if not a or not b or a == b:
+        return bool(a) and a == b
+    return a.endswith("." + b) or b.endswith("." + a)
+
+
 def _parse_category_file(rows: list[list[str]], account_domain: str) -> dict:
     """The HP category intent export, wide layout.
 
@@ -324,6 +338,16 @@ def _parse_category_file(rows: list[list[str]], account_domain: str) -> dict:
     records = [r for r in rows[2:] if any(_clean(c) for c in r)]
     account_d = _norm_domain(account_domain)
     matching = [r for r in records if _norm_domain(account_field(r, "domain")) == account_d]
+    matched_by = "domain" if matching else None
+    if account_d and not matching:
+        # The file covers the group domain and the account is filed under a
+        # country subdomain, or the reverse: pilipinas.shell.com.ph against
+        # shell.com.ph. Same organisation, same intent row. Tried only after
+        # an exact match has failed, and recorded, so a looser match is
+        # visible rather than silent.
+        matching = [r for r in records
+                    if _same_site(_norm_domain(account_field(r, "domain")), account_d)]
+        matched_by = "subdomain" if matching else None
     if not account_d or not matching:
         first = records[0] if records else []
         result["status"] = "unverified" if not account_d else "mismatch"
@@ -342,6 +366,8 @@ def _parse_category_file(rows: list[list[str]], account_domain: str) -> dict:
         "label": "HP Category Intent file",
         "company": account_field(record, "company"),
         "domain": account_d,
+        "file_domain": _norm_domain(account_field(record, "domain")),
+        "matched_by": matched_by,
         "run_date": account_field(record, "run date"),
         "runs_on_file": len(matching),
     }
@@ -992,6 +1018,34 @@ def _bu_summary(topics: list[dict], categories: list[dict]) -> dict:
             "source_label": "PredictLeads", "units": units}
 
 
+def _summary_unavailable(source_a: dict, category_file: dict) -> dict:
+    """Why the category summary has nothing, naming the file that is missing.
+
+    The topics widget IS the Bombora table, so "no Bombora topics on file" is
+    the right thing to say there. The summary is not: it leads with the HP
+    category file and falls back to it when Bombora is absent, so blaming
+    Bombora for its emptiness sends whoever reads it looking in the wrong
+    place. That is exactly what happened - three accounts were reported as
+    having no intent data while their HP rows sat uploaded and unmatched.
+    """
+    status = category_file.get("status")
+    if status == "mismatch":
+        return {"availability": "no_matched_signal",
+                "message": "Intent unavailable: no Bombora topics are on file, and the "
+                           "HP category file could not be attached. "
+                           + (category_file.get("note") or "")}
+    if status == "unverified":
+        return {"availability": "no_matched_signal",
+                "message": "Intent unavailable: no Bombora topics are on file, and the "
+                           "HP category file could not be checked. "
+                           + (category_file.get("note") or "")}
+    if status == "no_file":
+        return {"availability": "no_intent_data",
+                "message": "Intent unavailable: neither Bombora intent topics nor the HP "
+                           "category file is on file for this account."}
+    return dict(source_a)
+
+
 @requires_local_datasets(
     "intent_score", "intent_topics", "job_openings", "hp_category_intent",
     "technographics", "webstack",
@@ -1081,7 +1135,9 @@ def extract_intent_demand_signals(account_id: str) -> list[dict]:
         }
 
     if source_a_unavailable and category_file["status"] != "matched":
-        summary_payload["data"] = {**provenance, **source_a_unavailable,
+        summary_payload["data"] = {**provenance,
+                                   **_summary_unavailable(source_a_unavailable,
+                                                          category_file),
                                    "category_file": category_file}
     else:
         included = [t for t in topics if t["included"]]
