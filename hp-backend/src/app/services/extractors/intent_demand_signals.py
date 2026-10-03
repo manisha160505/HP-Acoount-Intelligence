@@ -1018,11 +1018,6 @@ def _bu_summary(topics: list[dict], categories: list[dict]) -> dict:
             "source_label": "PredictLeads", "units": units}
 
 
-@requires_local_datasets(
-    "intent_score", "intent_topics", "job_openings", "hp_category_intent",
-    "technographics", "webstack",
-)
-@pipeline.feature("intent_demand_signals")
 def _summary_unavailable(source_a: dict, category_file: dict) -> dict:
     """Why the category summary has nothing, naming the file that is missing.
 
@@ -1051,6 +1046,11 @@ def _summary_unavailable(source_a: dict, category_file: dict) -> dict:
     return dict(source_a)
 
 
+@requires_local_datasets(
+    "intent_score", "intent_topics", "job_openings", "hp_category_intent",
+    "technographics", "webstack",
+)
+@pipeline.feature("intent_demand_signals")
 def extract_intent_demand_signals(account_id: str) -> list[dict]:
     db = get_db()
     now = datetime.now(UTC)
