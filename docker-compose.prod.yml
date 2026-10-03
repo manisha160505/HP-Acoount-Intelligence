@@ -23,6 +23,15 @@ services:
     # No `ports:` on purpose. The database is reachable only from the other
     # containers on this compose network, never from the host's public address.
     command: ["mongod", "--wiredTigerCacheSizeGB", "0.75"]
+    # MongoDB's recommended open-file limit. Docker's default soft limit is
+    # 1024, and every collection and index is a file: each account's retrieval
+    # index adds about eleven LightRAG collections, so at ~70 indexed accounts
+    # (2,450 files) mongod hit "Too many open files" and aborted (fassert
+    # 50853) three times on 2-3 Oct. The hard limit on the VM is 524288.
+    ulimits:
+      nofile:
+        soft: 64000
+        hard: 64000
     environment:
       # Refuses to start without them. A first start with no root password
       # would initialise the data directory with authentication disabled.
