@@ -20,6 +20,15 @@
         ],
         "createdAt": "2026-10-01T10:08:10.109Z",
         "reason": "Claude triage: .as-seg-indicator is an absolutely positioned highlight, so animating its width reflows nothing; scaleX would distort its rounded corners. Rationale is documented in the CSS comment"
+      },
+      {
+        "rule": "gray-on-color",
+        "value": "*",
+        "files": [
+          "src/components/rules/RuleParts.tsx"
+        ],
+        "createdAt": "2026-10-05T07:50:21.007Z",
+        "reason": "Claude triage: sky-50 is a hover-only background and hover also switches the text to hp-blue; at rest the gray text sits on a white glass surface"
       }
     ]
   }

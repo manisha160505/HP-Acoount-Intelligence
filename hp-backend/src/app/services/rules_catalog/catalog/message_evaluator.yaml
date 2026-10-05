@@ -1,0 +1,957 @@
+# Rules page catalog for `message_evaluator`. Read by app/services/rules_catalog.
+# `ref:` values are read live; `stated` is what the prose was written against.
+# Examples marked `verified` are recomputed by tests/test_rules_examples.py.
+feature_key: message_evaluator
+purpose: Scores a seller's own draft (an email, a LinkedIn message or a one-pager) for one of eight buying
+  roles, gives feedback on specific phrases, and can rewrite the draft using only the changes the seller
+  picks.
+final_output: A total score with its band and the formula used; seven scores with a reason for each; format
+  checks (pass or fail); Keep, Improve or Change marks on the draft; a summary with strengths and weaknesses;
+  a carefully limited simulated reaction (Deep mode only); and, if asked, a checked rewrite with the changes
+  shown.
+how_it_combines: The AI scores the seller's draft on seven qualities for the chosen role. The scores are
+  checked and then combined into one total using the weighting set for the chosen objective. Caps are
+  applied for serious failures (for example, an HP product line this role is never offered caps the Relevance
+  score). Format checks, source rules and market restrictions run alongside. Phrase feedback must cover
+  the whole message. An optional rewrite applies only the changes the seller selects and is then checked
+  against the same content rules as generated content.
+rules:
+- id: me_personas
+  parent: null
+  name: Who a message is scored against
+  kind: selection
+  summary: 'The role menu: the client''s eight roles, each with a fixed profile.'
+  purpose: 'The role menu: the client''s eight roles, each with a fixed profile.'
+  inputs:
+  - The account's list of named contacts
+  - The fixed profiles of the eight roles
+  logic: The same eight roles as in Content Studio are offered on every account. Each is marked as filled
+    or unfilled, depending on whether the account has a named contact in that role. The profile of each
+    role is fixed and the same on all accounts. It covers title, department, buying-committee angle, remit,
+    goals, pain points, value drivers, decision criteria, tone, format, key metrics, what resonates and
+    what does not, typical objections, the HP opportunity and an evidence grade. Only whether a named
+    contact holds the role differs between accounts. A role that is not offered for the account is refused
+    with 'does not belong to this account'. In Deep mode, the role's assumed starting attitude is added
+    to the profile.
+  table:
+    columns:
+    - Role
+    - Buying-committee angle
+    - Deep-mode starting attitude
+    - Evidence grade
+    rows:
+    - - VP IT
+      - Economic Buyer
+      - Evaluation mode
+      - Strong
+    - - CFO
+      - Finance - Budget Owner
+      - Initial skepticism
+      - Moderate
+    - - IT asset manager
+      - Technical Buyer
+      - Information seeking
+      - Moderate
+    - - Head of procurement
+      - Gatekeeper - Procurement & Legal
+      - Evaluation mode
+      - Moderate
+    - - IT security manager
+      - Technical Buyer
+      - Initial skepticism
+      - Strong
+    - - Device lifecycle manager
+      - Finance - Budget Owner
+      - Information seeking
+      - Strong
+    - - PC fleet standards owner
+      - Technical Buyer
+      - Initial skepticism
+      - Thin - sign-off required
+    - - AV and collaboration manager
+      - Technical Buyer
+      - Evaluation mode
+      - Strong
+  sources:
+  - hp-backend/src/app/services/extractors/message_evaluator.py:_personas_from_client_roles
+  - hp-backend/src/app/services/extractors/message_evaluator.py:extract_message_evaluator
+  - hp-backend/src/app/services/evaluator/storage.py:resolve_persona
+  - hp-backend/src/app/services/hp/buyer_personas.py:evaluator_card
+  doc_source: HP 220 - Content Studio & Message Evaluator - Build Specification v1.0 (30 Sep 2026), as
+    quoted in code comments; the document itself is not in the repo or the scratchpad docs, Sections 4.2-4.3
+  confidence: high
+- id: me_behavioural_states
+  parent: me_personas
+  name: Deep-mode starting attitudes
+  kind: selection
+  summary: An assumed starting attitude for the reader, treated as a guess.
+  purpose: An assumed starting attitude for the reader, treated as a guess.
+  logic: Each role has one starting attitude. In Deep mode, the AI is shown that attitude with its trust
+    level, bias, what works, what would fast-track the decision and the key blocker. It is described as
+    'a default, not something observed'. It is not used in any calculation.
+  table:
+    columns:
+    - Attitude
+    - Trust
+    - Bias
+    - Best approach
+    rows:
+    - - Initial skepticism
+      - '0.3'
+      - Critical
+      - Lead with proof, cite independent research, acknowledge what their current stack does well
+    - - Information seeking
+      - '0.5'
+      - Analytical
+      - Provide documentation, specifications, integration detail, comparison matrices
+    - - Evaluation mode
+      - '0.6'
+      - Comparative
+      - Emphasise total value, decision-support material, address migration risk head-on
+    - - Decision ready
+      - '0.8'
+      - Action-oriented
+      - Clear roadmap, strong call to action, pilot options, executive sponsorship
+  sources:
+  - hp-backend/src/app/services/hp/buyer_personas.py:BEHAVIOURAL_STATES
+  - hp-backend/src/app/services/evaluator/evaluate.py:_card_block
+  confidence: high
+- id: me_request
+  parent: null
+  name: What the seller chooses
+  kind: selection
+  summary: What the seller sets for one evaluation.
+  purpose: What the seller sets for one evaluation.
+  logic: 'Objective (funnel stage): awareness, engagement, consideration, conversion or advocacy. Format:
+    Email, LinkedIn Message or One-Pager Exec Brief. Social Post, Website Copy, Tech Blog, Message Planks
+    and Campaign Idea are retired and refused. Mode: Lite or Deep (Deep is the default). The message must
+    not be empty. The objective alone selects the scoring weights. Format and mode never change a weight.'
+  constants:
+  - label: Objectives
+    ref: py:app.services.evaluator.scoring:OBJECTIVES
+    stated:
+    - awareness
+    - engagement
+    - consideration
+    - conversion
+    - advocacy
+  - label: Offered formats
+    ref: py:app.services.evaluator.formats:OFFERED_FORMATS
+    stated:
+    - email
+    - linkedin_message
+    - one_pager
+  - label: Modes
+    ref: py:app.services.evaluator.evaluate:MODES
+    stated:
+    - LITE
+    - DEEP
+  sources:
+  - hp-backend/src/app/services/evaluator/evaluate.py:evaluate_message
+  - hp-backend/src/app/services/evaluator/formats.py:normalize_offered_format
+  - hp-backend/src/app/schemas/widget.py:MessageEvaluateRequest
+  doc_source: 'Client feedback 27 Sep: ''In Message evaluator - we can limit to only 3 formats - Email,
+    LinkedIn Message and One pager exec brief'''
+  confidence: high
+- id: me_scoring
+  parent: null
+  name: Objective-weighted score
+  kind: score
+  summary: Turns seven AI-scored qualities into one total score.
+  purpose: Turns seven AI-scored qualities into one total score.
+  logic: The AI scores all seven qualities from 0 to 100 and gives a one-sentence reason for each. It
+    never sees the weights or the total. The formula is chosen by the objective alone, and the total is
+    the weighted sum, rounded to 1 decimal. A quality with a weight of 0 is still shown. Every quality
+    in the formula must have a valid score, or no total is shown. The weights are not rescaled to fill
+    the gap.
+  formula: Total = the sum of (score for each quality × its weight for the chosen objective), rounded
+    to 1 decimal
+  table:
+    columns:
+    - Objective
+    - Formula
+    - Where it comes from
+    rows:
+    - - Awareness
+      - 30% × Relevance + 20% × Impact + 20% × Brand Recall + 15% × Clarity + 15% × Creativity
+      - The client's HP scoring guidance
+    - - Engagement
+      - 50% × Relevance + 10% × Impact + 20% × Clarity + 10% × Creativity + 10% × Emotional Connection
+      - The client's HP scoring guidance
+    - - Consideration
+      - 40% × Relevance + 10% × Brand Recall + 10% × Clarity + 10% × Emotional Connection + 30% × Next-step
+        Strength
+      - The client's HP scoring guidance
+    - - Conversion
+      - 15% × Relevance + 15% × Impact + 25% × Brand Recall + 10% × Clarity + 5% × Emotional Connection
+        + 30% × Next-step Strength
+      - The client's HP scoring guidance
+    - - Advocacy
+      - 15% × Relevance + 30% × Brand Recall + 15% × Clarity + 10% × Creativity + 30% × Emotional Connection
+      - Carried over from an earlier version of the tool (not in the client's scoring guidance)
+  example:
+    scenario: 'Scores: Relevance 80, Impact 70, Brand Recall 60, Clarity 90, Creativity 50, Emotional
+      Connection 40, Next-step Strength 75.'
+    steps:
+    - 'Awareness: 80×0.3 + 70×0.2 + 60×0.2 + 90×0.15 + 50×0.15 = 71.0'
+    - 'Engagement: 80×0.5 + 70×0.1 + 90×0.2 + 50×0.1 + 40×0.1 = 74.0'
+    - 'Consideration: 80×0.4 + 60×0.1 + 90×0.1 + 40×0.1 + 75×0.3 = 73.5'
+    - 'Conversion: 80×0.15 + 70×0.15 + 60×0.25 + 90×0.1 + 40×0.05 + 75×0.3 = 71.0'
+    - 'Advocacy: 80×0.15 + 60×0.3 + 90×0.15 + 50×0.1 + 40×0.3 = 60.5'
+    result: 71.0 / 74.0 / 73.5 / 71.0 / 60.5
+    verified: true
+    expect:
+    - - awareness
+      - 71.0
+    - - engagement
+      - 74.0
+    - - consideration
+      - 73.5
+    - - conversion
+      - 71.0
+    - - advocacy
+      - 60.5
+  output: The total score, its band, the formula used and the weights.
+  sources:
+  - hp-backend/src/app/services/evaluator/scoring.py:OBJECTIVE_FORMULAS
+  - hp-backend/src/app/services/evaluator/scoring.py:composite
+  doc_source: HP_ABX_v3_final Feature 9 Stage 5 Step 4 (four formulas); Advocacy from the reference application
+  confidence: high
+- id: me_score_bands
+  parent: me_scoring
+  name: Score bands
+  kind: score
+  summary: The word shown under the score.
+  purpose: The word shown under the score.
+  logic: 'Read from the top down: 90 or more is Exceptional, 75 or more is Strong, 60 or more is Good,
+    40 or more is Average, 20 or more is Weak, and anything lower is Poor. If there is no total, the band
+    is Unavailable. The same scale is shown to the AI.'
+  table:
+    columns:
+    - Score from
+    - Band
+    rows:
+    - - '90'
+      - Exceptional
+    - - '75'
+      - Strong
+    - - '60'
+      - Good
+    - - '40'
+      - Average
+    - - '20'
+      - Weak
+    - - '0'
+      - Poor
+  example:
+    scenario: Scores 90, 89.9, 75, 74, 40, 39, 19, and no score.
+    steps:
+    - Apply the lowest scores for each band from the top down
+    result: Exceptional, Strong, Strong, Good, Average, Weak, Poor, Unavailable
+    verified: true
+    expect:
+    - Exceptional
+    - Strong
+    - Strong
+    - Good
+    - Average
+    - Weak
+    - Poor
+    - Unavailable
+  sources:
+  - hp-backend/src/app/services/evaluator/scoring.py:SCORE_BANDS
+  - hp-backend/src/app/services/evaluator/scoring.py:score_band
+  - hp-backend/src/app/services/evaluator/evaluate.py:_rubric_block
+  doc_source: HP 220 - Content Studio & Message Evaluator - Build Specification v1.0 (30 Sep 2026), as
+    quoted in code comments; the document itself is not in the repo or the scratchpad docs, Section 4.5
+  confidence: high
+- id: me_dimension_validation
+  parent: me_scoring
+  name: Score checks, one retry, and filling gaps
+  kind: guardrail
+  summary: What happens when the AI's scores are missing or invalid.
+  purpose: What happens when the AI's scores are missing or invalid.
+  logic: Quality names are matched loosely (for example 'CTA' means Next-step Strength, and 'Brand_Recall'
+    and 'Emotional' are accepted). Unknown qualities are dropped. A score is valid only if it is a number
+    from 0 to 100. If anything is wrong, the AI is asked once more and told what the problems were. A
+    quality that is still missing after that is filled in with 50 and listed as filled in. Scores that
+    are not numbers, or are outside 0 to 100, are not filled in. In that case no scores and no total are
+    shown, and the band is 'Unavailable'.
+  constants:
+  - label: Fill-in score
+    ref: py:app.services.evaluator.scoring:PAD_SCORE
+    stated: 50.0
+  example:
+    scenario: The AI returns Relevance 80, Impact '70', Brand Recall 400, Clarity 'excellent', and nothing
+      else.
+    steps:
+    - Relevance and Impact are valid
+    - Brand Recall is out of range and Clarity is not a number
+    - Creativity, Emotional Connection and Next-step Strength are missing, so they are filled in with
+      50
+    result: Three scores are filled in, but two problems remain, so no total is shown.
+    verified: true
+    expect:
+    - relevance: 80.0
+      impact: 70.0
+      creativity: 50.0
+      emotional_connection: 50.0
+      next_step_strength: 50.0
+    - - creativity
+      - emotional_connection
+      - next_step_strength
+    - - 'brand_recall: 400 outside 0-100'
+      - 'clarity: not numeric (''excellent'')'
+  sources:
+  - hp-backend/src/app/services/evaluator/scoring.py:validate_dimensions
+  - hp-backend/src/app/services/evaluator/scoring.py:pad_missing
+  - hp-backend/src/app/services/evaluator/scoring.py:split_dimension_payload
+  - hp-backend/src/app/services/evaluator/evaluate.py:evaluate_message
+  doc_source: HP 220 - Content Studio & Message Evaluator - Build Specification v1.0 (30 Sep 2026), as
+    quoted in code comments; the document itself is not in the repo or the scratchpad docs, T21 (quoted
+    in scoring.py)
+  confidence: high
+- id: me_severe_failures
+  parent: me_scoring
+  name: Severe failures
+  kind: selection
+  summary: A wrong HP product line or an out-of-angle ask always pulls the score down.
+  purpose: A wrong HP product line or an out-of-angle ask always pulls the score down.
+  logic: 'Before the AI scores the draft, two of Content Studio''s content checks are run on it. The first
+    looks for an HP product line that this role is never offered, anywhere in the text. The second looks
+    at the ask, meaning the last question in the message or, if there is none, the last sentence. After
+    the AI scores the draft, the first check, if it finds a problem, caps Relevance at 39. The second
+    check, if it finds a problem, caps Next-step Strength at 39. Caps only push scores down: if the AI''s
+    score is already lower, it is kept. The summary starts with ''<Quality> scored down: <reason>.'' These
+    checks are skipped for a role outside the eight.'
+  constants:
+  - label: Severe cap
+    ref: py:app.services.evaluator.evaluate:SEVERE_FLOOR
+    stated: 39.0
+  example:
+    scenario: 'A draft to the CFO: ''Hi Budi, Poly Studio bars give finance teams clearer meetings. Could
+      I send you pricing?'''
+    steps:
+    - Poly Studio is never offered to the CFO, so Relevance is capped at 39
+    - The ask 'Could I send you pricing?' raises a commercial term with a Finance - Budget Owner, so Next-step
+      Strength is capped at 39
+    result: Two severe failures.
+    verified: true
+    expect:
+    - dimension: relevance
+      gate: G4
+      detail: Poly Studio is a line this persona is never offered (found in prose)
+      quote: Hi Budi, Poly Studio bars give finance teams clearer meetings.
+    - dimension: next_step_strength
+      gate: G6
+      detail: 'the ask is outside this persona''s committee angle (Finance - Budget Owner): names a commercial
+        term (pricing) to a Finance - Budget Owner'
+      quote: Could I send you pricing?
+  sources:
+  - hp-backend/src/app/services/evaluator/evaluate.py:_severe_failures
+  - hp-backend/src/app/services/evaluator/evaluate.py:_ask_sentence
+  - hp-backend/src/app/services/evaluator/evaluate.py:evaluate_message
+  doc_source: HP 220 - Content Studio & Message Evaluator - Build Specification v1.0 (30 Sep 2026), as
+    quoted in code comments; the document itself is not in the repo or the scratchpad docs, Section 4.5
+    (T17/T18)
+  confidence: high
+- id: me_scoring_context
+  parent: me_scoring
+  name: What Brand Recall and Impact are judged against
+  kind: selection
+  uses:
+  - hp_rulebook
+  summary: Gives the AI the HP positioning and proof that exist for the product lines the seller named.
+  purpose: Gives the AI the HP positioning and proof that exist for the product lines the seller named.
+  logic: The draft is checked for the HP product lines it names, using a fixed list of product line names.
+    For each line found, the AI is given up to 3 rules from HP's approved messaging (what we offer, up
+    to 3 facts that may be stated and up to 3 things that must not be said). It is also given up to 2
+    HP case studies, ranked by how well they match the draft and the account's industry. If no case study
+    fits, the AI is told that the recommendation is to cut the claim that cannot be proved. How this moves
+    the scores is up to the AI's judgement. Nothing here changes a number directly.
+  constants:
+  - label: Messaging rules per product line
+    ref: py:app.services.evaluator.evaluate:RULEBOOK_RULES_PER_LINE
+    stated: 3
+  - label: Proof points per product line
+    ref: py:app.services.evaluator.evaluate:PROOF_POINTS_PER_LINE
+    stated: 2
+  example:
+    scenario: The draft says 'Our HP Wolf Security and HP Elite / Pro PCs bundle'.
+    steps:
+    - Match the product line names in the draft
+    result: HP Elite / Pro PCs and HP Wolf Security
+    verified: true
+    expect:
+    - HP Elite / Pro PCs
+    - HP Wolf Security
+  sources:
+  - hp-backend/src/app/services/evaluator/evaluate.py:_hp_lines_named
+  - hp-backend/src/app/services/evaluator/evaluate.py:_rulebook_positioning
+  - hp-backend/src/app/services/evaluator/evaluate.py:_proof_available
+  - hp-backend/src/app/services/evaluator/evaluate.py:_rulebook_block
+  confidence: medium
+- id: me_structure_checks
+  parent: null
+  name: Format checks
+  kind: guardrail
+  summary: Pass or fail checks on the shape of the message. They still work if the AI fails.
+  purpose: Pass or fail checks on the shape of the message. They still work if the AI fails.
+  logic: 'Email: at most 180 words; a ''Subject:'' line that is at most 80 characters; a greeting at the
+    very start of the text (dear, hi, hello, hey, good morning or good afternoon); a sign-off line at
+    the end (best regards, kind regards, regards, sincerely, thanks, cheers and similar); and next-step
+    language. LinkedIn Message: at most 110 words; at most 300 characters; a greeting; and next-step language
+    (no sign-off needed). One-Pager: at most 500 words; next-step language; and at least 2 heading-like
+    lines. Next-step language means phrases such as: let me know, happy to, are you free or available,
+    can we, shall we, book, schedule, set up, arrange, call, meeting, demo, chat, connect, reply, respond,
+    get in touch, reach out, next step, follow up, would you be open, worth a conversation, interested
+    in. Checks that fail are passed to the AI as already decided. Known quirk: the greeting check looks
+    only at the very start of the text. A draft that begins with a ''Subject:'' line therefore always
+    reports that no greeting was found, even when ''Dear ...,'' follows.'
+  table:
+    columns:
+    - Format
+    - Max words
+    - Max characters
+    - Subject line
+    - Greeting
+    - Sign-off
+    - At least 2 headings
+    rows:
+    - - Email
+      - '180'
+      - '-'
+      - 'Yes'
+      - 'Yes'
+      - 'Yes'
+      - '-'
+    - - LinkedIn message
+      - '110'
+      - '300'
+      - '-'
+      - 'Yes'
+      - '-'
+      - '-'
+    - - One-pager
+      - '500'
+      - '-'
+      - '-'
+      - '-'
+      - '-'
+      - 'Yes'
+  example:
+    scenario: 'An email that starts with ''Subject: Re: your Cikarang plant refresh'', then ''Dear Ms
+      Tan,'', a body with ''Would you be open to a 20-minute call'', and ''Best regards, Andi''.'
+    steps:
+    - 29 words, within the limit of 180
+    - The subject line is 31 characters
+    - The greeting check looks only at the very start of the text, which is the Subject line, so it fails
+    - A sign-off is found
+    - Next-step language is found
+    result: 4 of 5 checks pass. The greeting is reported as missing.
+    verified: true
+    expect:
+    - 4
+    - 5
+    - - - length
+        - true
+      - - subject_line
+        - true
+      - - greeting
+        - false
+      - - sign_off
+        - true
+      - - next_step_request
+        - true
+  sources:
+  - hp-backend/src/app/services/evaluator/formats.py:structure_checks
+  - hp-backend/src/app/services/evaluator/formats.py:FORMATS
+  - hp-backend/src/app/services/evaluator/formats.py:_DRAFT_GREETING_RE
+  doc_source: HP 220 - Content Studio & Message Evaluator - Build Specification v1.0 (30 Sep 2026), as
+    quoted in code comments; the document itself is not in the repo or the scratchpad docs, Section 4.5
+    format criteria
+  confidence: high
+- id: me_sources
+  parent: null
+  name: Four sources with separate authority
+  kind: source
+  summary: Decides which source may confirm which kind of claim.
+  purpose: Decides which source may confirm which kind of claim.
+  logic: Your draft shows only where a phrase sits, never a fact. Account data (any uploaded rows that
+    are supplied, plus the executive summary's description, name and headquarters, the intent topic names,
+    the opportunity trigger headlines and the full technology stack) can confirm facts about the account,
+    but never what an HP product can do. Approved HP facts (the approved facts, conditions and qualifiers
+    in the HP recommendations, plus HP product family, device type and category names) can confirm what
+    an HP product can do, but never anything about the account. Role context gives the role, department
+    and seniority, but never what the person thinks. A claim that names an HP product line is checked
+    against the HP facts. Any other claim is checked against the account data. A claim is never re-checked
+    against the other source.
+  table:
+    columns:
+    - Source
+    - May establish
+    - Never establishes
+    rows:
+    - - Your draft
+      - Where a phrase sits in the message
+      - Any fact. Writing a claim does not make it true.
+    - - Account data
+      - Facts about this account
+      - What an HP product can do
+    - - Approved HP facts
+      - What an HP product can do
+      - Any fact about this account
+    - - Role context
+      - The contact's role, department, seniority and remit
+      - What the person thinks, wants or has said
+  sources:
+  - hp-backend/src/app/services/evaluator/sources.py:AUTHORITY
+  - hp-backend/src/app/services/evaluator/sources.py:build
+  - hp-backend/src/app/services/evaluator/sources.py:_hp_fact_texts
+  - hp-backend/src/app/services/evaluator/sources.py:_account_texts
+  doc_source: Guardrail 13 'HP decks cannot create account evidence' (quoted in grounding.py)
+  confidence: high
+- id: me_claim_verdict
+  parent: me_sources
+  name: Claim verdicts
+  kind: guardrail
+  summary: How one sentence is judged against its source.
+  purpose: How one sentence is judged against its source.
+  logic: 'Steps: first, decide which source the claim is checked against. If the account''s country blocks
+    superlatives and the claim has one (world''s most, best, first or only; industry-leading; the most,
+    best, fastest or safest of something; most secure; unmatched; unrivalled; number one; #1; market-leading;
+    best-in-class), that is a reason. If the country blocks competitor claims and a competitor is named
+    (lenovo, dell, apple, acer, asus, samsung, microsoft surface, huawei, toshiba, fujitsu, msi, razer),
+    that is a reason. Any number or web link that the chosen source does not contain is a reason. An HP
+    claim when there are no approved HP facts is a reason. Verdict: Restricted if a country rule was hit;
+    otherwise Unsupported if there is any reason; otherwise Supported if something was checked or the
+    claim contains a number; otherwise Not checkable.'
+  example:
+    scenario: 'An Indonesian account. Sentences in the draft: ''HP Wolf Security stops 99% of attacks.'',
+      ''Your 4500 staff deserve better.'', "We are the world''s most secure.", ''We help teams.'''
+    steps:
+    - The HP claim is checked against the HP facts, which have no 99%, so it is Unsupported
+    - The account claim's 4500 is in the account data, so it is Supported
+    - The superlative is blocked in Indonesia, so it is Restricted
+    - Nothing can be checked, so it is Not checkable
+    result: Unsupported, Supported, Restricted, Not checkable
+    verified: true
+    expect:
+    - - unsupported
+      - hp_fact_corpus
+    - - supported
+      - account_corpus
+    - - restricted
+      - account_corpus
+    - - not_checkable
+      - account_corpus
+  sources:
+  - hp-backend/src/app/services/evaluator/sources.py:verify_claim
+  - hp-backend/src/app/services/evaluator/sources.py:route
+  confidence: high
+- id: me_country_restrictions
+  parent: me_sources
+  name: Market restrictions
+  kind: guardrail
+  summary: Superlative and competitor-comparison claims are blocked in listed countries.
+  purpose: Superlative and competitor-comparison claims are blocked in listed countries.
+  logic: The country is the last comma-separated part of the account's headquarters location (taken from
+    the executive summary, otherwise from the account record). The lists of countries that block superlatives
+    and competitor claims come from HP's guardrails. When a restriction applies, the AI is told so and
+    the claims are judged Restricted.
+  constants:
+  - label: Countries that block superlatives
+    ref: py:app.services.hp.guardrails:SUPERLATIVE_BLOCK_COUNTRIES
+    stated:
+    - armenia
+    - belarus
+    - brazil
+    - china
+    - indonesia
+    - kazakhstan
+    - kyrgyzstan
+    - malaysia
+    - mexico
+    - moldova
+    - romania
+    - russia
+    - slovakia
+    - tajikistan
+    - turkey
+    - turkmenistan
+    - uae
+    - ukraine
+    - united arab emirates
+    - uzbekistan
+    - vietnam
+  - label: Countries that block competitor claims (count)
+    ref: py:app.services.hp.guardrails:COMPETITOR_BLOCK_COUNTRIES
+    format: count
+    stated: 100
+  sources:
+  - hp-backend/src/app/services/evaluator/sources.py:__init__
+  - hp-backend/src/app/services/hp/guardrails.py
+  confidence: high
+- id: me_phrase_feedback
+  parent: null
+  name: Phrase-level Keep / Improve / Change
+  kind: model
+  summary: Feedback tied to the exact words the seller wrote.
+  purpose: Feedback tied to the exact words the seller wrote.
+  logic: 'The AI must cut the whole message into chunks (Lite: exactly 5; Deep: 10 to 15) and give each
+    one a verdict, a comment and a suggestion. Each chunk is then found in the draft, ignoring capital
+    letters and spacing. A chunk that cannot be found, or that repeats another chunk''s words, is dropped.
+    Chunks beyond the limit for the mode are dropped. Unknown verdicts become Improve. Each chunk is also
+    checked as a claim. If it is Unsupported or Restricted, it is marked as a factual issue, and a ''Keep''
+    is changed to ''Change''. Colours: Keep is green, Improve is yellow, Change is red. A Deep review
+    with fewer than 10 chunks is noted for review but is not rejected.'
+  constants:
+  - label: Lite chunks
+    ref: py:app.services.evaluator.evaluate:LITE_MAX_CHUNKS
+    stated: 5
+  - label: Deep chunks
+    value:
+    - 10
+    - 15
+  example:
+    scenario: The AI returns four chunks for the Indonesian draft, all marked Keep or Improve. One quotes
+      text the seller never wrote.
+    steps:
+    - The superlative sentence is Restricted, so its Keep becomes Change (red)
+    - The 99% sentence is Unsupported, so it is marked as a factual issue and stays Improve
+    - The 4500 sentence is Supported, so it stays Keep (green)
+    - The chunk that was not found is dropped
+    result: 3 chunks kept (Change, Improve, Keep); 1 dropped.
+    verified: true
+    expect:
+    - - - 0
+        - 31
+        - Change
+        - red
+        - factual_grounding
+      - - 32
+        - 70
+        - Improve
+        - yellow
+        - factual_grounding
+      - - 71
+        - 102
+        - Keep
+        - green
+        - style
+    - - reason: not found in the submitted message
+        chunk: Something never written
+  sources:
+  - hp-backend/src/app/services/evaluator/verify.py:verify_phrases
+  - hp-backend/src/app/services/evaluator/sources.py:locate
+  - hp-backend/src/app/services/evaluator/evaluate.py:_chunk_instruction
+  doc_source: HP 220 - Content Studio & Message Evaluator - Build Specification v1.0 (30 Sep 2026), as
+    quoted in code comments; the document itself is not in the repo or the scratchpad docs, Section 4.6
+  confidence: high
+- id: me_chunk_fidelity
+  parent: me_phrase_feedback
+  name: Chunks must cover the whole message
+  kind: guardrail
+  summary: Every sentence must belong to exactly one chunk.
+  purpose: Every sentence must belong to exactly one chunk.
+  logic: After the chunks are found in the draft, they are read in order. Any text between chunks, or
+    after the last one, that is not blank is a fault. Then a final check confirms that the chunks joined
+    together equal the message, ignoring spacing. If there is a fault, the AI is asked once more for chunks.
+    If the retry also fails, the first result is kept and the faults are recorded.
+  example:
+    scenario: Only the first two of three sentences were put into chunks.
+    steps:
+    - The last sentence is not covered by any chunk
+    result: 'Fault: the chunks stop before the end of the message.'
+    verified: true
+    expect:
+    - the chunks stop before the end of the message ('Your 4500 staff deserve better.')
+  sources:
+  - hp-backend/src/app/services/evaluator/verify.py:chunk_fidelity
+  - hp-backend/src/app/services/hp/content_gates.py:g14_chunk_fidelity
+  - hp-backend/src/app/services/evaluator/evaluate.py:evaluate_message
+  confidence: high
+- id: me_reaction_guard
+  parent: null
+  name: Simulated role reaction (Deep mode only)
+  kind: guardrail
+  summary: How someone in this role would likely read the message, never a real person's words.
+  purpose: How someone in this role would likely read the message, never a real person's words.
+  logic: 'The reaction is withheld completely (it is not shown with a warning) if: it names the contact
+    (full name, or any part of the name longer than 2 letters); it uses a verb about inner feelings (thinks,
+    believes, wants, decided, is worried, prefers, said that, and so on) together with he, she, his or
+    her; it contains a double quotation mark; or any sentence with a number, web link, superlative or
+    competitor is Unsupported or Restricted. A reaction that is shown is labelled ''Simulated reaction
+    - how someone in this role would likely read this message. Not a statement about the real contact.'''
+  example:
+    scenario: Three reactions for the contact 'Budi Santoso'.
+    steps:
+    - '''Budi thinks this is too long.'' names the contact'
+    - '''Someone in this role would want the cost case first.'' is fine'
+    - '''He believes "pricing" matters.'' attributes a belief and contains a quotation'
+    result: Withheld, shown, withheld
+    verified: true
+    expect:
+    - - false
+      - - names the contact ('Budi'); a reaction is written in role terms
+    - - true
+      - []
+    - - false
+      - - attributes 'believes' to the individual; the reaction may describe how a role would read the
+          message, not what this person thinks
+        - contains a quotation; the contact has not said anything
+  sources:
+  - hp-backend/src/app/services/evaluator/verify.py:guard_reaction
+  doc_source: HP 220 - Content Studio & Message Evaluator - Build Specification v1.0 (30 Sep 2026), as
+    quoted in code comments; the document itself is not in the repo or the scratchpad docs, Section 4.7
+  confidence: high
+- id: me_ai_failure
+  parent: null
+  name: When the AI service fails
+  kind: guardrail
+  summary: Format check results are still shown.
+  purpose: Format check results are still shown.
+  logic: If the AI returns nothing, the evaluation is still saved with the format checks, no scores and
+    no total (band 'Unavailable'). It is marked as AI scoring not available, and the summary reads 'AI
+    scoring was unavailable. The checks below are computed in code and are unaffected.'
+  sources:
+  - hp-backend/src/app/services/evaluator/evaluate.py:evaluate_message
+  confidence: high
+  internal: true
+- id: me_cache_versions
+  parent: null
+  name: Repeat requests and versions
+  kind: selection
+  summary: The same request gives the same answer; changes to the scoring rules trigger a fresh score.
+  purpose: The same request gives the same answer; changes to the scoring rules trigger a fresh score.
+  logic: A repeat request (the same message after spaces are tidied, role, objective, format, mode and
+    scoring-rules version) returns the saved evaluation without asking the AI again. Versions are counted
+    per role (V1, V2, and so on). The history shows up to 50 evaluations (20 by default).
+  example:
+    scenario: '''Hello  world'' for the CFO, awareness, email, Deep mode, under one set of scoring rules.'
+    steps:
+    - Tidy the spaces
+    - Create the request fingerprint
+    result: The first 16 characters of the fingerprint.
+    verified: true
+    expect: b39fda835a469451
+  sources:
+  - hp-backend/src/app/services/evaluator/storage.py:message_fingerprint
+  - hp-backend/src/app/services/evaluator/storage.py:save
+  - hp-backend/src/app/services/evaluator/evaluate.py:evaluate_message
+  confidence: high
+  internal: true
+- id: me_rewrite
+  parent: null
+  name: Rewrite with selected recommendations
+  kind: selection
+  summary: Applies only the changes the seller ticked, in the structure of the chosen format.
+  purpose: Applies only the changes the seller ticked, in the structure of the chosen format.
+  logic: This runs only when the seller selects at least one recommendation. The AI may not add any number,
+    percentage, web link or HP capability that is not in the approved sources. It must drop or soften
+    unsupported claims from the original. The role description given to the AI leaves out the instruction
+    not to use a name. The greeting and sign-off are added by the system, not written by the AI. If there
+    is any fault, the AI gets one retry with the faults listed. If it still fails, the seller keeps the
+    original and the faults are recorded. Then the change check runs (see the rewrite change check). A
+    fault there also withholds the rewrite.
+  table:
+    columns:
+    - Format
+    - Required parts
+    - Body sections
+    - Limits
+    - Greeting / sign-off
+    rows:
+    - - Email
+      - Subject line, opening, body sections, call to action
+      - 1-2, no headings
+      - Subject at most 80 characters
+      - Dear [<role> Name], / 'Best regards,' then a blank line and '[Your Name]'
+    - - LinkedIn message
+      - Opening, body sections, call to action
+      - Exactly 1
+      - Whole message at most 300 characters including the greeting
+      - Hi [<role> Name], / none
+    - - One-pager
+      - Headline, opening, body sections, call to action
+      - Exactly 4, each with a heading
+      - The AI is asked for at most 400 words, but this is not checked
+      - None / none
+  sources:
+  - hp-backend/src/app/services/evaluator/evaluate.py:rewrite_message
+  - hp-backend/src/app/services/evaluator/formats.py
+  doc_source: HP 220 - Content Studio & Message Evaluator - Build Specification v1.0 (30 Sep 2026), as
+    quoted in code comments; the document itself is not in the repo or the scratchpad docs, Section 4.8
+  confidence: high
+- id: me_rewrite_greeting
+  parent: me_rewrite
+  name: Rewrite greeting and sign-off
+  kind: selection
+  summary: Added by the system, never written by the AI.
+  purpose: Added by the system, never written by the AI.
+  logic: 'If the seller''s draft already starts with a greeting, it is kept. Otherwise the greeting is
+    ''<Dear or Hi> [<short role> Name],''. The short role is the first part of the title (cut at a slash,
+    bracket, comma, semicolon, vertical bar or '' - ''). Rank prefixes such as head of, director of, senior
+    and lead are removed, and known titles are shortened (Chief Financial Officer becomes CFO, information
+    technology becomes IT). If the result is longer than 4 words, just ''[Name]'' is used. Email sign-off:
+    the draft''s own sign-off if it has one, otherwise ''Best regards,'' then a blank line and ''[Your
+    Name]''.'
+  example:
+    scenario: Titles 'Head of information technology project procurement', 'Chief Financial Officer' and
+      'VP / Head of Information Technology'.
+    steps:
+    - Drop 'Head of' and shorten to IT
+    - Use the short form
+    - Use the first part, 'VP'
+    result: IT Project Procurement | CFO | VP
+    verified: true
+    expect:
+    - IT Project Procurement
+    - CFO
+    - VP
+  sources:
+  - hp-backend/src/app/services/evaluator/formats.py:_short_role
+  - hp-backend/src/app/services/evaluator/formats.py:compose_greeting
+  - hp-backend/src/app/services/evaluator/formats.py:compose_signoff
+  confidence: high
+- id: me_rewrite_validation
+  parent: me_rewrite
+  name: Rewrite format check
+  kind: guardrail
+  summary: A badly formed rewrite is never shown.
+  purpose: A badly formed rewrite is never shown.
+  logic: 'Only the parts the format uses are read. These are faults: no rewrite at all; a required part
+    missing; a number of body sections outside the allowed range; a one-pager section with no heading;
+    a subject line over 80 characters; or a finished message (including greeting and sign-off) longer
+    than the format''s character limit (LinkedIn: 300).'
+  example:
+    scenario: A LinkedIn rewrite with a 150-character opening and a 150-character paragraph.
+    steps:
+    - The greeting 'Hi [CFO Name],' is added
+    - The finished length is 335, which is over 300
+    result: The rewrite is rejected.
+    verified: true
+    expect:
+    - null
+    - - rewrite is 335 characters; LinkedIn Message allows 300
+  sources:
+  - hp-backend/src/app/services/evaluator/formats.py:validate_rewrite
+  confidence: high
+- id: me_rewrite_gates
+  parent: me_rewrite
+  name: Content checks on the rewrite
+  kind: guardrail
+  summary: The version that gets sent must pass the same hard checks as generated content.
+  purpose: The version that gets sent must pass the same hard checks as generated content.
+  logic: Content Studio's full set of content checks is run on the rewrite for the chosen role. Only serious
+    findings that reject the content become faults. These include an HP product line the role is never
+    offered. The fact-support check never rejects here, because the account facts, the approved HP facts
+    and the seller's own original are all accepted as support. A check for roles with no named contact
+    runs when the role is unfilled. The competitor check never fires, because no competitor list is supplied
+    here. Findings that only ask for a redo (word count, banned phrases, the ask) do not block the rewrite.
+    All findings are recorded for review.
+  sources:
+  - hp-backend/src/app/services/evaluator/evaluate.py:_rewrite_gate_faults
+  confidence: high
+- id: me_rewrite_diff
+  parent: me_rewrite
+  name: Rewrite change check
+  kind: guardrail
+  summary: The rewrite may not slip in new claims.
+  purpose: The rewrite may not slip in new claims.
+  logic: The numbers and web links in the original are compared with those in the rewrite. Each rewrite
+    sentence that contains an added number or link is checked against its source. If it is Unsupported
+    or Restricted, that is a fault. A new superlative (where the country blocks them) or a newly named
+    competitor (where blocked) is also a fault. Figures that were dropped are reported but do not block
+    the rewrite.
+  example:
+    scenario: An Indonesian account. The original says 'Your 4500 staff deserve better.' The rewrite adds
+      '12 sites' and 'the best PCs from the market-leading vendor'.
+    steps:
+    - 12 is not in the account data
+    - '''The best PCs'' is a blocked superlative'
+    result: Two faults, so the rewrite is withheld.
+    verified: true
+    expect:
+    - 'the rewrite introduces an unsupported claim: superlative claim ''the best PCs'' is not permitted
+      in Indonesia (guardrail 2); figure not found in Account data: 12'
+    - the rewrite adds a superlative claim (the best PCs) not permitted in Indonesia
+  sources:
+  - hp-backend/src/app/services/evaluator/verify.py:diff_rewrite
+  confidence: high
+- id: me_model
+  parent: null
+  name: AI service and instructions
+  kind: model
+  summary: Which AI service writes the scores and text.
+  purpose: Which AI service writes the scores and text.
+  logic: Each evaluation makes one request to the AI, plus at most one retry for the scores and one for
+    the chunks. Each rewrite makes one request, plus one retry. The standing instructions tell the AI
+    that the draft is not evidence, that phrases must be exact quotes, that the reaction is about a role,
+    that it must not add new numbers or links, that it must not claim HP capability outside the approved
+    facts, and that a named HP line the role is never offered must score Relevance below 40.
+  constants:
+  - label: Instruction version
+    ref: py:app.services.evaluator.evaluate:PROMPT_VERSION
+    stated: 6
+  sources:
+  - hp-backend/src/app/services/evaluator/evaluate.py:SYSTEM_PROMPT
+  - hp-backend/src/app/services/evaluator/evaluate.py:_user_prompt
+  - hp-backend/src/app/core/llm.py:generate_gpt4o_json_completion
+  confidence: high
+  internal: true
+undetermined:
+- The seven dimension scores, their rationales, the chunk verdicts/comments, the summary and the reaction
+  are model-judged; Python only validates, caps (severe failures) and combines them. There is no fixed
+  formula for any single dimension.
+- How the Rulebook positioning and proof points shown to the model affect Brand Recall and Impact is model-judged
+  and not checked.
+- Deployed model depends on LLM_PROVIDER (default gemini -> gemini-2.5-flash; openai -> gpt-4o).
+- 'Observation: the email ''greeting'' structure check only matches a salutation at the very start of
+  the text (\A anchor), so a draft that begins with a ''Subject:'' line always reports ''no salutation
+  found'' even when ''Dear ...,'' follows (verified in me_structure_checks example).'
+- 'Observation: account data passed to the evaluator corpus is only widget-derived text unless dataset_records
+  are supplied; the evaluate endpoint does not pass dataset_records (widgets.py:983-990), so raw uploaded
+  rows are not in the account corpus for API calls.'
+- _personas_from_contacts and _personas_from_hiring remain in message_evaluator.py but are unscheduled;
+  only the eight client roles are offered.
+discrepancies:
+- rule_id: me_rewrite
+  doc: 'formats.py:122-125 comment: ''The same four sections, in the same order, as Content Studio''s
+    one-pager (HP_ABX_v3_final), so a draft written there evaluates here.'''
+  code: Content Studio's one-pager (content_studio.py:490-512) is now structured as why_now + 2-3 pillars
+    + HP play + Proof Points, 350-500 words; the evaluator's one-pager rewrite still demands exactly 4
+    headed sections (Account Challenge / How HP Helps / Proof Points / Next Step) and 'AT MOST 400 words'.
+  note: The two one-pager shapes no longer match.
+- rule_id: me_structure_checks
+  doc: 'formats.py:90 ''max_words: 110, from Section 4.5 and Content Studio''s G12 budget'' and Content
+    Studio LinkedIn budget 60-110 words (content_gates.WORD_BUDGETS).'
+  code: formats.py:89 also enforces max_chars 300 for LinkedIn Message (about 45-55 words).
+  note: A Content Studio LinkedIn message written to its 60-110 word budget will normally fail the evaluator's
+    300-character check and its rewrite cap.
+- rule_id: me_scoring
+  doc: HP_ABX_v3_final Feature 9 Step 4 defines four objectives (scoring.py:61-66).
+  code: A fifth objective, Advocacy, uses the reference application's weights; FORMULA_SOURCE records
+    'reference application (not in HP_ABX_v3_final)'.
+  note: Weights not from the client document.
+- rule_id: me_phrase_feedback
+  doc: 'Spec Section 4.2 (quoted at evaluate.py:50-54): DEEP is 10-15 chunks.'
+  code: The floor of 10 is recorded in the audit log only; fewer chunks still publish.
+  note: Deliberate per code comment.
+- rule_id: me_rewrite_gates
+  doc: 'Spec Section 4.8 (evaluate.py:907-909): ''runs the Section 6 gates on the rewrite because it is
+    the version that actually gets sent''.'
+  code: 'evaluate.py:858-864: only reject-type findings block; competitors=() so G8 cannot fire; G2/G3
+    not applicable (no labels).'
+  note: Ask-bound (G6), word budget (G12) and banned phrases (G9) do not block a rewrite.
+- rule_id: me_claim_verdict
+  doc: guardrails.py:89-96 SUPERLATIVE_RE / COMPETITOR_RE used for rulebook facts.
+  code: evaluator/sources.py:84-94 uses its own narrower SUPERLATIVE_RE and a different COMPETITOR_RE
+    list.
+  note: Different definitions of 'superlative' and 'competitor' between fact approval and draft evaluation.
+- rule_id: me_personas
+  doc: 'WIDGET_REGISTRY evaluator_persona_context description: ''Persona title and seniority requirements'';
+    source_datasets prospect_contacts, job_openings.'
+  code: Personas come from company_personas + the hardcoded pack; seniority_band is always null for the
+    eight.
+  note: Registry description predates the eight-persona change.

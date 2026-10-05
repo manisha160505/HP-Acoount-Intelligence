@@ -1,0 +1,1655 @@
+# Rules page catalog for `stakeholder_map`. Read by app/services/rules_catalog.
+# `ref:` values are read live; `stated` is what the prose was written against.
+# Examples marked `verified` are recomputed by tests/test_rules_examples.py.
+feature_key: stakeholder_map
+purpose: Lists the people at the account from the contact list supplied for it, grouped by department
+  and ordered by seniority, and gives the seller an AI-written, automatically checked opening angle for
+  each person.
+final_output: A roster of contact cards (Senior contacts = C-Suite and VP first, then all other contacts)
+  showing name, title, department, seniority badge, email, phone, location, LinkedIn and a source label.
+  Each card also has a 'How to open' paragraph, HP play focus, decision power and potential pain points,
+  where these passed the checks. There is also a collapsible list of all departments, a strip of department
+  counts as delivered, and a CSV export.
+how_it_combines: Contacts are filtered (matches that are pending or under review are withheld), cleaned,
+  and given a department and a seniority band. A hidden 0-100 stakeholder score combines seniority, HP
+  relevance, influence, data completeness and priority. It selects Priority Contacts but is never shown.
+  The page groups people by department and orders them by seniority. Each person gets an AI-written opening
+  angle, which is checked for invented numbers or links, blocked HP product lines and repeated labels
+  before it is shown.
+rules:
+- id: contact_intake
+  parent: null
+  name: Which contacts the map uses
+  kind: selection
+  summary: Decides which entries in the account's contact list become people on the Stakeholder Map.
+  purpose: Decides which entries in the account's contact list become people on the Stakeholder Map.
+  inputs:
+  - The contact list supplied for the account (one entry per person)
+  logic: Every entry in the account's contact list is read. Entries where the contact data provider has
+    not finished matching the person are withheld (see the sub-rule below). Every remaining entry becomes
+    one contact; nothing is added from any other source. An entry is never dropped for having blank fields.
+  output: The usable contact list. The number of withheld entries is recorded in the system log but is
+    not shown on the page.
+  sources:
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:extract_stakeholder_map
+  doc_source: 'HP_Recommendation_Tuning_Logic_FINAL_v4.txt Input contract, Contacts row: ''Blank contact
+    fields or Pending/Review status means do not infer the missing role, authority or contact detail'''
+  confidence: high
+- id: withhold_pending_review
+  parent: contact_intake
+  name: Withhold contacts whose match is pending or under review
+  kind: guardrail
+  summary: A contact the data provider has not finished matching cannot support a stakeholder card, so
+    it is left off.
+  purpose: A contact the data provider has not finished matching cannot support a stakeholder card, so
+    it is left off.
+  inputs:
+  - The match status recorded for each contact
+  logic: The first non-blank match status recorded for the contact is read, ignoring capital letters.
+    If it contains any of the words pending, review, unmatched, not matched, no match or in progress,
+    the contact is withheld and counted. A BLANK status is kept, because blank means the provider recorded
+    nothing, not that matching failed.
+  conditions:
+  - 'Status contains ''pending'', ''review'', ''unmatched'', ''not matched'', ''no match'' or ''in progress'':
+    withheld'
+  - 'Status blank: kept'
+  - 'Any other status (for example ''Matched''): kept'
+  constants:
+  - label: Withholding words
+    ref: py:app.services.extractors.stakeholder_map:UNMATCHED_STATUS_WORDS
+    stated:
+    - pending
+    - review
+    - unmatched
+    - not matched
+    - no match
+    - in progress
+  - label: Places where the match status can be recorded (checked in order)
+    ref: py:app.services.extractors.stakeholder_map:MATCH_STATUS_COLUMNS
+    stated:
+    - apollo_match_status
+    - match_status
+    - Match Status
+    - Match status
+    - match status
+  example:
+    scenario: Four contacts with the statuses 'Pending review', 'Matched', blank and 'Needs Review'.
+    steps:
+    - '''Pending review'' contains ''pending'', so it is withheld'
+    - '''Matched'' contains none of the words, so it is kept'
+    - Blank is kept
+    - '''Needs review'' contains ''review'', so it is withheld'
+    result: 2 contacts kept (Matched, blank), 2 withheld.
+    verified: true
+    expect:
+    - - apollo_match_status: Matched
+      - Match Status: ''
+    - 2
+  output: The kept contacts and the number withheld.
+  sources:
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:_drop_unmatched_contacts
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:UNMATCHED_STATUS_WORDS
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:MATCH_STATUS_COLUMNS
+  doc_source: 'HP_Recommendation_Tuning_Logic_FINAL_v4.txt Contacts row: ''Pending/Review status means
+    do not infer the missing role, authority or contact detail'''
+  confidence: high
+- id: contact_field_precedence
+  parent: contact_intake
+  name: Where each contact detail is taken from
+  kind: source
+  summary: The contact list can arrive in two different layouts that name their fields differently. This
+    fixes which source wins for each detail.
+  purpose: The contact list can arrive in two different layouts that name their fields differently. This
+    fixes which source wins for each detail.
+  logic: 'For each detail, the possible sources are tried in order and the first non-blank value is used.
+    The values ''none'', ''null'', ''nan'' and ''[]'' (in any capitalisation) count as blank. Name: the
+    contact''s full name, else first plus last name, else the title from the second provider''s layout,
+    else ''Unknown Contact''. Title: the job title, then the title from the second provider''s layout.
+    Department: the main job department, then the department from the second provider''s layout. Seniority:
+    the main job level, then the seniority from the second provider''s layout. Email: the professional
+    email, then the plain email, then the verified work email. Email status: the professional email status,
+    then the plain email status, then the email verification status. Phone: the mobile phone, then the
+    plain mobile phone, then the direct mobile phone. LinkedIn: the LinkedIn address, then the list of
+    LinkedIn addresses, then the LinkedIn address from the second provider''s layout. Contact ID: the
+    contact''s own identifier, otherwise one based on its position in the list. Location: city and country
+    joined with a comma.'
+  table:
+    columns:
+    - Detail
+    - Sources tried in order
+    rows:
+    - - Full name
+      - Full name -> first name + last name -> title from the second provider's layout -> 'Unknown Contact'
+    - - Title
+      - Job title -> title from the second provider's layout
+    - - Department (as delivered)
+      - Main job department -> department from the second provider's layout
+    - - Seniority (as delivered)
+      - Main job level -> seniority from the second provider's layout
+    - - Email
+      - Professional email -> plain email -> verified work email
+    - - Email status
+      - Professional email status -> plain email status -> email verification status
+    - - Phone
+      - Mobile phone -> plain mobile phone -> direct mobile phone (then tidied)
+    - - LinkedIn
+      - LinkedIn address -> list of LinkedIn addresses -> LinkedIn address from the second provider's
+        layout
+    - - Skills / profile
+      - Skills; work experience
+    - - Location
+      - City + country
+  example:
+    scenario: A contact whose job title cell says 'nan' and whose title from the second provider's layout
+      says 'CTO'.
+    steps:
+    - '''nan'' counts as blank'
+    - The next source gives 'CTO'
+    result: 'Title shown: CTO'
+    verified: true
+    expect: CTO
+  output: The value displayed for each detail (or 'Not disclosed' on the page when blank).
+  sources:
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:resolve_field
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:extract_stakeholder_map
+  confidence: high
+  internal: true
+- id: phone_normalisation
+  parent: contact_intake
+  name: Phone numbers repaired from spreadsheet number format
+  kind: display
+  summary: Undoes the '.0' and the lost '+' that spreadsheet programs add when a phone column is stored
+    as a number.
+  purpose: Undoes the '.0' and the lost '+' that spreadsheet programs add when a phone column is stored
+    as a number.
+  logic: A trailing '.0' is removed, then everything that is not a digit is stripped. If the original
+    started with '+', or the number has between 10 and 15 digits, a '+' is put in front. Shorter numbers
+    are kept as plain digits. No digits are made up and no spacing is added.
+  example:
+    scenario: Phone entry '6281293986658.0'.
+    steps:
+    - Remove '.0' to get 6281293986658
+    - 13 digits is between 10 and 15, so a '+' is added at the front
+    result: '''+6281293986658'''
+    verified: true
+    expect: '+6281293986658'
+  output: The phone number shown on the card.
+  sources:
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:normalize_phone
+  confidence: high
+- id: source_label
+  parent: contact_intake
+  name: One source label for every contact
+  kind: source
+  summary: Tells the reader where the contact data came from, using the wording the client chose.
+  purpose: Tells the reader where the contact data came from, using the wording the client chose.
+  logic: 'Every contact displays the same fixed source label (shown in the value below). Behind the scenes,
+    each contact is also marked as coming from one of two contact layouts: the second provider''s layout
+    when the contact was requested or matched through that provider, otherwise the main layout. This marker
+    is not shown. Content Studio uses it to decide who may be named in its copy.'
+  constants:
+  - label: Displayed source label
+    ref: py:app.services.extractors.stakeholder_map:CONTACT_SOURCE_LABEL
+    stated: Explorium + Contacts Waterfall Tools
+  output: A green source tag on each card; a 'source' column in the CSV export.
+  sources:
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:CONTACT_SOURCE_LABEL
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:extract_stakeholder_map
+  doc_source: 'Client, 27 Sep (quoted at stakeholder_map.py:300-302): ''let''s replace it to Explorium
+    + Contacts Waterfall Tools'''
+  confidence: high
+- id: buying_persona_provenance
+  parent: contact_intake
+  name: When the uploaded buying-committee persona is carried on a contact
+  kind: selection
+  summary: Only a persona whose origin is known is attached to the contact record.
+  purpose: Only a persona whose origin is known is attached to the contact record.
+  logic: The buying-committee persona delivered with a contact is carried on the contact record only when
+    the contact is in the main layout, or when the client's persona coverage sheet assigned the person
+    a target role at load time. Contacts from the second provider's layout without such an assignment
+    carry no persona, because the 'Requested Role' on those is the role we asked for, not the person's
+    own role. The persona as delivered is still used when working out the influence type, whatever its
+    origin (see the influence type rule).
+  output: The persona stored on the contact. It is not shown on the Stakeholder Map page; it is used when
+    writing opening angles and by Content Studio.
+  sources:
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:extract_stakeholder_map
+  - scripts/split_account_data.py:attach_personas
+  confidence: high
+- id: persona_attachment_at_load
+  parent: contact_intake
+  name: Client persona attached to a contact when the data is loaded
+  kind: source
+  summary: Puts the client's own target-role assignment onto the matching contact.
+  purpose: Puts the client's own target-role assignment onto the matching contact.
+  logic: When the contact data is loaded, each contact is matched to the client's persona coverage sheet
+    by its row number in the second provider's export, or else by the main provider's person identifier.
+    On a match, the contact is given the client's target role, along with a note of where the match came
+    from and how it was made. Nothing else can set it, and no guess is made from title similarity.
+  example:
+    scenario: A contact with source row '185'; the coverage sheet maps row 185 to 'CTO'. A second contact
+      has no source row or identifier.
+    steps:
+    - Row 185 is found in the coverage sheet, so the persona is 'CTO'
+    - The contact with no row number or identifier is left without a persona
+    result: The first contact's persona is CTO; the second contact has no persona.
+  output: The buying-committee persona on the stored contact list.
+  sources:
+  - scripts/split_account_data.py:attach_personas
+  confidence: high
+- id: department_normalisation
+  parent: null
+  name: Department names unified
+  kind: selection
+  summary: Department codes and short labels from the two contact layouts are mapped to one department
+    list so that contacts group together.
+  purpose: Department codes and short labels from the two contact layouts are mapped to one department
+    list so that contacts group together.
+  logic: The department as delivered is split on ';' or ','. The first part (other than 'c_suite') that
+    is in the mapping table wins. If only 'c_suite' is present, the department is 'Executive'. If nothing
+    maps, the delivered text is shown in title case as it is. A blank department becomes 'Unassigned'.
+  table:
+    columns:
+    - Department as delivered
+    - Unified department
+    rows:
+    - - information technology (also 'it' or 'data')
+      - Information Technology
+    - - engineering and technical (also 'engineering')
+      - Engineering & Technical
+    - - operations
+      - Operations
+    - - finance
+      - Finance
+    - - legal
+      - Legal
+    - - marketing
+      - Marketing
+    - - sales
+      - Sales
+    - - human resources
+      - Human Resources
+    - - product management
+      - Product Management
+    - - consulting
+      - Consulting
+    - - c_suite (on its own)
+      - Executive
+    - - blank
+      - Unassigned
+    - - anything else
+      - The delivered text in title case
+  constants:
+  - label: Department mapping
+    ref: py:app.services.extractors.stakeholder_map:DEPT_LABELS
+  example:
+    scenario: Department delivered as 'c_suite; master_operations'.
+    steps:
+    - Skip c_suite
+    - '''master_operations'' is the operations department, so it maps to Operations'
+    result: Operations
+    verified: true
+    expect: Operations
+  output: 'The unified department: shown under each name and used for the department groups and the Department
+    filter.'
+  sources:
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:normalize_department
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:DEPT_LABELS
+  confidence: high
+- id: seniority_banding
+  parent: null
+  name: Seniority band from the job level
+  kind: selection
+  summary: Puts every contact into one of five seniority bands.
+  purpose: Puts every contact into one of five seniority bands.
+  logic: 'The job level as delivered (ignoring brackets, quotes and capital letters) is looked up: c_suite,
+    c-suite or cxo = C-Suite; vp or vice_president = VP; director or head = Director; manager or owner
+    = Manager; anything else or blank = Individual Contributor. A ''Head of ...'' title therefore bands
+    as Director, not VP. A C-Suite tag must be backed up by the title (see the sub-rule below).'
+  table:
+    columns:
+    - Job level as delivered
+    - Band
+    rows:
+    - - c_suite, c-suite, cxo
+      - C-Suite
+    - - vp, vice_president
+      - VP
+    - - director, head
+      - Director
+    - - manager, owner
+      - Manager
+    - - anything else / blank
+      - Individual Contributor
+  example:
+    scenario: Job level 'head', title 'Head of IT Infrastructure'.
+    steps:
+    - '''head'' maps to Director'
+    result: Director, no conflict flag
+    verified: true
+    expect:
+    - Director
+    - false
+  output: 'The seniority band: the only badge on each card. It sets the roster order and the Senior contacts
+    section.'
+  sources:
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:seniority_band
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:SENIORITY_BAND_MAP
+  confidence: high
+- id: c_suite_corroboration
+  parent: seniority_banding
+  name: A C-Suite tag needs an executive title
+  kind: selection
+  summary: Stops office staff tagged 'c_suite' (for example 'CIO Office') from being shown as executives.
+  purpose: Stops office staff tagged 'c_suite' (e.g. 'CIO Office') being shown as executives.
+  logic: When the band would be C-Suite, the title must look like an executive title (Chief ... Officer,
+    CEO, CIO, COO, CTO, CFO, CISO, President, Managing Director) AND must not contain the word 'office'.
+    If not, the band becomes Manager and the contact is marked as having a seniority conflict. The original
+    title is never changed.
+  constants:
+  - label: Band used when the C-Suite tag is not backed up by the title
+    ref: py:app.services.extractors.stakeholder_map:SENIORITY_UNCORROBORATED_BAND
+    stated: Manager
+  example:
+    scenario: Job level 'c_suite', title 'CIO Office'.
+    steps:
+    - '''CIO'' matches the executive titles'
+    - but the title contains the word 'office'
+    - so the C-Suite tag is not backed up
+    result: Manager, marked as a seniority conflict
+    verified: true
+    expect:
+    - Manager
+    - true
+  output: The seniority band and the conflict marker (the marker is stored but is not shown anywhere on
+    the page).
+  sources:
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:seniority_band
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:EXECUTIVE_TITLE_RE
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:OFFICE_NAME_RE
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:SENIORITY_UNCORROBORATED_BAND
+  doc_source: 'HP_ABX_v3_final Feature 3 rule 4 (quoted at stakeholder_map.py:117-119): ''If the mapped
+    seniority does not fit the original title, keep the original title and send only the mapped field
+    for review.'''
+  confidence: high
+- id: stakeholder_score
+  parent: null
+  name: Stakeholder score (calculated, not shown)
+  kind: score
+  summary: A 0-100 score per contact that picks Priority Contacts for other features.
+  purpose: A 0-100 score per contact that picks Priority Contacts for other features. Following client
+    feedback it is no longer displayed, used to order the page, or exported.
+  logic: Five components, each from 0 to 100, are combined using fixed weights and rounded to a whole
+    number. Every component is calculated by fixed rules. AI is never asked for a score, band, influence
+    type, priority or relevance.
+  formula: Stakeholder score = round(25% × Seniority + 25% × HP relevance + 20% × Influence + 15% × Data
+    completeness + 15% × Priority)
+  constants:
+  - label: Weights
+    ref: py:app.services.extractors.stakeholder_map:COMPOSITE_WEIGHTS
+    stated:
+      seniority: 0.25
+      hp_relevance: 0.25
+      influence: 0.2
+      data_completeness: 0.15
+      priority: 0.15
+  example:
+    scenario: Head of IT Procurement; job level 'head'; department 'it'; persona 'IT Decision Maker';
+      valid email, phone, LinkedIn, skills 'SAP'.
+    steps:
+    - 'Seniority: ''head'' gives Director, which is 50'
+    - 'HP relevance: the title contains ''procurement'' (top tier), so 100; the skill bonus is capped
+      at 100, so 100'
+    - 'Influence: the title contains ''procurement'', so Budget Holder, which is 85'
+    - 'Data completeness: 20 base + 15 LinkedIn + 20 email + 10 valid + 20 phone + 15 profile = 100'
+    - 'Priority: IT department, Director (not C-Suite or VP), so Medium, which is 50'
+    - 0.25 × 50 + 0.25 × 100 + 0.20 × 85 + 0.15 × 100 + 0.15 × 50 = 12.5 + 25 + 17 + 15 + 7.5 = 77
+    result: Stakeholder score 77; HP relevance band high; Priority Contact = yes (77 is at least 60 and
+      the band is not low)
+    verified: true
+    expect:
+      band: Director
+      influence: Budget Holder
+      components:
+        seniority: 50
+        hp_relevance: 100
+        influence: 85
+        data_completeness: 100
+        priority: 50
+      composite: 77
+      relevance_band: high
+      priority_contact: true
+  output: A stakeholder score, the five component scores and a Priority Contact flag on each contact (stored,
+    not shown).
+  sources:
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:COMPOSITE_WEIGHTS
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:composite_score
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:extract_stakeholder_map
+  doc_source: HP_ABX_v3_final formula as quoted in code (stakeholder_map.py:90-92) and widget registry
+    text for stakeholder_influence_map
+  confidence: high
+- id: score_seniority
+  parent: stakeholder_score
+  name: Seniority component
+  kind: score
+  summary: Converts the seniority band into points.
+  purpose: Converts the seniority band into points.
+  logic: C-Suite 100, VP 75, Director 50, Manager 25, Individual Contributor 10. Unknown bands score as
+    Individual Contributor.
+  table:
+    columns:
+    - Band
+    - Points
+    rows:
+    - - C-Suite
+      - 100
+    - - VP
+      - 75
+    - - Director
+      - 50
+    - - Manager
+      - 25
+    - - Individual Contributor
+      - 10
+  constants:
+  - label: Seniority points
+    ref: py:app.services.extractors.stakeholder_map:SENIORITY_SCORES
+    stated:
+      C-Suite: 100
+      VP: 75
+      Director: 50
+      Manager: 25
+      Individual Contributor: 10
+  example:
+    scenario: A VP.
+    steps:
+    - VP gives 75
+    result: '75'
+    verified: true
+    expect: 75
+  output: The seniority component (0-100).
+  sources:
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:SENIORITY_SCORES
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:score_seniority
+  confidence: high
+- id: score_hp_relevance
+  parent: stakeholder_score
+  name: HP relevance component
+  kind: score
+  summary: How close a contact's role sits to HP's product lines.
+  purpose: How close a contact's role sits to HP's product lines.
+  logic: 'The text searched is the title plus the unified department name (ignoring capital letters; a
+    keyword counts if it appears anywhere in the text, even inside a longer word). Start from the department''s
+    own tier (Information Technology 70, Engineering & Technical 70, Operations 40, Product Management
+    40, Executive 40, otherwise 0). Then check the keyword tiers from the top: the first tier that is
+    higher than the current value and has a keyword in the text sets the value. If the value is still
+    0, a floor of 20 applies. Then: a clearly non-IT title caps the result at 40 (with no skill bonus).
+    Otherwise, if the contact''s skills mention SAP, Azure, AWS, AutoCAD, CATIA, VMware, Cisco or Windows,
+    add 10 (maximum 100).'
+  table:
+    columns:
+    - Tier
+    - Keywords (title or department text)
+    rows:
+    - - 100
+      - procurement, infrastructure, end user, end-user, workplace, device, fleet, cio, chief information,
+        information technology
+    - - 70
+      - engineer, architect, network, data cent, data centre, data center, cloud, devops, security, developer,
+        technology
+    - - 40
+      - operations, product, executive, business
+    - - Cap of 40
+      - 'Non-IT title: employment relations, people experience, human resources, recruitment, payroll,
+        tax, legal, audit, corporate communications, industrial relations'
+    - - '+10'
+      - 'Skills mention: sap, azure, aws, autocad, catia, vmware, cisco, windows'
+    - - Floor of 20
+      - Nothing matched
+  constants:
+  - label: Non-IT cap
+    ref: py:app.services.extractors.stakeholder_map:NON_IT_TITLE_CAP
+    stated: 40
+  - label: Floor
+    ref: py:app.services.extractors.stakeholder_map:HP_RELEVANCE_FLOOR
+    stated: 20
+  - label: Skill bonus
+    ref: py:app.services.extractors.stakeholder_map:HP_SKILL_BONUS
+    stated: 10
+  - label: Department starting tiers
+    ref: py:app.services.extractors.stakeholder_map:HP_RELEVANCE_DEPT_TIERS
+    stated:
+      Information Technology: 70
+      Engineering & Technical: 70
+      Operations: 40
+      Product Management: 40
+      Executive: 40
+  example:
+    scenario: Cloud Architect in Engineering & Technical with skills 'Azure, AWS'.
+    steps:
+    - The department tier is 70
+    - '100-tier keywords: none present'
+    - The 70 tier is not higher than 70, so stop
+    - Skills mention Azure, so add 10
+    result: '80'
+    verified: true
+    expect: 80
+  output: The HP relevance component (0-100).
+  sources:
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:score_hp_relevance
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:HP_RELEVANCE_TIERS
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:HP_RELEVANCE_DEPT_TIERS
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:NON_IT_TITLE_TERMS
+  confidence: high
+- id: hp_relevance_department_text
+  parent: score_hp_relevance
+  name: Department name itself can reach the top relevance tier
+  kind: score
+  summary: Records an observed effect of the relevance rule.
+  purpose: Records an observed effect of the relevance rule.
+  logic: Because the department name is part of the searched text and 'information technology' is a top-tier
+    keyword, every contact whose unified department is Information Technology (including 'it' and 'data'
+    as delivered) scores 100, unless the title is non-IT (then 40). A Sales Manager filed under IT therefore
+    scores 100.
+  example:
+    scenario: Title 'Sales Manager', department Information Technology.
+    steps:
+    - The searched text is 'sales manager information technology'
+    - '''information technology'' is a 100-tier keyword'
+    result: '100'
+    verified: true
+    expect: 100
+  output: The HP relevance component.
+  sources:
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:score_hp_relevance
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:HP_RELEVANCE_TIERS
+  confidence: high
+- id: non_it_title_cap
+  parent: score_hp_relevance
+  name: Non-IT titles capped
+  kind: filter
+  summary: Stops HR, tax, legal and similar roles looking IT-relevant because of a mislabelled department.
+  purpose: Stops HR, tax, legal and similar roles looking IT-relevant because of a mislabelled department.
+  logic: If the title contains employment relations, people experience, human resources, recruitment,
+    payroll, tax, legal, audit, corporate communications or industrial relations, the relevance is the
+    lower of its tier and 40, and no skill bonus is added.
+  example:
+    scenario: An Employment Relations Lead filed under Information Technology.
+    steps:
+    - The department text alone would give 100
+    - The title contains 'employment relations', so the cap of 40 applies
+    result: '40'
+    verified: true
+    expect: 40
+  output: The HP relevance component.
+  sources:
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:score_hp_relevance
+  confidence: high
+- id: hp_relevance_band
+  parent: score_hp_relevance
+  name: HP relevance band
+  kind: guardrail
+  summary: Turns the relevance score into high, medium or low.
+  purpose: Turns the relevance score into high, medium or low.
+  logic: 70 or more = high; 40 to 69 = medium; below 40 = low.
+  table:
+    columns:
+    - Score
+    - Band
+    rows:
+    - - 70 or more
+      - high
+    - - 40-69
+      - medium
+    - - Below 40
+      - low
+  constants:
+  - label: Band thresholds
+    ref: py:app.services.extractors.stakeholder_map:HP_RELEVANCE_BAND_THRESHOLDS
+    stated:
+    - - 70
+      - high
+    - - 40
+      - medium
+  example:
+    scenario: Score 69.
+    steps:
+    - 69 is below 70
+    - 69 is at least 40
+    result: medium
+    verified: true
+    expect: medium
+  output: The HP relevance band (stored; no longer shown; it decides who can be a Priority Contact and
+    whom Content Studio may name).
+  sources:
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:hp_relevance_band
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:HP_RELEVANCE_BAND_THRESHOLDS
+  confidence: high
+- id: influence_type
+  parent: stakeholder_score
+  name: Influence type (buying role) rules
+  kind: selection
+  summary: Labels each contact Budget Holder, Decision Maker, Technical Evaluator or Influencer from title,
+    seniority and department.
+  purpose: Labels each contact Budget Holder, Decision Maker, Technical Evaluator or Influencer from title,
+    seniority and department.
+  logic: 'The rules are checked in this order and the first one that applies wins (a title term counts
+    if it appears anywhere in the lower-case title). 1) The title contains procurement, infrastructure
+    strategy, purchasing or sourcing: Budget Holder. 2) The band is C-Suite: Decision Maker. 3) The title
+    contains a hands-on technical term: Technical Evaluator. 4) The band is VP or Director AND the department
+    is Information Technology or Engineering & Technical AND the title is not non-IT: Decision Maker.
+    5) The persona assigned to the contact contains ''business decision maker'': Influencer. 6) The persona
+    contains ''decision maker'': Decision Maker only if the department is Information Technology, Engineering
+    & Technical or Executive and the title is not non-IT; otherwise Influencer. 7) Otherwise: Influencer.
+    Champion and Blocker are never assigned. The rule that decided the outcome is recorded.'
+  table:
+    columns:
+    - Order
+    - Condition
+    - Result
+    - Reason recorded
+    rows:
+    - - 1
+      - Title has procurement / infrastructure strategy / purchasing / sourcing
+      - Budget Holder
+      - Budget term in title
+    - - 2
+      - Seniority band is C-Suite
+      - Decision Maker
+      - C-Suite band
+    - - 3
+      - Title has infrastructure, engineer, engineering, collaboration, 'it' followed by a space, network,
+        cloud, system, technology, developer, software, application, architect, end user, end-user, data
+        governance, technical, devops, operations excellence
+      - Technical Evaluator
+      - Technical term in title
+    - - 4
+      - VP or Director in Information Technology / Engineering & Technical, title not non-IT
+      - Decision Maker
+      - Senior in IT or engineering
+    - - 5
+      - Persona contains 'business decision maker'
+      - Influencer
+      - Business persona, not IT
+    - - 6
+      - Persona contains 'decision maker', department IT / Engineering / Executive, title not non-IT
+      - Decision Maker
+      - Decision-maker persona in IT, engineering or executive
+    - - 6b
+      - Persona contains 'decision maker' otherwise
+      - Influencer
+      - Decision-maker persona outside IT
+    - - 7
+      - None of the above
+      - Influencer
+      - Default
+  constants:
+  - label: Budget holder title terms
+    ref: py:app.services.extractors.stakeholder_map:BUDGET_HOLDER_TITLE_TERMS
+    stated:
+    - procurement
+    - infrastructure strategy
+    - purchasing
+    - sourcing
+  - label: Technical title terms
+    ref: py:app.services.extractors.stakeholder_map:TECHNICAL_TITLE_TERMS
+    stated:
+    - infrastructure
+    - engineer
+    - engineering
+    - collaboration
+    - 'it '
+    - network
+    - cloud
+    - system
+    - technology
+    - developer
+    - software
+    - application
+    - architect
+    - end user
+    - end-user
+    - data governance
+    - technical
+    - devops
+    - operations excellence
+  example:
+    scenario: Tax Division Head, Director, department Information Technology, persona 'IT Decision Maker'.
+    steps:
+    - No budget term
+    - Not C-Suite
+    - No technical term
+    - Director in IT, but the title contains 'tax' (non-IT), so rule 4 is skipped
+    - The persona is not 'business decision maker'
+    - The persona has 'decision maker' but the title is non-IT, so Influencer
+    result: Influencer (decision-maker persona outside IT)
+    verified: true
+    expect:
+    - Influencer
+    - persona_outside_it
+  output: 'The influence type: stored; no longer shown on the page; it limits what the opening angle may
+    claim as decision power.'
+  sources:
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:assign_influence
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:BUDGET_HOLDER_TITLE_TERMS
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:TECHNICAL_TITLE_TERMS
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:PERSONA_DECISION_DEPARTMENTS
+  doc_source: ABX Step 4 cascade (quoted in code docstring, stakeholder_map.py:449-452)
+  confidence: high
+- id: influence_substring_effects
+  parent: influence_type
+  name: Side effects of word matching in the technical-title check
+  kind: guardrail
+  summary: Records the observed results of the term 'it ' (with a trailing space) matching inside longer
+    words.
+  purpose: Records the observed results of the term 'it ' (with a trailing space) matching inside longer
+    words.
+  logic: The technical term 'it ' (with a trailing space) also matches inside words that end in 'it' followed
+    by a space, such as 'audit ' or 'unit '. Because the technical check runs before the non-IT check,
+    'Internal Audit Manager' and 'Business Unit Head' come out as Technical Evaluator.
+  example:
+    scenario: Title 'Internal Audit Manager', Manager, Finance.
+    steps:
+    - The lower-case title 'internal audit manager' contains 'it ' inside 'audit '
+    result: Technical Evaluator (technical term in title)
+    verified: true
+    expect:
+    - Technical Evaluator
+    - technical_title
+  output: The influence type.
+  sources:
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:assign_influence
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:TECHNICAL_TITLE_TERMS
+  confidence: high
+- id: score_influence
+  parent: influence_type
+  name: Influence component
+  kind: score
+  summary: Converts the influence type into points.
+  purpose: Converts the influence type into points.
+  logic: Decision Maker 100, Budget Holder 85, Champion 70, Technical Evaluator 60, Influencer 50, Blocker
+    30 (Champion and Blocker are never assigned). Unknown types score as Influencer.
+  table:
+    columns:
+    - Influence type
+    - Points
+    rows:
+    - - Decision Maker
+      - 100
+    - - Budget Holder
+      - 85
+    - - Champion
+      - 70
+    - - Technical Evaluator
+      - 60
+    - - Influencer
+      - 50
+    - - Blocker
+      - 30
+  constants:
+  - label: Influence points
+    ref: py:app.services.extractors.stakeholder_map:INFLUENCE_SCORES
+    stated:
+      Decision Maker: 100
+      Budget Holder: 85
+      Champion: 70
+      Technical Evaluator: 60
+      Influencer: 50
+      Blocker: 30
+  example:
+    scenario: Technical Evaluator.
+    steps:
+    - Look up the points for the type
+    result: '60'
+    verified: true
+    expect: 60
+  output: The influence component.
+  sources:
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:INFLUENCE_SCORES
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:score_influence
+  confidence: high
+- id: score_data_completeness
+  parent: stakeholder_score
+  name: Data completeness component
+  kind: score
+  summary: Rewards contacts the seller can actually reach.
+  purpose: Rewards contacts the seller can actually reach.
+  logic: Start at 20. Add 15 if there is a LinkedIn address, 20 if there is an email, a further 10 if
+    the email status is exactly 'valid', 20 if there is a phone number, and 15 if there is profile data
+    (skills or experience). Maximum 100.
+  table:
+    columns:
+    - Item
+    - Points
+    rows:
+    - - Starting points
+      - 20
+    - - LinkedIn address
+      - 15
+    - - Email
+      - 20
+    - - Email status is 'valid'
+      - 10
+    - - Phone number
+      - 20
+    - - Skills or experience
+      - 15
+  constants:
+  - label: Completeness points
+    ref: py:app.services.extractors.stakeholder_map:DATA_COMPLETENESS_POINTS
+    stated:
+      base: 20
+      linkedin: 15
+      email: 20
+      email_valid: 10
+      phone: 20
+      profile: 15
+  example:
+    scenario: Email with status 'catch-all', LinkedIn, no phone, no profile.
+    steps:
+    - 20 starting points
+    - +15 LinkedIn
+    - +20 email
+    - The status is not 'valid', so +0
+    - No phone, no profile
+    result: '55'
+    verified: true
+    expect: 55
+  output: The data completeness component.
+  sources:
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:score_data_completeness
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:DATA_COMPLETENESS_POINTS
+  confidence: high
+- id: priority_level
+  parent: stakeholder_score
+  name: Priority level and component
+  kind: score
+  summary: A priority based on department and seniority, deliberately independent of the score so that
+    the logic is not circular.
+  purpose: A priority based on department and seniority, deliberately independent of the score so that
+    the logic is not circular.
+  logic: 'If the unified department is Information Technology, Engineering & Technical, Operations or
+    Executive: High for C-Suite or VP, otherwise Medium. Any other department: Low. Points: High 100,
+    Medium 50, Low 10.'
+  table:
+    columns:
+    - Department
+    - C-Suite / VP
+    - Other bands
+    rows:
+    - - Information Technology, Engineering & Technical, Operations, Executive
+      - High (100)
+      - Medium (50)
+    - - any other
+      - Low (10)
+      - Low (10)
+  constants:
+  - label: Priority points
+    ref: py:app.services.extractors.stakeholder_map:PRIORITY_SCORES
+    stated:
+      High: 100
+      Medium: 50
+      Low: 10
+  - label: High-priority departments
+    ref: py:app.services.extractors.stakeholder_map:HIGH_PRIORITY_DEPTS
+    stated:
+    - Engineering & Technical
+    - Executive
+    - Information Technology
+    - Operations
+  example:
+    scenario: C-Suite in Finance.
+    steps:
+    - Finance is not a high-priority department
+    result: Low
+    verified: true
+    expect: Low
+  output: The priority (stored, no longer shown) and the priority component.
+  sources:
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:assign_priority
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:HIGH_PRIORITY_DEPTS
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:PRIORITY_SCORES
+  confidence: high
+- id: priority_contacts
+  parent: stakeholder_score
+  name: Priority Contacts selection
+  kind: selection
+  summary: Marks the contacts that other features (Content Studio) may name first.
+  purpose: Marks the contacts that other features (Content Studio) may name first.
+  logic: 'A contact is a Priority Contact when the stakeholder score is 60 or more AND the HP relevance
+    band is not low. There is no fixed number of Priority Contacts. Coverage check: if no Priority Contact
+    is a Budget Holder but the roster has at least one Budget Holder, the highest-scoring Budget Holder
+    is also made a Priority Contact (the first one in list order if there is a tie).'
+  formula: Priority Contact = (stakeholder score of 60 or more AND HP relevance band not low) OR (the
+    top-scoring Budget Holder, when no Budget Holder qualified)
+  constants:
+  - label: Priority Contact threshold
+    ref: py:app.services.extractors.stakeholder_map:PRIORITY_CONTACT_MIN_COMPOSITE
+    stated: 60
+  example:
+    scenario: 'A Manager in Marketing: seniority 25, relevance 40, influence 50, completeness 55, priority
+      10.'
+    steps:
+    - 0.25 × 25 + 0.25 × 40 + 0.20 × 50 + 0.15 × 55 + 0.15 × 10 = 6.25 + 10 + 10 + 8.25 + 1.5 = 36
+    - 36 is below 60
+    result: 'Score 36: not a Priority Contact'
+    verified: true
+    expect: false
+  output: The Priority Contact flag (stored; not shown; the number of Priority Contacts is also recorded).
+  sources:
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:extract_stakeholder_map
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:PRIORITY_CONTACT_MIN_COMPOSITE
+  doc_source: ABX Step 6 coverage pass (quoted in code, stakeholder_map.py:1143-1144)
+  confidence: high
+- id: hidden_score_use_elsewhere
+  parent: stakeholder_score
+  name: Where the hidden score is still used
+  kind: selection
+  summary: Explains why the score is still calculated although the page no longer shows it.
+  purpose: Explains why the score is still calculated although the page no longer shows it.
+  logic: 'Content Studio''s named personas: only contacts from the main layout whose relevance band is
+    not low and who have a title, ordered Priority Contacts first, then by stakeholder score (high first),
+    then by name. Strategy Chat persona dropdown: contacts ordered by stakeholder score, high first. Opportunity
+    Map contact matching: the score breaks ties among contacts whose title or department matches a play.
+    The opening angles use the influence type to limit the decision power they claim.'
+  output: Ordering and selection in other features; nothing on the Stakeholder Map page.
+  sources:
+  - hp-backend/src/app/services/extractors/content_studio.py:_derive_named_personas
+  - hp-backend/src/app/services/strategy/personas.py:options
+  - hp-backend/src/app/services/extractors/solution_narrative_opportunity_map.py:_match_contacts
+  confidence: high
+- id: roster_order
+  parent: null
+  name: Roster order on the page
+  kind: selection
+  summary: Lists people most senior first.
+  purpose: Lists people most senior first.
+  logic: Contacts are sorted by seniority band in the order C-Suite, VP, Director, Manager, Individual
+    Contributor (any unknown band last), then alphabetically by full name. The score and Priority Contact
+    flag do not affect the order.
+  constants:
+  - label: Seniority order
+    ref: py:app.services.extractors.stakeholder_map:SENIORITY_ORDER
+    stated:
+    - C-Suite
+    - VP
+    - Director
+    - Manager
+    - Individual Contributor
+  example:
+    scenario: Bands VP, Manager, C-Suite, Unknown, Director.
+    steps:
+    - Rank by the seniority order; unknown last
+    result: C-Suite, VP, Director, Manager, Unknown
+    verified: true
+    expect:
+    - C-Suite
+    - VP
+    - Director
+    - Manager
+    - Unknown
+  output: The order of contacts in the grid and inside each department.
+  sources:
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:seniority_rank
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:SENIORITY_ORDER
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:extract_stakeholder_map
+  doc_source: Client 27 Sep feedback 4.2 (tests/test_stakeholder_feedback.py:8-11)
+  confidence: high
+- id: senior_contacts_section
+  parent: null
+  name: Senior contacts vs all other contacts
+  kind: selection
+  summary: Splits the roster into two card sections.
+  purpose: Splits the roster into two card sections.
+  logic: After the search and filters are applied, contacts whose seniority band is C-Suite or VP are
+    shown first under 'Senior contacts' ('N C-Suite & VP'). Everyone else is shown under 'All other contacts',
+    in the same seniority order. Each card shows name, LinkedIn link, title, department, seniority badge,
+    email, phone, location, source label, email status and the talking points.
+  output: Two card sections on the Stakeholder Map tab.
+  sources:
+  - hp-frontend/src/app/dashboard/page.tsx
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:SENIOR_BANDS
+  doc_source: 28 Sep rule (frontend comment, page.tsx:4096-4100 and 4453-4458)
+  confidence: high
+- id: filters_and_search
+  parent: null
+  name: Search and filters
+  kind: filter
+  summary: Lets the seller narrow the roster.
+  purpose: Lets the seller narrow the roster.
+  logic: 'Free-text search matches part of the name, title or unified department (capital letters are
+    ignored). There are two dropdown filters: Seniority (band) and Department (unified). The options are
+    built from the data, never fixed in advance. The Influence, Priority and HP Relevance filters were
+    removed.'
+  output: Filtered card and department lists; the CSV export uses the filtered list.
+  sources:
+  - hp-frontend/src/app/dashboard/page.tsx:matchesFilters
+  doc_source: 'Client 27 Sep feedback 4.2: ''let''s drop the 3 ... filters - Influence, Priority and HP
+    Relevance as these are hard to defend'' (tests/test_stakeholder_feedback.py:8-9)'
+  confidence: high
+- id: department_groups
+  parent: null
+  name: Departments panel (buying-centre grouping)
+  kind: selection
+  summary: Groups the whole roster by department.
+  purpose: Groups the whole roster by department.
+  logic: Contacts are grouped by unified department. Groups are ordered by number of members (largest
+    first), with ties in alphabetical order. Inside a group, members are ordered most senior first, then
+    by name. Each group is collapsible and shows its member count after filters. Behind the scenes, each
+    group also records which contacts are 'HP-relevant' (Priority Contacts, or relevance high or medium)
+    and which are 'lower relevance', plus influence and seniority counts and buying-group coverage by
+    influence type. These are not shown.
+  output: The 'All departments' collapsible list.
+  sources:
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:extract_stakeholder_map
+  - hp-frontend/src/app/dashboard/page.tsx
+  confidence: high
+- id: raw_department_distribution
+  parent: null
+  name: Raw department distribution
+  kind: selection
+  summary: Shows the department values exactly as delivered.
+  purpose: Shows the department values exactly as delivered.
+  logic: Counts contacts for each department as delivered (not unified); a blank department counts as
+    'Unassigned'. Listed most common first.
+  output: A strip of department tags at the bottom of the tab.
+  sources:
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:extract_stakeholder_map
+  - hp-frontend/src/app/dashboard/page.tsx
+  confidence: high
+- id: client_buying_committee_coverage
+  parent: null
+  name: Client buying-committee coverage (target roles)
+  kind: selection
+  summary: Reports which of the client's target roles for the account have a person and which do not.
+  purpose: Reports which of the client's target roles for the account have a person and which do not.
+  logic: 'Read from the client''s list of target roles for the account: every entry with a target role
+    is a role, and it is ''filled'' when a contact name is given. Coverage % = filled roles / total roles
+    × 100, rounded to 1 decimal (shown as none when there are no roles). Reachable = filled roles with
+    a work email or phone. Unfilled roles are listed with their reason (the contact status given, else
+    ''no contact found''). An unfilled role never gets a name. When an account has no usable contacts
+    but does have target roles, the influence map still shows this coverage.'
+  formula: Coverage % = 100 × filled roles ÷ target roles, rounded to 1 decimal
+  example:
+    scenario: '3 roles: Head of Procurement (no name), IT Asset Manager (name + email), CFO (name, no
+      email or phone).'
+    steps:
+    - Filled = 2, unfilled = 1
+    - Reachable = 1 (only the IT Asset Manager has an email or phone)
+    - 100 × 2 ÷ 3 = 66.7
+    result: '2 of 3 roles filled (66.7%), 1 reachable, Head of Procurement listed as not covered: ''No
+      suitable distinct candidate found'''
+    verified: true
+    expect:
+      target_roles: 3
+      filled_roles: 2
+      roles_with_a_contact_detail: 1
+      coverage_percent: 66.7
+  output: A coverage summary in the influence map. It is not currently shown on the dashboard page.
+  sources:
+  - hp-backend/src/app/services/extractors/personas.py:read_roles
+  - hp-backend/src/app/services/extractors/personas.py:coverage
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:extract_stakeholder_map
+  confidence: high
+- id: hidden_fields_policy
+  parent: null
+  name: What is deliberately not shown or exported
+  kind: guardrail
+  summary: Keeps numbers the client did not want to defend off the page.
+  purpose: Keeps numbers the client did not want to defend off the page.
+  logic: 'The page shows only the seniority badge. Influence type, priority, HP relevance, stakeholder
+    score and the Priority Contact flag are not displayed, not filterable and not in the CSV export. The
+    ranked ''Entry Path'' was removed. The CSV export columns are: full name, title, department, seniority
+    band, email, email status, phone, LinkedIn address, source (the label), how to open, HP play focus
+    and decision power.'
+  output: Card badges and CSV columns.
+  sources:
+  - hp-frontend/src/app/dashboard/page.tsx:handleExportCsv
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:extract_stakeholder_map
+  doc_source: 'Client 27 Sep feedback 4.2 and 4.4 (tests/test_stakeholder_feedback.py:1-15): ''let''s
+    drop the entire Entry Path tab altogether'''
+  confidence: high
+- id: talking_points
+  parent: null
+  name: Per-contact opening angle (AI-written, automatically checked)
+  kind: model
+  summary: Writes, for every contact, how to open the conversation, the HP play focus, the role's decision
+    power and potential pain points.
+  purpose: Writes, for every contact, how to open the conversation, the HP play focus, the role's decision
+    power and potential pain points.
+  inputs:
+  - 'The roster: ID, name, title, unified department, seniority band, influence type, buying persona,
+    skills (first 180 characters), past roles (first 180 characters) and the list of HP product lines
+    that may not be proposed'
+  - Account evidence (see the sub-rule below)
+  logic: 'One AI request covers every contact on the roster. The AI writes only four things: how to open,
+    HP play focus, decision power and pain points. Everything else (names, bands, influence, scores, contact
+    details) is fixed by the system, and the AI is told not to produce it. The AI''s output is then filtered
+    by the automatic checks in the sub-rules. Where a field is missing or removed, the card shows nothing
+    for it (''No signal'' when there is no opener).'
+  output: 'For each contact: how to open, HP play focus, decision power and pain points.'
+  sources:
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:generate_stakeholder_talking_points
+  doc_source: 'HP_Recommendation_Tuning_Logic_FINAL_v4.txt Stakeholder Map row: ''Connect each stakeholder''s
+    role and function with the relevant account signals and opportunities, then generate a customized
+    How to Open and HP Play Focus for that person.'''
+  confidence: high
+- id: talking_points_account_context
+  parent: talking_points
+  name: Account evidence given to the AI
+  kind: source
+  summary: Fixes exactly which account facts the opener may draw on.
+  purpose: Fixes exactly which account facts the opener may draw on.
+  inputs:
+  - Company profile
+  - Technology stack (technographics)
+  - Intent topics
+  - Recent news coverage
+  - News events
+  - Qualified opportunity plays from the Opportunity Map
+  logic: 'Built by fixed rules: (1) from the company profile: industry (LinkedIn category, else NAICS
+    code), employee range, revenue range and business description; (2) from the technology data: the full
+    tech stack, first 40 items; (3) from the intent data: the first 10 topics listed, with each topic''s
+    composite score; (4) from news coverage and news events: headlines with duplicates removed (ignoring
+    capital letters), sorted newest first (undated last), first 10; (5) qualified Opportunity Map plays
+    (see the sub-rule below). Hiring and filings information is NOT included. Intent topic names and headlines
+    are also kept as ''evidence labels'' for the pain-point repeat check.'
+  output: The account evidence block given to the AI.
+  sources:
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:_build_account_context
+  doc_source: 'HP_Recommendation_Tuning_Logic_FINAL_v4.txt Stakeholder Map row, Data to use: ''Contacts
+    (role, title, function and seniority) + relevant Intent + Explorium Technographics + PredictLeads
+    Hiring + Google RSS/Exa News + Filings + qualified Opportunity Map findings.'''
+  confidence: high
+- id: qualified_opportunities_input
+  parent: talking_points_account_context
+  name: Qualified Opportunity Map plays offered to the AI
+  kind: source
+  summary: Gives the AI the HP opportunities that the account's evidence has already earned.
+  purpose: Gives the AI the HP opportunities that the account's evidence has already earned.
+  logic: 'Taken from the stored Opportunity Map plays. Every opportunity play with a title becomes ''title
+    | HP: products | earned on: first 60 characters of up to 2 evidence quotes''. Every service play becomes
+    ''title | HP service | earned on: up to 3 matched terms''. Discovery areas (plays that failed their
+    checks) are not offered. The AI is told that these plays satisfy only the ACCOUNT half of the chain,
+    never the person''s remit.'
+  output: '''Qualified HP opportunities'' lines at the end of the account evidence.'
+  sources:
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:_qualified_opportunities
+  confidence: high
+- id: do_not_propose_list
+  parent: talking_points
+  name: Per-contact HP lines that may not be proposed
+  kind: guardrail
+  summary: Blocks HP product lines that do not follow from a contact's remit, by automatic check rather
+    than by instruction alone.
+  purpose: Blocks HP product lines that do not follow from a contact's remit, by automatic check rather
+    than by instruction alone.
+  logic: If the title contains a no-hardware remit term (employment relations, people experience, human
+    resources, recruitment, payroll, tax, legal, audit, corporate communications, industrial relations,
+    branch manager, product owner, business owner), EVERY HP product line is blocked. Otherwise a line
+    is blocked when the title contains one of its listed terms (see the table). The list is given to the
+    AI as 'do not propose' and enforced again after the text is written.
+  table:
+    columns:
+    - HP line blocked
+    - When the title contains
+    rows:
+    - - HP Enterprise Printing & MPS
+      - cloud, infrastructure, network, data governance, software, application, developer, devops, architect,
+        security, business intelligence, analytics, cio, engineering, technology development
+    - - Z by HP Workstations
+      - employment relations, people experience, human resources, recruitment, payroll, tax, legal, audit,
+        corporate communications, industrial relations, branch manager
+    - - Poly Studio
+      - tax, legal, audit, payroll, procurement
+    - - ALL HP lines (21)
+      - 'No-hardware remit: the non-IT title terms plus branch manager, product owner, business owner'
+  constants:
+  - label: No-hardware remit terms
+    ref: py:app.services.extractors.stakeholder_map:NO_HARDWARE_REMIT_TERMS
+    stated:
+    - employment relations
+    - people experience
+    - human resources
+    - recruitment
+    - payroll
+    - tax
+    - legal
+    - audit
+    - corporate communications
+    - industrial relations
+    - branch manager
+    - product owner
+    - business owner
+  example:
+    scenario: Title 'Head of Cloud Operations'.
+    steps:
+    - No no-hardware term
+    - '''cloud'' is a term that blocks Print/MPS'
+    result: 'Blocked: HP Enterprise Printing & MPS'
+    verified: true
+    expect:
+    - HP Enterprise Printing & MPS
+  output: The 'do not propose' list for each contact, used again in the check after writing.
+  sources:
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:blocked_plays_for
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:remit_reaches_hardware
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:PLAY_BLOCKED_BY_TITLE
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:NO_HARDWARE_REMIT_TERMS
+  confidence: high
+- id: prompt_instructions
+  parent: talking_points
+  name: What the AI is instructed to do (judged by AI, not enforced by checks)
+  kind: model
+  summary: Records the instructions whose compliance depends on the AI.
+  purpose: Records the instructions whose compliance depends on the AI.
+  logic: These instructions depend on the AI following them; there is no automatic check. HP plays must
+    be 'earned' through the chain role + persona + account trigger or technology -> product. Otherwise
+    the play focus is 'Account engagement / discovery' and no product is named. How to open is written
+    in the first person, in 40 to 90 words. Every contact gets a different angle, and no trigger is used
+    for more than two contacts. The HP play focus is a short label. Decision power is limited by the supplied
+    influence type (Budget Holder may discuss budget and procurement authority; Decision Maker participates
+    in or owns decisions, not sole authority; Technical Evaluator evaluation and standards only; Influencer
+    advisory only) and is left out for roles whose remit does not reach hardware. Pain points must be
+    hedged ('may', 'could' and similar), name an evidence item and the pressure on the function, otherwise
+    they are left out. No reporting lines are stated. Competitor products are never called 'our'. The
+    40-90 word range is NOT checked automatically.
+  constants:
+  - label: Opener minimum words (requested, not checked automatically)
+    ref: py:app.services.extractors.stakeholder_map:OPENER_MIN_WORDS
+    stated: 40
+  - label: Opener maximum words (requested, not checked automatically)
+    ref: py:app.services.extractors.stakeholder_map:OPENER_MAX_WORDS
+    stated: 90
+  output: The AI's output before the automatic checks.
+  sources:
+  - hp-backend/src/app/services/extractors/stakeholder_map.py
+  doc_source: 'HP_Recommendation_Tuning_Logic_FINAL_v4.txt formatting table: ''Stakeholder Map | How to
+    Open + HP Play Focus | Minimum 40 words; maximum 100 words.'''
+  confidence: high
+- id: tp_entry_acceptance
+  parent: talking_points
+  name: Which AI entries are accepted at all
+  kind: guardrail
+  summary: Discards unusable entries.
+  purpose: Discards unusable entries.
+  logic: An entry is discarded if it is not a proper entry, if its contact ID is not one of the contacts
+    supplied, or if the how-to-open text is empty. An empty HP play focus is stored as none.
+  output: Entries passed on to the invented-number check.
+  sources:
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:_run
+  confidence: high
+- id: tp_grounding_check
+  parent: talking_points
+  name: No number or link the account's data never held
+  kind: guardrail
+  summary: Removes a contact's whole entry if it carries an unsourced figure or web link.
+  purpose: Removes a contact's whole entry if it carries an unsourced figure or web link.
+  logic: All four fields are checked against everything in the contact list, company profile, technology
+    data, intent data, news coverage and news events. A percentage must appear as that percentage in the
+    data. Any other number with 2 or more digits must appear as a number in the data. Any web link must
+    appear in the data. One failure drops the whole entry for that contact (it then gets one more attempt).
+  example:
+    scenario: The data holds 'ASII sets IDR 36 trillion capex for 2026'; the opener says '40 trillion
+      of capex in 2026, up 36 trillion'.
+    steps:
+    - 2026 and 36 are in the data
+    - 40 is not
+    result: 'Unsourced: [''40''], so the entry is dropped'
+    verified: true
+    expect:
+    - '40'
+  output: The entry is kept or dropped; a record of the check is stored.
+  sources:
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:_run
+  - hp-backend/src/app/services/extractors/grounding.py:check_text
+  - hp-backend/src/app/services/extractors/grounding.py:unsourced_numbers
+  confidence: high
+- id: tp_decision_power_echo
+  parent: talking_points
+  name: Decision power that just repeats the instruction is removed
+  kind: guardrail
+  summary: Stops boilerplate authority statements.
+  purpose: Stops boilerplate authority statements.
+  logic: 'Decision power is removed when (after trimming, ignoring capital letters and removing a final
+    full stop) it equals, or starts with, one of: ''this role typically participates in or owns decisions
+    of this kind'', ''evaluation, standards and requirements influence only'', ''may discuss budget ownership
+    and procurement authority'', ''advisory input only''. The rest of the entry is kept.'
+  example:
+    scenario: Decision power = 'This role typically participates in or owns decisions of this kind.'
+    steps:
+    - The cleaned-up text equals the first of these phrases
+    result: Removed (it is a repeat of the instruction)
+    verified: true
+    expect: true
+  output: Decision power is present or absent on the card.
+  sources:
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:_is_rule_echo
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:DECISION_POWER_ECHOES
+  confidence: high
+- id: tp_no_hardware_override
+  parent: do_not_propose_list
+  name: Product named to a role that does not reach hardware
+  kind: guardrail
+  summary: Replaces the play focus when the AI names an HP line to a non-IT remit.
+  purpose: Replaces the play focus when the AI names an HP line to a non-IT remit.
+  logic: If the contact's title has a no-hardware remit term and the opener plus play focus (ignoring
+    capital letters) mention any HP product line name or keyword (for example 'elitebook', 'workstation',
+    'wolf', 'poly', 'print', 'daas'), the play focus is replaced by 'Account engagement / discovery' and
+    the blocked line is recorded. The how-to-open text itself is NOT rewritten or removed.
+  example:
+    scenario: Head of Tax Division; the AI's opener mentions 'HP EliteBook' and its play focus is 'PC
+      - fleet standardisation'.
+    steps:
+    - '''tax'' means the remit does not reach hardware'
+    - The text contains 'elitebook', which is HP Elite / Pro PCs
+    result: The play focus becomes 'Account engagement / discovery'; the blocked line recorded is 'HP
+      Elite / Pro PCs'; the opener is unchanged
+    verified: true
+    expect: HP Elite / Pro PCs
+  output: The HP play focus and the blocked line.
+  sources:
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:_run
+  - hp-backend/src/app/services/extractors/grounding.py:HP_LINE_TOKENS
+  confidence: high
+- id: tp_blocked_play_override
+  parent: do_not_propose_list
+  name: Blocked line named anyway
+  kind: guardrail
+  summary: Enforces the 'do not propose' list after the text is written.
+  purpose: Enforces the 'do not propose' list after the text is written.
+  logic: For each line on the contact's 'do not propose' list, if the full line name (ignoring capital
+    letters) appears in the how-to-open text or play focus, the play focus is replaced by 'Account engagement
+    / discovery' and the blocked line is recorded. Only the exact line name is looked for (for example
+    'hp enterprise printing & mps'); the opener text is not changed.
+  output: The HP play focus and the blocked line.
+  sources:
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:_run
+  confidence: high
+- id: tp_pain_point_filter
+  parent: talking_points
+  name: Pain points that only echo a label are removed
+  kind: guardrail
+  summary: Keeps only real, sentence-length pain points.
+  purpose: Keeps only real, sentence-length pain points.
+  logic: Each pain point is dropped if it has fewer than 12 words, or (ignoring capital letters and a
+    final full stop) equals an intent topic or news headline, or, for labels longer than 20 characters,
+    starts with the label or is the start of the label. If no pain point survives, pain points are left
+    out. Hedged wording and function-versus-person wording are judged by AI only.
+  constants:
+  - label: Minimum words per pain point
+    ref: py:app.services.extractors.stakeholder_map:PAIN_POINT_MIN_WORDS
+    stated: 12
+  example:
+    scenario: Pain point 'Cloud computing', where 'Cloud computing' is an intent topic.
+    steps:
+    - 2 words, which is fewer than 12
+    result: Dropped
+    verified: true
+    expect: true
+  output: The list of pain points ('Potential pain points (inferred)' on the card).
+  sources:
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:_is_evidence_label
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:PAIN_POINT_MIN_WORDS
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:_run
+  confidence: high
+- id: tp_retry_cache_failure
+  parent: talking_points
+  name: Retries, saved results and failure handling
+  kind: selection
+  summary: Defines when the AI is asked again and when earlier text is reused.
+  purpose: Defines when the AI is asked again and when earlier text is reused.
+  logic: After the first pass, any contact without an accepted entry gets ONE more attempt (only those
+    contacts). Results are saved against a fingerprint of each contact's ID, name, title, department,
+    persona and skills, the full account evidence and the version of the AI instructions. A matching,
+    complete saved result is reused. If no contact gets an entry, the last good result is kept where there
+    is one. Otherwise the section is left pending and the page shows 'Talking points unavailable'.
+  constants:
+  - label: Version of the AI instructions
+    ref: py:app.services.extractors.stakeholder_map:TALKING_POINTS_PROMPT_VERSION
+    stated: 10
+  output: The section is available or pending.
+  sources:
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:generate_stakeholder_talking_points
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:_contacts_fingerprint
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:TALKING_POINTS_PROMPT_VERSION
+  confidence: high
+  internal: true
+- id: persona_pack_reference
+  parent: null
+  name: HP's eight buyer personas (reference used by other features)
+  kind: selection
+  summary: The fixed persona cards and the HP-line eligibility matrix that Content Studio, the Message
+    Evaluator and Strategy Chat apply to people drawn from this roster or from the client's target roles.
+  purpose: The fixed persona cards and the HP-line eligibility matrix that Content Studio, the Message
+    Evaluator and Strategy Chat apply to people drawn from this roster or from the client's target roles.
+    They do not change anything the three Stakeholder Map sections display.
+  logic: Eight fixed personas, taken from HP's content specification and identical on every account. Each
+    persona is identified by its own persona ID, never by a job title. HP has not yet confirmed the eligibility
+    matrix.
+  constants:
+  - label: Persona library version
+    ref: py:app.services.hp.buyer_personas:PERSONA_PACK_VERSION
+    stated: 3
+  - label: Matrix confirmed by HP
+    ref: py:app.services.hp.buyer_personas:MATRIX_CONFIRMED_BY_HP
+    stated: false
+  output: Persona cards and product-line limits in Content Studio, the Message Evaluator and Strategy
+    Chat.
+  sources:
+  - hp-backend/src/app/services/hp/buyer_personas.py:PERSONAS
+  - hp-backend/src/app/services/hp/buyer_personas.py:PERSONA_PACK_VERSION
+  - hp-backend/src/app/services/hp/buyer_personas.py:MATRIX_CONFIRMED_BY_HP
+  doc_source: HP 220 Content Studio & Message Evaluator Build Specification v1.0 Sections 2.2, 2.3, 4.9,
+    5 (cited in buyer_personas.py:1-6)
+  confidence: high
+- id: persona_role_match
+  parent: persona_pack_reference
+  name: Client target role to persona
+  kind: selection
+  summary: Maps one of the client's 32 target-role titles to one of the eight personas.
+  purpose: Maps one of the client's 32 target-role titles to one of the eight personas.
+  logic: Titles are put in lower case, '&' becomes 'and', punctuation is removed, and the title is split
+    into words. An exact word-for-word match against the client's titles or the persona titles wins. Otherwise
+    a match where one title is the start of the other counts (so 'Chief Financial Officer (CFO)' is the
+    CFO). The other 24 roles match no persona.
+  table:
+    columns:
+    - Persona
+    - Client target role title
+    - Committee angle
+    rows:
+    - - VP IT
+      - VP / Head of Information Technology
+      - Economic Buyer
+    - - CFO
+      - Chief Financial Officer (CFO)
+      - Finance - Budget Owner
+    - - IT Asset Manager
+      - IT Asset Manager
+      - Technical Buyer
+    - - Head of Procurement
+      - Head of Procurement
+      - Gatekeeper - Procurement & Legal
+    - - IT Security Manager
+      - IT Security Manager
+      - Technical Buyer
+    - - Device Lifecycle Manager
+      - Device Lifecycle & Refresh Manager
+      - Finance - Budget Owner
+    - - PC Fleet Standards Owner
+      - PC Fleet & Hardware Standards Owner
+      - Technical Buyer
+    - - AV & Collaboration Manager
+      - AV & Collaboration Systems Manager
+      - Technical Buyer
+  example:
+    scenario: Target role 'Chief Financial Officer (CFO)'.
+    steps:
+    - The words start with 'chief financial officer'
+    result: The CFO persona
+    verified: true
+    expect: cfo
+  output: A persona, or none.
+  sources:
+  - hp-backend/src/app/services/hp/buyer_personas.py:match_role
+  - hp-backend/src/app/services/hp/buyer_personas.py:SOURCE_ROLE_TITLES
+  confidence: high
+- id: persona_ask_bounds
+  parent: persona_pack_reference
+  name: What content may ask each committee angle for
+  kind: selection
+  summary: Limits the ask by buying-committee angle.
+  purpose: Limits the ask by buying-committee angle.
+  logic: 'Economic Buyer: a decision-oriented ask is acceptable. Technical Buyer: an evaluation, technical
+    review or pilot; never a decision or a commercial term. Finance - Budget Owner: cost, lifecycle, business-case
+    shape; never a price, a discount, or an assumption that a budget exists. Gatekeeper - Procurement
+    & Legal: the process (how a vendor is evaluated, documentation needed); never a product pitch or asking
+    them to choose a vendor.'
+  example:
+    scenario: Head of Procurement.
+    steps:
+    - The angle is Gatekeeper
+    result: May ask about the process; never a product pitch or vendor choice
+    verified: true
+    expect:
+      may_ask: the process - how a vendor is evaluated, what documentation is needed
+      never:
+      - a product pitch
+      - asking them to choose a vendor
+  output: Limits on what Content Studio and the Message Evaluator may ask for.
+  sources:
+  - hp-backend/src/app/services/hp/buyer_personas.py:ASK_BOUNDS
+  confidence: high
+- id: persona_line_eligibility
+  parent: persona_pack_reference
+  name: HP line eligibility per persona
+  kind: selection
+  summary: Which HP lines may and may not be named to each persona.
+  purpose: Which HP lines may and may not be named to each persona.
+  logic: A product line may be named only if it is on the persona's allowed list; the denied list is stated
+    explicitly. Some allowed lines come with a required framing (a qualifier).
+  table:
+    columns:
+    - Persona
+    - Allowed
+    - Denied
+    rows:
+    - - VP IT
+      - Elite/Pro PCs, EliteBook, ProBook, Wolf, WXP, Deployment, Care Pack, Anyware/DaaS, IQ, Z (only
+        where engineering workloads are evidenced)
+      - 3D
+    - - CFO
+      - Anyware/DaaS (financing structure), Care Pack (fixed multi-year cost), Lifecycle (residual value,
+        disposal), Print/MPS (cost-per-page), Elite/Pro PCs (fleet economics only)
+      - all Poly, Z, Wolf, IQ, 3D
+    - - IT Asset Manager
+      - WXP, Lifecycle, Care Pack, Deployment, Wolf (BIOS/firmware baselines only), Print/MPS (fleet visibility
+        only)
+      - all Poly, IQ, 3D, Z
+    - - Head of Procurement
+      - Elite/Pro PCs, Care Pack, Deployment, Print/MPS, Anyware/DaaS, Lifecycle - commercial wrapper
+        only, never a product pitch
+      - all Poly, Z, Wolf, IQ, 3D, EliteBook, ProBook, WXP
+    - - IT Security Manager
+      - Wolf, Elite/Pro PCs, EliteBook, ProBook, WXP, Deployment, Print/MPS (printer-firmware angle only)
+      - all Poly, 3D, Anyware/DaaS, IQ, Lifecycle
+    - - Device Lifecycle Manager
+      - Elite/Pro PCs, Care Pack, Deployment, Lifecycle, WXP, Anyware/DaaS
+      - all Poly, 3D, Z, Wolf
+    - - PC Fleet Standards Owner
+      - Elite/Pro PCs, Z, Deployment, Wolf (built-in baseline), Care Pack
+      - all Poly, Print/MPS, 3D, Anyware/DaaS
+    - - AV & Collaboration Manager
+      - Poly Collaboration, Poly Studio, Poly Lens, HP Poly Room Compute, Care Pack
+      - Z, Wolf, Print/MPS, 3D, Anyware/DaaS
+  example:
+    scenario: Can Poly Studio be named to the CFO?
+    steps:
+    - Poly Studio is not on the CFO's allowed list (it is denied)
+    result: 'No'
+    verified: true
+    expect: false
+  output: An allowed or denied decision, plus any qualifier text.
+  sources:
+  - hp-backend/src/app/services/hp/buyer_personas.py:ALLOWED_LINES
+  - hp-backend/src/app/services/hp/buyer_personas.py:DENIED_LINES
+  - hp-backend/src/app/services/hp/buyer_personas.py:LINE_QUALIFIERS
+  - hp-backend/src/app/services/hp/buyer_personas.py:is_line_allowed
+  doc_source: Build Specification v1.0 Section 2.3 (buyer_personas.py:152-171)
+  confidence: high
+undetermined:
+- The talking-points opener quality, angle uniqueness, hedging of pain points and decision-power wording
+  are entirely model-judged; there is no fixed formula and only the checks listed are applied in Python.
+- Which Opportunity Map plays count as 'qualified' depends on the Opportunity Map feature's own rules
+  (opportunity_narrative_plays widget); not re-documented here.
+- The eight persona cards' text content (goals, pain points, objections) is spec-transcribed reference
+  data; it was not reproduced here and HP has not confirmed the matrix (MATRIX_CONFIRMED_BY_HP = False,
+  SIGN_OFF_REQUIRED for pc-fleet-standards-owner and av-collaboration-manager).
+- How the client's persona coverage sheet decided which person fills a target role (matched_alias / match_basis)
+  is the client's own matching, delivered as data; not derivable from code.
+discrepancies:
+- rule_id: prompt_instructions
+  doc: 'HP_Recommendation_Tuning_Logic_FINAL_v4.txt formatting table: ''Stakeholder Map | How to Open
+    + HP Play Focus | Minimum 40 words; maximum 100 words.'''
+  code: hp-backend/src/app/services/extractors/stakeholder_map.py:333-334 OPENER_MIN_WORDS = 40, OPENER_MAX_WORDS
+    = 90; prompt line 793 'BETWEEN 40 AND 90 WORDS'. No Python check of the word count.
+  note: Upper bound 90 vs 100 (code comment says the play-focus label takes the remainder); the band is
+    only requested in the prompt.
+- rule_id: talking_points_account_context
+  doc: 'HP_Recommendation_Tuning_Logic_FINAL_v4.txt Stakeholder Map, Data to use: ''Contacts ... + relevant
+    Intent + Explorium Technographics + PredictLeads Hiring + Google RSS/Exa News + Filings + qualified
+    Opportunity Map findings.'''
+  code: hp-backend/src/app/services/extractors/stakeholder_map.py:632-714 _build_account_context reads
+    firmographics, technographics, intent_score, google_news, news_events and qualified opportunities;
+    no job_openings (Hiring) and no filings.
+  note: Hiring and Filings are not in the talking-points evidence; firmographics is included though not
+    listed in the doc row.
+- rule_id: talking_points
+  doc: 'HP_Recommendation_Tuning_Logic_FINAL_v4.txt Stakeholder Map, HP Rulebook + Case Study use: ''Use
+    relevant Rulebook offerings and case-study proof to make the HP Play Focus specific to the stakeholder
+    and evidenced opportunity.'' North Star example includes ''WHY THIS STAKEHOLDER'' and ''SUPPORTING
+    PROOF: NASA - Z by HP Workstations ...''.'
+  code: hp-backend/src/app/services/extractors/stakeholder_map.py:717-984 - no rulebook or case-study
+    input (only the qualified play titles and their HP product names); output fields are how_to_open,
+    hp_play_focus, decision_power, pain_points only.
+  note: No supporting-proof or why-this-stakeholder field is produced.
+- rule_id: hp_relevance_department_text
+  doc: 'Code comment hp-backend/src/app/services/extractors/stakeholder_map.py:148-150: ''A department
+    slug suggests relevance but never asserts the top tier on its own - only a title keyword reaches 100.'''
+  code: hp-backend/src/app/services/extractors/stakeholder_map.py:408-415 searches title + department
+    text; 'information technology' is a 100-tier keyword (line 143), so score_hp_relevance('Sales Manager','Information
+    Technology',None) = 100.
+  note: Comment and behaviour differ for the Information Technology department (incl. raw 'it' and 'data').
+- rule_id: influence_type
+  doc: 'hp-backend/src/app/api/v1/feature_mapping.py:321 buying_committee_persona purpose: ''Uploaded
+    buying-committee classification; primary input to influence type'''
+  code: hp-backend/src/app/services/extractors/stakeholder_map.py:488-502 the persona is consulted only
+    after the title/seniority/department branches (steps 5-6); feature_mapping.py:348 itself says 'used
+    LAST and is GATED'.
+  note: Admin field-mapping text is internally inconsistent; code uses persona as the last fallback.
+- rule_id: contact_intake
+  doc: 'Widget registry hp-backend/src/app/api/v1/widgets.py:208 stakeholder_contacts_grid description:
+    ''Verified IT decision makers, titles, departments, email contacts, and phone numbers'''
+  code: hp-backend/src/app/services/extractors/stakeholder_map.py:1044-1134 every usable contact row of
+    any department (HR, finance, sales...) is included; no 'decision maker' or 'verified' filter.
+  note: Registry wording narrower than the implemented roster.
+- rule_id: prompt_instructions
+  doc: 'hp-backend/src/app/api/v1/feature_mapping.py:238 purpose: ''Org chart mapping, key IT decision
+    makers, contacts, and influence levels'''
+  code: hp-backend/src/app/services/extractors/stakeholder_map.py:816 prompt rule 8 'NEVER state or imply
+    who anyone reports to. No reporting lines, no org structure.'; influence levels are not displayed
+    (hp-frontend/src/app/dashboard/page.tsx renderBadges 4268-4271).
+  note: No org chart and no visible influence levels in the implementation.
+- rule_id: c_suite_corroboration
+  doc: 'HP_ABX_v3_final Feature 3 rule 4 (quoted hp-backend/src/app/services/extractors/stakeholder_map.py:117-119):
+    ''keep the original title and send only the mapped field for review.'''
+  code: hp-backend/src/app/services/extractors/stakeholder_map.py:376-378 sets band to Manager and seniority_source_conflict
+    = true; no frontend or review queue reads seniority_source_conflict (grep finds no consumer).
+  note: The flag is stored but not routed to any review surface.
+- rule_id: client_buying_committee_coverage
+  doc: hp-backend/src/app/services/extractors/personas.py:16-17 'Keeping them here is what lets the Stakeholder
+    Map say "9 of 32 target roles are covered"'
+  code: client_buying_committee is written into stakeholder_influence_map (hp-backend/src/app/services/extractors/stakeholder_map.py:1268)
+    but hp-frontend/src/app/dashboard/page.tsx has no reference to client_buying_committee / not_covered.
+  note: Coverage is computed but not rendered on the current page.

@@ -1,0 +1,1514 @@
+# Rules page catalog for `intent_demand_signals`. Read by app/services/rules_catalog.
+# `ref:` values are read live; `stated` is what the prose was written against.
+# Examples marked `verified` are recomputed by tests/test_rules_examples.py.
+feature_key: intent_demand_signals
+purpose: Shows what the account is researching online, mapped to HP's five business categories (PC, Workstation,
+  Poly/Collaboration, Print and 3D), and what its job postings say it is hiring for, with the matching
+  HP products.
+final_output: A 'So what for HP' box; an 'Intent across HP business units' chart and cards (one score
+  per HP category, the topics behind it, a one-line read and a dropdown for the remaining topics); per-category
+  cards with supporting research signals and confirming technologies; the full table of research topics;
+  and a Hiring Signals section with job-posting and hybrid-role tiles, job-family bars, technology tags
+  and one HP theme card per hiring theme.
+how_it_combines: 'One intent source leads each account: the company''s online research activity where
+  research data exists for the account''s website, otherwise HP''s own interest scores for its five product
+  categories.
+
+  - Accounts led by research activity: AI places each research topic in one of HP''s five categories,
+  a category''s score is the average of its topics, and the remaining topics go to a long-tail dropdown.
+
+  - Accounts led by HP''s own scores: the five category scores are shown as received.
+
+  Each category then gets supporting signals, technology confirmation and an evidence tier, which sets
+  how strongly the wording may speak.
+
+  The Hiring Signals section below is independent: it counts job postings in the account''s country over
+  the 12 months before the job data was collected and maps them to HP themes using the standard occupation
+  code of each job.'
+rules:
+- id: int_lead_source
+  parent: null
+  name: Which intent source leads the tab
+  kind: source
+  summary: Decides whether the account's intent is told from its online research activity or from HP's
+    own category interest scores.
+  purpose: Decides whether the account's intent is told from its online research activity or from HP's
+    own category interest scores.
+  inputs:
+  - The company's online research topics and their scores
+  - The website and date the research data belongs to
+  - HP's own interest scores for its five product categories
+  logic: If the account has at least one usable research topic (it belongs to this company's website and
+    has a numeric score), the research activity leads. The HP business-unit summary is then built from
+    it, and HP's own category scores are left out of the 'So what for HP' box. If the account has no usable
+    research topic, HP's own category scores lead. The two sources are never blended into one number.
+  example:
+    scenario: Astra has 4 research topics and also a row in HP's own category scores.
+    steps:
+    - Usable research topics exist -> research activity leads.
+    result: The lead source is the research activity; the line of HP's own category scores is not printed
+      in 'So what for HP'.
+    verified: true
+    expect: Bombora
+  output: Which source leads the summary
+  sources:
+  - hp-backend/src/app/services/extractors/intent_demand_signals.py:_summarise
+  - hp-backend/src/app/services/extractors/intent_demand_signals.py:_bu_summary
+  doc_source: Sahaj 27 Sep, quoted at hp-backend/src/app/services/extractors/intent_demand_signals.py:939-942
+  confidence: high
+- id: int_domain_match
+  parent: int_lead_source
+  name: Research data must belong to this account's website
+  kind: selection
+  summary: Prevents another company's research being shown.
+  purpose: Prevents another company's research being shown.
+  logic: 'The website the research data was collected for is tidied up (web prefix, ''www.'' and any path
+    removed) and compared with the account''s website. Equal: matched. A different website: mismatch.
+    The topics are not attached to the account, and the tab says that the research data is for the other
+    website, naming both websites. No website on either side: unverified, and the topics are still shown.
+    The observation date is the data''s date stamp (YYYYMMDD) when exactly one is present.'
+  example:
+    scenario: Account website iag.co.nz; research data collected for www.iag.com.au.
+    steps:
+    - iag.com.au is not the same as iag.co.nz -> mismatch.
+    result: The topics are dropped for this account; the message names both websites.
+    verified: true
+    expect:
+    - mismatch
+    - The intent export is for iag.com.au, not iag.co.nz. Its topics are not attached to this account.
+    - '2026-09-01'
+  output: Whether the data matches the account, and the observation date
+  sources:
+  - hp-backend/src/app/services/extractors/intent_demand_signals.py:_match_provider_account
+  - hp-backend/src/app/services/extractors/intent_demand_signals.py:extract_intent_demand_signals
+  confidence: high
+- id: int_unavailable_states
+  parent: int_lead_source
+  name: What is shown when intent data is missing
+  kind: display
+  summary: Missing data is stated, never drawn as zero.
+  purpose: Missing data is stated, never drawn as zero.
+  logic: 'No research topics: the tab says that no intent topics are on file for this account. Research
+    data for a different website: a ''No matched signal'' message. If there is no research data AND HP''s
+    own category scores have no row for the account, the summary shows only that message. Empty sections
+    are hidden rather than showing ''no data''.'
+  example:
+    scenario: Account with no research topics and no row in HP's own category scores.
+    steps:
+    - There are no research topics, so no intent data.
+    - HP's own category scores have no match for the account.
+    result: Both summaries show the unavailable message; no scores are shown.
+  output: Availability flag and message
+  sources:
+  - hp-backend/src/app/services/extractors/intent_demand_signals.py:extract_intent_demand_signals
+  - hp-frontend/src/app/dashboard/page.tsx:sourceAMessage
+  confidence: high
+- id: int_topics_table
+  parent: null
+  name: Research topics table
+  kind: selection
+  summary: Every research topic for the account, as received.
+  purpose: Every research topic for the account, as received.
+  logic: Each topic keeps its score (0-100) exactly as received. Topics are sorted by score, highest first;
+    topics without a numeric score go last. Each row also shows an intensity label, the research theme
+    from HP's topic list, any HP category that list assigns, and whether the topic is staffing-related.
+  example:
+    scenario: Topics Laptops 72, laptops 90 (repeat), 3D Printing 88, Zero Trust 'n/a'.
+    steps:
+    - The repeat 'laptops' is removed and the first row (72) is kept.
+    - 'Zero Trust is excluded: its score is not a number.'
+    - 'Sorted: 3D Printing 88, Laptops 72, Zero Trust (excluded).'
+    result: 3D Printing 88 (High, 3D), Laptops 72 (Moderate, PC), Zero Trust shown without a score; the
+      repeat 'laptops' (90) is listed as removed.
+    verified: true
+    expect:
+    - - - 3D Printing
+        - 88
+        - true
+        - High
+        - 3D
+        - 3D
+      - - Laptops
+        - 72
+        - true
+        - Moderate
+        - Devices & Endpoints
+        - PC
+      - - Zero Trust
+        - null
+        - false
+        - null
+        - Security
+        - null
+    - - topic_name: laptops
+        composite_score: 90
+        kept_score: 72
+  output: The topics table and the list of repeats removed
+  sources:
+  - hp-backend/src/app/services/extractors/intent_demand_signals.py:_build_topics
+  - hp-backend/src/app/services/extractors/intent_demand_signals.py:extract_intent_demand_signals
+  confidence: high
+- id: int_topic_dedup_exclusion
+  parent: int_topics_table
+  name: Repeated and non-numeric topics
+  kind: filter
+  summary: Keeps the table honest without inventing values.
+  purpose: Keeps the table honest without inventing values.
+  logic: 'A topic name repeated in the same data (ignoring capital letters) is a duplicate: the first
+    row is kept and the repeat is listed under ''duplicates removed'' with both scores. The scores are
+    never averaged. A topic whose score is not a number stays in the table but is left out of every calculation,
+    with the reason shown. It is not scored 0.'
+  example:
+    scenario: Topic 'Zero Trust' with score 'n/a'.
+    steps:
+    - '''n/a'' is not a number.'
+    result: 'Left out of calculations, with the reason: the score ''n/a'' is not a number.'
+    verified: true
+    expect: Composite Score 'n/a' is not a number
+  output: Included flag and reason for exclusion
+  sources:
+  - hp-backend/src/app/services/extractors/intent_demand_signals.py:_build_topics
+  confidence: high
+- id: int_intensity
+  parent: int_topics_table
+  name: Intensity label for a research score
+  kind: score
+  summary: Plain-language strength of a topic score.
+  purpose: Plain-language strength of a topic score.
+  logic: A score of 85 or more is High; 70-84 is Moderate; below 70 is Low. This is applied only to research-topic
+    scores, never to HP's own category scores. The topic table's 70+ and 85+ filter buttons use the same
+    cut points.
+  table:
+    columns:
+    - Research score
+    - Intensity
+    rows:
+    - - '>= 85'
+      - High
+    - - 70-84
+      - Moderate
+    - - < 70
+      - Low
+  constants:
+  - label: Intensity bands
+    ref: py:app.services.hp.intent_topic_map:INTENSITY_BANDS
+    stated:
+    - - 85
+      - High
+    - - 70
+      - Moderate
+    - - 0
+      - Low
+  example:
+    scenario: Scores 85, 84, 70, 69.
+    steps:
+    - 85 -> High; 84 and 70 -> Moderate; 69 -> Low.
+    result: High, Moderate, Moderate, Low.
+    verified: true
+    expect:
+    - High
+    - Moderate
+    - Moderate
+    - Low
+  output: Intensity per topic
+  sources:
+  - hp-backend/src/app/services/hp/intent_topic_map.py:INTENSITY_BANDS
+  - hp-backend/src/app/services/hp/intent_topic_map.py:intensity
+  - hp-frontend/src/app/dashboard/page.tsx:filteredTopics
+  confidence: high
+- id: int_dictionary_mapping
+  parent: int_topics_table
+  name: 'HP''s topic list: theme and HP category'
+  kind: selection
+  uses:
+  - intent_dictionary
+  summary: Labels each topic with a research theme and, only where the link is direct, an HP category.
+  purpose: Labels each topic with a research theme and, only where the link is direct, an HP category.
+  logic: 'Every term from HP''s topic list that appears as a whole word in the topic name is collected.
+    A term contained in a longer matched term is dropped (''printing'' is dropped when ''3d printing''
+    matched). The terms'' themes decide the topic''s theme, and their HP categories decide its HP category.
+    There are ten themes: Collaboration & Workplace, AI & Compute, Cloud & Infrastructure, Devices & Endpoints,
+    Financial Services & Fintech, Security, E-commerce & Logistics, Print, 3D, and Other / Low Relevance.
+    Only terms for devices (pc, laptop, desktop, notebook -> PC; workstation -> Workstation), collaboration
+    (meeting room, video conferencing, headset, Zoom, Teams, Webex... -> Poly/Collaboration), print (printer,
+    print, managed print, document management, scanning -> Print) and 3D (3d printing, additive manufacturing,
+    3d printer -> 3D) carry an HP category. AI, Cloud & Infrastructure, Financial Services & Fintech,
+    Security and E-commerce & Logistics never do. A topic with no matching term is Other / Low Relevance.
+    The score is never changed.'
+  constants:
+  - label: Version of HP's topic list
+    ref: py:app.services.hp.intent_topic_map:DICTIONARY_VERSION
+    stated: intent-map-v2
+  example:
+    scenario: Topics '3D Printing', 'Managed Print Services', 'Meeting Room Solutions', 'Quantum Computing'.
+    steps:
+    - '''3d printing'' beats ''printing'' -> 3D / 3D.'
+    - '''managed print'' -> Print / Print.'
+    - '''meeting room'' -> Collaboration / Poly.'
+    - No matching term -> Other / Low Relevance.
+    result: '3D Printing: 3D theme, 3D category. Managed Print Services: Print theme, Print category.
+      Meeting Room Solutions: Collaboration & Workplace theme, Poly/Collaboration category. Quantum Computing:
+      Other / Low Relevance, no category.'
+    verified: true
+    expect:
+    - - 3D Printing
+      - 3D
+      - 3D
+    - - Managed Print Services
+      - Print
+      - Print
+    - - Meeting Room Solutions
+      - Collaboration & Workplace
+      - Poly/Collaboration
+    - - Quantum Computing
+      - Other / Low Relevance
+      - null
+  output: Theme, HP category, matched terms and mapping status per topic
+  sources:
+  - hp-backend/src/app/services/hp/intent_topic_map.py:TERMS
+  - hp-backend/src/app/services/hp/intent_topic_map.py:map_topic
+  - hp-backend/src/app/services/hp/intent_topic_map.py:_drop_contained
+  confidence: high
+- id: int_mapping_conflicts
+  parent: int_dictionary_mapping
+  name: Topic list conflict and review rules
+  kind: selection
+  uses:
+  - intent_dictionary
+  summary: Keeps doubtful topics out of HP categories.
+  purpose: Keeps doubtful topics out of HP categories.
+  logic: If a topic fits two themes, the higher one in this order wins (3D > Print > Devices > Collaboration
+    > AI > Security > Cloud > Finance > Commerce), and only the winner's terms can give an HP category.
+    If a topic names two HP categories (for example laptops and workstations), the theme is kept, no HP
+    category is given and the topic is flagged for review. If an HP-category term sits next to 'software',
+    'advertising', 'marketing' or 'media', the topic is moved to Other and flagged. If there is no matching
+    term but a near-miss word is present (for example 'ai', 'device', 'hardware', 'meeting', 'infrastructure',
+    'risk', 'finance', 'delivery', '3d'), the topic goes to Other and is flagged for review.
+  example:
+    scenario: '''security: cloud security'', ''Laptops and Workstations'', ''Print Advertising''.'
+    steps:
+    - Security outranks Cloud -> Security.
+    - PC and Workstation both named -> Devices, no category, flagged.
+    - '''print'' next to ''advertising'' -> Other, flagged.'
+    result: '''security: cloud security'': Security, no category, mapped. ''Laptops and Workstations'':
+      Devices & Endpoints, no category, flagged. ''Print Advertising'': Other / Low Relevance, no category,
+      flagged.'
+    verified: true
+    expect:
+    - - 'security: cloud security'
+      - Security
+      - null
+      - mapped
+    - - Laptops and Workstations
+      - Devices & Endpoints
+      - null
+      - flagged
+    - - Print Advertising
+      - Other / Low Relevance
+      - null
+      - flagged
+  output: Mapping status and reason for the flag
+  sources:
+  - hp-backend/src/app/services/hp/intent_topic_map.py:THEME_PRECEDENCE
+  - hp-backend/src/app/services/hp/intent_topic_map.py:NON_HARDWARE_QUALIFIERS
+  - hp-backend/src/app/services/hp/intent_topic_map.py:NEAR_MISS_TERMS
+  - hp-backend/src/app/services/hp/intent_topic_map.py:map_topic
+  confidence: high
+- id: int_hiring_linked_tag
+  parent: int_topics_table
+  name: Staffing-related topic tag
+  kind: selection
+  summary: Marks research topics about staffing.
+  purpose: Marks research topics about staffing.
+  logic: 'A topic is staffing-related if it contains staffing, staff, recruitment, recruiting, hiring,
+    onboarding, talent, layoff(s) or workforce as a whole word. HR software topics (for example ''hr tech:
+    successfactors'') are not. The tag is kept, but the section that displayed it is no longer shown,
+    at the client''s request.'
+  example:
+    scenario: '''Talent Acquisition'' and ''hr tech: successfactors''.'
+    steps:
+    - '''talent'' is present in the first only.'
+    result: Yes for the first, no for the second.
+    verified: true
+    expect:
+    - true
+    - false
+  output: Staffing-related flag
+  sources:
+  - hp-backend/src/app/services/hp/intent_topic_map.py:HIRING_TERMS
+  - hp-backend/src/app/services/hp/intent_topic_map.py:is_hiring_linked
+  - hp-backend/src/app/services/extractors/intent_demand_signals.py:_summarise
+  confidence: high
+- id: int_theme_stats
+  parent: null
+  name: 'Theme summary: highest and average'
+  kind: score
+  summary: Per research theme, how strong the research is.
+  purpose: Per research theme, how strong the research is.
+  logic: 'For each research theme, over the topics included in it: the topic count, the sum of scores,
+    the highest score and the average (rounded to 1 decimal), plus the intensity of the highest score.
+    The Other / Low Relevance theme also counts flagged topics.'
+  formula: average = sum of topic scores / number of topics, rounded to 1 decimal
+  example:
+    scenario: 'Topics Laptops 80, 2-in-1 PCs 65, Workstations 89 (all Devices & Endpoints), Cloud: Kubernetes
+      92.'
+    steps:
+    - 'Devices: count 3, highest 89, average (80+65+89)/3 = 78.0.'
+    - 'Cloud: count 1, highest 92, average 92.0.'
+    result: 'Cloud & Infrastructure: 1 topic, highest 92, average 92.0. Devices & Endpoints: 3 topics,
+      highest 89, average 78.0.'
+    verified: true
+    expect:
+    - - Cloud & Infrastructure
+      - 1
+      - 92
+      - 92.0
+    - - Devices & Endpoints
+      - 3
+      - 89
+      - 78.0
+  output: Summary per research theme
+  sources:
+  - hp-backend/src/app/services/extractors/intent_demand_signals.py:_stats
+  - hp-backend/src/app/services/extractors/intent_demand_signals.py:_summarise
+  confidence: high
+- id: int_category_file
+  parent: null
+  name: HP's own category interest scores
+  kind: source
+  summary: Reads the five HP category scores for the account as delivered.
+  purpose: Reads the five HP category scores for the account as delivered.
+  inputs:
+  - HP's interest scores for its five product categories, with trend, buying stage and research details
+  logic: 'The data holds, for each of HP''s five categories (for example ''PCs''), a score out of 100
+    and supporting details: intent trend, buying stage, research volume, topics researched, keywords matched,
+    related technologies, first and latest intent dates and the geographic source. The account''s row
+    is found by website. If several runs exist, the latest run date wins. Category names are standardised
+    (PCs -> PC, Workstations -> Workstation, Poly -> Poly/Collaboration, Printers -> Print, 3D Printers
+    -> 3D). Empty markers (dashes, n/a, none, blank) are treated as empty, and cells holding several items
+    are split into separate items. Scores are used exactly as received.'
+  example:
+    scenario: Astra has runs on 2026-08-01 and 2026-09-01.
+    steps:
+    - The latest run, 2026-09-01, is used.
+    - PC 32 Consideration; Workstation 38 No Signal.
+    result: The account matches. PC 32 (Consideration) has a signal; Workstation 38 (No Signal) does not.
+    verified: true
+    expect:
+    - matched
+    - '2026-09-01'
+    - 2
+    - PC:
+      - 32
+      - Consideration
+      - true
+      Workstation:
+      - 38
+      - No Signal
+      - false
+  output: Category scores and each category's main entry
+  sources:
+  - hp-backend/src/app/services/extractors/intent_demand_signals.py:_parse_category_file
+  - hp-backend/src/app/services/hp/intent_topic_map.py:CATEGORY_ALIASES
+  doc_source: HP_Recommendation_Tuning_Logic_FINAL_v4.docx section A (Intent input contract)
+  confidence: high
+- id: int_has_signal
+  parent: int_category_file
+  name: Does a category carry a signal?
+  kind: selection
+  summary: HP's own verdict on whether a score means something.
+  purpose: HP's own verdict on whether a score means something.
+  logic: A category has a signal when its score is present and not zero AND its buying stage is not blank
+    and not 'No Signal'. A category that fails this still keeps its score on screen.
+  example:
+    scenario: Workstation 38 with stage 'No Signal'.
+    steps:
+    - The stage is 'No Signal'.
+    result: No signal (the score of 38 is still shown).
+    verified: true
+    expect: false
+  output: Signal yes or no
+  sources:
+  - hp-backend/src/app/services/extractors/intent_demand_signals.py:_parse_category_file
+  confidence: high
+- id: int_trend_and_flags
+  parent: int_category_file
+  name: Trend label and keyword-noise flags
+  kind: display
+  summary: How the trend and noisy keywords are treated.
+  purpose: How the trend and noisy keywords are treated.
+  logic: The trend is shown as the label supplied with HP's category scores; it is not calculated by the
+    app. The summary states that a trend is unavailable because only one data delivery exists. Flagging
+    of noisy keywords is switched off, so no category is ever flagged or barred because of its keywords.
+  constants:
+  - label: Keywords treated as noise (none are set)
+    ref: py:app.services.hp.intent_topic_map:NOISY_CATEGORY_TERMS
+    stated: {}
+  example:
+    scenario: Any category.
+    steps:
+    - The list of noisy keywords is empty.
+    result: No category is flagged.
+    verified: true
+    expect: []
+  output: Trend label and keyword flags
+  sources:
+  - hp-backend/src/app/services/extractors/intent_demand_signals.py:_parse_category_file
+  - hp-backend/src/app/services/hp/intent_topic_map.py:NOISY_CATEGORY_TERMS
+  - hp-backend/src/app/services/extractors/intent_demand_signals.py:extract_intent_demand_signals
+  confidence: high
+- id: int_top_check
+  parent: int_category_file
+  name: Stated top category check
+  kind: guardrail
+  summary: Checks the stated top category against the scores in the same row.
+  purpose: Checks the stated top category against the scores in the same row.
+  logic: The stated top HP category and top score are compared with the highest category score in the
+    row. They count as consistent only if both match.
+  example:
+    scenario: The row states top 'Workstations' but gives no top score; the highest score is Workstation
+      38.
+    steps:
+    - The category matches but the score is missing -> not consistent.
+    result: Not consistent.
+    verified: true
+    expect: false
+  output: Top-category consistency check
+  sources:
+  - hp-backend/src/app/services/extractors/intent_demand_signals.py:_parse_category_file
+  confidence: high
+- id: int_supporting_signals
+  parent: null
+  name: Supporting research signals per HP category
+  kind: selection
+  summary: Shows which research backs each category and whether the account's technology confirms it.
+  purpose: Shows which research backs each category and whether the account's technology confirms it.
+  logic: For each category, each included research topic joins the FIRST signal family (in the order listed)
+    whose topic terms it contains. For PC, Poly, Print and 3D, a topic containing 'software', 'advertising',
+    'marketing' or 'media' joins nothing. A family is 'confirmed' when it has topics AND at least one
+    of the account's technologies matches its technology terms. Families are listed confirmed first, then
+    research without matching technology, then technology without research; within each group the family
+    with the highest topic score comes first. These signals never change a category's score.
+  table:
+    columns:
+    - Category
+    - Signal family
+    - Research topic terms
+    - Technology terms
+    rows:
+    - - Workstation
+      - GPT / LLMs
+      - gpt, chatgpt, openai, llm(s), large language model, generative ai
+      - openai, chatgpt, azure openai, gpt
+    - - Workstation
+      - AI chips / GPU
+      - ai chips, gpu(s), graphics processing unit, ai compute
+      - nvidia, cuda
+    - - Workstation
+      - Vector databases
+      - vector database(s)
+      - pinecone, weaviate, milvus, qdrant, chroma, pgvector
+    - - Workstation
+      - Data analytics
+      - data analytics, analytics, data science
+      - tableau, power bi, looker, qlik, cognos, spark, databricks, snowflake, sas
+    - - Workstation
+      - CAD / 3D design
+      - cad, 3d rendering, 3d modeling, engineering simulation
+      - autocad, autodesk, catia, solidworks, blender, siemens nx, creo, rhino
+    - - Workstation
+      - AI / Machine learning
+      - ai, artificial intelligence, machine learning, ml
+      - pytorch, keras, tensorflow, scikit-learn, mllib, sagemaker, azure machine learning, vertex ai,
+        hugging face, databricks
+    - - PC
+      - PCs & endpoints
+      - pc(s), laptop(s), desktop(s), notebook(s), endpoint(s), device management, windows 11
+      - intune, jamf, workspace one, airwatch, windows 10, windows 11, microsoft windows os
+    - - Poly/Collaboration
+      - Video & unified communications
+      - video collaboration/conferencing, unified communications, meeting room(s), huddle room, microsoft
+        teams, zoom, webex, hybrid work
+      - microsoft teams, zoom, webex, google meet, ringcentral, 8x8
+    - - Print
+      - Print & document workflow
+      - printer(s), print, printing, managed print, document management
+      - papercut, printix, uniflow, kofax, docuware
+    - - 3D
+      - Additive manufacturing
+      - 3d printing, additive manufacturing, additive, prototyping
+      - materialise, stratasys, formlabs, ultimaker, markforged
+    - - 3D
+      - CAD / 3D design
+      - cad, 3d modeling, 3d design, 3d rendering
+      - autocad, autodesk, catia, solidworks, blender, siemens nx, creo, fusion 360
+  example:
+    scenario: Workstation; topics CAD Software 81, GPU 77, Data Analytics 90; technologies AutoCAD, SolidWorks,
+      NVIDIA, Intune, Google Analytics, Zoom.
+    steps:
+    - CAD Software -> CAD / 3D design, confirmed by AutoCAD and SolidWorks.
+    - GPU -> AI chips / GPU, confirmed by NVIDIA.
+    - Data Analytics -> Data analytics; no matching technology (Google Analytics does not count).
+    - 'Order: confirmed CAD 81, confirmed GPU 77, then unconfirmed Data analytics 90.'
+    result: CAD / 3D design (81, confirmed by AutoCAD and SolidWorks); AI chips / GPU (77, confirmed by
+      NVIDIA); Data analytics (90, not confirmed).
+    verified: true
+    expect:
+    - - CAD / 3D design
+      - 81
+      - true
+      - - AutoCAD
+        - SolidWorks
+    - - AI chips / GPU
+      - 77
+      - true
+      - - NVIDIA
+    - - Data analytics
+      - 90
+      - false
+      - []
+  output: Supporting signals and the highest confirmed score per category
+  sources:
+  - hp-backend/src/app/services/extractors/intent_demand_signals.py:_supporting_signals
+  - hp-backend/src/app/services/hp/intent_topic_map.py:SIGNAL_FAMILIES
+  - hp-backend/src/app/services/hp/intent_topic_map.py:signal_family
+  - hp-backend/src/app/services/hp/intent_topic_map.py:family_technologies
+  doc_source: User-defined four-step flow (11 Sep), described at hp-backend/src/app/services/extractors/intent_demand_signals.py:1-24
+  confidence: high
+- id: int_tech_inventory
+  parent: int_supporting_signals
+  name: Account technology list used for confirmation
+  kind: selection
+  summary: Which technologies can confirm a signal.
+  purpose: Which technologies can confirm a signal.
+  logic: 'The list is built from the company''s installed technology: first the technologies grouped by
+    category, then its full technology stack, then the technologies used on its website. Values are split
+    at commas, underscores are read as spaces, and duplicates are removed (the first place a technology
+    appears is the one kept). Workforce trend data is not used. Technologies are matched to the technology
+    terms as whole words.'
+  example:
+    scenario: Product and design technologies 'AutoCAD, SolidWorks'; full technology stack 'AutoCAD, NVIDIA,
+      Microsoft Intune'; website technologies 'Google Analytics, Zoom'.
+    steps:
+    - AutoCAD is credited to Product and design, not to the full stack.
+    result: 6 technologies.
+    verified: true
+    expect:
+    - - AutoCAD
+      - Product And Design
+    - - SolidWorks
+      - Product And Design
+    - - Microsoft Intune
+      - It Management
+    - - NVIDIA
+      - Full Tech Stack
+    - - Google Analytics
+      - Technologies Used By Company Website
+    - - Zoom
+      - Technologies Used By Company Website
+  output: Technology list
+  sources:
+  - hp-backend/src/app/services/extractors/intent_demand_signals.py:_tech_inventory
+  confidence: high
+- id: int_category_explanation
+  parent: int_supporting_signals
+  name: Category card explanation sentence
+  kind: display
+  summary: A fixed-pattern read of each category card.
+  purpose: A fixed-pattern read of each category card.
+  logic: 'Built from fixed sentences: the category score and buying stage (or ''No <category> score''
+    when there is none); confirmed signals with their highest score and up to 4 technologies; research
+    with no matching technology; then ''This may strengthen an existing <HP play> conversation; it does
+    not change the category score'' if any signal is confirmed, otherwise ''On its own this does not support
+    a recommendation for <HP play>''.'
+  example:
+    scenario: Workstation 38 (Awareness) with the supporting signals above.
+    steps:
+    - Two confirmed families, one unconfirmed.
+    result: 'Workstation 38/100 (Awareness). Supporting research backed by the account''s own technology:
+      CAD / 3D design (max 81; AutoCAD, SolidWorks) and AI chips / GPU (max 77; NVIDIA). Research with
+      no matching technology: Data analytics (90). This may strengthen an existing Z by HP Workstations
+      conversation; it does not change the category score.'
+    verified: true
+    expect: 'Workstation: 38/100 in the category file (Awareness). Supporting research backed by the account''s
+      own technology: CAD / 3D design (max 81; AutoCAD, SolidWorks); AI chips / GPU (max 77; NVIDIA).
+      Research with no matching technology: Data analytics (90). This may strengthen an existing Z by
+      HP Workstations conversation; it does not change the category score.'
+  output: Explanation on each category card
+  sources:
+  - hp-backend/src/app/services/extractors/intent_demand_signals.py:_category_explanation
+  confidence: high
+- id: int_evidence_tier
+  parent: null
+  name: Evidence tier per HP category
+  kind: selection
+  summary: Limits how strongly any wording may talk about a category.
+  purpose: Limits how strongly any wording may talk about a category.
+  logic: 'Evidence sources counted: HP''s own category score (always) plus the account''s technology,
+    if any supporting signal is confirmed. If the category''s score is 0 / No Signal, technology does
+    not count. Tier: no signal, or no corroborating source -> Context Only; 2 or more sources -> Opportunity;
+    otherwise Conversation Starter. The tier sets the wording allowed: Opportunity = ''is relevant'',
+    Conversation Starter = ''may be relevant'', Context Only = ''possible fit'' (not recommended).'
+  table:
+    columns:
+    - Condition
+    - Tier
+    - Wording allowed
+    rows:
+    - - No signal, or no corroborating source
+      - Context Only
+      - possible fit (not recommended)
+    - - Has a signal, category score only
+      - Conversation Starter
+      - may be relevant
+    - - Has a signal + confirmed technology (2 sources)
+      - Opportunity
+      - is relevant
+  constants:
+  - label: Sources needed for Opportunity
+    ref: py:app.services.hp.evidence_tier:PIPELINES_FOR_OPPORTUNITY
+    stated: 2
+  example:
+    scenario: 'Workstation: (a) score 38, has a signal, confirmed CAD/GPU signals; (b) score 0, No Signal,
+      same technology.'
+    steps:
+    - (a) Category score + technology = 2 sources -> Opportunity.
+    - (b) No signal -> Context Only (the technology is ignored).
+    result: Opportunity; Context Only.
+    verified: true
+    expect:
+    - Opportunity
+    - Context Only
+  output: Evidence tier and wording allowed per category
+  sources:
+  - hp-backend/src/app/services/extractors/intent_demand_signals.py:_category_tier
+  - hp-backend/src/app/services/hp/evidence_tier.py:tier_for
+  - hp-backend/src/app/services/hp/evidence_tier.py:relevance_for
+  doc_source: HP_Recommendation_Tuning_Logic_FINAL_v4.docx section C (Evidence-Strength Tiers) and banned
+    output 1 (Poly)
+  confidence: high
+- id: int_so_what_category
+  parent: null
+  name: '''So What for HP'' per category - written by AI'
+  kind: model
+  summary: A seller paragraph per scored category.
+  purpose: A seller paragraph per scored category.
+  logic: 'AI writes one paragraph for each category that has a score, strongest first. It is given only
+    the score out of 100, the buying stage, the topics researched, the confirmed technology, the evidence
+    tier and the wording allowed. Rules: 80-90 words, no invented figures, no trend or volume words, and
+    the wording must match the tier. A paragraph outside 80-90 words is rewritten once; the rewrite is
+    kept only if it is closer to the word range. The wording check (sub-rule) then runs; text that fails
+    it is withheld and the category has no ''So What''.'
+  conditions:
+  - Stored with each category but not currently shown on the dashboard page
+  constants:
+  - label: Minimum words
+    ref: py:app.services.extractors.intent_demand_signals:SO_WHAT_MIN_WORDS
+    stated: 80
+  - label: Maximum words
+    ref: py:app.services.extractors.intent_demand_signals:SO_WHAT_MAX_WORDS
+    stated: 90
+  example:
+    scenario: First answer 40 words, rewrite 84 words.
+    steps:
+    - 40 words misses the range by 40; 84 words misses by 0.
+    - The rewrite is closer -> kept.
+    result: The 84-word paragraph is kept.
+    verified: true
+    expect: true
+  output: '''So What'' text and its word count'
+  sources:
+  - hp-backend/src/app/services/extractors/intent_demand_signals.py:SO_WHAT_SYSTEM
+  - hp-backend/src/app/services/extractors/intent_demand_signals.py:_so_what
+  - hp-backend/src/app/services/extractors/intent_demand_signals.py:_closer_to_band
+  - hp-backend/src/app/services/extractors/intent_demand_signals.py:extract_intent_demand_signals
+  doc_source: HP_Recommendation_Tuning_Logic_FINAL_v4.docx section E (Intent & Demand 80-90 words)
+  confidence: high
+- id: int_tier_wording_guard
+  parent: int_so_what_category
+  name: Wording guard for the tier
+  kind: guardrail
+  summary: Drops text that claims more than its evidence allows.
+  purpose: Drops text that claims more than its evidence allows.
+  logic: 'Below Opportunity, these are rejected: ''is relevant'', ''is a strong/clear/direct/natural fit'',
+    ''is well-suited'', ''clearly/directly addresses''. A sentence that does not start with HP, Wolf,
+    Poly, Z by HP, Elite or Pro and says the account needs, requires, plans to, is evaluating, is replacing,
+    has budget, is in market and similar is also rejected. At Context Only, ''recommend'', ''should deploy/adopt/buy/consider'',
+    ''propose'', ''position HP'' and ''pitch'' are also rejected.'
+  example:
+    scenario: Conversation Starter text 'Astra needs new workstations for its engineers.'
+    steps:
+    - The subject is the account and the verb is 'needs'.
+    result: Rejected; the category has no 'So What'.
+    verified: true
+    expect:
+    - 'tier Conversation Starter: says ''needs'', which states a confirmed need, project or buying motion
+      that only the Opportunity tier may claim'
+  output: Reasons the text was withheld
+  sources:
+  - hp-backend/src/app/services/hp/guardrails.py:tier_language_faults
+  - hp-backend/src/app/services/hp/guardrails.py:_SETTLED_RELEVANCE_RE
+  - hp-backend/src/app/services/hp/guardrails.py:_CONFIRMED_NEED_RE
+  - hp-backend/src/app/services/hp/guardrails.py:_RECOMMENDS_RE
+  doc_source: Client relevance ladder, 25 Sep (quoted at hp-backend/src/app/services/hp/evidence_tier.py:83-90)
+  confidence: high
+- id: int_so_what_box
+  parent: null
+  name: '''So what for HP'' box at the top of the tab'
+  kind: selection
+  summary: The lines shown in the summary box.
+  purpose: The lines shown in the summary box.
+  logic: 'The box shows these lines in order. For an account led by research activity: AI''s one-sentence
+    overview of the account''s research, if one was written. For other accounts: a line listing each category''s
+    score out of 100 and buying stage and, if no category has a signal, a line saying that no category
+    reports a buying stage, so none of the scores stands as a signal on its own. If there are no category
+    scores at all: a line saying so. Then, for any account, a line on supporting research confirmed by
+    the account''s own technology, listing the confirmed families with their highest score and up to 3
+    technologies.'
+  example:
+    scenario: No research data; HP's category scores PC 32 Consideration (signal), Workstation 0 No Signal;
+      no technology.
+    steps:
+    - HP's own scores lead -> score line.
+    - PC has a signal -> no 'no buying stage' line.
+    result: 'One line: category scores PC 32/100 (Consideration); Workstation 0/100 (No Signal).'
+    verified: true
+    expect:
+    - 'HP Category Intent file scores: PC 32/100 (Consideration); Workstation 0/100 (No Signal).'
+  output: The lines of the 'So what for HP' box
+  sources:
+  - hp-backend/src/app/services/extractors/intent_demand_signals.py:_summarise
+  - hp-backend/src/app/services/extractors/intent_demand_signals.py:extract_intent_demand_signals
+  confidence: high
+- id: int_bu_summary
+  parent: null
+  name: Intent across HP business units (top of tab)
+  kind: selection
+  summary: One score per HP category - PC, Workstation, Poly, Print, 3D - from the leading source.
+  purpose: One score per HP category - PC, Workstation, Poly, Print, 3D - from the leading source.
+  logic: 'Three cases. (1) No usable research topic: each category''s score is HP''s own category score,
+    sorted highest first, with no long tail. (2) Research exists but AI placed no topic in any HP category:
+    HP''s own category scores stand in, and every research topic goes to the long tail. (3) Otherwise:
+    each category''s score is the average of the scores of the research topics placed in it (sub-rules);
+    categories with none have no score. Categories are sorted by score (no score last), then by topic
+    count.'
+  example:
+    scenario: No research data; HP's own category scores PC 32 Consideration, Workstation 38 Awareness.
+    steps:
+    - Case (1).
+    result: Workstation 38, PC 32; the other three have no score.
+    verified: true
+    expect:
+    - PredictLeads
+    - - - Workstation
+        - 38
+        - category_file
+      - - PC
+        - 32
+        - category_file
+      - - Poly/Collaboration
+        - null
+        - null
+      - - Print
+        - null
+        - null
+      - - 3D
+        - null
+        - null
+  output: Category scores for the chart, cards and long tail
+  sources:
+  - hp-backend/src/app/services/extractors/intent_demand_signals.py:_bu_summary
+  - hp-backend/src/app/services/extractors/intent_demand_signals.py:_file_unit
+  - hp-frontend/src/app/dashboard/page.tsx
+  doc_source: Client email 5 Oct (quoted at hp-backend/src/app/services/extractors/intent_demand_signals.py:944-954
+    and hp-backend/src/app/services/hp/bombora_hp_classifier.py:3-9)
+  confidence: high
+  uncommitted: true
+- id: int_bombora_classifier
+  parent: int_bu_summary
+  name: AI places each research topic in an HP category
+  kind: model
+  summary: Decides which research topics count towards each HP category.
+  purpose: Decides which research topics count towards each HP category.
+  logic: AI labels each topic PC, Workstation, Poly/Collaboration, Print, 3D or none, using HP's definitions
+    (for example PC = laptops, 2-in-1s, desktops, thin clients, PC processors, Windows migrations, monitors
+    and docks; Workstation = workstations, RTX/Quadro graphics, CAD/BIM/rendering applications; data-centre
+    GPUs, high-performance computing clusters, cloud, general AI, security and networking are always none).
+    When unsure, the label is none; a topic naming two categories equally is none. The AI never sees a
+    score. Answers naming an unknown category are ignored. Labels are saved per topic text and reused
+    across accounts.
+  constants:
+  - label: Version of the category definitions
+    ref: py:app.services.hp.bombora_hp_classifier:PROMPT_VERSION
+    stated: bombora-hp-v2
+  - label: Topics labelled in one batch
+    internal: true
+    ref: py:app.services.hp.bombora_hp_classifier:BATCH_SIZE
+    stated: 120
+  - label: Store of saved labels
+    ref: py:app.services.hp.bombora_hp_classifier:COLLECTION
+    stated: bombora_topic_hp_classes
+  example:
+    scenario: 'Topics ''Laptops'' and ''cloud: kubernetes''.'
+    steps:
+    - AI labels Laptops -> PC and kubernetes -> none.
+    result: AI judgement; saved for later accounts.
+  output: HP category label and reason per topic
+  sources:
+  - hp-backend/src/app/services/hp/bombora_hp_classifier.py:SYSTEM
+  - hp-backend/src/app/services/hp/bombora_hp_classifier.py:_classify_batch
+  - hp-backend/src/app/services/hp/bombora_hp_classifier.py:classify_topics
+  - hp-backend/src/app/services/extractors/intent_demand_signals.py:extract_intent_demand_signals
+  confidence: high
+  uncommitted: true
+- id: int_bu_average
+  parent: int_bu_summary
+  name: HP category score = average of its research topics
+  kind: score
+  summary: The number on each business-unit bar and card on an account led by research activity.
+  purpose: The number on each business-unit bar and card on an account led by research activity.
+  logic: Score = the sum of the scores of the topics placed in the category / the number of those topics,
+    rounded to 1 decimal. The sum, the count and the full topic list are kept so the average can be checked
+    by hand. The top 3 topics are used for the card's one-line read. A category with no topic has no score
+    (not 0). Topics labelled none form the long tail, strongest first, shown as received in a dropdown.
+  formula: Category score = (sum of the scores of placed topics / number of placed topics), rounded to
+    1 decimal
+  constants:
+  - label: Top topics used for the card's one-line read
+    ref: py:app.services.extractors.intent_demand_signals:BU_TOP_TOPICS
+    stated: 3
+  example:
+    scenario: 'Laptops 80 and 2-in-1 PCs 65 placed in PC; Workstations 89 placed in Workstation; Cloud:
+      Kubernetes 92 labelled none.'
+    steps:
+    - PC = (80 + 65) / 2 = 72.5.
+    - Workstation = 89 / 1 = 89.0.
+    - Kubernetes 92 goes to the long tail.
+    - 'Order: Workstation 89.0, PC 72.5, then the three unscored.'
+    result: 'Workstation 89.0 (1 topic), PC 72.5 (2 topics, sum 145), Poly/Collaboration, Print and 3D
+      unscored; Cloud: Kubernetes 92 in the long tail.'
+    verified: true
+    expect:
+    - - - Workstation
+        - 89.0
+        - 1
+        - 89
+      - - PC
+        - 72.5
+        - 2
+        - 145
+      - - Poly/Collaboration
+        - null
+        - 0
+        - null
+      - - Print
+        - null
+        - 0
+        - null
+      - - 3D
+        - null
+        - 0
+        - null
+    - - topic: 'Cloud: Kubernetes'
+        score: 92
+  output: Category score, topic sum, topic count and long tail
+  sources:
+  - hp-backend/src/app/services/extractors/intent_demand_signals.py:_bu_summary
+  - hp-backend/src/app/services/extractors/intent_demand_signals.py:_stats
+  confidence: high
+  uncommitted: true
+- id: int_bu_fallback
+  parent: int_bu_summary
+  name: 'No HP-relevant research topic: HP''s own category scores stand in'
+  kind: source
+  summary: What an account with research data shows when none of its research is about HP's categories.
+  purpose: What an account with research data shows when none of its research is about HP's categories.
+  logic: If AI places no research topic in any HP category, each category takes HP's own category score,
+    and all research topics go to the long tail. The page says that the scores come from HP's own category
+    interest scores because none of the account's research topics is about an HP category.
+  example:
+    scenario: Same 4 topics, all labelled none; HP's own scores PC 32, Workstation 38.
+    steps:
+    - Nothing is placed -> HP's own scores stand in.
+    result: Workstation 38 and PC 32 from HP's own scores; 4 topics in the long tail.
+    verified: true
+    expect:
+    - PredictLeads
+    - - - Workstation
+        - 38
+      - - PC
+        - 32
+    - 4
+  output: Where each category score comes from
+  sources:
+  - hp-backend/src/app/services/extractors/intent_demand_signals.py:_bu_summary
+  - hp-frontend/src/app/dashboard/page.tsx:sourceNote
+  doc_source: Client answer 5 Oct (quoted at hp-backend/src/app/services/extractors/intent_demand_signals.py:952-954)
+  confidence: high
+  uncommitted: true
+- id: int_bu_reads
+  parent: int_bu_summary
+  name: One-sentence read per category - written by AI
+  kind: model
+  summary: A short read of what the account is researching in each category, plus an overview.
+  purpose: A short read of what the account is researching in each category, plus an overview.
+  logic: 'Only for accounts led by research activity. AI is given each category that has placed topics,
+    with its top 3 topic names (no scores), and writes one sentence per category and one overview sentence
+    naming 1-3 categories. Rules: 18-40 words; research language (''suggests'', ''may indicate''), never
+    ''needs'' or ''is ready to''; name only the listed topics; never an HP product; no numbers, scores,
+    percentages or dates. A read is dropped if it contains a number that does not appear in the category
+    or topic names, or if it falls outside 18-40 words (there is no second attempt). An overview with
+    an unsourced figure is blanked. The overview becomes the first line of the ''So what for HP'' box.'
+  constants:
+  - label: Minimum words
+    ref: py:app.services.extractors.intent_demand_signals:BU_READ_MIN_WORDS
+    stated: 18
+  - label: Maximum words
+    ref: py:app.services.extractors.intent_demand_signals:BU_READ_MAX_WORDS
+    stated: 40
+  - label: Version of the wording instructions
+    ref: py:app.services.extractors.intent_demand_signals:BU_READ_PROMPT_VERSION
+    stated: 2
+  example:
+    scenario: 'A read ''Research into 2-in-1 PCs suggests ...'' for PC (topic ''personal computer: 2-in-1
+      pcs''), and a read containing ''73 topics''.'
+    steps:
+    - '''2-in-1'' appears in the topic name -> allowed.'
+    - '''73'' appears in no name -> read dropped.'
+    result: The first is kept, the second is dropped.
+    verified: true
+    expect:
+    - false
+    - true
+  output: One-line read per category and the overview
+  sources:
+  - hp-backend/src/app/services/extractors/intent_demand_signals.py:BU_READ_SYSTEM
+  - hp-backend/src/app/services/extractors/intent_demand_signals.py:_bu_reads
+  - hp-backend/src/app/services/extractors/intent_demand_signals.py:_has_figure
+  - hp-backend/src/app/services/extractors/intent_demand_signals.py:extract_intent_demand_signals
+  doc_source: Sahaj 28 Sep (quoted at hp-backend/src/app/services/extractors/intent_demand_signals.py:805-807)
+  confidence: high
+  uncommitted: true
+- id: hire_job_selection
+  parent: null
+  name: Which job postings count (Hiring Signals)
+  kind: selection
+  summary: One shared selection, also used by the Executive Dashboard job tile.
+  purpose: One shared selection, also used by the Executive Dashboard job tile.
+  inputs:
+  - 'The company''s job postings: company name, country code, location and first-seen date'
+  logic: 'From the account''s job postings: (1) Country check: drop a job whose location names a country
+    other than the account''s; keep blank locations and locations naming no country. (2) Keep only jobs
+    first seen within the 12 months up to the date the job data was collected (18 Sep 2026, so from 18
+    Sep 2025); a job with no first-seen date is dropped. (3) Open and closed postings both count. The
+    original order is kept. Location is never shown. If the account''s country cannot be worked out, the
+    country check is skipped and a note is recorded.'
+  constants:
+  - label: Job data collection date (window end)
+    ref: py:app.services.hp.hiring_jobs:PREDICTLEADS_PULL_DATE
+    stated: '2026-09-18'
+  - label: Window (months)
+    ref: py:app.services.hp.hiring_jobs:WINDOW_MONTHS
+    stated: 12
+  - label: Hiring rules version
+    ref: py:app.services.hp.hiring_jobs:HIRING_RULES_VERSION
+    stated: 2
+  example:
+    scenario: 'Jabil - MY account, six jobs on rows shared by the Malaysian and Singaporean companies:
+      Singapore (Mar 2026), Kuala Lumpur Malaysia (Mar 2026), blank location (Jun 2025), blank location
+      and no date, Penang Malaysia (18 Sep 2025), Austin United States (May 2026).'
+    steps:
+    - Singapore and United States -> other country, dropped (2).
+    - Jun 2025 -> before 18 Sep 2025, dropped.
+    - No first-seen date -> dropped.
+    - Kuala Lumpur and Penang (on the window start day) are kept.
+    result: 2 jobs.
+    verified: true
+    expect:
+    - 2
+    - 2
+    - 1
+    - 1
+  output: The job list every Hiring figure uses, with counts of the jobs dropped
+  sources:
+  - hp-backend/src/app/services/hp/hiring_jobs.py:select_jobs
+  - hp-backend/src/app/services/hp/hiring_jobs.py:PREDICTLEADS_PULL_DATE
+  - hp-backend/src/app/services/hp/hiring_jobs.py:WINDOW_MONTHS
+  doc_source: Hiring_Signals_Rule_Set_Final.docx 'Preparing an account's jobs'; client answers 1 Oct quoted
+    at hp-backend/src/app/services/hp/hiring_jobs.py:8-18
+  confidence: high
+- id: hire_country_code
+  parent: hire_job_selection
+  name: Account's own country code
+  kind: selection
+  summary: Works out which country the account page is for.
+  purpose: Works out which country the account page is for.
+  logic: On rows shared by two companies (for example 'JABIL ... - MY; JABIL ... - SG' with codes 'MY;
+    SG'), the account's own name picks the code in the same position. Otherwise the ' - XX' ending of
+    the account name is used, and otherwise the most common single code on the account's rows. Only AU,
+    NZ, SG, MY, TH, ID, PH, VN, JP and KR are recognised.
+  table:
+    columns:
+    - Code
+    - Country names looked for in the job location
+    rows:
+    - - AU
+      - Australia
+    - - NZ
+      - New Zealand
+    - - SG
+      - Singapore
+    - - MY
+      - Malaysia
+    - - TH
+      - Thailand
+    - - ID
+      - Indonesia
+    - - PH
+      - Philippines
+    - - VN
+      - Vietnam, Viet Nam
+    - - JP
+      - Japan
+    - - KR
+      - South Korea, Korea
+  example:
+    scenario: A row naming 'JABIL CIRCUIT SDN BHD - MY; JABIL CIRCUIT (SINGAPORE) PTE LTD - SG', with
+      codes 'MY; SG'.
+    steps:
+    - The Singapore account's name is second -> SG.
+    - The Malaysian account's name is first -> MY.
+    result: SG, MY.
+    verified: true
+    expect:
+    - SG
+    - MY
+  output: Account country code
+  sources:
+  - hp-backend/src/app/services/hp/hiring_jobs.py:account_country_code
+  - hp-backend/src/app/services/hp/hiring_jobs.py:ACCOUNT_COUNTRY_NAMES
+  confidence: high
+- id: hire_country_check
+  parent: hire_job_selection
+  name: Location country check
+  kind: guardrail
+  summary: Drops jobs located in another country.
+  purpose: Drops jobs located in another country.
+  logic: 'Country names (the ten account countries plus about 150 others) are searched for in the location
+    as whole words, longest first (so ''Papua New Guinea'' is not read as ''Guinea''). No country found,
+    or a blank location: the job is kept. Otherwise it is kept only if one of the countries found is the
+    account''s.'
+  example:
+    scenario: 'AU account: ''Cremorne, Victoria, Australia'', ''Columbus, OH'', ''Port Moresby, Papua
+      New Guinea''; MY account: ''Singapore''.'
+    steps:
+    - Australia -> keep.
+    - No country named -> keep.
+    - Papua New Guinea -> drop.
+    - Singapore is not Malaysia -> drop.
+    result: Kept, kept, dropped, dropped.
+    verified: true
+    expect:
+    - true
+    - true
+    - false
+    - false
+  output: Keep or drop
+  sources:
+  - hp-backend/src/app/services/hp/hiring_jobs.py:location_in_country
+  - hp-backend/src/app/services/hp/hiring_jobs.py:_COUNTRY_RE
+  confidence: high
+- id: hire_window
+  parent: hire_job_selection
+  name: 12-month window start
+  kind: filter
+  summary: Start of the job window.
+  purpose: Start of the job window.
+  logic: The window starts 12 calendar months before the date the job data was collected (the same day,
+    or the last valid day of that month). A job first seen on the start date is inside.
+  example:
+    scenario: Data collected on 18 Sep 2026.
+    steps:
+    - Minus 12 months.
+    result: 18 Sep 2025.
+    verified: true
+    expect: '2025-09-18'
+  output: Window start date
+  sources:
+  - hp-backend/src/app/services/hp/hiring_jobs.py:window_start
+  confidence: high
+- id: hire_postings_tile
+  parent: null
+  name: Job postings and Hybrid roles tiles
+  kind: display
+  summary: Headline hiring numbers.
+  purpose: Headline hiring numbers.
+  logic: Job postings = the number of selected jobs (labelled 'Last 12 months'). Hybrid = jobs whose contract
+    types contain 'hybrid', 'remote' or 'work from home' (any capitalisation); hybrid % = 100 x hybrid
+    jobs / job postings, rounded to a whole number. The Hybrid tile is shown only when at least one job
+    is hybrid.
+  formula: hybrid % = 100 x hybrid jobs / job postings, rounded to a whole number
+  example:
+    scenario: 3 jobs with contract types ['Hybrid'], ['Full time'] and ['Work From Home', 'Contract'].
+    steps:
+    - 2 of 3 are hybrid.
+    - 100 x 2 / 3 = 66.7 -> 67.
+    result: 3 postings; Hybrid 67%.
+    verified: true
+    expect:
+    - 3
+    - 2
+    - 67
+    - '2025-12-01'
+    - '2026-09-01'
+  output: Job-posting and hybrid figures
+  sources:
+  - hp-backend/src/app/services/extractors/hiring_signals.py:postings_summary
+  - hp-backend/src/app/services/extractors/hiring_signals.py:HYBRID_TERMS
+  - hp-frontend/src/app/dashboard/page.tsx
+  doc_source: Hiring_Signals_Rule_Set_Final.docx Page sections 1-2
+  confidence: high
+- id: hire_family_breakdown
+  parent: null
+  name: What they're hiring for
+  kind: selection
+  summary: Jobs per job family.
+  purpose: Jobs per job family.
+  logic: Jobs are counted per job family (the standard occupation group each job belongs to). The 6 largest
+    families are shown (ties keep the original order); everything else, including jobs with no family,
+    is one 'Other' bar, so the bars add up to the job postings tile.
+  constants:
+  - label: Bars shown before Other
+    ref: py:app.services.extractors.hiring_signals:FAMILY_BARS
+    stated: 6
+  example:
+    scenario: '22 jobs: Management 5, Sales 4, Office 3, Computer 3, Business 2, Production 2, Legal 1,
+      Education 1, no family 1.'
+    steps:
+    - The top 6 are kept.
+    - Other = Legal 1 + Education 1 + no family 1 = 3.
+    result: 7 bars, with Other = 3.
+    verified: true
+    expect:
+    - - Management
+      - 5
+    - - Sales
+      - 4
+    - - Office
+      - 3
+    - - Computer
+      - 3
+    - - Business
+      - 2
+    - - Production
+      - 2
+    - - Other
+      - 3
+  output: Job-family bars
+  sources:
+  - hp-backend/src/app/services/extractors/hiring_signals.py:family_breakdown
+  - hp-backend/src/app/services/extractors/hiring_signals.py:FAMILY_BARS
+  doc_source: Hiring_Signals_Rule_Set_Final.docx Page section 3
+  confidence: high
+- id: hire_tech_tags
+  parent: null
+  name: Tech named in job ads
+  kind: selection
+  summary: Tools and skills most mentioned in the account's job ads.
+  purpose: Tools and skills most mentioned in the account's job ads.
+  logic: 'Each job''s tags count once per job. Tags are ranked by the number of jobs (ties keep the order
+    first seen). These are removed: Internship, Contractor, Business development, Customer success, Marketing
+    campaigns, Advertising and Social media (any capitalisation); the company''s own name (the account
+    name without its '' - XX'' ending, or the first part of its website address, matched ignoring capitals
+    and punctuation); and any tag of 5 or more characters that is the start of that name. At most 30 tags
+    are shown.'
+  constants:
+  - label: Maximum tags
+    ref: py:app.services.extractors.hiring_signals:TECH_TAG_LIMIT
+    stated: 30
+  example:
+    scenario: 'AUSTRALIA POST - AU (auspost.com.au). Job tags: [SAP, Power BI, Internship, Australia Post,
+      SAP], [SAP, Excel, Auspost], [Power BI, Austr].'
+    steps:
+    - SAP is in 2 jobs (a repeat within one job counts once); Power BI 2; Excel 1.
+    - Internship is not a technology; 'Australia Post' and 'Auspost' are the company's own name; 'Austr'
+      (5 characters) is the start of the company name.
+    result: SAP 2, Power BI 2, Excel 1.
+    verified: true
+    expect:
+    - - - SAP
+        - 2
+      - - Power BI
+        - 2
+      - - Excel
+        - 1
+    - - Internship
+      - Australia Post
+      - Auspost
+      - Austr
+  output: Technology tags
+  sources:
+  - hp-backend/src/app/services/extractors/hiring_signals.py:tech_tags
+  - hp-backend/src/app/services/extractors/hiring_signals.py:NON_TECH_TAGS
+  - hp-backend/src/app/services/extractors/hiring_signals.py:_own_name_keys
+  - hp-backend/src/app/services/extractors/hiring_signals.py:_is_own_name
+  doc_source: Hiring_Signals_Rule_Set_Final.docx Page section 4
+  confidence: high
+- id: hire_theme_assignment
+  parent: null
+  name: Job -> HP theme by occupation code
+  kind: selection
+  summary: Maps each job to one of nine HP themes and its HP product, service and solution.
+  purpose: Maps each job to one of nine HP themes and its HP product, service and solution.
+  logic: Each job carries a standard occupation code. The code is checked against the table from the top
+    down, and the first matching row gives the theme. Exact codes for Security, IT operations and Leadership
+    are checked before the broad code groups. A job with no code, or a code no row matches, has no theme
+    and appears on no card.
+  table:
+    columns:
+    - '#'
+    - Theme
+    - Occupation codes
+    - HP product
+    - HP service
+    - HP solution
+    rows:
+    - - 1
+      - Security
+      - 15-1212.00, 15-1299.04, 15-1299.05, 15-1299.06
+      - HP EliteBook 8 G2 Series (built-in Wolf Security, Sure Start / Sure Admin)
+      - Sure Click Enterprise professional services
+      - Sure Click Enterprise; Wolf Security Controller; Sure Access Enterprise
+    - - 2
+      - IT operations
+      - 11-3021.00, 15-1231.00, 15-1232.00, 15-1241.00, 15-1244.00, 15-1299.01
+      - HP EliteBook 8 G2 Series
+      - HP Imaging Service; HP Device Registration Service; Priority Access
+      - HP Workforce Experience Platform (WXP)
+    - - 3
+      - Leadership
+      - 11-1011.00, 11-1011.03, 11-1031.00
+      - HP EliteBook Ultra G1i
+      - Travel Support
+      - Protect and Trace with Wolf Connect
+    - - 4
+      - Education
+      - 25-*
+      - HP 200 G2 Series
+      - Accidental Damage Protection
+      - WXP
+    - - 5
+      - Technical, engineering & design experts
+      - other 15-*, 17-*, 19-*, 27-*
+      - HP EliteDesk 8 Tower G1i Desktop AI PC; HP EliteBook 8 G2 Series (AI PC)
+      - HP Advanced Imaging Service; Onsite / Next Business Day support
+      - HP Workforce Experience Platform (WXP)
+    - - 6
+      - Mobile & field sales
+      - 41-3*, 41-4*, 41-9*
+      - HP EliteBook 8 G2 Series
+      - Travel Support; Accidental Damage Protection; Computer Tracing
+      - Protect and Trace with Wolf Connect
+    - - 7
+      - Frontline & operations
+      - 29-, 31-, 33-, 35-, 37-, 39-, 45-, 47-, 49-, 51-, 53-, 55-*; 41-1*, 41-2*
+      - HP EliteStudio 8 AiO G1i / HP ProStudio 4 AiO G1i
+      - Accidental Damage Protection
+      - HP Workforce Experience Platform (WXP)
+    - - 8
+      - Office support & customer service
+      - 43-*, 23-2*
+      - HP EliteDesk 8 Mini G1i / HP ProDesk 4 Mini G1i
+      - Onsite / Next Business Day support
+      - HP Secure Print Enterprise Package Cloud; HP Access Control Scan
+    - - 9
+      - Office knowledge workers
+      - other 11-*, 13-*, 21-*, 23-1*
+      - HP EliteBook 6 G2 Series
+      - HP Imaging Service
+      - WXP and WXP Collaboration
+  constants:
+  - label: Version of the theme table
+    ref: py:app.services.hp.hiring_themes:THEMES_VERSION
+    stated: 1
+  example:
+    scenario: Codes 15-1212.00, 15-2051.00, 11-2021.00, 41-2031.00, 23-2011.00, blank.
+    steps:
+    - Exact Security code.
+    - Other 15- -> Technical.
+    - Other 11- -> Knowledge workers.
+    - 41-2 -> Frontline.
+    - 23-2 -> Office support.
+    - Blank -> no theme.
+    result: '15-1212.00: Security. 15-2051.00: Technical, engineering & design experts. 11-2021.00: Office
+      knowledge workers. 41-2031.00: Frontline & operations. 23-2011.00: Office support & customer service.
+      Blank: no theme.'
+    verified: true
+    expect:
+    - - 15-1212.00
+      - Security
+    - - 15-2051.00
+      - Technical, engineering & design experts
+    - - 11-2021.00
+      - Office knowledge workers
+    - - 41-2031.00
+      - Frontline & operations
+    - - 23-2011.00
+      - Office support & customer service
+    - - ''
+      - null
+  output: Theme per job
+  sources:
+  - hp-backend/src/app/services/hp/hiring_themes.py:THEMES
+  - hp-backend/src/app/services/hp/hiring_themes.py:theme_for
+  doc_source: Hiring_Signals_Rule_Set_Final.docx Theme rules table
+  confidence: high
+- id: hire_theme_cards
+  parent: hire_theme_assignment
+  name: Hiring signals for HP cards
+  kind: display
+  summary: One card per theme that has jobs.
+  purpose: One card per theme that has jobs.
+  logic: 'Each theme with at least one job gets a card: the theme name, the job count, up to 5 job titles
+    (the job''s title, otherwise its standard title) most frequent first with a posted count, ''+ N more
+    jobs'' for the rest, and the theme''s HP product, service and solution. Cards are sorted by job count,
+    with ties in table order.'
+  constants:
+  - label: Titles per card
+    ref: py:app.services.extractors.hiring_signals:CARD_TITLES
+    stated: 5
+  example:
+    scenario: 3 Security jobs (Security Engineer x2, SOC Analyst), 3 Office support jobs (Customer Service
+      Rep x2, Contact Centre Agent), 1 job with no code.
+    steps:
+    - Both themes have 3 jobs -> Security first by table order.
+    - The job with no code has no theme.
+    result: Security 3, Office support 3; 1 job has no theme.
+    verified: true
+    expect:
+    - - - Security
+        - 3
+        - - - Security Engineer
+            - 2
+          - - SOC Analyst
+            - 1
+        - 0
+      - - Office support & customer service
+        - 3
+        - - - Customer Service Rep
+            - 2
+          - - Contact Centre Agent
+            - 1
+        - 0
+    - 1
+  output: Hiring theme cards
+  sources:
+  - hp-backend/src/app/services/extractors/hiring_signals.py:theme_cards
+  - hp-backend/src/app/services/extractors/hiring_signals.py:CARD_TITLES
+  doc_source: Hiring_Signals_Rule_Set_Final.docx Page section 5 and 'What each card shows'
+  confidence: high
+- id: hire_empty_section
+  parent: null
+  name: 'No jobs: section hidden'
+  kind: guardrail
+  summary: Never shows 'no data' for hiring.
+  purpose: Never shows 'no data' for hiring.
+  logic: If no job passes the selection, all four Hiring figures are empty and the page leaves the Hiring
+    Signals section out. A figure with nothing to show (no tags, no themed jobs) is also empty.
+  example:
+    scenario: Every job is in another country.
+    steps:
+    - The selection is empty.
+    result: The section is not shown.
+  output: Section hidden
+  sources:
+  - hp-backend/src/app/services/extractors/hiring_signals.py:extract_hiring_signals
+  - hp-frontend/src/app/dashboard/page.tsx
+  doc_source: Hiring_Signals_Rule_Set_Final.docx 'If no jobs remain, hide the Hiring Signals section'
+  confidence: high
+undetermined:
+- 'Uncommitted change (5 Oct, featBomboraHpCategories): the intent node in hp-backend/src/app/services/regen/graph.py
+  (127-140) does not reference bombora_hp_classifier.PROMPT_VERSION and logic_version stays 2, so existing
+  intent widgets are not automatically marked stale; Bombora accounts keep the 30 Sep theme cards until
+  intent_demand_signals is explicitly regenerated.'
+- Single-topic HP categories show 'avg of 1 topic' (score = that topic's score); whether the client accepts
+  this was not answered (5 Oct).
+- The classifier's labels, the So What and the business-unit reads are model output; only their checks
+  are reproducible.
+- datasets.account_domain (domain resolution used by the Bombora and category-file domain checks) was
+  not inspected in depth.
+- How job_openings rows are assigned to an account before select_jobs (dataset split by domain/name) was
+  not inspected.
+- PREDICTLEADS_PULL_DATE is hard-coded to 2026-09-18 and must be changed by hand for a new pull.
+- _carries_buying_signal (hp-backend/src/app/services/extractors/intent_demand_signals.py:462) is used
+  by the Opportunity Map, not displayed on this tab.
+discrepancies:
+- rule_id: int_so_what_category
+  doc: 'HP_Recommendation_Tuning_Logic_FINAL_v4.docx Intent & Demand row: ''Group related Intent topics
+    into meaningful themes using scores, volume, trend, stage and researched topics'' and example ''Astra''s
+    3D-printing research is increasing''.'
+  code: 'Prompt forbids describing intent as increasing/decreasing/stable/high-volume/low-volume (hp-backend/src/app/services/extractors/intent_demand_signals.py:491-494);
+    graph.py logic_version 2 comment: ''Sahaj 27 Sep - no trend or volume in the So What'' (hp-backend/src/app/services/regen/graph.py:137).'
+  note: ''
+- rule_id: int_evidence_tier
+  doc: 'HP_Recommendation_Tuning_Logic_FINAL_v4.docx Intent & Demand row: corroborate themes with Technographics,
+    Hiring, News and Filings.'
+  code: Tier pipelines are only the category file (Intent) and confirmed technology (hp-backend/src/app/services/extractors/intent_demand_signals.py:531-533).
+  note: Hiring, News and Filings never count toward the Intent tier.
+- rule_id: int_so_what_category
+  doc: 'HP_Recommendation_Tuning_Logic_FINAL_v4.docx section E: ''So What for HP by prioritized theme''
+    is the mandatory seller-facing output.'
+  code: Per-category LLM So What is stored (hp-backend/src/app/services/extractors/intent_demand_signals.py:1120-1138)
+    but the dashboard renders only summaryData.so_what (hp-frontend/src/app/dashboard/page.tsx:2751),
+    the Python lines plus the Bombora overview.
+  note: On Bombora accounts the per-category So What is still based on the category file, not the Bombora
+    averages.
+- rule_id: int_bu_average
+  doc: 'Code comments recording the user''s 11 Sep rule: ''Supporting signals never change a category''s
+    score. The category file is the source of truth'' (hp-backend/src/app/services/extractors/intent_demand_signals.py:15-18,
+    hp-backend/src/app/services/hp/intent_topic_map.py:361-374).'
+  code: On Bombora-led accounts the business-unit score is now the Bombora average (hp-backend/src/app/services/extractors/intent_demand_signals.py:989-1013),
+    per the 5 Oct client email; the per-category cards further down still show the 'Predictleads score'
+    (hp-frontend/src/app/dashboard/page.tsx:3215-3226).
+  note: Two different HP-category numbers can appear on one Bombora account page.
+- rule_id: int_category_file
+  doc: 'Module docstring: ''Three widgets, all computed here in Python - nothing is generated'' (hp-backend/src/app/services/extractors/intent_demand_signals.py:26).'
+  code: The So What, the business-unit reads and the topic classifier are model calls (hp-backend/src/app/services/extractors/intent_demand_signals.py:541,
+    843, 1155).
+  note: Stale comment, not a client decision.
+- rule_id: int_mapping_conflicts
+  doc: 'Dictionary docstring: ''two themes of different rank resolve by THEME_PRECEDENCE; two of equal
+    rank stay ambiguous'' (hp-backend/src/app/services/hp/intent_topic_map.py:23-24).'
+  code: Every theme has its own rank in THEME_PRECEDENCE (hp-backend/src/app/services/hp/intent_topic_map.py:504-505),
+    so the equal-rank branch (hp-backend/src/app/services/hp/intent_topic_map.py:511-513) can never trigger.
+  note: Multi-theme topics always resolve to one theme.
+- rule_id: hire_job_selection
+  doc: 'Hiring_Signals_Rule_Set_Final.docx Page section 1: ''Count of jobs after the country check; sub-line
+    "Seen [earliest column H] - [latest column L]"''.'
+  code: A 12-month window to the pull date is also applied (client answer 1 Oct, hp-backend/src/app/services/hp/hiring_jobs.py:15-17);
+    the page sub-line shows 'Last 12 months' (hp-frontend/src/app/dashboard/page.tsx:3515), not the seen
+    range, although seen_from/seen_to are computed.
+  note: ''
+- rule_id: hire_postings_tile
+  doc: 'Hiring_Signals_Rule_Set_Final.docx: ''Hybrid roles (column F) map to HP ProBook 4 G2 Series and
+    WXP Collaboration. This appears in the Hybrid tile''.'
+  code: Neither the payload nor the page shows a product on the Hybrid tile (hp-backend/src/app/services/extractors/hiring_signals.py:129-141,
+    hp-frontend/src/app/dashboard/page.tsx:3517-3525).
+  note: ''
+- rule_id: hire_theme_assignment
+  doc: 'Hiring_Signals_Rule_Set_Final.docx theme table: #5 ''Technical, engineering & design'', solution
+    ''WXP''; #9 solution ''WXP and WXP Collaboration(separate licence)''.'
+  code: '#5 named ''Technical, engineering & design experts'' (client answer 1 Oct, hp-backend/src/app/services/hp/hiring_themes.py:53)
+    with solution ''HP Workforce Experience Platform (WXP)''; #9 solution ''WXP and WXP Collaboration''
+    without ''(separate licence)'' (hp-backend/src/app/services/hp/hiring_themes.py:54-79).'
+  note: Wording only.
+- rule_id: hire_tech_tags
+  doc: 'Hiring_Signals_Rule_Set_Final.docx section 4: ''remove the company''s own name and non-tech tags''.'
+  code: Also removes any tag of 5+ characters that is the start of the company name or domain label (hp-backend/src/app/services/extractors/hiring_signals.py:117-118).
+  note: e.g. 'Toyota' for TOYOTA GROUP; could remove a genuine tool whose name starts the company name.
+- rule_id: hire_country_code
+  doc: 'Hiring_Signals_Rule_Set_Final.docx: a job links to its account on domain + company name + country
+    code together.'
+  code: Rows come from the account's job_openings dataset; if no country code is found the country check
+    is skipped entirely (hp-backend/src/app/services/hp/hiring_jobs.py:195-197).
+  note: Doc does not cover a missing code.

@@ -1,0 +1,1066 @@
+# Rules page catalog for `objection_playbook`. Read by app/services/rules_catalog.
+# `ref:` values are read live; `stated` is what the prose was written against.
+# Examples marked `verified` are recomputed by tests/test_rules_examples.py.
+feature_key: objection_playbook
+purpose: Prepares the seller for push-back in five fixed HP contest areas, using the technology the account
+  is known to run, claims approved in HP's sales rulebook and, where one exists, an HP customer case study.
+final_output: A header showing the number of reframes and an 'Incumbents Detected' count, then up to five
+  expandable cards, one per area. Each card shows a hypothetical buyer objection and 'Could be raised
+  by' (a real contact's job title only when the title is a strong match, otherwise the function that owns
+  the area). When expanded, the card shows the reframe, the evidence line word for word, a counter question,
+  an HP proof point when one exists, and a topic-owner line stating that the person has not raised it.
+how_it_combines: The playbook always works through the same five HP contest areas. For each area it finds
+  the vendors the account runs (from the installed technology list, or from website technology when that
+  list is empty), names a topic owner only on a strong job-title match, and selects the claims from HP's
+  approved sales rulebook that the account's evidence has earned. It can also attach a case study. The
+  AI writes the objection and reframe from that material only. The app then rejects cards that use the
+  sector as justification, make unsupported HP claims or invent numbers, gives rejected areas one more
+  try, and merges near-duplicates.
+rules:
+- id: technology_evidence_source
+  parent: null
+  name: Which technology evidence the playbook is built from
+  kind: source
+  summary: Picks one source of technology information per account, in a fixed order, and records which
+    one was used.
+  purpose: Picks one source of technology information per account, in a fixed order, and records which
+    one was used.
+  inputs:
+  - The account's installed technology list
+  - The account's website technology
+  logic: '1) If the installed technology list has at least one non-blank entry, it is used. 2) Otherwise
+    the website technology is used: every technology named under its categories is combined into one ''Website
+    stack'' list. Technical page details (search-engine headers, titles and descriptions, copyright, document
+    information, robots, language, feeds, links, web master) and ID fields are skipped. 3) Otherwise there
+    is no technology evidence and no objection is written. Technology seen in job ads and in other vendors''
+    technology detections is never used. The source used is recorded on the card. When website technology
+    is used, a note says that the installed technology list has no data for this account and that the
+    evidence is website technology; the admin data-gaps view reads that note.'
+  conditions:
+  - Installed technology list has any non-blank entry -> use it
+  - Otherwise website technology has any real technology (not page details) -> use it
+  - Otherwise -> no technology evidence; the Objection Playbook shows an empty message and no cards
+  constants:
+  - label: Names shown for each source
+    ref: py:app.services.extractors.objection_playbook:EVIDENCE_SOURCE_LABELS
+    stated:
+      technographics: 4_Technographics
+      tech_breakdown: tech_breakdown (website technology)
+      none: No technology evidence available
+  example:
+    scenario: The installed technology list exists but its only entry is blank.
+    steps:
+    - The entry has no non-blank value, so it cannot be used
+    - Fall back to website technology
+    result: The installed technology list is not usable, so website technology is tried
+    verified: true
+    expect: false
+  output: 'One of three sources: installed technology list, website technology, or none. The page header
+    says which one was used.'
+  sources:
+  - hp-backend/src/app/services/extractors/objection_playbook.py:_technology_evidence
+  - hp-backend/src/app/services/extractors/objection_playbook.py:_usable
+  - hp-backend/src/app/services/extractors/tech_landscape.py:_parse_tech_breakdown
+  - hp-backend/src/app/services/extractors/objection_playbook.py:EVIDENCE_SOURCE_LABELS
+  - hp-backend/src/app/services/extractors/objection_playbook.py:TECH_BREAKDOWN_FALLBACK_NOTE
+  doc_source: 'Client round-2 load guidance quoted at objection_playbook.py:197: ''website tech when no
+    technographics'''
+  confidence: high
+- id: incumbent_context
+  parent: null
+  name: Incumbent Technology Context panel
+  kind: selection
+  summary: Lists the technologies the account is known to run, plus business context.
+  purpose: Lists the technologies the account is known to run, plus business context.
+  inputs:
+  - The account's installed technology list
+  - The company profile
+  - The contact list
+  logic: 'Only when the source is the installed technology list: the incumbent technologies are every
+    item in the account''s full technology list (all technologies, not only competitors), and the relevant
+    categories are the technology categories (20 in total) that have at least one entry. Business context
+    comes from the company profile: business description, company name, web domain, headquarters location
+    (city, region and country joined; otherwise the stated headquarters), industry (the LinkedIn, NAICS
+    and SIC industry labels, with repeats removed, joined with '' / ''), employee range and revenue range.
+    The panel also carries the evidence and topic owner for each area. Status is ''available'' if there
+    are incumbents or business context, otherwise ''empty''. When website technology is the source, the
+    incumbent list stays empty (count 0).'
+  output: The 'N Incumbents Detected' badge in the page header. The other details sit in the panel.
+  sources:
+  - hp-backend/src/app/services/extractors/objection_playbook.py:extract_objection_playbook
+  - hp-backend/src/app/services/extractors/objection_playbook.py:TECHNOGRAPHICS_CATEGORY_COLUMNS
+  confidence: high
+- id: contest_areas
+  parent: null
+  name: Five fixed HP contest areas
+  kind: selection
+  summary: Every account is examined in the same five areas; each area gets at most one objection card.
+  purpose: Every account is examined in the same five areas; each area gets at most one objection card.
+  logic: 'For each area, the playbook finds competing vendors in the technology evidence and writes a
+    plain evidence line. Areas are always handled in this order: Client Devices, Collaboration, Print
+    / MPS, Endpoint Security, Device Management. An area with no vendor is still kept (marked as not shown
+    in the installed technology) and still gets a card.'
+  table:
+    columns:
+    - Area
+    - Technology categories checked
+    - Main vendors (these carry the objection)
+    rows:
+    - - Client Devices
+      - Platform and storage, IT management
+      - dell, lenovo, asus, acer, msi, apple ios, macos, chromeos, microsoft windows, thinkpad, latitude,
+        macbook, matebook, surface laptop
+    - - Collaboration
+      - Collaboration, communications
+      - zoom, microsoft teams, webex, poly, logitech, g suite, google workspace, slack, ringcentral, microsoft
+        office 365, google meet
+    - - Print / MPS
+      - Productivity and operations, operations management
+      - canon, epson, xerox, ricoh, brother, kyocera, lexmark, sharp, konica, papercut, printer
+    - - Endpoint Security
+      - IT security, computer networks
+      - symantec, kaspersky, defender, crowdstrike, sentinelone, mcafee, sophos, trend micro, bitdefender,
+        eset, carbon black, cylance
+    - - Device Management
+      - IT management, computer networks
+      - intune, workspace one, airwatch, jamf, manageengine, sccm, ivanti, tanium, ninjaone
+  constants:
+  - label: Technology categories checked for each area
+    ref: py:app.services.extractors.objection_playbook:AREA_CATEGORY_COLUMNS
+  - label: Main vendors for each area
+    ref: py:app.services.extractors.objection_playbook:AREA_PRIMARY_TOKENS
+  output: One evidence entry per area.
+  sources:
+  - hp-backend/src/app/services/extractors/objection_playbook.py:AREA_CATEGORY_COLUMNS
+  - hp-backend/src/app/services/extractors/objection_playbook.py:_build_area_evidence
+  confidence: high
+- id: vendor_token_matching
+  parent: contest_areas
+  name: How a vendor is detected in an area
+  kind: selection
+  summary: Finds competitor technologies without false hits inside other words.
+  purpose: Finds competitor technologies without false hits inside other words.
+  logic: 'A vendor name counts as a match only when it stands alone as a word: no letter or digit directly
+    before or after it, ignoring capital letters. So ''it'' does not match ''quality'' and ''poly'' does
+    not match ''Polycom''. The area''s own technology categories are checked first (noting which category),
+    then the full technology list (or the ''Website stack'' list when website technology is the source)
+    for anything not already found. Each technology is listed once.'
+  example:
+    scenario: Vendor name 'poly' against the entry 'Polycom'.
+    steps:
+    - '''poly'' is followed by the letter ''c'', so it does not stand alone as a word'
+    result: No match
+    verified: true
+    expect: false
+  output: Vendors detected for each area.
+  sources:
+  - hp-backend/src/app/services/extractors/objection_playbook.py:_token_present
+  - hp-backend/src/app/services/extractors/objection_playbook.py:_build_area_evidence
+  confidence: high
+- id: context_vendors
+  parent: contest_areas
+  name: Supporting-context technologies (Endpoint Security only)
+  kind: selection
+  summary: Shows adjacent security products without letting them carry the argument.
+  purpose: Shows adjacent security products without letting them carry the argument.
+  logic: For Endpoint Security only, products matching Cisco ASA, Cisco IronPort, Fortinet, FortiGate,
+    FortiManager, Aruba ClearPass, Palo Alto, Check Point, Azure AD or Okta (found in the technology list
+    or the area's categories, and not already a main vendor) are listed as 'supporting context'. They
+    never make an area count as 'detected', and the AI is told not to treat them as doing the area's job.
+  constants:
+  - label: Endpoint Security supporting-context vendors
+    ref: py:app.services.extractors.objection_playbook:AREA_CONTEXT_TOKENS.Endpoint Security
+    stated:
+    - cisco asa
+    - cisco ironport
+    - fortinet
+    - fortigate
+    - fortimanager
+    - aruba clearpass
+    - palo alto
+    - check point
+    - azure ad
+    - okta
+  output: Supporting-context vendors for each area.
+  sources:
+  - hp-backend/src/app/services/extractors/objection_playbook.py:AREA_CONTEXT_TOKENS
+  - hp-backend/src/app/services/extractors/objection_playbook.py:_build_area_evidence
+  confidence: high
+- id: area_evidence_string
+  parent: contest_areas
+  name: The evidence line shown on each card
+  kind: display
+  summary: An evidence line written by fixed rules and shown word for word; the AI may read it but not
+    rewrite it.
+  purpose: An evidence line written by fixed rules and shown word for word; the AI may read it but not
+    rewrite it.
+  logic: 'If vendors were found: ''<source> -> <Area> | <category>: <vendors> | ...'', plus '' | supporting
+    context: ...'' when there is any. If none were found: ''<source> -> <Area>: no vendor for this area
+    appears in this account''s <installed technology | website technology> evidence''. The no-vendor wording
+    means only that the data does not name one, never that the account has none.'
+  example:
+    scenario: 'Technology list: Dell Latitude, Microsoft Teams, Zoom, Canon imageRUNNER, Kaspersky Endpoint
+      Security, Fortinet FortiGate, Okta, Microsoft Intune, SAP ERP. The collaboration category lists
+      ''Microsoft Teams, Zoom''; the IT security category lists ''Kaspersky Endpoint Security, Fortinet
+      FortiGate''; the IT management category lists ''Microsoft Intune''.'
+    steps:
+    - 'Client Devices: ''latitude'' and ''dell'' are found only in the full technology list'
+    - 'Collaboration: Teams and Zoom are found in the collaboration category'
+    - 'Print / MPS: ''canon'' is found in the full technology list'
+    - 'Endpoint Security: Kaspersky is found in the IT security category; FortiGate and Okta are supporting
+      context'
+    - 'Device Management: Intune is found in the IT management category'
+    result: 'Client Devices: Dell Latitude (full technology list). Collaboration: Microsoft Teams, Zoom
+      (collaboration category). Print / MPS: Canon imageRUNNER (full technology list). Endpoint Security:
+      Kaspersky Endpoint Security (IT security category), with Fortinet FortiGate and Okta as supporting
+      context. Device Management: Microsoft Intune (IT management category).'
+    verified: true
+    expect:
+    - 'technographics -> Client Devices | Full Tech Stack: Dell Latitude'
+    - 'technographics -> Collaboration | Collaboration: Microsoft Teams, Zoom'
+    - 'technographics -> Print / MPS | Full Tech Stack: Canon imageRUNNER'
+    - 'technographics -> Endpoint Security | It Security: Kaspersky Endpoint Security | supporting context:
+      Fortinet FortiGate, Okta'
+    - 'technographics -> Device Management | It Management: Microsoft Intune'
+  output: The 'Evidence' panel on the card.
+  sources:
+  - hp-backend/src/app/services/extractors/objection_playbook.py:_build_area_evidence
+  confidence: high
+- id: topic_owner
+  parent: null
+  name: Topic owner ('Could be raised by')
+  kind: selection
+  summary: Names who at the account would own each area's subject - never someone who raised the objection.
+  purpose: Names who at the account would own each area's subject - never someone who raised the objection.
+  inputs:
+  - 'The contact list: each contact''s job title and department'
+  logic: For each area, every contact's job title is checked for the area's STRONG title words (whole
+    words only). A contact whose title has no strong word is ignored entirely, even if a weaker word or
+    the department matches, because a weak match is only the nearest technically adjacent person, not
+    the owner. Rank = the number of strong words matched, plus 1 if the contact's department is one of
+    the area's owner departments. The highest rank wins; on a tie the contact listed first stays. The
+    winner's own job title is shown and marked as coming from the contact list. If nobody matches a strong
+    word, the area name itself is shown and marked as an HP contest area. Weaker title words play no part
+    in the choice.
+  formula: rank of a contact = number of strong title words in the job title + (1 if the department is
+    one of the area's owner departments, otherwise 0); only contacts with at least 1 strong word are eligible
+  table:
+    columns:
+    - Area
+    - Strong title words (required)
+    - Owner departments (+1)
+    rows:
+    - - Client Devices
+      - procurement, end user, information technology, it operations, infrastructure
+      - Information Technology, Operations
+    - - Collaboration
+      - collaboration, communications, end user, workplace
+      - Information Technology, Operations
+    - - Print / MPS
+      - procurement, facilities, general affairs, administration
+      - Operations, Information Technology, Finance
+    - - Endpoint Security
+      - security, ciso, infosec, cyber, information security
+      - Information Technology, Engineering & Technical
+    - - Device Management
+      - information technology, it operations, infrastructure, procurement, end user
+      - Information Technology, Engineering & Technical
+  constants:
+  - label: Strong owner title words
+    ref: py:app.services.extractors.objection_playbook:AREA_OWNER_STRONG_TOKENS
+  - label: Owner departments
+    ref: py:app.services.extractors.objection_playbook:AREA_OWNER_DEPARTMENTS
+  example:
+    scenario: 'Contacts: Head of IT Procurement (IT department), Head of Cloud Operations (IT department),
+      IT Security Manager (IT department), General Affairs Manager (Operations department).'
+    steps:
+    - 'Client Devices: ''procurement'' matches Head of IT Procurement (1) + IT department (1) = 2; General
+      Affairs Manager has no Client Devices strong word'
+    - 'Collaboration: nobody''s title has collaboration, communications, end user or workplace (''operations''
+      is only a weak word) -> the area name is shown'
+    - 'Print / MPS: Head of IT Procurement = 1 + 1 = 2 and General Affairs Manager = 1 + 1 = 2; on a tie
+      the contact listed first stays'
+    - 'Endpoint Security: ''security'' matches IT Security Manager'
+    - 'Device Management: ''procurement'' matches Head of IT Procurement'
+    result: 'Client Devices: Head of IT Procurement; Collaboration: ''Collaboration'' (the owning function);
+      Print / MPS: Head of IT Procurement; Endpoint Security: IT Security Manager; Device Management:
+      Head of IT Procurement'
+    verified: true
+    expect:
+    - - Client Devices
+      - - Head of IT Procurement
+        - prospect_contacts
+    - - Collaboration
+      - - Collaboration
+        - hp_contest_area
+    - - Print / MPS
+      - - Head of IT Procurement
+        - prospect_contacts
+    - - Endpoint Security
+      - - IT Security Manager
+        - prospect_contacts
+    - - Device Management
+      - - Head of IT Procurement
+        - prospect_contacts
+  output: The 'Could be raised by' line on each card, and whether it came from a real contact or from
+    the area name.
+  sources:
+  - hp-backend/src/app/services/extractors/objection_playbook.py:_resolve_likely_raiser
+  - hp-backend/src/app/services/extractors/objection_playbook.py:AREA_OWNER_STRONG_TOKENS
+  - hp-backend/src/app/services/extractors/objection_playbook.py:AREA_OWNER_DEPARTMENTS
+  - hp-backend/src/app/services/extractors/objection_playbook.py:AREA_OWNER_WEAK_TOKENS
+  confidence: high
+- id: topic_owner_wording
+  parent: topic_owner
+  name: Deliberately cautious wording for the topic owner
+  kind: guardrail
+  summary: The card never says the person 'likely raised' the objection, because a title is named only
+    on a strong word match and otherwise the area name is shown.
+  purpose: The card never says the person 'likely raised' the objection, because a title is named only
+    on a strong word match and otherwise the area name is shown.
+  logic: 'Collapsed card: ''Could be raised by: <name>'', with '' (owning function)'' added when the area
+    name is shown instead of a contact. Expanded card: if a contact''s title was used, ''Topic owner:
+    <title> - a title in this account''s contacts who would own this subject. They have not raised this
+    objection.''; otherwise ''Owning function: <area>''. The AI is told that the topic owner is the audience,
+    not the speaker, and that the objection must never be attributed to a person.'
+  example:
+    scenario: Collaboration resolved to the area name.
+    steps:
+    - No contact's title matched, so the area name was used
+    result: '''Could be raised by: Collaboration (owning function)'' and ''Owning function: Collaboration'''
+    verified: true
+    expect:
+    - Collaboration
+    - hp_contest_area
+  output: The 'Could be raised by' line on the card.
+  sources:
+  - hp-frontend/src/app/dashboard/page.tsx
+  - hp-backend/src/app/services/extractors/objection_playbook.py
+  doc_source: 'Project decision: ''Could be raised by'' / ''Topic owner'', never ''Likely raised by''
+    (feature_mapping.py:605 ''This names a topic owner, never someone who has raised the objection'')'
+  confidence: high
+- id: rulebook_claims
+  parent: null
+  name: HP claims the reframe may make (HP's approved sales rulebook)
+  kind: selection
+  uses:
+  - hp_rulebook
+  summary: Limits what the reframe may say about HP to approved rulebook facts that the account's own
+    evidence earns.
+  purpose: Limits what the reframe may say about HP to approved rulebook facts that the account's own
+    evidence earns.
+  logic: 'The account''s evidence is matched against HP''s approved sales rulebook. For each area, the
+    rules from the relevant rule groups that the evidence has earned are kept, each rule''s facts are
+    passed through the guardrails, and at most 3 rules x 4 facts per area are given to the AI as ''may
+    say'' lines (with the rule''s prohibitions as ''must not say''). An area with no approved claim is
+    told: ''APPROVED HP CLAIMS for this area: NONE ... may name an HP line but MUST NOT state any capability,
+    benefit, saving or figure''. If the rulebook cannot be read, every area is treated as having no approved
+    claims.'
+  output: The list of approved HP claims given to the AI for each area. The claim source, the rules used
+    and any note are saved with the card but not shown.
+  sources:
+  - hp-backend/src/app/services/extractors/objection_playbook.py:_rulebook_claims
+  - hp-backend/src/app/services/extractors/objection_playbook.py:_claims_block
+  - hp-backend/src/app/services/extractors/objection_playbook.py:generate_objection_cards
+  doc_source: Rulebook C 01, C 02, C 06, C 07 as quoted in rulebook.py:10-46
+  confidence: high
+- id: rulebook_evidence_corpus
+  parent: rulebook_claims
+  name: Account evidence the rulebook is matched against
+  kind: selection
+  summary: Defines which pieces of account information can fire a rule.
+  purpose: Defines which pieces of account information can fire a rule.
+  logic: Every field of the company profile, installed technology list, job openings, intent topics, news
+    events, Google News results, website technology and technology detections. The contact list is deliberately
+    left out, because a person's skill is not the company's need. A piece of text is skipped if it is
+    shorter than 4 characters, starts with '{' or '[', sits in a field that looks like an ID, link, web
+    address, domain, date, timestamp, score, count, currency, salary, map coordinate or postal code, or
+    is itself an ID, timestamp, web address or plain number.
+  constants:
+  - label: Evidence sources
+    ref: py:app.services.hp.rulebook:EVIDENCE_DATASETS
+    stated:
+    - firmographics
+    - technographics
+    - job_openings
+    - intent_topics
+    - news_events
+    - google_news
+    - webstack
+    - technology_detections
+  example:
+    scenario: A 'company domain' field with the value 'astra.co.id'.
+    steps:
+    - The field name looks like a domain field, so it is ignored
+    result: Skipped
+    verified: true
+    expect: false
+  output: The list of usable pieces of evidence.
+  sources:
+  - hp-backend/src/app/services/hp/rulebook.py:EVIDENCE_DATASETS
+  - hp-backend/src/app/services/hp/rulebook.py:account_evidence
+  - hp-backend/src/app/services/hp/rulebook.py:_is_meaningful
+  confidence: high
+- id: rule_fired_by
+  parent: rulebook_claims
+  name: When a rule is 'fired by' the account's evidence
+  kind: selection
+  uses:
+  - hp_rulebook
+  summary: Defines when a rulebook rule counts as matched.
+  purpose: Defines when a rulebook rule counts as matched.
+  logic: Each rule has trigger words, plus extra words that the account's data would contain if the signal
+    were true. A word fires on a piece of evidence when it appears there as a whole word, ignoring capital
+    letters. Evidence containing a known look-alike phrase (for example tokenization, vehicle, vehicles,
+    fleet maintenance, ai chips, social collaboration, employee experience management, executive education)
+    is ignored. The rule is fired when at least one word hits at least one piece of evidence. The matching
+    evidence and the distinct matched words are recorded.
+  example:
+    scenario: 'An HP Wolf security rule with the words ''kaspersky'' and ''symantec endpoint protection'';
+      evidence: ''Kaspersky Endpoint Security'', ''SAP ERP'', ''Microsoft Teams Rooms''.'
+    steps:
+    - '''kaspersky'' is found as a whole word in the first piece of evidence'
+    - '''symantec endpoint protection'' is not found'
+    result: The rule fires on the first piece of evidence; the matched word is 'kaspersky'
+    verified: true
+    expect:
+    - - 0
+    - - kaspersky
+  output: Which evidence matched, and which words matched.
+  sources:
+  - hp-backend/src/app/services/hp/rulebook.py:_fired_by
+  - hp-backend/src/app/services/hp/rulebook.py:_match_terms
+  - hp-backend/src/app/services/hp/rulebook.py:_Corpus
+  - hp-backend/src/app/services/hp/product_rules.py:GLOBAL_EXCLUDE_PHRASES
+  confidence: high
+- id: qualifying_vs_indicative
+  parent: rule_fired_by
+  name: A rule must be earned by a qualifying term
+  kind: selection
+  summary: Stops rules firing on words that every large company would match.
+  purpose: Stops rules firing on words that every large company would match.
+  logic: A matched word is only 'indicative' (not enough on its own) when every word in it is either a
+    ubiquitous vendor or platform (microsoft, google, apple, adobe, oracle, sap, amazon, aws, azure, cisco,
+    ibm, windows, linux, android, ios, macos, chrome, office, teams, zoom, slack, outlook, excel, word,
+    sharepoint, onedrive, gmail, workspace, salesforce, jira, confluence) or a generic qualifier (erp,
+    crm, cloud, suite, platform, enterprise, software, system(s), solution(s), service(s), tool(s), application(s),
+    app(s), financials, server(s), online, premium, pro, plus, standard, edition), and at least one word
+    is a ubiquitous vendor. For a rule marked as routing-only (with extra words), only the extra words
+    can qualify. A rule with no qualifying word is dropped and the reason is recorded.
+  example:
+    scenario: The word 'sap erp'.
+    steps:
+    - '''sap'' is a ubiquitous vendor and ''erp'' is a generic qualifier'
+    result: Indicative (yes) - it cannot earn a rule
+    verified: true
+    expect: true
+  output: Qualifying words, indicative words and dropped rules.
+  sources:
+  - hp-backend/src/app/services/hp/rulebook.py:indicative_term
+  - hp-backend/src/app/services/hp/rulebook.py:split_terms
+  - hp-backend/src/app/services/hp/rulebook.py:candidates
+  confidence: high
+- id: family_gates
+  parent: rule_fired_by
+  name: Rule-group gates (HP IQ market, Wolf device support)
+  kind: guardrail
+  summary: Removes whole rule groups or offerings the account cannot take.
+  purpose: Removes whole rule groups or offerings the account cannot take.
+  logic: 'HP IQ: if the account''s country is known and is not the United States (''united states'', ''us'',
+    ''usa''), every IQ rule is blocked, because IQ 1.0 is for the US and English only. An unknown country
+    does not block. Wolf: if the account''s evidence names no HP client hardware (hp elitebook, hp probook,
+    hp elitedesk, hp prodesk, hp zbook, hp elitestudio, hp prostudio, hp elite pc, hp pro pc, hp workstation,
+    hp z workstation, hp dragonfly, hp omnibook), a Wolf rule is dropped when its offering is listed as
+    ''HP PCs only'' or ''HP commercial PCs only'' for device support (the longest matching offering name
+    is used first). Offerings that are not listed are allowed.'
+  example:
+    scenario: Account in Indonesia.
+    steps:
+    - The country is known and is not the United States
+    result: HP IQ is not available, so all IQ rules are blocked
+    verified: true
+    expect: false
+  output: Rules kept or dropped.
+  sources:
+  - hp-backend/src/app/services/hp/rulebook.py:iq_availability
+  - hp-backend/src/app/services/hp/rulebook.py:has_hp_client_hardware
+  - hp-backend/src/app/services/hp/rulebook.py:wolf_offering_allowed
+  - hp-backend/src/app/services/hp/rulebook.py:candidates
+  confidence: high
+- id: rule_conditions
+  parent: rule_fired_by
+  name: 'Rule conditions: drop, or label as unverified'
+  kind: guardrail
+  summary: Applies the conditions written into a rule.
+  purpose: Applies the conditions written into a rule.
+  logic: Only country, management environment and operating system conditions can be tested. A country
+    condition naming the United States drops the rule if the account's country is known and does not contain
+    it ('English' is ignored as a language). A management environment or operating system condition is
+    met when a term it names (intune, entra, autopilot, sccm, vpro, azure, active directory, on-premises,
+    cloud portal, tenancy / windows, macos, linux, android, ios, chromeos) also appears in the account's
+    evidence; otherwise it is kept as 'unverified'. Every other kind of condition is kept as 'unverified'
+    and the rule stays.
+  example:
+    scenario: Condition 'Requires E5 licence' (a licence condition), account in Indonesia.
+    steps:
+    - A licence condition cannot be tested
+    result: The rule is kept; the condition is listed as unverified
+    verified: true
+    expect:
+    - true
+    - []
+    - - condition_type: licence
+        text: Requires E5 licence
+  output: Whether each condition is met, not met or unverified.
+  sources:
+  - hp-backend/src/app/services/hp/rulebook.py:check_conditions
+  - hp-backend/src/app/services/hp/rulebook.py:TESTABLE
+  - hp-backend/src/app/services/hp/rulebook.py:_ENV_TERMS
+  - hp-backend/src/app/services/hp/rulebook.py:_OS_TERMS
+  confidence: high
+- id: rule_ranking
+  parent: rule_fired_by
+  name: Ranking and per-group cap
+  kind: filter
+  summary: Orders the fired rules, best-earned first.
+  purpose: Orders the fired rules, best-earned first.
+  logic: 'Within a rule group, rules are sorted by: more distinct qualifying words, then more distinct
+    matched words, then more matching pieces of evidence, then rulebook order. Each group keeps at most
+    3 ''standalone'' rules. Rules that only modify another rule, only route, or only list a catalogue
+    (their facts say ''contains no'', ''provides no'', ''does not contain'', ''does not provide'' or ''does
+    not map'') are kept without limit. All kept rules are then sorted across groups by the same keys,
+    with groups whose routing rule also fired ranked first. Routing is not a requirement for a rule to
+    be kept.'
+  constants:
+  - label: Most standalone rules kept per group
+    ref: py:app.services.hp.rulebook:MAX_RULES_PER_FAMILY
+    stated: 3
+  output: Ordered list of candidate rules.
+  sources:
+  - hp-backend/src/app/services/hp/rulebook.py:_rank
+  - hp-backend/src/app/services/hp/rulebook.py:candidates
+  - hp-backend/src/app/services/hp/rulebook.py:MAX_RULES_PER_FAMILY
+  - hp-backend/src/app/services/hp/rulebook.py:_catalogue_only
+  confidence: high
+- id: area_to_rule_families
+  parent: rulebook_claims
+  name: Which rule groups may answer each area
+  kind: selection
+  uses:
+  - hp_rulebook
+  summary: Connects the five areas to rulebook rule groups through the shared HP product lines.
+  purpose: Connects the five areas to rulebook rule groups through the shared HP product lines.
+  logic: Each area is linked to HP product lines, each rule group belongs to an HP product line, and a
+    group qualifies when its line matches one of the area's lines. The first 3 fired rules (in overall
+    rank order) from those groups are then taken for the area; this step does not exclude modifier-only
+    or catalogue-only rules. For each, the facts approved by the guardrails are kept (maximum 4); a rule
+    with no approved fact is skipped.
+  table:
+    columns:
+    - Area
+    - Rule groups
+    rows:
+    - - Client Devices
+      - Care services, Deployment services, Lifecycle services
+    - - Collaboration
+      - Poly collaboration
+    - - Print / MPS
+      - Ink, Print, Scan
+    - - Endpoint Security
+      - Wolf security
+    - - Device Management
+      - Care services, Deployment services, Lifecycle services, Workforce Experience Platform
+  constants:
+  - label: Most rules per area
+    ref: py:app.services.extractors.objection_playbook:MAX_RULES_PER_AREA
+    stated: 3
+  - label: Most facts per rule
+    ref: py:app.services.extractors.objection_playbook:MAX_FACTS_PER_RULE
+    stated: 4
+  example:
+    scenario: 'Fired rules: a Wolf security rule (matched on ''kaspersky'') and a Poly rule (matched on
+      ''microsoft teams rooms''). A Care rule matched only ''sap erp''.'
+    steps:
+    - 'The Care rule is dropped: it matched only an indicative word'
+    - The Wolf rule goes to Endpoint Security
+    - The Poly rule goes to Collaboration
+    result: 'Collaboration: the Poly rule; Endpoint Security: the Wolf rule; other areas: none'
+    verified: true
+    expect:
+      Client Devices: []
+      Collaboration:
+      - POLY 02
+      Print / MPS: []
+      Endpoint Security:
+      - WOLF 09
+      Device Management: []
+  output: Approved rules for each area.
+  sources:
+  - hp-backend/src/app/services/extractors/objection_playbook.py:_area_families
+  - hp-backend/src/app/services/extractors/objection_playbook.py:_rulebook_claims
+  - hp-backend/src/app/services/extractors/objection_playbook.py:MAX_RULES_PER_AREA
+  - hp-backend/src/app/services/extractors/objection_playbook.py:MAX_FACTS_PER_RULE
+  - hp-backend/src/app/services/hp/rulebook.py:RULEBOOK_FAMILY_TO_HP_LINE
+  - hp-backend/src/app/services/hp/case_studies.py:AREA_TO_LINES
+  confidence: high
+- id: fact_guardrails
+  parent: rulebook_claims
+  name: Guardrails applied to each rulebook fact
+  kind: guardrail
+  uses:
+  - hp_rulebook
+  summary: Removes facts that may not be stated in this account's market or without context.
+  purpose: Removes facts that may not be stated in this account's market or without context.
+  logic: 'The country is the last comma-separated part of the account''s country, in lower case. In order,
+    a fact is withheld if: G2 - the country is on the restricted-superlative list (romania, slovakia,
+    turkey, uae / united arab emirates, russia, armenia, belarus, kazakhstan, kyrgyzstan, moldova, tajikistan,
+    turkmenistan, ukraine, uzbekistan, china, vietnam, indonesia, malaysia, brazil, mexico) and the fact
+    uses world''s, industry''s, market''s, most, best, first, only, fastest, strongest, safest or leading;
+    G3/G4 - the rule names a competitor (Lenovo, ThinkPad, Dell, Latitude, Apple, MacBook, Asus, Acer,
+    Huawei, Samsung, Microsoft Surface) and the country is on the competitor-block list; G5 - it compares
+    against a competitor (a %, higher, better, faster, less) without benchmark wording (Cinebench, Procyon,
+    MobileMark, internal testing, benchmark, tested, spec / data sheet) in the fact or the rule''s conditions;
+    G6/G7 - it mentions 5G, HP Go, Wi-Fi 7, Sure View, discrete graphics or ''up to N displays'' without
+    the required qualifier. Kept facts carry the rule''s conditions with them. Only the number of facts
+    withheld by each guardrail is recorded, never the text.'
+  example:
+    scenario: Rule facts 'HP Wolf Pro Security is the most comprehensive PC security.' and 'Wolf Pro Security
+      isolates risky attachments.'; account in 'Jakarta, Indonesia'.
+    steps:
+    - The country is indonesia, which is on the restricted-superlative list
+    - The first fact says 'most', so it is withheld (G2)
+    - The second fact is kept, with the condition 'Supported Windows PCs'
+    result: 1 approved fact; 1 fact withheld under 'G2 superlative by country'
+    verified: true
+    expect:
+    - - Wolf Pro Security isolates risky attachments.
+    - G2 superlative by country: 1
+  output: Approved facts (given to the AI) and counts of withheld facts (saved with the card).
+  sources:
+  - hp-backend/src/app/services/hp/guardrails.py:approve_rulebook_facts
+  - hp-backend/src/app/services/hp/guardrails.py:SUPERLATIVE_BLOCK_COUNTRIES
+  - hp-backend/src/app/services/hp/guardrails.py:COMPETITOR_BLOCK_COUNTRIES
+  - hp-backend/src/app/services/hp/guardrails.py:REQUIRED_QUALIFIER_TRIGGERS
+  - hp-backend/src/app/services/hp/guardrails.py:summarise
+  doc_source: '''Mandatory RAG Guardrails'' in the HP rules document (guardrails.py:1-10)'
+  confidence: high
+- id: proof_point
+  parent: null
+  name: HP case study attached as the proof point
+  kind: selection
+  summary: Gives each card, where possible, one real HP customer story from HP's customer case studies.
+  purpose: Gives each card, where possible, one real HP customer story from HP's customer case studies.
+  logic: 'Chosen by fixed rules before the AI writes; the AI never sees or writes it. For each area (in
+    fixed order): candidate studies are those whose product line is one of the area''s lines and that
+    have a headline. They are ranked by score (see the ranking rule). Studies already used on an earlier
+    card of this playbook are excluded (hard rule: no customer twice in one playbook). Among the rest,
+    the best study sets a quality bar (same industry? told as a story rather than only a customer quote?).
+    The first study that meets that bar and that no higher-priority part of the app has cited is chosen;
+    if all such studies are cited elsewhere, the best one is repeated. If nothing qualifies, the card
+    has no proof point and the section is not shown. The Objection Playbook chooses first among all parts
+    of the app.'
+  table:
+    columns:
+    - Area
+    - Product lines
+    - Use-case tags
+    rows:
+    - - Client Devices
+      - PCs, device services
+      - Fleet-Refresh
+    - - Collaboration
+      - Collaboration
+      - Remote-Collaboration
+    - - Print / MPS
+      - Print
+      - (none)
+    - - Endpoint Security
+      - Security
+      - Security
+    - - Device Management
+      - Workforce Experience Platform, device services
+      - (none)
+  example:
+    scenario: Use-case tags for each area name.
+    steps:
+    - Each area name is matched against the use-case word lists
+    result: 'Client Devices: Fleet-Refresh; Collaboration: Remote-Collaboration; Print / MPS: none; Endpoint
+      Security: Security; Device Management: none'
+    verified: true
+    expect:
+      Client Devices:
+      - Fleet-Refresh
+      Collaboration:
+      - Remote-Collaboration
+      Print / MPS: []
+      Endpoint Security:
+      - Security
+      Device Management: []
+  output: 'The ''HP Proof Point'' box: headline (and outcome), customer, industry and a ''View the HP
+    case study'' link. The study''s product tag is not shown.'
+  sources:
+  - hp-backend/src/app/services/extractors/objection_playbook.py:generate_objection_cards
+  - hp-backend/src/app/services/hp/case_studies.py:allocate
+  - hp-backend/src/app/services/hp/case_studies.py:match
+  - hp-backend/src/app/services/hp/case_studies.py:cited_above
+  - hp-backend/src/app/services/hp/case_studies.py:SURFACE_ORDER
+  - hp-backend/src/app/services/extractors/objection_playbook.py:NO_PROOF_POINT
+  doc_source: 'Client 25 Sep ranking keys (case_studies.py:213-218): ''1. Same use case -> 2. Same industry
+    -> 3. APJ/APAC region -> 4. Stated outcome/metric -> 5. HP.com (T0) before third-party (T2)'''
+  confidence: high
+- id: proof_point_score
+  parent: proof_point
+  name: Case-study ranking score
+  kind: score
+  summary: Orders candidate studies by the ranking priorities HP set.
+  purpose: Orders candidate studies by the ranking priorities HP set.
+  logic: +100 per use-case tag shared with the area; +10 same industry as the account (the account's industry
+    is matched to one of 11 industry labels by keyword, most specific first); +4 has a stated outcome;
+    +2 published by HP itself; +1 has a challenge; +2 told as a story (not only a customer quote). Ties
+    are broken by the number of source documents merged into the study, then by customer name. Region
+    is not scored because the case studies carry no region information.
+  formula: score = 100 x shared use-case tags + 10 x same industry + 4 x has outcome + 2 x published by
+    HP + 1 x has challenge + 2 x told as a story (each yes/no item counts 1 for yes and 0 for no)
+  constants:
+  - label: Use-case tag
+    ref: py:app.services.hp.case_studies:SCORE_PER_SHARED_SIGNAL
+    stated: 100
+  - label: Same industry
+    ref: py:app.services.hp.case_studies:SCORE_SAME_INDUSTRY
+    stated: 10
+  - label: Stated outcome
+    ref: py:app.services.hp.case_studies:SCORE_HAS_OUTCOME
+    stated: 4
+  - label: Published by HP
+    ref: py:app.services.hp.case_studies:SCORE_HP_PUBLISHED
+    stated: 2
+  - label: Has challenge
+    ref: py:app.services.hp.case_studies:SCORE_HAS_CHALLENGE
+    stated: 1
+  - label: Told as a story
+    ref: py:app.services.hp.case_studies:SCORE_NARRATED
+    stated: 2
+  example:
+    scenario: An Education study tagged Fleet-Refresh, with an outcome, published by HP, a challenge and
+      told as a story; the account's industry is Education; area Client Devices.
+    steps:
+    - 100 (Fleet-Refresh) + 10 (industry) + 4 + 2 + 1 + 2
+    result: '119'
+    verified: true
+    expect: 119
+  output: Ranking of the studies.
+  sources:
+  - hp-backend/src/app/services/hp/case_studies.py:_score
+  - hp-backend/src/app/services/hp/case_studies.py:SCORE_PER_SHARED_SIGNAL
+  - hp-backend/src/app/services/hp/case_studies.py:normalise_industry
+  confidence: high
+- id: card_generation
+  parent: null
+  name: Objection cards written by the AI
+  kind: model
+  summary: Writes one hypothetical objection per area with a reframe and a counter question.
+  purpose: Writes one hypothetical objection per area with a reframe and a counter question.
+  inputs:
+  - Evidence, topic owner and approved claims for each area
+  - The business description from the company profile
+  - The company name
+  logic: 'One AI request covers all areas. The AI writes only: the objection (a buyer brush-off, in quotes,
+    one sentence), the reframe (maximum two sentences; it must name an HP line and an account-specific
+    angle tied to that area''s evidence), a counter question, why the objection is expected, and a recommended
+    next step. The evidence, vendors, area, topic owner, proof point and the source of each HP claim are
+    fixed by rules and are never sent back for rewriting. The AI is instructed (these instructions are
+    not checked automatically) to: treat objections as hypothetical, never as reported speech; use no
+    vendor, product, number, customer or event outside the area''s evidence; for areas with no vendor,
+    frame a visibility gap, never ''greenfield'' or ''no incumbent'', and make the objection a de-prioritisation;
+    build only on main technologies; avoid complimenting openers, the ''<praise> ... However'' pattern
+    and filler phrases; and give each reframe a different shape.'
+  output: Draft cards, before checking.
+  sources:
+  - hp-backend/src/app/services/extractors/objection_playbook.py:generate_objection_cards
+  confidence: high
+- id: card_validation
+  parent: null
+  name: Checks on every AI-written card
+  kind: guardrail
+  summary: Rejects cards that break evidence or HP-claim rules.
+  purpose: Rejects cards that break evidence or HP-claim rules.
+  logic: 'A card is discarded if: the area name is not exactly one of the five; the objection, reframe
+    or counter question is empty; (a) the reframe or counter question names a sector word that also appears
+    in the account''s business description (rejected, then rewritten); (b) any of the objection, reframe
+    or counter question carries a number or web address that is not in the account''s installed technology
+    list, company profile or contact list (or website technology when that is the source) (dropped, NOT
+    rewritten); (c) the reframe makes an HP claim the approved facts do not support (rejected, then rewritten)
+    - see the sub-rules.'
+  output: Accepted cards.
+  sources:
+  - hp-backend/src/app/services/extractors/objection_playbook.py:generate_objection_cards
+  confidence: high
+- id: sector_justification_check
+  parent: card_validation
+  name: No sector used as justification
+  kind: guardrail
+  summary: Blocks 'because you are in mining' style reasoning that the evidence does not support.
+  purpose: Blocks 'because you are in mining' style reasoning that the evidence does not support.
+  logic: 'Sector words: automotive, financial services, heavy equipment, mining, construction, energy,
+    agriculture, agribusiness, infrastructure, logistics, property development, plantations, forestry,
+    banking, insurance, toll road, palm oil, coal. A card fails if a sector word appears in BOTH its reframe
+    or counter question and the account''s business description.'
+  constants:
+  - label: Sector words
+    ref: py:app.services.extractors.objection_playbook:SECTOR_WORDS
+    stated:
+    - automotive
+    - financial services
+    - heavy equipment
+    - mining
+    - construction
+    - energy
+    - agriculture
+    - agribusiness
+    - infrastructure
+    - logistics
+    - property development
+    - plantations
+    - forestry
+    - banking
+    - insurance
+    - toll road
+    - palm oil
+    - coal
+  example:
+    scenario: Reframe 'Across mining sites, HP Wolf Security protects devices.'; the business description
+      mentions automotive, mining and financial services.
+    steps:
+    - '''mining'' appears in both'
+    result: '''mining'' is found -> the card is rejected and rewritten'
+    verified: true
+    expect:
+    - mining
+  output: Card rejected or kept.
+  sources:
+  - hp-backend/src/app/services/extractors/objection_playbook.py:SECTOR_WORDS
+  - hp-backend/src/app/services/extractors/objection_playbook.py:_sector_terms_used
+  confidence: high
+- id: hp_claim_faults
+  parent: card_validation
+  name: HP-claim checks on the reframe
+  kind: guardrail
+  summary: Stops the reframe asserting HP things the approved facts do not support.
+  purpose: Stops the reframe asserting HP things the approved facts do not support.
+  logic: 'A reframe fails on any of: G15 - calls something a ''Next Gen AI PC'' with a TOPS figure outside
+    40-60 within 140 characters; G16 - names a product generation (such as G1 or G2, with an optional
+    i, a, q or 8) that the approved facts do not state; internal jargon - refers to data sources, datasets,
+    records or evidence blocks instead of speaking to the seller; integration claims - a sentence with
+    an integration verb (integrate, interoperate, works with, connects to or into, plugs into, native
+    support for, compatible with) names a capitalised product that is not HP''s own brand, not the account,
+    not the rule''s offering or line, and not in the text or conditions of the approved facts; G2 sentence
+    superlatives - when the country is on the restricted-superlative list, a superlative word that the
+    approved facts do not use.'
+  example:
+    scenario: Approved fact 'WXP integrates with Microsoft Intune.'; reframe 'HP WXP integrates seamlessly
+      with ServiceNow to cut tickets.'
+    steps:
+    - The sentence has an integration verb
+    - '''ServiceNow'' is a product name that is not in the approved facts'
+    result: 'Fault: claims HP connects to ServiceNow, which no approved fact names'
+    verified: true
+    expect:
+    - 'C 03 integration: claims HP connects to ServiceNow, which no approved fact names'
+  output: List of faults (an empty list means the card passes).
+  sources:
+  - hp-backend/src/app/services/extractors/objection_playbook.py:_claim_faults
+  - hp-backend/src/app/services/extractors/objection_playbook.py:_INTERNAL_VOCABULARY
+  - hp-backend/src/app/services/extractors/objection_playbook.py:_INTEGRATION_VERB_RE
+  - hp-backend/src/app/services/extractors/objection_playbook.py:_named_products
+  - hp-backend/src/app/services/hp/guardrails.py:prose_guardrail_faults
+  doc_source: Rulebook C 03 'use exact facts' and guardrails G2, G15, G16 (objection_playbook.py:602-613)
+  confidence: high
+- id: superlative_country_case
+  parent: hp_claim_faults
+  name: Sentence-level superlative check depends on how the country is written
+  kind: guardrail
+  summary: Records an observed quirk of the G2 sentence check.
+  purpose: Records an observed quirk of the G2 sentence check.
+  logic: The sentence-level superlative check compares the account's country exactly as it appears in
+    the company profile against a lower-case list, without changing its case (the fact-level guardrail
+    does change case). It therefore fires for 'indonesia' but not for 'Indonesia'. All 220 delivered company
+    profiles currently write country names in lower case, so the check works as intended on current data.
+  example:
+    scenario: Reframe 'HP Wolf Security is the most trusted endpoint protection.' with the country written
+      as 'indonesia' versus 'Indonesia'.
+    steps:
+    - '''indonesia'' is on the list -> ''most'' is flagged'
+    - '''Indonesia'' does not equal any entry on the list -> no check'
+    result: 'Lower case: 1 fault; capitalised: no fault'
+    verified: true
+    expect:
+    - - 'G2 restricted superlative: says ''most'', which no approved fact states and which indonesia restricts'
+    - []
+  output: List of faults.
+  sources:
+  - hp-backend/src/app/services/extractors/objection_playbook.py:_claim_faults
+  - hp-backend/src/app/services/hp/rulebook.py:account_country
+  - hp-backend/src/app/services/hp/guardrails.py:normalize_country
+  confidence: high
+- id: retry_once
+  parent: null
+  name: One rewrite for sector or HP-claim rejections
+  kind: selection
+  internal: true
+  summary: Gives a rejected area one more chance instead of losing its card.
+  purpose: Gives a rejected area one more chance instead of losing its card.
+  logic: If any card was rejected for a sector word or an HP-claim fault, the AI is asked once more, told
+    the reasons, for only those areas. A rewritten card must pass every check again (sector, numbers and
+    web addresses, HP claims); otherwise the area has no card. Cards dropped for an unsourced number or
+    web address are not rewritten.
+  output: Additional accepted cards.
+  sources:
+  - hp-backend/src/app/services/extractors/objection_playbook.py:generate_objection_cards
+  confidence: high
+- id: merge_near_duplicates
+  parent: null
+  name: Near-duplicate objections merged; card cap
+  kind: filter
+  summary: Avoids two cards saying the same thing.
+  purpose: Avoids two cards saying the same thing.
+  logic: Each objection is put in lower case, spaces are collapsed, outer quotes are removed and everything
+    except letters and numbers is dropped. If its similarity to an earlier kept card is 0.85 or more,
+    it becomes a 'variant' (area, objection, raiser) of that card instead of a separate card. At most
+    10 cards are kept (with five areas, at most 5 can exist). Variants are stored but not shown.
+  formula: merge when the similarity of the two cleaned objections is 0.85 or more (similarity runs from
+    0 to 1)
+  constants:
+  - label: Most cards
+    ref: py:app.services.extractors.objection_playbook:MAX_OBJECTIONS
+    stated: 10
+  - label: Merge similarity
+    value: 0.85
+  example:
+    scenario: '''"We already standardised on Dell laptops."'' versus ''We already standardized on Dell
+      laptops''.'
+    steps:
+    - Clean both objections
+    - Similarity = 0.974, which is 0.85 or more
+    result: Merged as a variant
+    verified: true
+    expect: 0.974
+  output: Final card list.
+  sources:
+  - hp-backend/src/app/services/extractors/objection_playbook.py:generate_objection_cards
+  - hp-backend/src/app/services/extractors/objection_playbook.py:MAX_OBJECTIONS
+  doc_source: 'Quoted in code (objection_playbook.py:1063-1064): ''If two objections differ only in wording,
+    merge them and preserve persona-specific variants inside one entry.'''
+  confidence: high
+- id: cache_and_empty_states
+  parent: null
+  name: Reuse of earlier cards and what shows when there are no cards
+  kind: display
+  internal: true
+  summary: Defines when earlier cards are reused and which empty or pending messages appear.
+  purpose: Defines when earlier cards are reused and which empty or pending messages appear.
+  logic: 'Earlier cards are reused when nothing they depend on has changed: each area''s evidence line
+    and topic owner, the business description, the case studies, the rulebook and the writing instructions.
+    If there is no technology evidence, the section is empty with the notice ''No technology evidence
+    available: neither the installed technology list nor website technology has data for this account,
+    so no objections are written.'' If card writing fails or nothing survives the checks, earlier cards
+    are kept where they exist; otherwise the section shows as pending. The page shows a neutral ''No signal''
+    message in both cases.'
+  constants:
+  - label: Version of the writing instructions
+    ref: py:app.services.extractors.objection_playbook:OBJECTION_PROMPT_VERSION
+    stated: 16
+  output: 'Section status: available, empty or pending.'
+  sources:
+  - hp-backend/src/app/services/extractors/objection_playbook.py:_evidence_fingerprint
+  - hp-backend/src/app/services/extractors/objection_playbook.py:OBJECTION_PROMPT_VERSION
+  - hp-backend/src/app/services/extractors/objection_playbook.py:generate_objection_cards
+  - hp-backend/src/app/services/extractors/objection_playbook.py:extract_objection_playbook
+  - hp-frontend/src/app/dashboard/page.tsx:objectionsReady
+  confidence: high
+- id: card_display
+  parent: null
+  name: What the seller sees on each card
+  kind: display
+  summary: Defines the card as displayed.
+  purpose: Defines the card as displayed.
+  logic: 'Header: ''<N> objection reframes for <account>'' and a disclaimer that these are anticipated
+    push-back generated from the installed technology (or website technology) evidence and are not statements
+    made by any contact; a badge ''<count> Incumbents Detected''. Each card, collapsed: the objection
+    in quotes, ''Could be raised by: ...'' and the area tag. Expanded: Reframe, Evidence (word for word),
+    Counter Question, HP Proof Point (only if one was chosen; customer, industry, link; product tag hidden)
+    and the Topic owner / Owning function line. Saved but not shown: why the objection is expected, the
+    recommended next step, the source of each HP claim, variants, detected and supporting vendors, and
+    the evidence link, date and confidence (always blank).'
+  output: The Objection Playbook tab.
+  sources:
+  - hp-frontend/src/app/dashboard/page.tsx
+  - hp-backend/src/app/services/extractors/objection_playbook.py:generate_objection_cards
+  confidence: high
+undetermined:
+- The wording of objection, reframe, counter question, why_expected and recommended_next_step is model-judged;
+  only the checks listed under card_validation are enforced in Python.
+- Which rules fire on a real account depends on the loaded hp_rulebook collection (signal_tokens and observable_terms
+  derived at load time by scripts/load_rulebook.py), which is data, not code.
+- Which case study a card gets depends on the loaded hp_case_studies corpus and on what higher-priority
+  surfaces have stored (none are above the Objection Playbook today).
+- The technographics-to-tech_breakdown fallback is uncommitted working-tree code on branch featBomboraHpCategories
+  at extraction time (git diff of objection_playbook.py); if it is not merged, the 'none' and 'tech_breakdown'
+  paths do not exist and an account without technographics gets no area evidence.
+discrepancies:
+- rule_id: card_generation
+  doc: 'Widget registry hp-backend/src/app/api/v1/widgets.py:352 objection_reframe_cards: ''Inferred objection
+    reframes contract. Competitive reframe synthesis and counter-question generation are TBD for future
+    AI generation.'''
+  code: hp-backend/src/app/services/extractors/objection_playbook.py:700-1116 generate_objection_cards
+    implements reframe and counter-question generation with GPT-4o today.
+  note: Registry description is out of date relative to the implementation.
+- rule_id: incumbent_context
+  doc: 'Widget registry widgets.py:341 objection_incumbent_context: ''Competitor technologies in place
+    for weakness framing and displacement strategy'''
+  code: hp-backend/src/app/services/extractors/objection_playbook.py:1149-1153 incumbent_technologies
+    is every item of 'Full Tech Stack' (all technologies, competitor or not); with the website fallback
+    it is empty.
+  note: The 'Incumbents Detected' count is the full stack size, not a competitor count.
+- rule_id: merge_near_duplicates
+  doc: 'Code comment hp-backend/src/app/services/extractors/objection_playbook.py:146-147 ''HP_ABX_v3_final:
+    "typically 5-10 when evidence supports that many"'' with MAX_OBJECTIONS = 10'
+  code: hp-backend/src/app/services/extractors/objection_playbook.py:75-81 five fixed areas, one card
+    per area (916-925 keyed by area), so at most 5 cards; merging can reduce further.
+  note: The 10 cap cannot be reached by construction.
+- rule_id: topic_owner
+  doc: 'hp-backend/src/app/api/v1/feature_mapping.py:605 likely_raiser: ''Resolved against prospect_contacts
+    job titles and departments on word boundaries; falls back to the HP contest area name when no contact
+    clearly owns it.'''
+  code: hp-backend/src/app/services/extractors/objection_playbook.py:407-412 department never qualifies
+    a contact on its own - a strong TITLE token is required and the department only adds +1 to the rank;
+    department is matched by normalised label, not word boundaries. AREA_OWNER_WEAK_TOKENS (137-143) is
+    defined but unused.
+  note: Admin text implies departments alone can resolve the owner.
+- rule_id: topic_owner
+  doc: 'HP_Recommendation_Tuning_Logic_FINAL_v4.txt Contacts input contract: ''Blank contact fields or
+    Pending/Review status means do not infer the missing role, authority or contact detail'''
+  code: hp-backend/src/app/services/extractors/objection_playbook.py:1129 and 1200 _resolve_likely_raiser
+    reads prospect_contacts directly; the Pending/Review withholding (stakeholder_map._drop_unmatched_contacts)
+    is not applied here.
+  note: A contact withheld from the Stakeholder Map can still be named as a topic owner.
+- rule_id: card_generation
+  doc: 'hp-backend/src/app/api/v1/feature_mapping.py:614 objection_synthesis: ''Grounded strictly in that
+    area''s own technographics evidence plus the firmographics Business Description; introduces no vendor,
+    product or fact absent from them'''
+  code: hp-backend/src/app/services/extractors/objection_playbook.py:748-823 the prompt also carries rulebook
+    APPROVED HP CLAIMS per area; 783-796 attaches an HP case study; 274-300 may use tech_breakdown instead
+    of technographics.
+  note: Admin text predates the rulebook, case-study and website-fallback inputs.
+- rule_id: card_display
+  doc: 'HP_Recommendation_Tuning_Logic_FINAL_v4.txt Rules: ''Seller-facing output should contain the conclusion,
+    not the backend logic. Do not expose internal rule IDs, prompt instructions, scoring mechanics...'''
+  code: 'hp-frontend/src/app/dashboard/page.tsx:6408 renders card.evidence verbatim, e.g. ''technographics
+    -> Endpoint Security | It Security: Kaspersky Endpoint Security''; header text names ''technographics
+    evidence''. Rule labels (hp_claim_rules) are stored but not rendered.'
+  note: The Evidence panel shows the internal dataset key and arrow format; whether this counts as 'backend
+    logic' under the doc is not judged here.
+- rule_id: proof_point
+  doc: Client 25 Sep ranking keys quoted at case_studies.py:213-218 include '3. APJ/APAC region'
+  code: hp-backend/src/app/services/hp/case_studies.py:222-229 region is not scored ('It is not in the
+    corpus and cannot be derived').
+  note: Key 3 not implemented pending a region column from the client.

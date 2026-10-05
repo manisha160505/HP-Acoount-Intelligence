@@ -1,0 +1,1663 @@
+# Rules page catalog for `solution_narrative_opportunity_map`. Read by app/services/rules_catalog.
+# `ref:` values are read live; `stated` is what the prose was written against.
+# Examples marked `verified` are recomputed by tests/test_rules_examples.py.
+feature_key: solution_narrative_opportunity_map
+purpose: Turns the account's own evidence into up to five HP hardware opportunity plays and a set of HP
+  service plays, each tied to the evidence that supports it.
+final_output: An account context card; the list of trigger signals (copied from the Live Signals feature);
+  up to 5 plays, each with a priority tag (Critical or High), verified evidence quotes, an HP capability,
+  a hedged inference, a timing note, an owner angle, HP products, a scale statement, target contacts and
+  an optional HP case study; discovery areas for plays whose evidence does not fit the HP line; and service
+  plays that quote HP's approved wording, with owners, unverified conditions and notes.
+how_it_combines: 'Two kinds of play are built side by side.
+
+  - Hardware plays: the account''s evidence decides which of the six hardware play families are eligible.
+  AI drafts the plays. Only plays whose quotes really exist in the account''s information, and that pass
+  the three checks, are kept. The wording rules are then enforced, priority is set, duplicates are merged
+  and the top plays are kept in order. Plays that fail the HP-fit check become discovery areas.
+
+  - Service plays: chosen by fixed rules, without AI, from HP''s approved sales rulebook, based on what
+  the account''s evidence earns.
+
+  Trigger signals are the published Live Signals feed.'
+rules:
+- id: om_context_card
+  parent: null
+  name: Opportunity Account Context card
+  kind: display
+  summary: Shows the account facts the plays reason from.
+  purpose: Shows the account facts the plays reason from.
+  inputs:
+  - 'Company profile: business description'
+  - 'Installed technology: full technology list'
+  - 'Research activity: topic and composite score'
+  logic: The business description is copied as it is. The full technology list is split into single items.
+    Research topics are shown with their composite score cut to a whole number (not rounded), highest
+    first. The top 10 are shown, and the total number of topics is also shown. The card is marked empty
+    if all three are blank.
+  example:
+    scenario: 'Research topics: Cloud Security 71.8, 3D Printing 64.2, Laptops 80.0.'
+    steps:
+    - 'Scores cut to whole numbers: 71, 64, 80.'
+    - Sorted highest first.
+    result: Laptops 80, Cloud Security 71, 3D Printing 64.
+  output: The business description, a sample of the full technology list, the total number of technology
+    items, the top 10 research topics and the total number of research topics.
+  sources:
+  - hp-backend/src/app/services/extractors/solution_narrative_opportunity_map.py:extract_solution_narrative_opportunity_map
+  confidence: high
+- id: om_trigger_signals
+  parent: null
+  name: Opportunity Trigger Signals = the published Live Signals feed
+  kind: source
+  summary: Lists the news and event triggers relevant to the plays.
+  purpose: Lists the news and event triggers relevant to the plays.
+  inputs:
+  - The published Live Signals feature (recent news and event triggers about the company)
+  logic: The signals in the final Live Signals list are copied unchanged when that list is available.
+    Otherwise this section is shown as empty. No scoring happens here. Each signal keeps the score and
+    the position the Live Signals feature gave it.
+  example:
+    scenario: Live Signals published 14 signals.
+    steps:
+    - The Live Signals list is available.
+    - All 14 are copied.
+    result: 14 trigger signals shown.
+  output: The list of trigger signals and their total count.
+  sources:
+  - hp-backend/src/app/services/extractors/solution_narrative_opportunity_map.py:_triggers_payload
+  - hp-backend/src/app/services/extractors/solution_narrative_opportunity_map.py:publish_trigger_signals
+  doc_source: HP_Live_Signal_Scoring_Logic (scoring belongs to the Live Signals feature)
+  confidence: high
+- id: om_evidence_corpus
+  parent: null
+  name: The evidence a play may cite
+  kind: selection
+  summary: Fixes, before AI is asked to write anything, the only account statements a play can quote,
+    and labels each as context or a timing trigger.
+  purpose: Fixes, before AI is asked to write anything, the only account statements a play can quote,
+    and labels each as context or a timing trigger.
+  inputs:
+  - 'Company profile: business description, employee range, yearly revenue range'
+  - 'Installed technology: each item in the full technology list'
+  - 'Research activity: the top 10 topics by composite score'
+  - 'Category research activity: topics researched in each HP category'
+  - 'Recent news: the 10 most recent distinct headlines'
+  logic: Context items are the business description, employee range, revenue range and every installed
+    technology item. Trigger items are the 10 most recent distinct news headlines (sorted by date, undated
+    last). Research topics and category research themes are triggers or context depending on the research
+    timing gate (see the next rule). Job postings, filings and contact records are not part of this evidence.
+    Contacts are used only to name owners.
+  constants:
+  - label: Research topics used
+    value: 10
+  - label: News headlines used
+    value: 10
+  example:
+    scenario: 15 news rows (2 duplicates), 25 research topics, 180 technology items.
+    steps:
+    - 13 distinct headlines, newest 10 kept as triggers.
+    - Top 10 topics by composite score kept.
+    - All 180 technology items kept as context.
+    result: Evidence of 180 technology items + company profile context + 10 topics + category themes +
+      10 headlines.
+  output: The evidence list that every quote is checked against.
+  sources:
+  - hp-backend/src/app/services/extractors/solution_narrative_opportunity_map.py:generate_opportunity_map_plays_with_gpt4o
+  doc_source: HP_Recommendation_Tuning_Logic_FINAL_v4 Opportunity Map row
+  confidence: high
+- id: om_intent_timing_gate
+  parent: om_evidence_corpus
+  name: Research timing gate - which HP categories may supply a timing trigger
+  kind: guardrail
+  summary: Lets a research topic signal timing only where HP's category-level research scores stand behind
+    that category.
+  purpose: Lets a research topic signal timing only where HP's category-level research scores stand behind
+    that category.
+  inputs:
+  - HP category research scores (status, score per category, buying stage, quality flags)
+  - Whether the topic research data was collected for this account's own company
+  logic: If the topic research data belongs to a different company, the gate is applied and no category
+    is allowed. If no category-level scores cover the account, the gate is not applied (topics keep their
+    trigger role, and the report says so). Otherwise a category is allowed only if its scores give it
+    a buying stage and none of its score rests on a noisy keyword (a quality flag).
+  example:
+    scenario: 'Category scores: 3D 34/100 Awareness; PC 12/100 no stage; Poly 40/100 Consideration but
+      flagged for the noisy keyword ''teams''.'
+    steps:
+    - 3D has a stage and no flag - allowed.
+    - PC has no stage - blocked.
+    - Poly is flagged - blocked.
+    result: Only 3D may supply timing.
+    computed_value:
+    - 3D
+    verified: true
+    expect:
+    - 3D
+  output: 'The gate result: whether it was applied, the reason, the categories allowed and the categories
+    blocked.'
+  sources:
+  - hp-backend/src/app/services/extractors/solution_narrative_opportunity_map.py:_intent_timing_gate
+  - hp-backend/src/app/services/extractors/intent_demand_signals.py:_carries_buying_signal
+  confidence: high
+- id: om_topic_kind
+  parent: om_intent_timing_gate
+  name: 'Each research topic and category theme: trigger or context'
+  kind: selection
+  uses:
+  - intent_dictionary
+  summary: Applies the gate to each item in the evidence.
+  purpose: Applies the gate to each item in the evidence.
+  inputs:
+  - Topic name
+  - Gate result
+  logic: 'Research topic: if the gate is not applied, it is a trigger. If the research data belongs to
+    another company, it is context. If the topic fits no HP category, it is context. If its HP category
+    is allowed, it is a trigger. Otherwise it is context, with the reason noted. Category research theme:
+    a trigger if its own category is allowed (or the gate is not applied), otherwise context. Context
+    items can still be quoted, but they never make a play look timely.'
+  example:
+    scenario: Topics '3D Printing' and 'Cloud Security' with only 3D allowed.
+    steps:
+    - '''3D Printing'' belongs to the 3D category, which is allowed - trigger.'
+    - '''Cloud Security'' fits no HP category - context (''maps to no HP category'').'
+    result: 3D Printing = trigger; Cloud Security = context.
+    computed_value: ({'3D'}, set())
+    verified: true
+    expect:
+    - - 3D
+    - []
+  output: Each item is marked as a trigger or context, with the reason when it is context. Context topics
+    are labelled 'research interest only' when plays are written.
+  sources:
+  - hp-backend/src/app/services/extractors/solution_narrative_opportunity_map.py:generate_opportunity_map_plays_with_gpt4o
+  - hp-backend/src/app/services/extractors/solution_narrative_opportunity_map.py:_topic_governing_categories
+  confidence: high
+- id: om_superseded_versions
+  parent: om_evidence_corpus
+  name: Older versions that the technology data itself has moved past are not evidence
+  kind: selection
+  summary: Stops a play leading on, say, Windows 7 when the same technology data also lists Windows 10.
+  purpose: Stops a play leading on, say, Windows 7 when the same technology data also lists Windows 10.
+  inputs:
+  - Installed technology items
+  logic: A name that ends in a version is split into a product family and a version (vendor prefixes such
+    as 'Microsoft ' are ignored). A version is a release number below 100 or a year from 1990 to 2100.
+    Anything else (such as the model number 6500) is not a version, and release numbers are never compared
+    with years. Where the technology data names several versions of one family, every older one counts
+    as superseded. A quote that names a superseded version is not used. Wording that names one is sent
+    back to be rewritten (up to the rewrite limit). No end-of-life dates are used.
+  example:
+    scenario: The technology list includes Microsoft Windows 7, Windows 10, Microsoft Office 365, Microsoft
+      Office 2016, Cisco Catalyst 6500, Cisco Catalyst 6503, SQL Server 2016 and SQL Server 2019.
+    steps:
+    - 'Windows: 7 is lower than 10, so Windows 7 is superseded.'
+    - Office 365 (a release number) and Office 2016 (a year) are never compared.
+    - 6500 and 6503 are model numbers, not versions.
+    - SQL Server 2016 is older than 2019, so it is superseded.
+    result: 'Superseded: Microsoft Windows 7, SQL Server 2016.'
+    computed_value:
+    - Microsoft Windows 7
+    - SQL Server 2016
+    verified: true
+    expect:
+    - Microsoft Windows 7
+    - SQL Server 2016
+  output: Dropped quotes and rewrite notes are recorded.
+  sources:
+  - hp-backend/src/app/services/extractors/tech_versions.py:superseded
+  - hp-backend/src/app/services/extractors/tech_versions.py:spellings
+  - hp-backend/src/app/services/extractors/solution_narrative_opportunity_map.py
+  doc_source: Client, 27 Sep, quoted in hp-backend/src/app/services/extractors/tech_versions.py docstring
+  confidence: high
+- id: om_play_eligibility
+  parent: null
+  name: Which of the six hardware play families the evidence can support
+  kind: selection
+  summary: Decides, before AI is asked to write, which play families it may propose and which evidence
+    each may cite.
+  purpose: Decides, before AI is asked to write, which play families it may propose and which evidence
+    each may cite.
+  inputs:
+  - The evidence list
+  - The research timing gate
+  logic: A family is eligible if at least one evidence item contains one of its signal words (as a whole
+    word) and none of its exclusion words. Up to 6 such items are listed as citable evidence. A family
+    has a timing trigger if any of its items is a trigger. But if the gate is applied and the family's
+    HP research category is not allowed, only news (not research activity) can supply its timing. Families
+    with no evidence are marked 'do not propose'.
+  table:
+    columns:
+    - Play family
+    - HP offering
+    - Signal words
+    - Excluded when item contains
+    - HP research category
+    rows:
+    - - Workstations
+      - Z by HP Workstations
+      - design, engineering, cad, simulation, modeling, modelling, 3d, rendering, research and development,
+        analytics, data insights, machine learning, artificial intelligence, ai, product development,
+        autocad, catia, solidworks
+      - vehicle, vehicles
+      - Workstation
+    - - Collaboration
+      - Poly Collaboration
+      - collaboration, meeting, conferencing, video, remote, hybrid, flexible working, communication,
+        communications, workplace, teams
+      - '-'
+      - Poly/Collaboration
+    - - PCs
+      - HP Elite / Pro PCs
+      - workforce, employee, workplace, flexible working, device, laptop, desktop, endpoint, productivity,
+        windows, refresh
+      - vehicle, vehicles, server
+      - PC
+    - - Print
+      - HP Enterprise Print / MPS
+      - print, printing, document, documents, paper, scanning, records, archive, mfp, workflow, workflows
+      - '-'
+      - Print
+    - - Device as a service
+      - HP Anyware / DaaS
+      - intune, workspace one, airwatch, jamf, manageengine, sccm, ivanti, tanium, azure ad, okta, device
+        management, endpoint management, device lifecycle, mobile device, mdm, uem, it asset management,
+        endpoint
+      - vehicle, vehicles, fleet maintenance, tokenization, tokenisation, ai chips
+      - PC
+    - - 3D printing
+      - HP Multi Jet Fusion (3D)
+      - 3d printing, 3d printer, 3d printers, additive manufacturing, multi jet fusion, prototyping, prototype,
+        tooling, jigs, fixtures, end-use parts, rapid prototyping
+      - '-'
+      - 3D
+  example:
+    scenario: Evidence item 'CATIA V5 engineering design'.
+    steps:
+    - '''engineering'' and ''design'' are workstation words.'
+    - No other family's words appear ('3d' is not a 3D-printing word; 3D needs '3d printing', 'additive
+      manufacturing', etc.).
+    result: Only the workstation family becomes eligible from this item.
+    computed_value:
+    - workstation
+    verified: true
+    expect:
+    - workstation
+  output: The list of citable evidence for each family, given to the AI that writes the plays.
+  sources:
+  - hp-backend/src/app/services/extractors/solution_narrative_opportunity_map.py:PLAY_SIGNAL_TOKENS
+  - hp-backend/src/app/services/extractors/solution_narrative_opportunity_map.py:PLAY_EXCLUDE_TOKENS
+  - hp-backend/src/app/services/extractors/solution_narrative_opportunity_map.py:PLAY_PRIMARY_CATEGORY
+  - hp-backend/src/app/services/extractors/solution_narrative_opportunity_map.py
+  confidence: high
+- id: om_play_exclusions
+  parent: om_play_eligibility
+  name: Look-alike phrases that cannot support a play
+  kind: filter
+  summary: Stops vehicle fleets, financial tokenisation and AI chips from being read as an IT estate.
+  purpose: Stops vehicle fleets, financial tokenisation and AI chips from being read as an IT estate.
+  inputs:
+  - Evidence item text
+  logic: 'An item that matches a family''s signal word is still ignored for that family if it contains
+    one of that family''s exclusion words (device as a service: vehicle(s), fleet maintenance, tokenization/tokenisation,
+    ai chips; PCs: vehicle(s), server; workstations: vehicle(s)).'
+  example:
+    scenario: Item 'Vehicle device management platform'.
+    steps:
+    - '''device management'' is a device-as-a-service word.'
+    - '''vehicle'' is a device-as-a-service exclusion.'
+    result: Not evidence for DaaS (or any family).
+    verified: true
+    expect: []
+  output: A smaller list of citable evidence.
+  sources:
+  - hp-backend/src/app/services/extractors/solution_narrative_opportunity_map.py:PLAY_EXCLUDE_TOKENS
+  confidence: high
+- id: om_play_generation
+  parent: null
+  name: Play drafting by AI (judged by AI, then verified)
+  kind: model
+  summary: Writes up to 5 opportunity plays from the eligible families only.
+  purpose: Writes up to 5 opportunity plays from the eligible families only.
+  inputs:
+  - Account overview (name, industry, revenue, employees, description)
+  - First 40 installed technology items
+  - Top 10 research topics (context topics marked)
+  - 10 news headlines with dates and links
+  - Citable evidence for each family
+  - Likely topic owners for each family
+  - Account-specific instructions and guardrails
+  logic: 'AI is asked for one play per eligible family. Each play has: a play name; 1 to 4 evidence items
+    (a word-for-word quote plus a one-line reading); an HP capability (1-2 sentences, no account facts);
+    a hedged inference (2-3 sentences); HP products; a proof point and link taken only from the news list;
+    a timing note when the family has no timing trigger; and an owner angle when owners are listed. The
+    wording is AI judgement, held in check by fixed rules: quote word for word, cite at least one signal,
+    use none of the banned buying-moment words, follow the relevance ladder and write 80-160 words. Every
+    rule below is then enforced by fixed checks after the AI has written.'
+  conditions:
+  - Up to 2 further attempts are made. Each one names the exact fault in each play and keeps the fields
+    that were already right.
+  - A play that still breaks a wording, length or timing-note rule after its rewrites is published with
+    the fault recorded. A play that fails evidence verification is dropped.
+  constants:
+  - label: Max plays
+    ref: py:app.services.extractors.solution_narrative_opportunity_map:MAX_PLAYS
+    stated: 5
+  - label: Play-writing guidance version
+    ref: py:app.services.extractors.solution_narrative_opportunity_map:OPPORTUNITY_PROMPT_VERSION
+    stated: 35
+  - label: Rewrites per play for wording faults
+    ref: py:app.services.extractors.solution_narrative_opportunity_map:MAX_PROSE_REWRITES
+    stated: 2
+  example:
+    scenario: 'Eligible families: workstations, 3D printing and PCs.'
+    steps:
+    - AI is asked for exactly these three.
+    - Each answer goes through quote verification and the wording checks.
+    result: 0-3 plays (fewer is acceptable).
+  output: Draft plays, ready for checking.
+  sources:
+  - hp-backend/src/app/services/extractors/solution_narrative_opportunity_map.py:generate_opportunity_map_plays_with_gpt4o
+  doc_source: HP_Recommendation_Tuning_Logic_FINAL_v4 Opportunity Map row
+  confidence: high
+- id: om_quote_verification
+  parent: om_play_generation
+  name: Every quote must exist in the account's data
+  kind: guardrail
+  summary: Removes any evidence the AI did not copy from the account's information.
+  purpose: Removes any evidence the AI did not copy from the account's information.
+  inputs:
+  - The quote written by AI
+  - The evidence list
+  logic: 'A quote is split at commas, and labels such as ''(Composite Score: N)'' or ''INSTALLED TECHNOLOGY
+    STACK:'' are removed. A part is verified if it sits inside an evidence item, or if an evidence item
+    of 6 or more characters appears in it as whole words. The longest matching item wins, and a trigger
+    item is preferred. Unverified quotes are dropped. Quotes that name a superseded version are dropped.
+    A play with no verified quote is dropped entirely.'
+  example:
+    scenario: Quote 'AutoCAD, CATIA, SAP S/4HANA migration' where only AutoCAD and CATIA are in the stack.
+    steps:
+    - '''AutoCAD'' and ''CATIA'' match installed technology items.'
+    - '''SAP S/4HANA migration'' matches nothing and is left out of the stored quote.'
+    result: Stored quote 'AutoCAD, CATIA', labelled as coming from the installed technology list.
+  output: 'The evidence for each play: the quote, the statement, where it came from, whether it is context
+    or a trigger, and the research score where relevant.'
+  sources:
+  - hp-backend/src/app/services/extractors/solution_narrative_opportunity_map.py:_process
+  confidence: high
+- id: om_three_checks
+  parent: om_play_generation
+  name: The three checks behind each play
+  kind: guardrail
+  summary: Records whether a play has verified evidence, a timing trigger and an evidenced HP fit.
+  purpose: Records whether a play has verified evidence, a timing trigger and an evidenced HP fit.
+  inputs:
+  - The play's verified evidence
+  logic: 'Verified evidence: at least one verified quote (always true for a play that survives). Timing
+    trigger: at least one verified quote is a trigger item. HP fit: at least one verified quote (leaving
+    out quotes that contain the family''s exclusion words) contains one of the family''s signal words.
+    Checks met = the number of true checks (0 to 3).'
+  example:
+    scenario: Workstation play quoting 'AutoCAD' (context) and the '3D Printing' topic (trigger, allowed).
+    steps:
+    - Verified evidence - yes.
+    - Timing trigger - yes.
+    - '''autocad'' is a workstation signal word - HP fit yes.'
+    result: Checks met = 3.
+  output: The checks and the number met (used for ordering and review; not shown as tags).
+  sources:
+  - hp-backend/src/app/services/extractors/solution_narrative_opportunity_map.py:_process
+  confidence: high
+- id: om_priority
+  parent: null
+  name: Play priority tag (Critical / High / Medium / Low)
+  kind: selection
+  summary: The single tag shown on each play.
+  purpose: The single tag shown on each play.
+  inputs:
+  - Has initiative = the play has any verified quote
+  - Has supporting signal = a verified quote is a timing trigger
+  - Has any signal = a verified quote, a trigger, or the family has signal words
+  logic: Initiative and supporting signal -> Critical; initiative only -> High; no initiative but some
+    signal -> Medium; otherwise Low.
+  conditions:
+  - 'A play with no verified quote is dropped before this point, so every published play has an initiative:
+    published plays are Critical (has a trigger) or High (no trigger).'
+  table:
+    columns:
+    - Initiative
+    - Supporting signal
+    - Any signal
+    - Priority
+    rows:
+    - - true
+      - true
+      - true
+      - Critical
+    - - true
+      - false
+      - true
+      - High
+    - - false
+      - true
+      - true
+      - Medium
+    - - false
+      - false
+      - true
+      - Medium
+    - - false
+      - false
+      - false
+      - Low
+  example:
+    scenario: Play with verified quotes but no trigger.
+    steps:
+    - Initiative yes.
+    - Supporting signal no.
+    result: High.
+    computed_value: High
+    verified: true
+    expect: High
+  output: The priority tag on each play.
+  sources:
+  - hp-backend/src/app/services/extractors/solution_narrative_opportunity_map.py:_priority_for
+  - hp-backend/src/app/services/extractors/solution_narrative_opportunity_map.py:_process
+  doc_source: Client priority table (Sep 2026), transcribed in hp-backend/src/app/services/extractors/solution_narrative_opportunity_map.py
+    lines 123-139
+  confidence: high
+- id: om_ordering
+  parent: null
+  name: Play ordering and cap
+  kind: filter
+  summary: Orders plays and keeps at most five.
+  purpose: Orders plays and keeps at most five.
+  inputs:
+  - Priority
+  - Checks met
+  - Trigger recency
+  logic: Plays are sorted by priority (Critical, High, Medium, Low), then by more checks met, then by
+    higher trigger recency score. The first 5 are kept. The cap is applied before discovery areas are
+    split off, so discovery areas count toward the 5.
+  example:
+    scenario: 'A: High, 2 checks, recency 0; B: Critical, 3 checks, recency 6; C: Critical, 3 checks,
+      recency 10.'
+    steps:
+    - Critical before High.
+    - B and C tie on checks; C's recency 10 beats 6.
+    result: C, B, A.
+  output: The order of the plays.
+  sources:
+  - hp-backend/src/app/services/extractors/solution_narrative_opportunity_map.py
+  confidence: high
+- id: om_trigger_recency
+  parent: om_ordering
+  name: Trigger recency score (tie-break only)
+  kind: score
+  summary: Breaks ties in favour of the play whose newest cited dated item is most recent.
+  purpose: Breaks ties in favour of the play whose newest cited dated item is most recent.
+  inputs:
+  - Newest date among the play's verified quotes
+  - Today's date
+  logic: 'Age in days of the newest cited date: 0-30 -> 10; 31-90 -> 8; 91-180 -> 6; 181-270 -> 4; 271-365
+    -> 2; older, future-dated or undated -> 0.'
+  table:
+    columns:
+    - Age up to (days)
+    - Score
+    rows:
+    - - 30
+      - 10.0
+    - - 90
+      - 8.0
+    - - 180
+      - 6.0
+    - - 270
+      - 4.0
+    - - 365
+      - 2.0
+    - - over 365 / no date
+      - 0.0
+  constants:
+  - label: Recency bands
+    ref: py:app.services.extractors.solution_narrative_opportunity_map:RECENCY_BANDS
+    stated:
+    - - 30
+      - 10.0
+    - - 90
+      - 8.0
+    - - 180
+      - 6.0
+    - - 270
+      - 4.0
+    - - 365
+      - 2.0
+  example:
+    scenario: Newest cited headline is 45 days old.
+    steps:
+    - 45 > 30 and <= 90.
+    result: '8.0'
+    computed_value: 8.0
+    verified: true
+    expect: 8.0
+  output: Each play's trigger recency score.
+  sources:
+  - hp-backend/src/app/services/extractors/solution_narrative_opportunity_map.py:_recency_score
+  - hp-backend/src/app/services/extractors/solution_narrative_opportunity_map.py:RECENCY_BANDS
+  confidence: high
+- id: om_prose_guardrails
+  parent: null
+  name: Wording rules enforced on each play
+  kind: guardrail
+  summary: Keeps play prose within what the evidence supports.
+  purpose: Keeps play prose within what the evidence supports.
+  inputs:
+  - Title, HP capability, inference, timing note, owner angle and evidence statements
+  logic: 'Checked in this order. Each failure sends the play back for a rewrite while rewrites remain
+    (2 for most faults). Otherwise the play is published with the fault noted. The checks are: overclaiming
+    words; a missing timing note (a standard note is then added); a missing owner angle when owners exist
+    (the play is published without it); length outside 80-160 words; a superseded version named in the
+    wording; and over-claiming against the relevance ladder. After those, any number that is not in the
+    account''s information sends the play back for a rewrite (there is no publish-anyway fallback at this
+    stage). Links with no support in the account''s information are removed. HP products outside the approved
+    list are dropped.'
+  example:
+    scenario: See the rules below.
+    result: '-'
+  output: Cleaned play text, a wording warning where one applies, the reasons for anything dropped, and
+    a report on what was checked against the account's information.
+  sources:
+  - hp-backend/src/app/services/extractors/solution_narrative_opportunity_map.py:_process
+  confidence: high
+- id: om_overclaim
+  parent: om_prose_guardrails
+  name: Overclaiming words
+  kind: guardrail
+  summary: Blocks buying-moment language the evidence cannot establish.
+  purpose: Blocks buying-moment language the evidence cannot establish.
+  inputs:
+  - Inference and evidence statements
+  - Company name
+  logic: 'Checked sentence by sentence. These phrases are always banned: ''now is the perfect time'',
+    ''perfect time'', ''perfect fit'', ''the right time to'', ''is ready to'', ''are ready to'', ''guarantees'',
+    ''ensures'', ''fully compatible'', ''must have'', ''ideal time''. These are banned only when the sentence
+    is about the account (it contains their, they, the company and similar words, or a word of the company
+    name longer than 3 letters): require(s/d), needs, need to, will need.'
+  example:
+    scenario: '''Now is the perfect time for HP. Their engineering teams require more compute. Design
+      workloads require high-performance computing.'' for Astra International.'
+    steps:
+    - 'Sentence 1: ''now is the perfect time'' and ''perfect time''.'
+    - Sentence 2 is about the account ('their') and says 'require'.
+    - Sentence 3 describes a type of workload - allowed.
+    result: 'Faults: now is the perfect time, perfect time, require.'
+    computed_value:
+    - now is the perfect time
+    - perfect time
+    - require
+    verified: true
+    expect:
+    - now is the perfect time
+    - perfect time
+    - require
+  output: A rewrite request, or a wording warning on the published play after 2 rewrites.
+  sources:
+  - hp-backend/src/app/services/extractors/solution_narrative_opportunity_map.py:_has_overclaim
+  - hp-backend/src/app/services/extractors/solution_narrative_opportunity_map.py:OVERCLAIM_ALWAYS
+  - hp-backend/src/app/services/extractors/solution_narrative_opportunity_map.py:OVERCLAIM_IF_ABOUT_ACCOUNT
+  confidence: high
+- id: om_length_band
+  parent: om_prose_guardrails
+  name: 80-160 word narrative
+  kind: guardrail
+  summary: Keeps each play's wording within a band of 80 to 160 words.
+  purpose: Keeps each play's wording within a band of 80 to 160 words.
+  inputs:
+  - HP capability
+  - Inference
+  - Timing note
+  - Owner angle
+  logic: The words in those four fields are added up. If the total is outside 80-160 (and not zero), the
+    play is sent back once for each remaining rewrite, with an instruction to expand the inference or
+    tighten the text. After the rewrites it is published as it is.
+  constants:
+  - label: Min words
+    ref: py:app.services.extractors.solution_narrative_opportunity_map:PLAY_MIN_WORDS
+    stated: 80
+  - label: Max words
+    ref: py:app.services.extractors.solution_narrative_opportunity_map:PLAY_MAX_WORDS
+    stated: 160
+  example:
+    scenario: Capability 20 words, inference 30, timing note 10, no owner angle.
+    steps:
+    - Total 60 < 80.
+    result: 'Rewrite requested: ''Expand the inference''.'
+    computed_value: 60
+    verified: true
+    expect: 60
+  output: A rewrite note, or a record that the play was published as it is.
+  sources:
+  - hp-backend/src/app/services/extractors/solution_narrative_opportunity_map.py:_play_length_fault
+  doc_source: HP_Recommendation_Tuning_Logic_FINAL_v4 section G (Opportunity Map 80-160 words)
+  confidence: high
+- id: om_relevance_ladder
+  parent: om_prose_guardrails
+  name: Relevance ladder on play prose
+  kind: guardrail
+  summary: An offering 'is relevant' only on two independent signals; 'may be relevant' on one; not recommended
+    on context alone.
+  purpose: An offering 'is relevant' only on two independent signals; 'may be relevant' on one; not recommended
+    on context alone.
+  inputs:
+  - Where each of the play's verified quotes came from
+  - HP capability and inference wording
+  logic: The play's evidence tier is worked out with the shared tier rule (see the evidence tier rule
+    below). Below Opportunity, phrases such as 'is relevant', 'strong fit' and 'clearly addresses' are
+    faults. At Context Only, phrases such as 'recommend', 'should deploy' and 'pitch' are faults. Below
+    Opportunity, wording that says the account needs, requires, plans to or is evaluating something is
+    also a fault.
+  example:
+    scenario: '''HP Wolf Security is relevant to this opportunity.'' on a play citing only the installed
+      technology, then on one citing the installed technology and research activity.'
+    steps:
+    - 'Installed technology only: 1 independent signal -> Conversation Starter -> fault.'
+    - 'Installed technology + research activity: 2 independent signals -> Opportunity -> allowed.'
+    result: '''may be relevant'' with 1 fault, then ''is relevant'' with 0 faults.'
+    computed_value:
+    - - may be relevant
+      - 1
+    - - is relevant
+      - 0
+    verified: true
+    expect:
+    - - may be relevant
+      - 1
+    - - is relevant
+      - 0
+  output: A rewrite request, or a record that the play was published as it is. The tier itself is not
+    stored on the play.
+  sources:
+  - hp-backend/src/app/services/extractors/solution_narrative_opportunity_map.py:_play_relevance_fault
+  - hp-backend/src/app/services/hp/guardrails.py:tier_language_faults
+  doc_source: Client relevance ladder, 25 Sep (quoted in hp-backend/src/app/services/hp/evidence_tier.py
+    lines 85-90)
+  confidence: high
+- id: om_timing_note
+  parent: om_prose_guardrails
+  name: Plays without a timing trigger must say what to confirm
+  kind: guardrail
+  summary: Stops a play reading as timely when no timing signal exists.
+  purpose: Stops a play reading as timely when no timing signal exists.
+  inputs:
+  - Whether the play has a trigger
+  - Timing note written by AI
+  logic: If the play has no trigger quote and no timing note, it is sent back (up to 2 rewrites). After
+    that, a standard note is added.
+  constants:
+  - label: Standard timing note
+    ref: py:app.services.extractors.solution_narrative_opportunity_map:DEFAULT_TIMING_NOTE
+    stated: No timing signal for this play appears in this account's data - confirm current plans and
+      budget timing before positioning.
+  example:
+    scenario: Print play citing only the business description; AI gave no timing note twice.
+    steps:
+    - Two rewrites used.
+    result: Standard note published.
+  output: The timing note on the play.
+  sources:
+  - hp-backend/src/app/services/extractors/solution_narrative_opportunity_map.py:_process
+  confidence: high
+- id: om_grounding
+  parent: om_prose_guardrails
+  name: Numbers, links and product names must come from the data
+  kind: guardrail
+  summary: Removes invented figures, links and product names.
+  purpose: Removes invented figures, links and product names.
+  inputs:
+  - All play text
+  - Everything in the company profile, installed technology, research activity and news information
+  - The approved HP product list
+  logic: A number that is not in the account's information sends the play back for a rewrite. A link that
+    is not in it is removed (and the source link cleared). HP products that are not on the approved list
+    are dropped.
+  table:
+    columns:
+    - Approved HP product names
+    rows:
+    - - Z by HP Workstations
+    - - HP Elite / Pro PCs
+    - - HP EliteBook
+    - - HP ProBook
+    - - HP Wolf Security
+    - - Poly Collaboration
+    - - Poly Studio
+    - - Poly Lens
+    - - HP Poly Room Compute
+    - - HP Enterprise Print / MPS
+    - - HP Enterprise Printing & MPS
+    - - HP Multi Jet Fusion (3D)
+    - - HP Anyware / DaaS
+    - - HP Anyware
+    - - HP DaaS
+    - - HP Workforce Experience Platform
+    - - HP Care Pack Services
+    - - HP Lifecycle & Sustainability Services
+    - - HP Deployment & Configuration Services
+    - - HP IQ for Enterprise
+    - - Original HP Ink
+  example:
+    scenario: Inference says 'could cut costs by 30%' and 30 appears nowhere in the account's information.
+    steps:
+    - 30 has no support in the account information.
+    result: Play sent back to remove the figure.
+  output: A report of what was checked, and a filtered product list.
+  sources:
+  - hp-backend/src/app/services/extractors/solution_narrative_opportunity_map.py:_process
+  - hp-backend/src/app/services/extractors/grounding.py:HP_PRODUCT_LINES
+  doc_source: HP_Recommendation_Tuning_Logic_FINAL_v4 section I
+  confidence: high
+- id: om_merge_duplicates
+  parent: null
+  name: Merge plays with the same family and the same triggers
+  kind: filter
+  summary: Combines two tiles that use the same trigger, need and HP solution.
+  purpose: Combines two tiles that use the same trigger, need and HP solution.
+  inputs:
+  - Play family
+  - Set of trigger quotes
+  logic: Two plays with the same family and an identical set of trigger quotes are merged. The first keeps
+    the other's extra evidence and a count of how many plays were merged.
+  example:
+    scenario: Two PC plays both citing only the headline 'Astra opens new plant'.
+    steps:
+    - Same family, same trigger set.
+    result: One PC play with both evidence lists, merged count 2.
+  output: A merged-play count on the play.
+  sources:
+  - hp-backend/src/app/services/extractors/solution_narrative_opportunity_map.py
+  confidence: high
+- id: om_discovery_areas
+  parent: null
+  name: Plays failing the HP-fit check become discovery areas
+  kind: guardrail
+  summary: Keeps what was seen without presenting an unsupported HP pitch.
+  purpose: Keeps what was seen without presenting an unsupported HP pitch.
+  inputs:
+  - The HP-fit check
+  logic: After ordering and the cap, any play whose HP-fit check is false moves to 'discovery areas'.
+    Its title becomes '<offering name> - no supporting evidence in this account's data'. The inference,
+    capability, resource link, owner angle, proof point, source link and case study are removed, and the
+    HP products are emptied. The evidence, priority, scale and owners stay.
+  example:
+    scenario: Print play whose quotes are about property investment.
+    steps:
+    - No print signal word in the quotes - HP fit is false.
+    result: Shown as 'HP Enterprise Print / MPS - no supporting evidence in this account's data'.
+  output: The discovery areas and their count.
+  sources:
+  - hp-backend/src/app/services/extractors/solution_narrative_opportunity_map.py
+  - hp-backend/src/app/services/extractors/solution_narrative_opportunity_map.py:PLAY_DISPLAY_NAMES
+  confidence: high
+- id: om_scale_statement
+  parent: null
+  name: Scale statement (qualitative, no projected saving)
+  kind: selection
+  summary: States the size of the opportunity only from named parts of the account's information.
+  purpose: States the size of the opportunity only from named parts of the account's information.
+  inputs:
+  - 'Company profile: employee range'
+  - Full installed technology list
+  - Research scores of the cited topics
+  - First cited dated headline that contains a digit
+  logic: 'Fragments are joined in this order: ''<employees> employee estate'' (PCs, device as a service,
+    collaboration and print only); the detected estate products for the family (up to 4, with server and
+    data-centre entries left out) or, if there are none, a sentence saying that none of the N listed technologies
+    is in this area; the highest-scoring cited research topic with its composite score; and the first
+    cited dated trigger headline that contains a digit. The basis of each fragment is listed alongside
+    the statement. If there is no fragment, there is no statement.'
+  table:
+    columns:
+    - Play family
+    - Estate products looked for
+    rows:
+    - - PCs
+      - microsoft windows os, windows 10, windows 11, macos, apple ios, chromeos, elitebook, probook,
+        thinkpad, latitude, macbook
+    - - Workstations
+      - autocad, autodesk, catia, solidworks, blender, inventor, 3ds max, maya, ansys, revit
+    - - Collaboration
+      - microsoft teams, zoom, webex, g suite, google workspace, slack, google meet, microsoft office
+        365
+    - - Print
+      - canon, epson, xerox, ricoh, brother, kyocera, lexmark, papercut, konica
+    - - Device as a service
+      - intune, workspace one, airwatch, jamf, manageengine, sccm, ivanti, tanium, microsoft azure ad
+        mfa, okta
+  example:
+    scenario: PC play; 10001+ employees; technology list 'Microsoft Windows OS', 'Windows Server 2008',
+      'Lenovo ThinkPad', 'Kaspersky'; cited topic 'Laptop refresh' (71); cited headline 'Astra opens 3
+      new plants' (dated).
+    steps:
+    - Employee fragment added (PCs are a headcount-based play).
+    - Windows Server 2008 is left out as a server; Windows OS and ThinkPad are detected.
+    - Topic at composite 71.
+    - The headline has a digit and a date.
+    result: '''10001+ employee estate; Microsoft Windows OS, Lenovo ThinkPad detected in the technology
+      stack; research interest in "Laptop refresh" at composite 71; reported in "Astra opens 3 new plants".''
+      (4 fields used)'
+    computed_value:
+    - 10001+ employee estate; Microsoft Windows OS, Lenovo ThinkPad detected in the technology stack;
+      research interest in "Laptop refresh" at composite 71; reported in "Astra opens 3 new plants".
+    - 4
+    verified: true
+    expect:
+    - 10001+ employee estate; Microsoft Windows OS, Lenovo ThinkPad detected in the technology stack;
+      research interest in "Laptop refresh" at composite 71; reported in "Astra opens 3 new plants".
+    - 4
+  output: The scale statement, the basis for each part of it, and the number of fields used.
+  sources:
+  - hp-backend/src/app/services/extractors/solution_narrative_opportunity_map.py:_build_scale_statement
+  - hp-backend/src/app/services/extractors/solution_narrative_opportunity_map.py:PLAY_ESTATE_TOKENS
+  - hp-backend/src/app/services/extractors/solution_narrative_opportunity_map.py:POPULATION_PLAYS
+  doc_source: HP_ABX_v3_final, quoted in hp-backend/src/app/services/extractors/solution_narrative_opportunity_map.py
+    _build_scale_statement docstring
+  confidence: high
+- id: om_target_contacts
+  parent: null
+  name: Who owns each play (real roster contacts only)
+  kind: selection
+  summary: Names up to two people at the account whose role matches the play.
+  purpose: Names up to two people at the account whose role matches the play.
+  inputs:
+  - 'Contacts: title, department, influence type and stakeholder score'
+  logic: A contact qualifies if a title word for the play family (as a whole word) is in their title,
+    or their department is one of the family's departments. Rank = 2 for a title match + 1 for a department
+    match. Ties are broken by the higher stakeholder score, and the top 2 are kept. Nobody is invented.
+    If nobody matches, the note 'No matching contact identified in supplied data.' is shown.
+  table:
+    columns:
+    - Play family
+    - Title words
+    - Departments
+    rows:
+    - - Workstations
+      - engineering, technology development, business intelligence, analytics, design, product development,
+        architect, research
+      - Engineering & Technical, Information Technology
+    - - Collaboration
+      - collaboration, communications, applications, end user, workplace, operations
+      - Information Technology, Operations
+    - - PCs
+      - end user, procurement, information technology, service, operations
+      - Information Technology, Operations
+    - - Print
+      - procurement, facilities, administration, general affairs, operations
+      - Operations, Information Technology, Finance
+    - - Device as a service
+      - information technology, procurement, infrastructure, cloud, operations
+      - Information Technology, Engineering & Technical
+    - - 3D printing
+      - engineering, product development, manufacturing, production, design, research, operations, supply
+        chain
+      - Engineering & Technical, Operations
+  example:
+    scenario: 'Workstation play; contacts: A Head of Engineering (Engineering & Technical, score 80),
+      B IT Manager (Information Technology, 90), C Design Lead (Marketing, 95), D CFO (Finance, 99).'
+    steps:
+    - 'A: title ''engineering'' + department -> rank 3.'
+    - 'C: title ''design'' -> rank 2.'
+    - 'B: department only -> rank 1.'
+    - 'D: no match.'
+    result: A and C.
+    computed_value:
+    - A
+    - C
+    verified: true
+    expect:
+    - A
+    - C
+  output: Up to two target contacts for each play, or the no-contact note.
+  sources:
+  - hp-backend/src/app/services/extractors/solution_narrative_opportunity_map.py:_match_contacts
+  - hp-backend/src/app/services/extractors/solution_narrative_opportunity_map.py:PLAY_OWNER_TITLE_TOKENS
+  - hp-backend/src/app/services/extractors/solution_narrative_opportunity_map.py:PLAY_OWNER_DEPARTMENTS
+  confidence: high
+- id: om_case_study_proof
+  parent: null
+  name: Case-study proof point per play
+  kind: selection
+  summary: Attaches at most one HP customer story that matches the HP line the play argues for, or nothing.
+  purpose: Attaches at most one HP customer story that matches the HP line the play argues for, or nothing.
+  inputs:
+  - The play's HP products
+  - The play title (and opportunity type for service plays)
+  - The account's industry
+  - Case studies already cited by higher-priority sections
+  logic: Only plays that stay as opportunities (not discovery areas) get a proof point. The play's HP
+    products are matched to case-study product lines, and only studies on those lines that have a headline
+    are candidates (no line match means no proof). Candidates are ranked (see the ranking rule) and then
+    allocated (see the allocation rule). Hardware plays pick first, then service plays. The same study
+    is never used twice on this page. The study text is not number-checked against the account, because
+    its figures belong to the customer.
+  table:
+    columns:
+    - HP offering
+    - Case-study product lines
+    rows:
+    - - z by hp workstations
+      - workstation
+    - - hp elite / pro pcs
+      - pc, device services
+    - - hp wolf security
+      - security
+    - - hp enterprise print / mps
+      - print
+    - - poly collaboration
+      - collaboration
+    - - hp anyware / daas
+      - device services, workforce experience
+    - - hp workforce experience platform
+      - workforce experience
+    - - hp multi jet fusion (3d)
+      - 3d
+    - - hp care pack services
+      - device services
+    - - hp deployment & configuration services
+      - device services
+    - - hp lifecycle & sustainability services
+      - device services
+    - - original hp ink
+      - print
+    - - hp elitebook
+      - pc, device services
+    - - hp probook
+      - pc, device services
+    - - poly studio
+      - collaboration
+    - - hp enterprise printing & mps
+      - print
+    - - hp anyware
+      - device services, workforce experience
+    - - hp daas
+      - device services, workforce experience
+  example:
+    scenario: Play with the HP product 'HP Elite / Pro PCs'.
+    steps:
+    - 'Lines: pc, device services.'
+    result: Only PC and device-services studies can be cited.
+    computed_value:
+    - pc
+    - device_services
+    verified: true
+    expect:
+    - pc
+    - device_services
+  output: The proof point text and its detail (customer, industry, link and so on).
+  sources:
+  - hp-backend/src/app/services/extractors/solution_narrative_opportunity_map.py
+  - hp-backend/src/app/services/hp/case_studies.py:allocate
+  - hp-backend/src/app/services/hp/case_studies.py:match
+  doc_source: HP_Recommendation_Tuning_Logic_FINAL_v4 section H and Shared Rulebook + Case Study Rule
+  confidence: high
+- id: om_cs_canonical_line
+  parent: om_case_study_proof
+  name: Which product line a study belongs to
+  kind: source
+  summary: Classifies each study by HP product line using only the tags on the case study itself.
+  purpose: Classifies each study by HP product line using only the tags on the case study itself.
+  inputs:
+  - The study's featured product
+  - The study's HP route (its sales route)
+  - The study's HP offering (used as a fallback)
+  logic: '1) The featured product is matched against the product-line keywords, most specific first: 3D,
+    SitePrint, Workstation, Security, workforce experience, Collaboration, Device services, Print, PC.
+    2) Otherwise the HP route is used: 3D Printing, Workstations, Print, PC-Notebook. 3) Only if both
+    are blank: the HP offering, as read by AI. Otherwise the study has no line.'
+  table:
+    columns:
+    - Line
+    - Keywords
+    rows:
+    - - 3d
+      - multi jet fusion, jet fusion, metal jet, 3d print, 3d
+    - - siteprint
+      - siteprint
+    - - workstation
+      - z workstation, zbook, z by hp, workstation
+    - - security
+      - wolf security, wolf pro, sure click
+    - - workforce experience
+      - workforce experience, wxp
+    - - collaboration
+      - collaboration, poly, conferencing, meeting room
+    - - device services
+      - managed device, device as a service, daas, dynamic configuration, device life extension
+    - - print
+      - managed print, pagewide, print
+    - - pc
+      - elitebook, dragonfly, omnibook, probook, elite pc, pro pc, laptop, notebook
+  example:
+    scenario: Study A tagged product 'HP Multi Jet Fusion 5200' with route 'Print'; study B with no product
+      and route 'Workstations'; study C with no tags and offering 'Poly conferencing rooms'.
+    steps:
+    - 'A: the product contains ''multi jet fusion'', so 3d (the route is not looked at).'
+    - 'B: the route gives workstation.'
+    - 'C: the fallback offering gives collaboration.'
+    result: 3d, workstation, collaboration.
+    computed_value:
+    - 3d
+    - workstation
+    - collaboration
+    verified: true
+    expect:
+    - 3d
+    - workstation
+    - collaboration
+  output: The product line used for matching.
+  sources:
+  - hp-backend/src/app/services/hp/case_studies.py:canonical_line
+  - hp-backend/src/app/services/hp/case_studies.py:OFFERING_KEYWORDS
+  - hp-backend/src/app/services/hp/case_studies.py:HP_ROUTE_TO_LINE
+  doc_source: Client, 27 Sep, quoted in hp-backend/src/app/services/hp/case_studies.py canonical_line
+    docstring
+  confidence: high
+- id: om_cs_ranking
+  parent: om_case_study_proof
+  name: 'Study ranking: use case first, then industry'
+  kind: selection
+  summary: Orders matching studies by use case first, then industry, then how fully the story is told.
+  purpose: Orders matching studies by use case first, then industry, then how fully the story is told.
+  inputs:
+  - The play's use-case tags (from its title and opportunity type)
+  - The account's industry
+  - Study tags, outcome, source level, challenge, and whether it is only a name credit
+  logic: 'Points: +100 for each shared use-case tag; +10 for the same industry; +4 for a recorded outcome;
+    +2 if published by HP (the top source level); +1 for a recorded challenge; +2 if the story is told
+    in full (not just a name credit). Ties are broken by more merged source material, then by customer
+    name. Region (APJ/APAC) is not scored because the case studies carry no region information.'
+  table:
+    columns:
+    - Use-case tag
+    - Words in the play title or type that map to it
+    rows:
+    - - Engineering-Product-Development
+      - workstation, engineering, design, cad, 3d, product development, simulation, rendering, modelling,
+        modeling, prototyp
+    - - Production-Optimization
+      - production, manufactur, factory, throughput, tooling, additive, supply chain, cost reduction,
+        efficiency
+    - - Industrial-Manufacturing
+      - industrial, manufactur, heavy equipment, automotive, mining, plant, machinery
+    - - Digital-Transformation
+      - digital transformation, modernis, moderniz, transformation, cloud, automation, digitis, digitiz
+    - - Fleet-Refresh
+      - device fleet, fleet refresh, refresh, pc, laptop, notebook, client device, device lifecycle, daas,
+        device as a service, deployment
+    - - Workforce-Modernization
+      - workforce, employee experience, hybrid, flexible working, wxp, workforce experience, productivity,
+        endpoint experience
+    - - Security
+      - security, endpoint protection, threat, wolf, compliance, zero trust
+    - - Remote-Collaboration
+      - collaboration, poly, meeting, conferencing, hybrid workplace, video
+  constants:
+  - label: Per shared use-case tag
+    ref: py:app.services.hp.case_studies:SCORE_PER_SHARED_SIGNAL
+    stated: 100
+  - label: Same industry
+    ref: py:app.services.hp.case_studies:SCORE_SAME_INDUSTRY
+    stated: 10
+  - label: Has outcome
+    ref: py:app.services.hp.case_studies:SCORE_HAS_OUTCOME
+    stated: 4
+  - label: Published by HP
+    ref: py:app.services.hp.case_studies:SCORE_HP_PUBLISHED
+    stated: 2
+  - label: Has challenge
+    ref: py:app.services.hp.case_studies:SCORE_HAS_CHALLENGE
+    stated: 1
+  - label: Told in full
+    ref: py:app.services.hp.case_studies:SCORE_NARRATED
+    stated: 2
+  example:
+    scenario: 'Automotive account, wanted tags Engineering-Product-Development and Production-Optimization.
+      Study A: Automotive, 1 shared tag, outcome, published by HP, challenge, told in full, 3 pieces of
+      source material. Study B: Industrial Manufacturing, 2 shared tags, no outcome, not published by
+      HP, told in full.'
+    steps:
+    - 'A: 100 + 10 + 4 + 2 + 1 + 2 = 119.'
+    - 'B: 200 + 2 = 202.'
+    result: B ranks above A (use case outranks industry).
+    computed_value:
+    - 119
+    - 202
+    verified: true
+    expect:
+    - 119
+    - 202
+  output: A ranked list of candidate studies (up to 25 examined).
+  sources:
+  - hp-backend/src/app/services/hp/case_studies.py:_score
+  - hp-backend/src/app/services/hp/case_studies.py:signals_for_opportunity
+  - hp-backend/src/app/services/hp/case_studies.py:USE_CASE_TAGS
+  doc_source: Client, 25 Sep ranking keys, quoted in hp-backend/src/app/services/hp/case_studies.py lines
+    214-230
+  confidence: high
+- id: om_cs_industry
+  parent: om_cs_ranking
+  name: Account industry matched to the case-study industry labels
+  kind: display
+  summary: Lets the same-industry key compare like with like.
+  purpose: Lets the same-industry key compare like with like.
+  inputs:
+  - The company's industry category (from LinkedIn, otherwise from its industry classification description)
+  logic: 'The first label (in this order) that has any keyword found in the industry text wins: Automotive,
+    Aerospace, Healthcare, Education, Logistics, Media & Entertainment, Consumer Goods, IT Services, Technology,
+    Industrial Manufacturing. If none is found, there is no label (and industry then adds nothing).'
+  table:
+    columns:
+    - Label
+    - Keywords
+    rows:
+    - - Automotive
+      - automotive, vehicle, car , motor, automobile
+    - - Aerospace
+      - aerospace, aviation, aircraft, space, defence, defense
+    - - Healthcare
+      - health, medical, hospital, pharma, clinic, prosthet, orthot, life science
+    - - Education
+      - education, university, college, school, academic
+    - - Logistics
+      - logistic, freight, shipping, warehous, supply chain
+    - - Media & Entertainment
+      - media, entertainment, broadcast, film, cinema, publishing
+    - - Consumer Goods
+      - consumer goods, retail, fmcg, apparel, food, beverage
+    - - IT Services
+      - it services, systems integrat, managed service, consulting, outsourc
+    - - Technology
+      - software, technology, saas, semiconductor, electronics, telecom
+    - - Industrial Manufacturing
+      - manufactur, industrial, machinery, engineering, production, factory, construction, heavy equipment,
+        mining
+  example:
+    scenario: '''automation machinery manufacturing / Other Industrial Machinery Manufacturing'' and ''Motor
+      Vehicle Manufacturing''.'
+    steps:
+    - First text hits only Industrial Manufacturing keywords.
+    - Second contains 'motor' and 'vehicle' -> Automotive before Industrial.
+    result: Industrial Manufacturing; Automotive.
+    computed_value:
+    - Industrial Manufacturing
+    - Automotive
+    verified: true
+    expect:
+    - Industrial Manufacturing
+    - Automotive
+  output: The industry label.
+  sources:
+  - hp-backend/src/app/services/hp/case_studies.py:normalise_industry
+  - hp-backend/src/app/services/hp/case_studies.py:INDUSTRY_KEYWORDS
+  confidence: high
+- id: om_cs_allocation
+  parent: om_case_study_proof
+  name: Allocation across surfaces
+  kind: selection
+  summary: Spreads customers across the dashboard without lowering quality.
+  purpose: Spreads customers across the dashboard without lowering quality.
+  inputs:
+  - Ranked candidate studies
+  - Studies cited by higher-priority sections (taken)
+  - Studies already used on this page
+  logic: 'Sections choose in a fixed order: Objection Playbook, Opportunity Map, Messaging, Content, Executive
+    Dashboard, Live Signals, Intent, Technographic Map. A section gives way only to those above it. Studies
+    already used on this page are excluded outright. The top candidate sets a quality bar = (same industry?,
+    told in full?). The first candidate that meets the bar and is not cited elsewhere is chosen. If every
+    candidate that meets the bar is cited elsewhere, the top one is repeated.'
+  example:
+    scenario: Top candidate B (other industry, told in full) is cited by the Objection Playbook; A (same
+      industry, told in full) is next.
+    steps:
+    - The bar is B's level (0, 1).
+    - A's level (1, 1) is not below the bar and A is not cited elsewhere.
+    result: A is chosen; quality levels (1, 1) vs (0, 1).
+    computed_value:
+    - - 1
+      - 1
+    - - 0
+      - 1
+    verified: true
+    expect:
+    - - 1
+      - 1
+    - - 0
+      - 1
+  output: One proof point, or none.
+  sources:
+  - hp-backend/src/app/services/hp/case_studies.py:allocate
+  - hp-backend/src/app/services/hp/case_studies.py:_quality_tier
+  - hp-backend/src/app/services/hp/case_studies.py:cited_above
+  - hp-backend/src/app/services/hp/case_studies.py:SURFACE_ORDER
+  confidence: high
+- id: om_cs_loader_filters
+  parent: om_case_study_proof
+  name: Which studies are in the library at all
+  kind: filter
+  internal: true
+  summary: Filters applied to the HP case-study library before any matching.
+  purpose: Filters applied to the HP case-study library before any matching.
+  inputs:
+  - The HP case-study library
+  logic: 'Left out when the library is loaded: non-English language versions; the placeholder customer
+    ''Enterprise Customer''; customers that are really HP page titles; and any study whose customer confidence
+    is below 0.9. Rows for the same customer and product are merged. A missing product tag does not drop
+    a study. When matching, a study with no headline is skipped.'
+  constants:
+  - label: Minimum customer confidence
+    value: 0.9
+  example:
+    scenario: A study whose customer confidence is 0.85.
+    steps:
+    - 0.85 < 0.9.
+    result: Not loaded.
+  output: The case-study library used for matching.
+  sources:
+  - hp-backend/scripts/load_case_studies.py:clean
+  - hp-backend/src/app/services/hp/case_studies.py:match
+  confidence: high
+- id: om_service_plays
+  parent: null
+  name: HP service plays from HP's approved sales rulebook (no AI)
+  kind: selection
+  uses:
+  - hp_rulebook
+  summary: Adds HP services the account's own evidence earns, quoting HP's approved wording verbatim.
+  purpose: Adds HP services the account's own evidence earns, quoting HP's approved wording verbatim.
+  inputs:
+  - The same evidence list as the hardware plays
+  - HP's approved sales rulebook (service rules, routing table and matrices)
+  - Account country
+  - Contacts
+  logic: 'Rules are matched with the shared rulebook matching logic (see the matching rule below), then
+    one primary play and separately evidenced secondary plays are selected (see the selection rule below).
+    Each play shows: the offering title, the opportunity type, the rule''s approved sentences (with prohibitions
+    shown separately), unverified conditions that address the reader, up to 6 evidence rows, the terms
+    the rule names that the account has (''named in rule'') versus terms that only indicate territory,
+    owners from the contacts for that opportunity type, and a case study if one matches. Withheld rules
+    and an HP IQ market block are listed as notes. No evidence tier or lifecycle check is applied to service
+    plays.'
+  table:
+    columns:
+    - Opportunity type
+    - Owner title words
+    - Owner departments
+    rows:
+    - - workforce experience
+      - end user, service, workplace, employee, information technology, operations, support
+      - Information Technology, Operations
+    - - security
+      - security, risk, compliance, governance, information technology, infrastructure
+      - Information Technology, Operations
+    - - support and care pack
+      - service, support, operations, procurement, information technology, maintenance
+      - Information Technology, Operations
+    - - lifecycle and sustainability
+      - sustainability, procurement, asset, general affairs, operations, finance
+      - Operations, Finance, Information Technology
+    - - deployment and configuration
+      - infrastructure, information technology, operations, procurement, end user, deployment
+      - Information Technology, Operations
+    - - poly support
+      - collaboration, communications, end user, workplace, operations
+      - Information Technology, Operations
+    - - print and scan
+      - procurement, facilities, administration, general affairs, operations
+      - Operations, Information Technology, Finance
+    - - enterprise ai
+      - data, analytics, business intelligence, technology development, architect, innovation
+      - Information Technology, Engineering & Technical
+  example:
+    scenario: Security opportunity; contacts as in the target-contacts rule.
+    steps:
+    - 'A: title and department match no Security owner word.'
+    - 'B: title ''IT Manager'' has no Security title word, but department Information Technology is a
+      Security department - rank 1.'
+    result: 'Owner: B.'
+    computed_value:
+    - B
+    verified: true
+    expect:
+    - B
+  output: The service plays, their count, any notes, and the version of the rulebook used.
+  sources:
+  - hp-backend/src/app/services/extractors/solution_narrative_opportunity_map.py:_service_plays
+  - hp-backend/src/app/services/hp/rulebook.py:facts_for
+  doc_source: HP 220 Account Rulebook C 01-C 07; HP_Recommendation_Tuning_Logic_FINAL_v4 Opportunity Map
+    row
+  confidence: high
+- id: om_sp_matching
+  parent: om_service_plays
+  name: A rule must be earned by qualifying terms
+  kind: selection
+  summary: Stops rules firing on terms every enterprise has.
+  purpose: Stops rules firing on terms every enterprise has.
+  inputs:
+  - The terms the rule matched
+  logic: A matched term is only 'indicative' (and cannot earn the rule) when every word in it is a ubiquitous
+    vendor (microsoft, google, sap, salesforce, teams...) or a generic qualifier (erp, crm, cloud, suite,
+    platform...), with at least one ubiquitous vendor. For a rule that only routes to another offering
+    and has observable terms, a term must also be one of those observable terms. A rule with no qualifying
+    term is refused. The remaining gates (HP Wolf Security offerings that apply only to HP hardware, the
+    HP IQ market, testable conditions and 3 rules per family) work as in the shared matching logic.
+  example:
+    scenario: Routing-only rule with observable term 'claims processing' matched 'financial services',
+      'claims processing' and 'sap erp'.
+    steps:
+    - '''sap erp'' is a ubiquitous vendor plus a generic word - indicative.'
+    - '''financial services'' is not an observable term of a routing-only rule - indicative.'
+    - '''claims processing'' qualifies.'
+    result: 'Qualifying: [''claims processing''].'
+    computed_value:
+    - - claims processing
+    - - financial services
+      - sap erp
+    verified: true
+    expect:
+    - - claims processing
+    - - financial services
+      - sap erp
+  output: Qualifying terms and indicative terms.
+  sources:
+  - hp-backend/src/app/services/hp/rulebook.py:split_terms
+  - hp-backend/src/app/services/hp/rulebook.py:indicative_term
+  - hp-backend/src/app/services/hp/rulebook.py:candidates
+  confidence: high
+- id: om_sp_conditions
+  parent: om_service_plays
+  name: 'Rule conditions: refused, satisfied or ''unverified'''
+  kind: guardrail
+  summary: Drops a rule the account contradicts, and labels what cannot be checked.
+  purpose: Drops a rule the account contradicts, and labels what cannot be checked.
+  inputs:
+  - The rule's conditions
+  - Evidence text
+  - Account country
+  logic: Only country, management-environment and operating-system conditions can be tested. A country
+    condition that names a country the account is not in refuses the rule. An environment or operating-system
+    condition is satisfied if the evidence names the same thing (intune, entra, autopilot, sccm, vpro,
+    azure, active directory...; windows, macos, linux, android, ios, chromeos). A miss is 'unverified',
+    not a refusal. Every other kind of condition is 'unverified'. Unverified conditions phrased as instructions
+    to the writer ('Recommend...', 'Mention...') are not shown to the seller.
+  example:
+    scenario: 'Indonesia account; rule conditions: US-and-English availability, ''Requires Windows 11'',
+      ''500+ seats''; evidence has ''Microsoft Windows 11''.'
+    steps:
+    - The country condition names the United States; the account is in Indonesia -> not met.
+    - Windows found -> satisfied.
+    - Seat count cannot be tested -> unverified.
+    result: Rule refused (country).
+    computed_value:
+    - false
+    - 1
+    - - 500+ seats
+    verified: true
+    expect:
+    - false
+    - 1
+    - - 500+ seats
+  output: Unverified conditions on the play; refusals appear in the notes.
+  sources:
+  - hp-backend/src/app/services/hp/rulebook.py:check_conditions
+  - hp-backend/src/app/services/hp/rulebook.py:facts_for
+  doc_source: HP 220 Account Rulebook C 07
+  confidence: high
+- id: om_sp_iq_market
+  parent: om_service_plays
+  name: HP IQ only in the United States
+  kind: selection
+  summary: Blocks the whole HP IQ family outside its launch market and says why.
+  purpose: Blocks the whole HP IQ family outside its launch market and says why.
+  inputs:
+  - 'Company profile: country'
+  logic: 'A country containing ''united states'' (or ''us'' / ''usa'') -> available. Any other known country
+    -> the whole HP IQ family is blocked and a note ''HP IQ not offered: ...'' is added. Unknown country
+    -> not blocked.'
+  example:
+    scenario: Indonesia, United States, blank.
+    result: Blocked, available, unknown (not blocked).
+    computed_value:
+    - false
+    - true
+    - null
+    verified: true
+    expect:
+    - false
+    - true
+    - null
+  output: A note on the page.
+  sources:
+  - hp-backend/src/app/services/hp/rulebook.py:iq_availability
+  - hp-backend/src/app/services/extractors/solution_narrative_opportunity_map.py:_service_plays
+  doc_source: Rulebook IQ 01, G 13, G 14 (quoted in hp-backend/src/app/services/hp/rulebook.py)
+  confidence: high
+- id: om_sp_selection
+  parent: om_service_plays
+  name: One primary service play; others only on separate evidence, one per opportunity type
+  kind: selection
+  summary: Stops several service plays resting on the same evidence.
+  purpose: Stops several service plays resting on the same evidence.
+  inputs:
+  - Ranked service-play candidates
+  logic: 'The same selection as the Technographic Map: the best standalone rule is the primary. A later
+    rule is added only if its evidence does not overlap any rule already chosen and its opportunity type
+    is not already represented. Otherwise it is withheld, with a reason that is published as a note.'
+  example:
+    scenario: 'Candidates: Care Pack rule A (evidence item 2, ranked first), Care Pack rule B (evidence
+      item 4, same type), Security rule C (evidence items 0 and 1).'
+    steps:
+    - Care Pack rule A is the primary.
+    - Care Pack rule B has separate evidence but the same type - withheld.
+    - Security rule C has separate evidence and a new type - secondary.
+    result: Care Pack rule A (primary), Security rule C (secondary); Care Pack rule B withheld.
+    computed_value:
+    - CARE 03
+    - - WOLF 09
+    - - CARE 05
+    verified: true
+    expect:
+    - CARE 03
+    - - WOLF 09
+    - - CARE 05
+  output: Service plays marked 'primary' or 'secondary'.
+  sources:
+  - hp-backend/src/app/services/hp/rulebook.py:select
+  doc_source: HP 220 Account Rulebook C 06
+  confidence: high
+- id: om_sp_confidential_facts
+  parent: om_service_plays
+  name: Figures from a confidential source need their condition
+  kind: source
+  summary: Holds back quantified claims from the confidential Original HP Ink information unless the rule
+    supplies the qualifying condition.
+  purpose: Holds back quantified claims from the confidential Original HP Ink information unless the rule
+    supplies the qualifying condition.
+  inputs:
+  - The rule's allowed facts
+  - The rule's conditions
+  - Whether the source is confidential
+  logic: For a rule from a confidential source, a fact that contains a percentage, a pages-per-minute
+    or page-count figure, or any number of 2 or more digits is withheld unless the rule has at least one
+    condition. Facts without figures pass.
+  example:
+    scenario: '''Saves up to 50% on ink'' with no condition; same with condition ''with Instant Ink plan'';
+      ''Original HP Ink is reliable''.'
+    steps:
+    - Figure, no condition -> withheld.
+    - Figure with condition -> allowed.
+    - No figure -> allowed.
+    result: Withheld, allowed, allowed.
+    computed_value:
+    - false
+    - true
+    - true
+    verified: true
+    expect:
+    - false
+    - true
+    - true
+  output: The facts allowed, and the facts withheld for confidentiality.
+  sources:
+  - hp-backend/src/app/services/hp/rulebook.py:_confidential_fact_allowed
+  - hp-backend/src/app/services/hp/rulebook.py:facts_for
+  doc_source: HP 220 Account Rulebook C 16
+  confidence: high
+- id: om_evidence_tier
+  parent: null
+  name: Evidence tier used by the relevance ladder
+  kind: selection
+  summary: Counts the independent kinds of information behind a play.
+  purpose: Counts the independent kinds of information behind a play.
+  inputs:
+  - Where the verified evidence came from
+  logic: Each kind of information counts as one independent signal. The two news feeds count as one 'News'
+    signal, and the research activity data counts as one 'Intent' signal. Company profile and contacts
+    do not corroborate. 2 or more corroborating signals -> Opportunity; 1 -> Conversation Starter; 0 ->
+    Context Only. (The Opportunity Map passes no category research score, so the rule that demotes technology
+    evidence when category research is zero is not applied here.)
+  table:
+    columns:
+    - Tier
+    - Permitted language
+    rows:
+    - - Opportunity
+      - May state that the combined evidence indicates or supports an HP-addressable opportunity, and
+        recommend a specific seller focus. An offering whose conditions are supported "is relevant to
+        this opportunity".
+    - - Conversation Starter
+      - An offering here "may be relevant to this opportunity" - never "is relevant". Do not state a confirmed
+        need, project or buying motion.
+    - - Context Only
+      - Present as seller context only. Do not create an HP opportunity or product recommendation. A detected
+        technology is a possible integration route, nothing more.
+  example:
+    scenario: Play citing one Google News headline, one news-events headline and an installed technology
+      item.
+    steps:
+    - The two news feeds collapse to News.
+    - Plus installed technology = 2.
+    result: Opportunity.
+    computed_value: Opportunity
+    verified: true
+    expect: Opportunity
+  output: Used only for checking the wording; not stored on the play.
+  sources:
+  - hp-backend/src/app/services/hp/evidence_tier.py:tier_for
+  - hp-backend/src/app/services/hp/evidence_tier.py:pipelines
+  doc_source: HP_Recommendation_Tuning_Logic_FINAL_v4 sections B-D
+  confidence: high
+- id: om_regeneration_cache
+  parent: null
+  name: When plays are rebuilt
+  kind: selection
+  internal: true
+  summary: Reuses stored plays unless an input changed.
+  purpose: Reuses stored plays unless an input changed.
+  inputs:
+  - Version of the play-writing guidance
+  - Evidence texts
+  - Contact identifiers
+  - Case-study library version
+  - Studies cited by higher-priority sections
+  - Rulebook version
+  - Account instructions and guardrails
+  logic: A fingerprint of these inputs is stored with the plays. If the stored plays are available and
+    the fingerprint is unchanged, they are reused without asking AI again. If a run produces nothing,
+    the section stays pending with the notice 'No opportunity play met the evidence threshold ... No plays
+    are invented.'
+  constants:
+  - label: Play-writing guidance version
+    ref: py:app.services.extractors.solution_narrative_opportunity_map:OPPORTUNITY_PROMPT_VERSION
+    stated: 35
+  example:
+    scenario: The Objection Playbook picks a different case study.
+    steps:
+    - The set of studies cited above changes, so the fingerprint changes.
+    result: Plays are rebuilt on the next run.
+  output: The stored fingerprint.
+  sources:
+  - hp-backend/src/app/services/extractors/solution_narrative_opportunity_map.py:_opportunity_fingerprint
+  - hp-backend/src/app/services/extractors/solution_narrative_opportunity_map.py
+  confidence: high
+undetermined:
+- Play titles, evidence selection among the eligible items, hp_capability, inference, timing_note, owner_angle
+  and hp_products are chosen by GPT-4o; only the Python gates listed are fixed.
+- Which Rulebook rules exist, their signal_tokens and observable_terms (derived by GPT-4o in scripts/load_rulebook.py
+  at load time), and the routing table live in MongoDB (hp_rulebook); which service plays fire for an
+  account cannot be stated without it.
+- Case-study corpus contents (hp_case_studies) are in MongoDB; enrichment fields (headline, outcome, signal_tags)
+  were model-written at load time.
+- Trigger-signal scores and order belong to the Live Signals feature (news_signals_feed) and are not recomputed
+  here.
+- Exact verbatim-quote matching lives in an inner closure (_process) and cannot be called on its own;
+  its example is hand-computed.
+discrepancies:
+- rule_id: om_evidence_corpus
+  doc: 'HP_Recommendation_Tuning_Logic_FINAL_v4 Opportunity Map: data to use ''Relevant Intent + Explorium
+    Technographics + PredictLeads Hiring + Google RSS/Exa News + Filings + Firmographics + Contacts +
+    HP Case Studies.'''
+  code: hp-backend/src/app/services/extractors/solution_narrative_opportunity_map.py:generate_opportunity_map_plays_with_gpt4o
+    (870-1000) - corpus reads firmographics, technographics, intent_score, hp_category_intent and google_news/news_events
+    only; job_openings and compliance_filings are not read; contacts are used only to name owners.
+- rule_id: om_priority
+  doc: 'Client table transcribed at hp-backend/src/app/services/extractors/solution_narrative_opportunity_map.py
+    lines 128-131: ''Critical a specific initiative AND an independent supporting signal ... Medium no
+    specific initiative, but relevant signals indicate potential ... Low contextual or indirect evidence
+    only''.'
+  code: 'hp-backend/src/app/services/extractors/solution_narrative_opportunity_map.py line 1413: has_initiative=bool(verified)
+    - any verified quote (including a tech-stack item or the business description) counts as ''a specific
+    initiative'', and plays with no verified quote are dropped earlier (line 1330), so Medium and Low
+    cannot occur on a published play.'
+  note: 'Verified: _priority_for is only ever called with has_initiative True for surviving plays.'
+- rule_id: om_evidence_tier
+  doc: 'HP_Recommendation_Tuning_Logic_FINAL_v4 C: Context Only covers evidence ''older based on its own
+    event/source date''; Opportunity needs ''2 logically related independent data pipelines''.'
+  code: hp-backend/src/app/services/hp/evidence_tier.py:tier_for counts distinct pipelines only; dates
+    and relatedness are not tested.
+- rule_id: om_service_plays
+  doc: 'HP_Recommendation_Tuning_Logic_FINAL_v4 J: ''Before surfacing an HP Product, Service or Solution,
+    check the HP Lifecycle file ... If listed and its applicable PE/EM or lifecycle end date has passed,
+    do not recommend it.'''
+  code: hp-backend/src/app/services/extractors/solution_narrative_opportunity_map.py - neither hardware
+    plays nor service plays call hp-backend/src/app/services/hp/lifecycle.py:status_for; only the Technographic
+    Map recommendations apply section J.
+- rule_id: om_service_plays
+  doc: 'Client relevance ladder, 25 Sep, quoted in hp-backend/src/app/services/hp/evidence_tier.py lines
+    85-90: "Technology only (Intune/ServiceNow): an internal ''possible fit'' only, NOT recommended.";
+    HP_Recommendation_Tuning_Logic_FINAL_v4 K3.'
+  code: hp-backend/src/app/services/extractors/solution_narrative_opportunity_map.py:_service_plays (654)
+    applies no evidence tier; a WXP rule whose term 'microsoft intune' is found in a single technographics
+    cell is selected as the primary service play (rb.candidates/rb.select).
+  note: 'Verified with a one-rule synthetic rulebook: evidence [{''text'':''Microsoft Intune'',''dataset'':''technographics''}]
+    -> primary ''WXP 07''.'
+- rule_id: om_cs_ranking
+  doc: 'HP_Recommendation_Tuning_Logic_FINAL_v4 H: ''where comparable proof is available, prefer APJ/APAC
+    proof for APJ accounts.'''
+  code: hp-backend/src/app/services/hp/case_studies.py:_score (435) has no region key; comment says the
+    corpus carries no region column.
+- rule_id: om_cs_loader_filters
+  doc: 'HP_Recommendation_Tuning_Logic_FINAL_v4 A (Input Contract, HP Case Studies): ''Missing source_url,
+    unvalidated record, or unresolved/manual-review item should not be used as seller-facing proof until
+    approved.'''
+  code: hp-backend/scripts/load_case_studies.py:clean (178) filters on language, placeholder customer,
+    page-title customer and customer_confidence < 0.9; it does not read validated or needs_manual_review,
+    and hp-backend/src/app/services/hp/case_studies.py:match (470) does not require source_url.
+- rule_id: om_play_generation
+  doc: 'HP_Recommendation_Tuning_Logic_FINAL_v4 F: every feature output carries feature, account_id, as_of_date,
+    recommendation_text, claim_ids[], evidence_ids[], confidence_tier.'
+  code: hp-backend/src/app/services/extractors/solution_narrative_opportunity_map.py - plays and service
+    plays carry no output_record, as_of_date or confidence_tier (the Technographic Map recommendations
+    do, via output_record.record).
+- rule_id: om_length_band
+  doc: 'HP_Recommendation_Tuning_Logic_FINAL_v4 G: Opportunity Map ''Minimum 80 words; maximum 160 words.'''
+  code: hp-backend/src/app/services/extractors/solution_narrative_opportunity_map.py:_process (1461-1475)
+    - after 2 rewrites an out-of-band play is 'published as is'.

@@ -4,12 +4,13 @@ import React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useAuth } from '@/providers/AuthProvider';
-import { LogOut, User as UserIcon, Shield, Building2, Users, BarChart3 } from 'lucide-react';
+import { LogOut, User as UserIcon, Shield, Building2, Users, BarChart3, BookOpen } from 'lucide-react';
 
 const ADMIN_LINKS = [
   { href: '/admin/platform', label: 'Platform', Icon: Building2 },
   { href: '/admin/users', label: 'Users', Icon: Users },
   { href: '/admin/analytics', label: 'Analytics', Icon: BarChart3 },
+  { href: '/admin/rules', label: 'Rules', Icon: BookOpen },
 ];
 
 export const Navbar: React.FC = () => {
