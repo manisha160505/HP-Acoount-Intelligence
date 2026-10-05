@@ -146,7 +146,9 @@ NODES = (
          # 2: Sahaj 27 Sep - no trend or volume in the So What, no proof point,
          # a business-unit summary led by Bombora.
          # 3: intent_hiring_demand removed; jobs are the hiring node's alone.
-         logic_version=3,
+         # 4: a Bombora export filed under the account's parent/subdomain or a
+         # confirmed alias is used (client, 5 Oct: NSW Health, IAG NZ).
+         logic_version=4,
          run=f"{_P}:intent"),
     # The Hiring Signals section of Intent & Demand Signals, and the one hiring
     # output: the Executive Dashboard's job postings tile reads
