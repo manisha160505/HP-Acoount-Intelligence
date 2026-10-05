@@ -58,29 +58,42 @@ rules:
   confidence: high
 - id: int_domain_match
   parent: int_lead_source
-  name: Research data must belong to this account's website
+  name: Research data must belong to this account's organisation
   kind: selection
   summary: Prevents another company's research being shown.
   purpose: Prevents another company's research being shown.
   logic: 'The website the research data was collected for is tidied up (web prefix, ''www.'' and any path
-    removed) and compared with the account''s website. Equal: matched. A different website: mismatch.
-    The topics are not attached to the account, and the tab says that the research data is for the other
-    website, naming both websites. No website on either side: unverified, and the topics are still shown.
-    The observation date is the data''s date stamp (YYYYMMDD) when exactly one is present.'
+    removed) and compared with the account''s website. It matches when the two are equal, when one is
+    a subdomain of the other (health.nsw.gov.au and nsw.gov.au), or when the data''s website is on the
+    confirmed list of the same organisation''s other websites (iag.com.au for IAG NZ, client 5 Oct).
+    Anything else is a mismatch: the topics are not attached and the tab names both websites. No website
+    on either side: unverified, and the topics are still shown. The observation date is the data''s date
+    stamp (YYYYMMDD) when exactly one is present.'
+  conditions:
+  - Look-alike registered websites (posco-inc.com and posco.com) never match by rule
+  - Research for a different company (e.g. nga.mil for NIS Korea) stays a mismatch
   example:
-    scenario: Account website iag.co.nz; research data collected for www.iag.com.au.
+    scenario: 'Three accounts: NSW Health (health.nsw.gov.au) with data for nsw.gov.au; IAG NZ (iag.co.nz)
+      with data for www.iag.com.au; NIS Korea (nis.go.kr) with data for nga.mil.'
     steps:
-    - iag.com.au is not the same as iag.co.nz -> mismatch.
-    result: The topics are dropped for this account; the message names both websites.
+    - 'NSW Health: nsw.gov.au is the parent of health.nsw.gov.au -> matched.'
+    - 'IAG NZ: iag.com.au is on the confirmed list -> matched.'
+    - 'NIS Korea: nga.mil is another organisation -> mismatch, topics dropped.'
+    result: matched, matched, mismatch.
     verified: true
     expect:
-    - mismatch
-    - The intent export is for iag.com.au, not iag.co.nz. Its topics are not attached to this account.
-    - '2026-09-01'
+    - - matched
+      - subdomain
+    - - matched
+      - confirmed_alias
+    - - mismatch
+      - null
   output: Whether the data matches the account, and the observation date
   sources:
   - hp-backend/src/app/services/extractors/intent_demand_signals.py:_match_provider_account
+  - hp-backend/src/app/services/extractors/intent_demand_signals.py:CONFIRMED_INTENT_DOMAINS
   - hp-backend/src/app/services/extractors/intent_demand_signals.py:extract_intent_demand_signals
+  doc_source: Client, 5 Oct (issue list v3) - NSW Health and IAG NZ Bombora data
   confidence: high
 - id: int_unavailable_states
   parent: int_lead_source

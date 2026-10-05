@@ -87,6 +87,23 @@ DISCLAIMER = ("Intent indicates research activity, not confirmed purchase intent
               "It can strengthen an opportunity that other account evidence already "
               "supports; it does not create one on its own.")
 
+# Bombora exports Explorium filed under another domain of the SAME organisation
+# or its group, accepted for the account (account domain -> export domains).
+# Client, 5 Oct (issue list v3): IAG NZ's export is "of iag.co.nz ... pls use
+# bambora data". The rest name the account's own company on its other domain.
+# Exports for a different company are deliberately absent and stay rejected:
+# nis.go.kr (nga.mil), mufg.jp (Link Administration Holdings), smfg.co.jp
+# (Sumiken Mitsui Road), uob.com.my (UBL United Bank), ntuc.org.sg (uweei.org.sg).
+# Subdomains (health.nsw.gov.au / nsw.gov.au) need no entry - see _same_site.
+CONFIRMED_INTENT_DOMAINS = {
+    "iag.co.nz": ("iag.com.au",),
+    "airnewzealand.co.nz": ("airnewzealand.com",),
+    "fujitsu.com": ("global.fujitsu",),
+    "khi.co.jp": ("kawasaki.com",),
+    "nomura.com": ("nomuraholdings.com",),
+    "sagilityhealth.com": ("sagility.com",),
+}
+
 # How the category file marks an empty cell. "\ufffd" is its em dash read
 # through a UTF-8 decoder that replaced it.
 EMPTY_MARKERS = {"", "-", "\u2013", "\u2014", "\ufffd", "n/a", "na", "none"}
@@ -165,9 +182,22 @@ def _match_provider_account(meta_records: list[dict], account_domain: str) -> tu
     account_d = _norm_domain(account_domain)
     rows = [r for r in meta_records if _clean(r.get("Company Website"))]
     matching = [r for r in rows if _norm_domain(r.get("Company Website")) == account_d]
+    matched_by = "domain" if matching else None
+    if not matching:
+        # The export filed under the organisation's parent or a subdomain of
+        # it: health.nsw.gov.au against nsw.gov.au (client, 5 Oct: "bambora
+        # explorium data is of health.nsw.gov.au ... pls use bambora data").
+        matching = [r for r in rows
+                    if _same_site(_norm_domain(r.get("Company Website")), account_d)]
+        matched_by = "subdomain" if matching else None
+    if not matching:
+        accepted = CONFIRMED_INTENT_DOMAINS.get(account_d, ())
+        matching = [r for r in rows if _norm_domain(r.get("Company Website")) in accepted]
+        matched_by = "confirmed_alias" if matching else None
 
     match = {"status": "unverified", "account_domain": account_d or None,
-             "provider_domain": None, "provider_company": None, "note": None}
+             "provider_domain": None, "provider_company": None, "note": None,
+             "matched_by": matched_by}
     if not account_d:
         match["note"] = "The account has no domain on file to check the intent export against."
     elif not rows:
@@ -180,8 +210,14 @@ def _match_provider_account(meta_records: list[dict], account_domain: str) -> tu
                          f"{account_d}. Its topics are not attached to this account.")
     else:
         match["status"] = "matched"
-        match["provider_domain"] = account_d
+        match["provider_domain"] = _norm_domain(matching[0].get("Company Website"))
         match["provider_company"] = _clean(matching[0].get("Company Name")) or None
+        if matched_by != "domain":
+            match["note"] = (f"The intent export is filed under {match['provider_domain']} "
+                             + ("(the same organisation's parent or subdomain)"
+                                if matched_by == "subdomain"
+                                else "(confirmed as this organisation)")
+                             + f"; used for {account_d}.")
 
     source_rows = matching or rows or meta_records
     stamps = sorted({_clean(r.get("Date Stamp")) for r in source_rows if _clean(r.get("Date Stamp"))})
