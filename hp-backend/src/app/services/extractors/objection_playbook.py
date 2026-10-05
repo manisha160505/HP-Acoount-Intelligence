@@ -192,6 +192,36 @@ TECHNOGRAPHICS_DATASET_KEY = "technographics"
 # The catch-all column. Category columns are a subset of it, so both are read.
 FULL_STACK_COLUMN = "Full Tech Stack"
 
+# Where an account's per-area technology evidence came from. 4_Technographics
+# first; when it holds no data for the account, the website technology in
+# tech_breakdown (client's round-2 load guidance: "website tech when no
+# technographics"); otherwise none, and no card is written. Recorded on both
+# widgets as `technology_evidence_source` so the source of a card is never
+# guessed.
+EVIDENCE_SOURCE_TECHNOGRAPHICS = TECHNOGRAPHICS_DATASET_KEY
+EVIDENCE_SOURCE_TECH_BREAKDOWN = "tech_breakdown"
+EVIDENCE_SOURCE_NONE = "none"
+# Shown in the admin's data gaps (`regen/data_gaps.py` reads `fallback_note`)
+# so a fallback account is never mistaken for one built from technographics.
+TECH_BREAKDOWN_FALLBACK_NOTE = ("4_Technographics has no data for this account; the "
+                                "evidence is website technology from tech_breakdown")
+EVIDENCE_SOURCE_LABELS = {
+    EVIDENCE_SOURCE_TECHNOGRAPHICS: "4_Technographics",
+    EVIDENCE_SOURCE_TECH_BREAKDOWN: "tech_breakdown (website technology)",
+    EVIDENCE_SOURCE_NONE: "No technology evidence available",
+}
+# How the evidence is named in the evidence strings and the prompt. The
+# technographics wording is the one every existing card was written under, so
+# it is left exactly as it was: changing it would invalidate their cache.
+_EVIDENCE_NOUN = {
+    EVIDENCE_SOURCE_TECHNOGRAPHICS: "technographics",
+    EVIDENCE_SOURCE_TECH_BREAKDOWN: "website technology",
+}
+# The single column a tech_breakdown fallback row carries: every technology
+# the website breakdown names, flattened. It is website technology only - it
+# says nothing about the account's internal device, print or security estate.
+WEBSITE_STACK_COLUMN = "Website stack"
+
 NL = chr(10)
 
 
@@ -238,15 +268,61 @@ def _read_dataset_records(account_id: str, dataset_key: str) -> list[dict]:
     """
     return read_dataset_records(account_id, dataset_key, strict=False)
 
-def _build_area_evidence(techno_row: dict) -> list[dict]:
+def _usable(records: list[dict]) -> bool:
+    """True when the first record carries at least one non-blank cell."""
+    if not records:
+        return False
+    return any(str(v or "").strip() for v in records[0].values())
+
+
+def _technology_evidence(account_id: str, techno_records: list[dict]) -> tuple[str, dict]:
+    """The row the per-area evidence is built from, and which source it is.
+
+    1. 4_Technographics, when it holds data for this account - unchanged.
+    2. Otherwise tech_breakdown: every technology the website breakdown names,
+       copied as delivered into one `Website stack` cell. Page metadata columns
+       (copyright year, languages, links) are not technology and are skipped.
+    3. Otherwise none - nothing is inferred from any other dataset. Job-ad tags
+       and PredictLeads technology detections are deliberately not read here.
+    """
+    if _usable(techno_records):
+        return EVIDENCE_SOURCE_TECHNOGRAPHICS, techno_records[0]
+
+    from app.services.extractors.tech_landscape import _parse_tech_breakdown
+
+    breakdown = _parse_tech_breakdown(
+        _read_dataset_records(account_id, EVIDENCE_SOURCE_TECH_BREAKDOWN) or [])
+    stack = []
+    for category in breakdown:
+        if category.get("page_metadata"):
+            continue
+        for name in category["technologies"]:
+            if name not in stack:
+                stack.append(name)
+    if stack:
+        return EVIDENCE_SOURCE_TECH_BREAKDOWN, {WEBSITE_STACK_COLUMN: ", ".join(stack)}
+    return EVIDENCE_SOURCE_NONE, {}
+
+
+def _build_area_evidence(techno_row: dict,
+                         source: str = EVIDENCE_SOURCE_TECHNOGRAPHICS) -> list[dict]:
     """One entry per HP contest area, carrying the verbatim technographics cells
     that speak to it and the vendors detected in them.
 
     An area with no detected vendor is kept, flagged `not_in_technographics`.
     That flag means only that this export does not name one - never that the
-    account has no such vendor, capability or process."""
+    account has no such vendor, capability or process.
+
+    With `source` tech_breakdown the row is the flattened website stack: there
+    are no category columns, the same vendor tokens are matched against it, and
+    the evidence string names tech_breakdown so it cannot pass for
+    technographics. The flag keeps its name because the page reads it."""
+    dataset_key = source
+    noun = _EVIDENCE_NOUN[source]
+    stack_column = (FULL_STACK_COLUMN if source == EVIDENCE_SOURCE_TECHNOGRAPHICS
+                    else WEBSITE_STACK_COLUMN)
     full_stack = [v.strip() for v in
-                  str(techno_row.get(FULL_STACK_COLUMN) or "").split(",") if v.strip()]
+                  str(techno_row.get(stack_column) or "").split(",") if v.strip()]
 
     areas = []
     for area, columns in AREA_CATEGORY_COLUMNS.items():
@@ -273,7 +349,7 @@ def _build_area_evidence(techno_row: dict) -> list[dict]:
         stack_only = [v for v in full_stack
                       if any(_token_present(t, v) for t in tokens) and v not in seen]
         if stack_only:
-            cells.append({"column": FULL_STACK_COLUMN, "values": stack_only})
+            cells.append({"column": stack_column, "values": stack_only})
             for v in stack_only:
                 seen.add(v)
                 detected.append(v)
@@ -293,13 +369,13 @@ def _build_area_evidence(techno_row: dict) -> list[dict]:
 
         if detected:
             parts = [c["column"] + ": " + ", ".join(c["values"]) for c in cells]
-            evidence = TECHNOGRAPHICS_DATASET_KEY + " -> " + area + " | " + " | ".join(parts)
+            evidence = dataset_key + " -> " + area + " | " + " | ".join(parts)
             if context_detected:
                 evidence += " | supporting context: " + ", ".join(context_detected)
         else:
-            evidence = (TECHNOGRAPHICS_DATASET_KEY + " -> " + area
+            evidence = (dataset_key + " -> " + area
                         + ": no vendor for this area appears in this account's"
-                        + " technographics evidence")
+                        + " " + noun + " evidence")
 
         areas.append({
             "area": area,
@@ -308,6 +384,9 @@ def _build_area_evidence(techno_row: dict) -> list[dict]:
             "detected_vendors": detected,
             "context_vendors": context_detected,
             "not_in_technographics": not detected,
+            # Not part of the card cache key (`_evidence_fingerprint`), which
+            # already moves with the source through the evidence string.
+            "evidence_source": source,
             "evidence": evidence,
         })
     return areas
@@ -434,6 +513,8 @@ def _rulebook_claims(db, corpus: list, areas: list[dict],
 _INTERNAL_VOCABULARY = (
     "technographic", "firmographic", "the dataset", "our dataset",
     "our records", "our data", "the evidence shows", "evidence block",
+    # The tech_breakdown fallback's own name for its evidence.
+    "website technolog", "website tech", "public website",
 )
 
 
@@ -618,7 +699,9 @@ def _evidence_fingerprint(areas: list[dict], business_description: str,
 
 def generate_objection_cards(account_id: str, areas: list[dict],
                              company_name: str, business_description: str,
-                             industry: str = "") -> dict | None:
+                             industry: str = "",
+                             evidence_source: str = EVIDENCE_SOURCE_TECHNOGRAPHICS
+                             ) -> dict | None:
     """One cached GPT-4o call. The model writes only the objection, the reframe
     and the counter question. The evidence, the vendor list, the area and the
     likely raiser are owned by Python and are never sent back for rewriting."""
@@ -640,7 +723,15 @@ def generate_objection_cards(account_id: str, areas: list[dict],
     # Grounding corpus: the datasets this feature reasons over.
     records = {k: _read_dataset_records(account_id, k) for k in
                ("technographics", "firmographics", "prospect_contacts")}
+    if evidence_source == EVIDENCE_SOURCE_TECH_BREAKDOWN:
+        # The cards are written from the website stack, so it is what they are
+        # checked against.
+        records[EVIDENCE_SOURCE_TECH_BREAKDOWN] = _read_dataset_records(
+            account_id, EVIDENCE_SOURCE_TECH_BREAKDOWN)
     ground = build_corpus(records)
+    # Exactly the technographics wording when that is the source, so the
+    # prompt every cached card was written under is unchanged.
+    noun = _EVIDENCE_NOUN[evidence_source]
 
     # The same cells again, as the rulebook matcher wants them. Built from the
     # records already read rather than through a second read, so the claims an
@@ -713,7 +804,7 @@ def generate_objection_cards(account_id: str, areas: list[dict],
 
     roster = []
     for a in areas:
-        state = ("NO VENDOR DETECTED IN THE TECHNOGRAPHICS EVIDENCE"
+        state = ("NO VENDOR DETECTED IN THE " + noun.upper() + " EVIDENCE"
                  if a["not_in_technographics"]
                  else "vendors detected: " + ", ".join(a["detected_vendors"]))
         rules = claims_by_area.get(a["area"]) or []
@@ -740,7 +831,12 @@ def generate_objection_cards(account_id: str, areas: list[dict],
   "device services that attach to them. Which HP offering applies to an area is not for you "
   "to decide - each area block below carries the offerings HP's rulebook connects to that "
   "area's evidence, and those are the ones to use." + NL + NL
-+ "EVIDENCE - one block per area, drawn from this account's technographics dataset:" + NL
++ ("EVIDENCE - one block per area, drawn from this account's technographics dataset:"
+   if evidence_source == EVIDENCE_SOURCE_TECHNOGRAPHICS else
+   "EVIDENCE - one block per area, drawn from the technologies detected on this account's "
+   "public website. This is website technology only: it does not describe the account's "
+   "devices, print fleet, collaboration rooms or endpoint security, so never write as if it did. "
+   "Never mention the website, or what it does or does not show, to the buyer:") + NL
 + NL.join(roster) + NL + NL
 + "WRITE, FOR EACH AREA, one objection card." + NL + NL
 + "WHAT AN OBJECTION IS HERE:" + NL
@@ -754,7 +850,7 @@ def generate_objection_cards(account_id: str, areas: list[dict],
   "evidence block above. If a vendor is not listed there, it does not exist for the purposes of this card." + NL
 + "2. An objection must be answerable from that area's own evidence. If no PC vendor is listed, do NOT "
   "write a 'we already standardised on Dell/Lenovo' objection - there is nothing to support it." + NL
-+ "3. WHERE NO VENDOR WAS DETECTED: this means only that the technographics evidence does not name one. "
++ "3. WHERE NO VENDOR WAS DETECTED: this means only that the " + noun + " evidence does not name one. "
   "It does NOT mean the account has no such vendor, no such process, or an open field. You MUST NOT write "
   "'they have no incumbent', 'there is no standard', 'the field is open', 'greenfield', or any equivalent "
   "claim about the account. Frame it as a visibility gap - the evidence does not show one, and a vendor may "
@@ -881,6 +977,7 @@ def generate_objection_cards(account_id: str, areas: list[dict],
                 "detected_vendors": src_area["detected_vendors"],
                 "context_vendors": src_area.get("context_vendors", []),
                 "not_in_technographics": src_area["not_in_technographics"],
+                "evidence_source": evidence_source,
                 "likely_raiser": src_area["likely_raiser"],
                 "likely_raiser_source": src_area["likely_raiser_source"],
             })
@@ -958,6 +1055,7 @@ def generate_objection_cards(account_id: str, areas: list[dict],
                     "detected_vendors": src_area["detected_vendors"],
                     "context_vendors": src_area.get("context_vendors", []),
                     "not_in_technographics": src_area["not_in_technographics"],
+                    "evidence_source": evidence_source,
                     "likely_raiser": src_area["likely_raiser"],
                     "likely_raiser_source": src_area["likely_raiser_source"],
                 })
@@ -997,10 +1095,11 @@ def generate_objection_cards(account_id: str, areas: list[dict],
                 "cards": cards,
                 "grounding_report": report.as_dict(),
                 "disclaimer": ("Anticipated objections a seller should be ready for, generated "
-                               "from this account's technographics evidence. Not statements made "
+                               "from this account's " + noun + " evidence. Not statements made "
                                "by any contact."),
+                "technology_evidence_source": evidence_source,
             },
-            "source_datasets": ["technographics", "firmographics", "prospect_contacts"],
+            "source_datasets": [evidence_source, "firmographics", "prospect_contacts"],
             "extracted_at": now,
             "updated_at": now,
         }
@@ -1018,7 +1117,7 @@ def generate_objection_cards(account_id: str, areas: list[dict],
 
 
 @requires_local_datasets(
-    "firmographics", "prospect_contacts", "technographics",
+    "firmographics", "prospect_contacts", "technographics", "tech_breakdown",
 )
 @pipeline.feature("objection_playbook")
 def extract_objection_playbook(account_id: str) -> list[dict]:
@@ -1044,8 +1143,11 @@ def extract_objection_playbook(account_id: str) -> list[dict]:
     incumbent_techs = []
     active_categories = []
 
-    if techno_records and len(techno_records) > 0:
-        row = techno_records[0]
+    evidence_source, evidence_row = _technology_evidence(account_id, techno_records)
+    pipeline.step("technology_evidence", EVIDENCE_SOURCE_LABELS[evidence_source])
+
+    if evidence_source == EVIDENCE_SOURCE_TECHNOGRAPHICS:
+        row = evidence_row
         raw_full = str(row.get("Full Tech Stack") or "").strip()
         if raw_full:
             incumbent_techs = [s.strip() for s in raw_full.split(",") if s.strip()]
@@ -1092,8 +1194,8 @@ def extract_objection_playbook(account_id: str) -> list[dict]:
     # Per-area evidence, and who at this account owns each area. Both entirely
     # deterministic and both computed before any model call.
     area_evidence = []
-    if techno_records:
-        area_evidence = _build_area_evidence(techno_records[0])
+    if evidence_source != EVIDENCE_SOURCE_NONE:
+        area_evidence = _build_area_evidence(evidence_row, evidence_source)
         for a in area_evidence:
             raiser, raiser_source = _resolve_likely_raiser(a["area"], contact_records)
             a["likely_raiser"] = raiser
@@ -1111,9 +1213,13 @@ def extract_objection_playbook(account_id: str) -> list[dict]:
                 "incumbent_technologies": incumbent_techs,
                 "relevant_categories": active_categories,
                 "business_context": business_context,
-                "area_evidence": area_evidence
+                "area_evidence": area_evidence,
+                "technology_evidence_source": evidence_source,
+                **({"fallback_note": TECH_BREAKDOWN_FALLBACK_NOTE}
+                   if evidence_source == EVIDENCE_SOURCE_TECH_BREAKDOWN else {}),
             },
-            "source_datasets": ["technographics", "firmographics"],
+            "source_datasets": ([evidence_source] if evidence_source != EVIDENCE_SOURCE_NONE
+                                else []) + ["firmographics"],
             "extracted_at": now,
             "updated_at": now
         }
@@ -1124,7 +1230,7 @@ def extract_objection_playbook(account_id: str) -> list[dict]:
             "widget_key": "objection_incumbent_context",
             "data_classification": "deterministic",
             "status": "empty",
-            "data": {},
+            "data": {"technology_evidence_source": evidence_source},
             "source_datasets": ["technographics", "firmographics"],
             "extracted_at": now,
             "updated_at": now
@@ -1143,9 +1249,32 @@ def extract_objection_playbook(account_id: str) -> list[dict]:
             company_name,
             str(business_context.get("business_description") or "").strip(),
             str(business_context.get("industry_classification") or "").strip(),
+            evidence_source,
         )
 
-    if reframe_payload is None:
+    if reframe_payload is None and evidence_source == EVIDENCE_SOURCE_NONE:
+        # Neither 4_Technographics nor tech_breakdown has data for this
+        # account. Nothing is inferred from any other source, so no card.
+        reframe_payload = {
+            "account_id": account_id,
+            "feature_key": "objection_playbook",
+            "widget_key": "objection_reframe_cards",
+            "data_classification": "inferred",
+            "status": "empty",
+            "data": {
+                "evidence_fingerprint": None,
+                "cards_count": 0,
+                "cards": [],
+                "technology_evidence_source": evidence_source,
+                "notice": ("No technology evidence available: neither 4_Technographics nor "
+                           "tech_breakdown has data for this account, so no objections "
+                           "are written."),
+            },
+            "source_datasets": ["technographics", "tech_breakdown"],
+            "extracted_at": now,
+            "updated_at": now
+        }
+    elif reframe_payload is None:
         reframe_payload = {
             "account_id": account_id,
             "feature_key": "objection_playbook",
@@ -1158,12 +1287,21 @@ def extract_objection_playbook(account_id: str) -> list[dict]:
                 "cards": [],
                 "notice": ("Objection generation requires an LLM API key. The incumbent "
                            "evidence below is shown as extracted; no objections are invented."),
+                "technology_evidence_source": evidence_source,
             },
             "source_datasets": ["technographics", "firmographics", "prospect_contacts"],
             "extracted_at": now,
             "updated_at": now
         }
 
+    if reframe_payload.get("status") == "available":
+        # A cached payload predates this field; the source is a fact of this run.
+        data = reframe_payload.setdefault("data", {})
+        data["technology_evidence_source"] = evidence_source
+        if evidence_source == EVIDENCE_SOURCE_TECH_BREAKDOWN:
+            data["fallback_note"] = TECH_BREAKDOWN_FALLBACK_NOTE
+        else:
+            data.pop("fallback_note", None)
     widget_store.put(account_id, "objection_reframe_cards", reframe_payload, db=db)
     results.append(reframe_payload)
 

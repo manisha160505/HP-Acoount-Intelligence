@@ -19,7 +19,6 @@ from app.services.extractors.grounding import (
     build_corpus,
     check_text,
 )
-from app.services.hp import hiring_jobs
 from app.services.regen import store as widget_store
 
 logger = logging.getLogger(__name__)
@@ -38,19 +37,104 @@ def _read_dataset_csv(account_id: str, dataset_key: str) -> list[dict]:
     """
     return read_dataset_records(account_id, dataset_key, strict=False)
 
-def _resolve_parent(hier_row: dict | None) -> str:
-    """The parent to display: the Company Hierarchy sheet's Parent Company Name.
+# Words that do not tell one company from another, dropped before a parent's
+# name is compared with the account's own.
+_LEGAL_WORDS = {
+    "pt", "tbk", "inc", "ltd", "limited", "co", "corporation", "corp", "company",
+    "group", "groups", "holdings", "holding", "plc", "public", "persero", "the",
+    "pte", "sdn", "bhd", "kk", "kabushiki", "kaisha",
+}
 
-    Client ruling (Sep 2026): a populated Parent Company Name is the parent and
-    is used as supplied. A blank one means the parent relationship is ignored
-    for now - nothing is shown and nothing is flagged, and no parent is looked
-    for anywhere else (Ultimate Parent Name, or a "subsidiary of" clause in the
-    Business Description).
+# Parents Explorium names that are wrong at source, held off the dashboard
+# until the client confirms them (5 Oct, issue list v3). Keyed by the account's
+# name; a held name is skipped, so a corrected value in a later file shows.
+HELD_PARENTS = {
+    "bank for agriculture and agricultural cooperative": {"ministry of finance | egypt"},
+    "bhp billiton": {"marathon petroleum", "andeavor"},
+    "charoen pokphand group co ltd": {"pt charoen pokphand indonesia tbk",
+                                      "pt charoen pokphand indonesia"},
+    "military bank": {"icici bank"},
+    "mitsubishi ufj financial group, inc.": {"us bancorp"},
+    "the bank of tokyo-mitsubishi limited (bangkok branch)": {"us bancorp"},
+    "sumitomo mitsui financial group, inc.": {"citibank"},
+    "shiseido company, limited": {"henkel"},
+    "viettel corporation": {"uk ministry of defence"},
+}
+
+
+def _account_key(name: str) -> str:
+    """The account's name without its ' - XX' country suffix, lowercased."""
+    name = " ".join(str(name or "").lower().split())
+    head, sep, tail = name.rpartition(" - ")
+    return head if sep and len(tail) == 2 else name
+
+
+def _name_words(name: str) -> list[str]:
+    cleaned = "".join(ch if ch.isalnum() else " " for ch in _account_key(name))
+    return [w for w in cleaned.split() if w not in _LEGAL_WORDS]
+
+
+def _is_own_name(candidate: str, account_name: str, exact: bool = False) -> bool:
+    """True when `candidate` is the account itself: 'canon' for 'CANON INC. -
+    JP'. Unless `exact`, a name the account's own name starts with also counts
+    ('mitsubishi' for MITSUBISHI MOTORS) - right for a parent, wrong for a
+    subsidiary ('toyota motor' is Toyota Group's subsidiary, not Toyota)."""
+    a, b = _name_words(candidate), _name_words(account_name)
+    if not a or not b:
+        return False
+    return a == b if exact else (len(a) <= len(b) and b[:len(a)] == a)
+
+
+def _resolve_parent(hier_row: dict | None, account_name: str = "") -> tuple[str, str | None]:
+    """(parent to display, the column it came from) from the Company Hierarchy
+    sheet.
+
+    Client, 5 Oct (issue list v3): the parent is column E, Ultimate Parent
+    Name. It is shown as supplied unless it is the account itself - Ultimate
+    Parent Id equal to Business Id, or the account's own name ('canon' for
+    Canon Inc.). Where column E gives no other company, column C (Parent
+    Company Name, the September rule) is used under the same test, so a parent
+    the sheet does name is not lost. A name in HELD_PARENTS for this account is
+    skipped. Nothing else is read: no 'subsidiary of' clause in the Business
+    Description.
     """
     if not hier_row:
-        return ""
-    return (hier_row.get("Parent Company Name")
-            or hier_row.get("parent_company_name") or "").strip()
+        return "", None
+    held = HELD_PARENTS.get(_account_key(account_name), set())
+    bid = str(hier_row.get("Business Id") or "").strip()
+    upid = str(hier_row.get("Ultimate Parent Id") or "").strip()
+    candidates = (
+        (hier_row.get("Ultimate Parent Name") or hier_row.get("ultimate_parent_name"),
+         "Ultimate Parent Name", bool(bid) and upid == bid),
+        (hier_row.get("Parent Company Name") or hier_row.get("parent_company_name"),
+         "Parent Company Name", False),
+    )
+    for value, column, is_self in candidates:
+        value = " ".join(str(value or "").split())
+        if (not value or is_self or value.lower() in held
+                or (account_name and _is_own_name(value, account_name))):
+            continue
+        return value, column
+    return "", None
+
+
+def _subsidiaries(rows: list[dict], account_name: str, parent: str) -> list[str]:
+    """Column A of the Subsidiaries sheet (Subsidiary Name), as supplied, in
+    file order: blanks and repeats dropped, and the account and its parent left
+    out, since neither is a subsidiary of the account."""
+    out, seen = [], set()
+    for row in rows or []:
+        value = row.get("Subsidiary Name")
+        if value is None and row:
+            value = next(iter(row.values()))  # column A
+        value = " ".join(str(value or "").split())
+        key = value.lower()
+        if (not value or key in seen or key == parent.lower()
+                or (account_name and _is_own_name(value, account_name, exact=True))):
+            continue
+        seen.add(key)
+        out.append(value)
+    return out
 
 
 # --------------------------------------------------------------------------
@@ -140,7 +224,7 @@ def _description_points(db, account_id: str, description: str,
 
 
 @requires_local_datasets(
-    "company_hierarchy", "firmographics", "job_openings",
+    "company_hierarchy", "firmographics", "job_openings", "subsidiaries",
 )
 @pipeline.feature("executive_dashboard")
 def extract_executive_dashboard(account_id: str) -> list[dict]:
@@ -149,7 +233,7 @@ def extract_executive_dashboard(account_id: str) -> list[dict]:
 
     firmo_rows = _read_dataset_csv(account_id, "firmographics")
     hier_rows = _read_dataset_csv(account_id, "company_hierarchy")
-    job_rows = _read_dataset_csv(account_id, "job_openings")
+    subsidiary_rows = _read_dataset_csv(account_id, "subsidiaries")
     # The filings list: the CSV uploaded with the PDFs under compliance_filings.
     try:
         filing_files = dataset_file_paths(account_id, "compliance_filings", strict=False)
@@ -158,7 +242,7 @@ def extract_executive_dashboard(account_id: str) -> list[dict]:
     index_rows = filings_register.index_rows_from_files(filing_files)
 
     pipeline.step("datasets", "", firmographics=len(firmo_rows),
-                  hierarchy=len(hier_rows), jobs=len(job_rows),
+                  hierarchy=len(hier_rows), subsidiaries=len(subsidiary_rows),
                   filings_list=len(index_rows))
 
     results = []
@@ -186,18 +270,26 @@ def extract_executive_dashboard(account_id: str) -> list[dict]:
             db, account_id, business_description, row)
         pipeline.step("summary", "%d bullet(s) - %s" % (len(points), points_basis))
 
-        # Blank unless the hierarchy sheet names a parent - see _resolve_parent.
-        parent_company = _resolve_parent(hier_rows[0] if hier_rows else None)
+        # Blank unless the hierarchy sheet names another company - see
+        # _resolve_parent. Subsidiaries are column A of the Subsidiaries sheet.
+        company_name = account_display_name(account_id, row)
+        parent_company, parent_column = _resolve_parent(
+            hier_rows[0] if hier_rows else None, company_name)
+        subsidiaries = _subsidiaries(subsidiary_rows, company_name, parent_company)
 
         summary_data = {
             # DEC-052: the audit sheet's name, held on the account record,
             # not the vendor's name for the domain.
-            "company_name": account_display_name(account_id, row),
+            "company_name": company_name,
             "domain": (row.get("Company Domain") or row.get("Website") or "").strip(),
             "business_description": business_description,
             "industry_classification": industry_classification,
             "hq_location": hq_location,
             "parent_company": parent_company,
+            "parent_company_source": (
+                "Company Hierarchy - " + parent_column if parent_column else None),
+            "subsidiaries": subsidiaries,
+            "subsidiaries_count": len(subsidiaries),
             # The company profile, as bullets. See _description_points.
             "business_description_points": points,
             "business_description_points_basis": points_basis,
@@ -212,7 +304,7 @@ def extract_executive_dashboard(account_id: str) -> list[dict]:
             "data_classification": "deterministic",
             "status": "available",
             "data": summary_data,
-            "source_datasets": ["firmographics", "company_hierarchy"],
+            "source_datasets": ["firmographics", "company_hierarchy", "subsidiaries"],
             "extracted_at": now,
             "updated_at": now
         }
@@ -224,7 +316,7 @@ def extract_executive_dashboard(account_id: str) -> list[dict]:
             "data_classification": "deterministic",
             "status": "empty",
             "data": {},
-            "source_datasets": ["firmographics", "company_hierarchy"],
+            "source_datasets": ["firmographics", "company_hierarchy", "subsidiaries"],
             "extracted_at": now,
             "updated_at": now
         }
@@ -295,51 +387,8 @@ def extract_executive_dashboard(account_id: str) -> list[dict]:
     widget_store.put(account_id, "exec_key_metrics", metrics_payload, db=db)
     results.append(metrics_payload)
 
-    # 3. exec_hiring_velocity - the same jobs the Hiring Signals page counts:
-    # country check, then the last 12 months to the PredictLeads pull date,
-    # open and closed alike (client answer #6, 1 Oct). Not every row any more.
-    selected = hiring_jobs.select_jobs(account_display_name(account_id), job_rows)
-    if selected.jobs:
-        sample_roles = []
-        for r in selected.jobs:
-            t = (r.get("title") or r.get("normalized_title") or "").strip()
-            if t and t not in sample_roles:
-                sample_roles.append(t)
-            if len(sample_roles) == 5:
-                break
-
-        hiring_data = {
-            "job_postings_12m": len(selected.jobs),
-            "sample_roles": sample_roles,
-            "basis": selected.basis(),
-        }
-
-        hiring_payload = {
-            "account_id": account_id,
-            "feature_key": "executive_dashboard",
-            "widget_key": "exec_hiring_velocity",
-            "data_classification": "deterministic",
-            "status": "available",
-            "data": hiring_data,
-            "source_datasets": ["job_openings"],
-            "extracted_at": now,
-            "updated_at": now
-        }
-    else:
-        hiring_payload = {
-            "account_id": account_id,
-            "feature_key": "executive_dashboard",
-            "widget_key": "exec_hiring_velocity",
-            "data_classification": "deterministic",
-            "status": "empty",
-            "data": {},
-            "source_datasets": ["job_openings"],
-            "extracted_at": now,
-            "updated_at": now
-        }
-
-    widget_store.put(account_id, "exec_hiring_velocity", hiring_payload, db=db)
-    results.append(hiring_payload)
+    # The job postings tile reads `hiring_postings_summary`, the one hiring
+    # output (extractors/hiring_signals.py). This feature computes no job count.
 
     # The urgency score. `build_urgency_score` computes and persists
     # `exec_urgency_score` itself, reading the datasets directly - it needs no

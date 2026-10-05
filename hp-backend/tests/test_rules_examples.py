@@ -110,7 +110,15 @@ def ex_content_studio__cs_tier_language():
 
 def ex_executive_dashboard__summary_parent_company():
     from app.services.extractors import executive_dashboard as ed
-    return [ed._resolve_parent({'Parent Company Name': ' Jardine Matheson '}), ed._resolve_parent({'Parent Company Name': '', 'Ultimate Parent Name': 'X'}), ed._resolve_parent(None)]
+    return [ed._resolve_parent(row, name)[0] for row, name in (
+        ({'Business Id': 'b', 'Ultimate Parent Id': 's', 'Ultimate Parent Name': 'sm investments'}, 'BANCO DE ORO UNIBANK, INC. (BDO) - PH'),
+        ({'Business Id': 'sm', 'Ultimate Parent Id': 'sm', 'Ultimate Parent Name': 'san miguel', 'Parent Company Name': 'top frontier investment holdings'}, 'SAN MIGUEL CORPORATION - PH'),
+        ({'Business Id': 'c', 'Ultimate Parent Id': 'x', 'Ultimate Parent Name': 'canon'}, 'CANON INC. - JP'),
+        ({'Business Id': 'm', 'Ultimate Parent Id': 'u', 'Ultimate Parent Name': 'us bancorp'}, 'MITSUBISHI UFJ FINANCIAL GROUP, INC. - JP'))]
+
+def ex_executive_dashboard__summary_subsidiaries():
+    from app.services.extractors import executive_dashboard as ed
+    return ed._subsidiaries([{'Subsidiary Name': n} for n in ('woolworths', 'Big W', 'big w', '', 'endeavour group', 'wesfarmers')], 'WOOLWORTHS GROUP LIMITED - AU', 'wesfarmers')
 
 def ex_executive_dashboard__summary_description_bullets():
     from app.services.extractors import executive_dashboard as ed
@@ -1077,6 +1085,7 @@ EXAMPLES = {
     ('content_studio', 'cs_country_guardrails'): ex_content_studio__cs_country_guardrails,
     ('content_studio', 'cs_tier_language'): ex_content_studio__cs_tier_language,
     ('executive_dashboard', 'summary_parent_company'): ex_executive_dashboard__summary_parent_company,
+    ('executive_dashboard', 'summary_subsidiaries'): ex_executive_dashboard__summary_subsidiaries,
     ('executive_dashboard', 'summary_description_bullets'): ex_executive_dashboard__summary_description_bullets,
     ('executive_dashboard', 'filings_on_record'): ex_executive_dashboard__filings_on_record,
     ('executive_dashboard', 'reported_financials'): ex_executive_dashboard__reported_financials,

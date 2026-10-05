@@ -55,7 +55,6 @@ import {
   Phone,
   Calculator,
   Binary,
-  Maximize2,
   ChevronLeft,
   MapPin,
   Globe,
@@ -488,8 +487,9 @@ export default function UserDashboardPage() {
   const [isLoadingWidgets, setIsLoadingLoadingWidgets] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // X-Ray Mode Toggle State (Northstar Debug / Provenance View)
-  const [isXRayOn, setIsXRayOn] = useState(false);
+  // X-Ray (provenance / debug view) is kept off: the client asked for the
+  // toggle to be removed (issue list v3). The views it gates stay in the code.
+  const isXRayOn = false;
   const [provenanceSearch, setProvenanceSearch] = useState('');
   const [provenanceSourceFilter, setProvenanceSourceFilter] = useState('ALL');
 
@@ -813,7 +813,7 @@ export default function UserDashboardPage() {
       { field_path: 'employee_count', source: '1_firmographics.csv (Number Of Employees Range)', type: 'Firmographics', date: '2026-09-04', confidence: '90%', url: 'data/accounts/' + selectedAccount.id + '/firmographics/firmographics.csv' },
       { field_path: 'revenue', source: '1_firmographics.csv (Yearly Revenue Range)', type: 'Firmographics', date: '2026-09-04', confidence: '90%', url: 'data/accounts/' + selectedAccount.id + '/firmographics/firmographics.csv' },
       { field_path: 'company_hierarchy', source: '2_company_hierarchy.csv (Parent Company Name)', type: 'Hierarchy', date: '2026-09-04', confidence: '90%', url: 'data/accounts/' + selectedAccount.id + '/company_hierarchy/company_hierarchy.csv' },
-      { field_path: 'job_postings_12m', source: 'job_openings.csv (Last 12 months, account country only, open and closed)', type: 'Job Openings', date: '2026-09-04', confidence: '85%', url: 'data/accounts/' + selectedAccount.id + '/job_openings/job_openings.csv' },
+      { field_path: 'job_postings', source: 'job_openings.csv (Last 12 months, account country only, open and closed)', type: 'Job Openings', date: '2026-09-04', confidence: '85%', url: 'data/accounts/' + selectedAccount.id + '/job_openings/job_openings.csv' },
       { field_path: 'liveSignals', source: 'google_news_rss_data.csv + news_events.csv', type: 'Google News', date: '2026-09-04', confidence: '80%', url: 'data/accounts/' + selectedAccount.id + '/google_news/google_news_rss_data.csv' },
       { field_path: 'technology_stack', source: '4_technographics.csv (Full Tech Stack)', type: 'Technographics', date: '2026-09-04', confidence: '85%', url: 'data/accounts/' + selectedAccount.id + '/technographics/technographics.csv' },
       { field_path: 'intentTopics', source: '11_intent_score.csv (Composite Score)', type: 'Bombora', date: '2026-09-04', confidence: '80%', url: 'data/accounts/' + selectedAccount.id + '/intent_score/intent_score.csv' }
@@ -1124,21 +1124,6 @@ export default function UserDashboardPage() {
               </button>
             )}
 
-            {/* X-Ray Mode Toggle Button */}
-            <div className="flex items-center space-x-3">
-              <button
-                type="button"
-                onClick={() => setIsXRayOn(!isXRayOn)}
-                className={`inline-flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl border text-xs font-bold transition shadow-xs ${
-                  isXRayOn
-                    ? 'bg-hp-navy text-white border-hp-navy shadow-sm'
-                    : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
-                }`}
-              >
-                <Maximize2 className="w-3.5 h-3.5" />
-                <span>X-Ray: {isXRayOn ? 'ON' : 'OFF'}</span>
-              </button>
-            </div>
           </header>
 
           {/* Main Dashboard Canvas Scroll Area */}
@@ -1257,7 +1242,7 @@ export default function UserDashboardPage() {
                 {activeFeatureKey === 'executive_dashboard' && (() => {
                   const summaryWidget = widgets.find(w => w.widget_key === 'exec_summary_card');
                   const metricsWidget = widgets.find(w => w.widget_key === 'exec_key_metrics');
-                  const hiringWidget = widgets.find(w => w.widget_key === 'exec_hiring_velocity');
+                  const hiringWidget = widgets.find(w => w.widget_key === 'hiring_postings_summary');
                   const prioritiesWidget = widgets.find(w => w.widget_key === 'exec_strategic_priorities');
                   const urgencyWidget = widgets.find(w => w.widget_key === 'exec_urgency_score');
 
@@ -1296,10 +1281,12 @@ export default function UserDashboardPage() {
                   const domainVal = summaryData?.domain || null;
                   const locationVal = summaryData?.hq_location || null;
                   const industryVal = summaryData?.industry_classification || null;
-                  // The hierarchy sheet's Parent Company Name. Blank means the
-                  // client asked for the relationship to be ignored, so the
-                  // line is hidden rather than shown as missing.
+                  // Client, 5 Oct: the parent is the hierarchy sheet's column E
+                  // (column C where E is the account itself) and the
+                  // subsidiaries are column A of the Subsidiaries sheet, both as
+                  // supplied. Blank means hidden, not shown as missing.
                   const parentVal = summaryData?.parent_company || null;
+                  const subsidiariesVal: string[] = summaryData?.subsidiaries || [];
                   // Feature 1's header CEO, read from the newest filing naming one.
                   const ceoVal: any = metricsData?.ceo || null;
 
@@ -1372,12 +1359,37 @@ export default function UserDashboardPage() {
                               )}
 
                               {parentVal && (
-                                <div className="flex items-center space-x-1.5 text-slate-700">
-                                  <User className="w-4 h-4 text-hp-navy" />
-                                  <span>Parent Company: <strong className="font-bold text-slate-900">{parentVal}</strong></span>
+                                <div className="flex items-center space-x-1.5 text-slate-700" title={summaryData?.parent_company_source || undefined}>
+                                  <Building2 className="w-4 h-4 text-hp-navy" />
+                                  <span>Parent Company: <strong className="font-bold text-slate-900 capitalize">{parentVal}</strong></span>
                                 </div>
                               )}
                             </div>
+
+                            {/* Subsidiaries: the first few inline, the rest one click away. */}
+                            {subsidiariesVal.length > 0 && (
+                              <details className="group text-xs text-slate-700">
+                                <summary className="as-summary flex items-start gap-1.5 cursor-pointer list-none">
+                                  <Layers className="w-4 h-4 text-hp-navy shrink-0 mt-0.5" />
+                                  <span className="min-w-0">
+                                    <span className="font-medium text-slate-500">Subsidiaries ({subsidiariesVal.length}): </span>
+                                    <span className="capitalize text-slate-900 font-semibold">
+                                      {subsidiariesVal.slice(0, 5).join(' · ')}
+                                    </span>
+                                    {subsidiariesVal.length > 5 && (
+                                      <span className="text-hp-navy font-bold group-open:hidden"> +{subsidiariesVal.length - 5} more</span>
+                                    )}
+                                  </span>
+                                </summary>
+                                {subsidiariesVal.length > 5 && (
+                                  <div className="mt-2 ml-5 flex flex-wrap gap-1.5">
+                                    {subsidiariesVal.slice(5).map((s, i) => (
+                                      <span key={`${s}-${i}`} className="capitalize px-2 py-0.5 rounded bg-slate-100 text-slate-700">{s}</span>
+                                    ))}
+                                  </div>
+                                )}
+                              </details>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -1435,13 +1447,13 @@ export default function UserDashboardPage() {
                             </div>
                           )}
 
-                          {/* Job postings - a count, not a band. Same selection as
-                              Hiring Signals: account country, last 12 months, open and closed. */}
-                          {hiringData && hiringData.job_postings_12m > 0 && (
+                          {/* Job postings - a count, not a band. Read from the Hiring Signals
+                              output (hiring_postings_summary): account country, last 12 months, open and closed. */}
+                          {hiringData && hiringData.job_postings > 0 && (
                             <div className="as-lift relative bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col justify-between min-h-[7rem]">
                               <span className="text-[11px] text-slate-500 block">Job postings (last 12 months)</span>
                               <span className="text-lg font-semibold text-slate-900 leading-tight">
-                                <CountUpText text={hiringData.job_postings_12m} />
+                                <CountUpText text={hiringData.job_postings} />
                               </span>
                               <span className="text-[10px] text-slate-400">Count · Job postings</span>
                             </div>
@@ -1569,7 +1581,7 @@ export default function UserDashboardPage() {
                               )}
                               <span
                                 className={`font-extrabold ${
-                                  urgencyData?.score != null ? 'text-3xl text-slate-800' : 'text-base text-slate-400'
+                                  urgencyData?.score != null ? 'text-3xl text-slate-800' : 'text-xs leading-tight text-center px-3 text-slate-400'
                                 }`}
                                 // Withheld rather than absent: the client's
                                 // 16 Sep gate publishes a score only where at
@@ -1582,7 +1594,9 @@ export default function UserDashboardPage() {
                               >
                                 {urgencyData?.score != null ? <CountUpText text={urgencyData.score} /> : NO_SIGNAL}
                               </span>
-                              <span className="text-[10px] font-bold text-slate-400">/100</span>
+                              {urgencyData?.score != null && (
+                                <span className="text-[10px] font-bold text-slate-400">/100</span>
+                              )}
                             </div>
 
                             <div className="flex-1 w-full space-y-3 text-xs">
@@ -2541,6 +2555,11 @@ export default function UserDashboardPage() {
                   const buUnits: any[] = summaryData?.bu_summary?.units || [];
                   const buByCat: Record<string, any> = Object.fromEntries(buUnits.map((u: any) => [u.category, u]));
                   const leadWithBombora = summaryData?.bu_summary?.lead_source === 'Bombora';
+                  // Client email, 5 Oct: a Bombora account's topics are grouped by HP
+                  // category in the summary, with the long tail in its dropdown. The
+                  // dictionary's theme groups further down would be a second, different
+                  // grouping of the same topics, so they are left out on these accounts.
+                  const hpGrouped = leadWithBombora && Array.isArray(summaryData?.bu_summary?.long_tail);
                   const otherCats = leadWithBombora
                     ? [...hpCategories].sort((a: any, b: any) =>
                         (buByCat[b.category]?.bombora_max ?? -1) - (buByCat[a.category]?.bombora_max ?? -1))
@@ -2778,15 +2797,26 @@ export default function UserDashboardPage() {
                       {(summaryData?.bu_summary?.units || []).length > 0 && (() => {
                         const bu: any = summaryData?.bu_summary;
                         const byBombora = bu.lead_source === 'Bombora';
+                        // Client email, 5 Oct: on a Bombora account each HP category is
+                        // scored by the average of the Bombora topics the model placed in
+                        // it. Where no topic was HP-relevant, the category file's scores
+                        // stand in (score_source 'PredictLeads'). `score` is whichever
+                        // applies; older builds carried only bombora_max.
+                        const unitScore = (u: any) => u.score ?? u.bombora_max ?? u.category_file_score ?? null;
+                        const averaged = bu.score_source === 'Bombora';
+                        const longTail: any[] = bu.long_tail || [];
+                        const sourceNote = averaged
+                          ? 'Average of the HP-relevant Bombora topics in each category'
+                          : byBombora
+                            ? 'From the HP category intent file · no Bombora topic for this account is about an HP category'
+                            : 'From the HP category intent file';
                         return (
                           <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm space-y-4">
-                            <div className="flex items-center justify-between gap-2">
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
                               <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700">
                                 Intent across HP business units
                               </h3>
-                              <span className="text-[10px] text-slate-400">
-                                {byBombora ? 'From this account’s Bombora research' : 'From the HP category intent file'}
-                              </span>
+                              <span className="text-[10px] text-slate-400">{sourceNote}</span>
                             </div>
 
                             {byBombora && bu.overview && (
@@ -2795,11 +2825,7 @@ export default function UserDashboardPage() {
                               </p>
                             )}
 
-                            {/* The same chart shape the category file gets, drawn
-                                from Bombora instead: one bar per unit at its
-                                strongest researched topic. A unit nothing maps to
-                                has no bar, which is the honest height for it. */}
-                            {byBombora && bu.units.some((u: any) => u.bombora_max != null) && (
+                            {byBombora && bu.units.some((u: any) => unitScore(u) != null) && (
                               <div className="overflow-x-auto">
                                 <div className="min-w-[480px] pl-8 pr-2 pt-7">
                                   <div className="relative h-52">
@@ -2810,7 +2836,8 @@ export default function UserDashboardPage() {
                                     ))}
                                     <div className="absolute inset-0 flex items-end justify-around">
                                       {bu.units.map((u: any, colIdx: number) => {
-                                        const pct = Math.min(100, Math.max(0, u.bombora_max ?? 0));
+                                        const s = unitScore(u);
+                                        const pct = Math.min(100, Math.max(0, s ?? 0));
                                         return (
                                           <div
                                             key={u.category}
@@ -2819,17 +2846,14 @@ export default function UserDashboardPage() {
                                             onMouseLeave={() => setHoveredIntentCat(null)}
                                           >
                                             <div
-                                              className={`as-grow-y w-14 rounded-t-md cursor-default ${THEME_STYLE[u.category]?.bar || CATEGORY_STYLE[u.category]?.bar || 'bg-slate-400'}`}
+                                              className={`as-grow-y w-14 rounded-t-md cursor-default ${CATEGORY_STYLE[u.category]?.bar || THEME_STYLE[u.category]?.bar || 'bg-slate-400'}`}
                                               style={{ height: `${pct}%`, ['--as-d' as string]: `${growDelay(colIdx, 120, 70)}ms` }}
                                             ></div>
-                                            {/* A unit with no score gets no label here; the
-                                                neutral placeholder sits under its name. */}
-                                            {u.bombora_max != null && (
+                                            {s != null && (
                                               <span className="absolute text-[11px] font-bold text-slate-700" style={{ bottom: `calc(${pct}% + 6px)` }}>
-                                                <CountUpText text={u.bombora_max} delay={growDelay(colIdx, 120, 70)} />
+                                                <CountUpText text={s} delay={growDelay(colIdx, 120, 70)} />
                                               </span>
                                             )}
-
                                           </div>
                                         );
                                       })}
@@ -2839,45 +2863,53 @@ export default function UserDashboardPage() {
                                     {bu.units.map((u: any) => (
                                       <div key={u.category} className="w-20 text-center">
                                         <span className="text-xs block font-semibold text-slate-600">{categoryLabel(u.category)}</span>
-                                        {(u.bombora_topic_count === 0 || u.bombora_max == null) && (
+                                        {unitScore(u) == null ? (
                                           <span className="text-[10px] font-medium text-slate-400 block">{NO_SIGNAL}</span>
+                                        ) : averaged && (
+                                          <span className="text-[10px] font-medium text-slate-400 block">
+                                            avg of {u.bombora_topic_count} topic{u.bombora_topic_count === 1 ? '' : 's'}
+                                          </span>
                                         )}
                                       </div>
                                     ))}
                                   </div>
 
-                                  {/* The hovered unit's detail, under the chart
-                                      rather than floating over a bar. The plot
-                                      scrolls sideways on a narrow screen, and
-                                      anything positioned outside a scrolling
-                                      box is clipped by it - which is what cut
-                                      this panel down to a sliver. */}
+                                  {/* The hovered unit's detail, under the chart: the
+                                      plot scrolls sideways on a narrow screen and
+                                      would clip anything floating over a bar. */}
                                   {(() => {
                                     const hovered = bu.units.find((u: any) => u.category === hoveredIntentCat);
                                     if (!hovered) {
                                       return (
                                         <p className="mt-3 text-[11px] text-slate-400 border-t border-slate-100 pt-2">
-                                          Hover a bar for that unit&apos;s researched topics.
+                                          Hover a bar for the topics behind that category&apos;s score.
                                         </p>
                                       );
                                     }
+                                    const listed: any[] = hovered.bombora_topics || hovered.bombora_top_topics || [];
                                     return (
                                       <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-1">
                                         <p className="text-[11px] font-extrabold text-slate-900">
-                                          {categoryLabel(hovered.category)} &middot; {hovered.bombora_topic_count} researched topic{hovered.bombora_topic_count === 1 ? '' : 's'}
-                                          {hovered.bombora_max != null && (
-                                            <span className="text-slate-500 font-semibold"> &middot; strongest {hovered.bombora_max}</span>
+                                          {categoryLabel(hovered.category)}
+                                          {hovered.score_basis === 'bombora_average' && (
+                                            <span className="text-slate-500 font-semibold">
+                                              {' '}&middot; {hovered.bombora_topic_count} topic{hovered.bombora_topic_count === 1 ? '' : 's'} &middot; {hovered.bombora_score_sum} / {hovered.bombora_topic_count} = {hovered.score}
+                                            </span>
+                                          )}
+                                          {hovered.score_basis === 'category_file' && hovered.category_file_stage && (
+                                            <span className="text-slate-500 font-semibold"> &middot; {hovered.category_file_stage}</span>
                                           )}
                                         </p>
-                                        {hovered.bombora_top_topics?.length > 0 ? (
+                                        {listed.length > 0 ? (
                                           <p className="text-[10px] text-slate-500 leading-snug">
-                                            <span className="font-bold text-slate-400 uppercase tracking-wider">Strongest topics: </span>
-                                            {hovered.bombora_top_topics.map((t: any) => `${shortTopic(t.topic)} ${t.score}`).join(' \u00b7 ')}
+                                            {listed.map((t: any) => `${shortTopic(t.topic)} ${t.score}`).join(' · ')}
                                           </p>
-                                        ) : (
+                                        ) : hovered.score_basis !== 'category_file' && (
                                           <p className="text-[10px] text-slate-400">{NO_SIGNAL}</p>
                                         )}
-                                        <p className="text-[9px] text-slate-400">Composite scores as supplied by Bombora.</p>
+                                        <p className="text-[9px] text-slate-400">
+                                          {hovered.score_basis === 'category_file' ? 'Score as supplied in the HP category intent file.' : 'Composite scores as supplied by Bombora.'}
+                                        </p>
                                       </div>
                                     );
                                   })()}
@@ -2888,33 +2920,27 @@ export default function UserDashboardPage() {
                             {byBombora ? (
                               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                                 {bu.units.map((u: any) => {
-                                  const researched = u.bombora_topic_count > 0;
-                                  // On a Bombora account the units are the
-                                  // account's own research themes, so they take
-                                  // the theme palette - the same colour this
-                                  // theme carries in the chart above and its
-                                  // group below. HP's five business units keep
-                                  // theirs on an account with no Bombora.
-                                  const style = THEME_STYLE[u.category] || CATEGORY_STYLE[u.category]
+                                  const s = unitScore(u);
+                                  const scored = s != null;
+                                  const style = CATEGORY_STYLE[u.category] || THEME_STYLE[u.category]
                                     || { bar: 'bg-slate-400', chip: 'bg-slate-50 text-slate-700 border-slate-200' };
+                                  const listed: any[] = u.bombora_topics || u.bombora_top_topics || [];
                                   return (
                                     <div
                                       key={u.category}
-                                      className={`rounded-xl border overflow-hidden ${researched
+                                      className={`rounded-xl border overflow-hidden ${scored
                                         ? 'bg-white border-slate-200 shadow-xs'
                                         : 'bg-slate-50/60 border-slate-200'}`}
                                     >
-                                      {/* The unit's own colour, the same one its bar
-                                          carries in the chart above. */}
-                                      <div className={`h-1 ${researched ? style.bar : 'bg-slate-200'}`}></div>
+                                      <div className={`h-1 ${scored ? style.bar : 'bg-slate-200'}`}></div>
                                       <div className="p-3.5 space-y-2">
                                       <div className="flex items-center justify-between gap-2">
                                         <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full border ${style.chip}`}>
                                           {categoryLabel(u.category)}
                                         </span>
-                                        {researched && (
+                                        {scored && (
                                           <span className="text-sm font-extrabold text-slate-800">
-                                            {u.bombora_max}<span className="text-[10px] text-slate-400 font-medium">/100</span>
+                                            {s}<span className="text-[10px] text-slate-400 font-medium">/100</span>
                                           </span>
                                         )}
                                       </div>
@@ -2923,16 +2949,21 @@ export default function UserDashboardPage() {
                                       )}
 
                                       <p className="text-[11px] font-semibold text-slate-600">
-                                        {researched
-                                          ? <>{u.bombora_topic_count} researched topic{u.bombora_topic_count === 1 ? '' : 's'}</>
-                                          : <span className="text-slate-400 font-normal">{NO_SIGNAL}</span>}
+                                        {u.score_basis === 'bombora_average'
+                                          ? <>Average of {u.bombora_topic_count} Bombora topic{u.bombora_topic_count === 1 ? '' : 's'}</>
+                                          : u.score_basis === 'category_file'
+                                            ? <>HP category intent file{u.category_file_stage ? ` · ${u.category_file_stage}` : ''}</>
+                                            : scored
+                                              ? <>{u.bombora_topic_count} researched topic{u.bombora_topic_count === 1 ? '' : 's'}</>
+                                              : <span className="text-slate-400 font-normal">{NO_SIGNAL}</span>}
                                       </p>
 
-                                      {u.bombora_top_topics?.length > 0 && (
+                                      {listed.length > 0 && (
                                         <div className="flex flex-wrap gap-1">
-                                          {u.bombora_top_topics.map((t: any) => (
+                                          {listed.map((t: any) => (
                                             <span
                                               key={t.topic}
+                                              title={t.reason || undefined}
                                               className="text-[10px] font-medium text-slate-600 bg-slate-50 border border-slate-200 px-1.5 py-0.5 rounded-full"
                                             >
                                               {shortTopic(t.topic)} <span className="text-slate-400">{t.score}</span>
@@ -2963,6 +2994,26 @@ export default function UserDashboardPage() {
                                   </li>
                                 ))}
                               </ul>
+                            )}
+
+                            {/* The long tail (client email, 5 Oct): every Bombora topic
+                                not placed in an HP category, as received, behind a
+                                dropdown so the HP view stays first. */}
+                            {byBombora && longTail.length > 0 && (
+                              <details className="group rounded-xl border border-slate-200 bg-slate-50/50">
+                                <summary className="cursor-pointer list-none flex items-center justify-between px-3.5 py-2.5 text-xs font-bold text-slate-700">
+                                  <span>Other Bombora topics ({longTail.length})</span>
+                                  <ChevronDown className="w-3.5 h-3.5 transition-transform group-open:rotate-180" />
+                                </summary>
+                                <div className="px-3.5 pb-3 space-y-1 max-h-96 overflow-y-auto">
+                                  {longTail.map((t: any, idx: number) => (
+                                    <div key={`${t.topic}-${idx}`} className="flex items-center justify-between gap-3 text-xs py-0.5">
+                                      <span className="capitalize text-slate-700 truncate">{t.topic}</span>
+                                      <span className="font-mono font-bold text-slate-900 flex-shrink-0">{t.score}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </details>
                             )}
                           </div>
                         );
@@ -3247,13 +3298,14 @@ export default function UserDashboardPage() {
                             <div>
                               <h3 className="text-sm font-extrabold uppercase tracking-wider text-slate-800 flex items-center gap-2">
                                 <Database className="w-4 h-4 text-hp-navy" />
-                                <span>BROADER INTENT TOPICS ({topicsList.length})</span>
+                                <span>{hpGrouped ? 'INTENT DATA' : `BROADER INTENT TOPICS (${topicsList.length})`}</span>
                               </h3>
                               <p className="text-xs text-slate-500 mt-0.5">
                                 As received from the intent data · {provider?.scoring_definition} · Intent sources: Bombora and Predictleads
                               </p>
                             </div>
 
+                            {!hpGrouped && (
                             <div className="flex items-center space-x-2 text-xs">
                               <div className="relative">
                                 <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-2.5" />
@@ -3289,6 +3341,7 @@ export default function UserDashboardPage() {
                                 <span>{intentSort === 'score' ? 'Score' : 'A-Z'}</span>
                               </button>
                             </div>
+                            )}
                           </div>
 
                           {/* Provenance for every row below */}
@@ -3314,7 +3367,7 @@ export default function UserDashboardPage() {
 
                           {/* Topics grouped by dictionary theme. Group numbers come from the backend summary, so a filter never changes them. */}
                           <div className="space-y-4 pt-2">
-                            {themes.filter((t: any) => t.theme !== 'Other / Low Relevance' && t.topic_count > 0).map((theme: any) => {
+                            {!hpGrouped && themes.filter((t: any) => t.theme !== 'Other / Low Relevance' && t.topic_count > 0).map((theme: any) => {
                               const style = THEME_STYLE[theme.theme] || THEME_STYLE['Other / Low Relevance'];
                               const shown = filteredTopics.filter((x: any) => x.included && x.theme === theme.theme);
                               // Collapsed by default; a search opens the groups it matched.
@@ -3353,7 +3406,7 @@ export default function UserDashboardPage() {
                               );
                             })}
 
-                            {otherTheme && otherTheme.topic_count > 0 && (() => {
+                            {!hpGrouped && otherTheme && otherTheme.topic_count > 0 && (() => {
                               const shown = filteredTopics.filter((x: any) => x.included && x.theme === 'Other / Low Relevance');
                               // Open like every other theme group: a search opens
                               // it, otherwise the button decides. It used to toggle
@@ -6300,7 +6353,9 @@ export default function UserDashboardPage() {
                           </p>
                           <p className="text-[11px] text-slate-400 mt-1 max-w-2xl leading-relaxed">
                             Anticipated push-back a seller should be ready for, generated from this
-                            account&apos;s technographics evidence. These are not statements made by
+                            account&apos;s {(reframesData.technology_evidence_source ?? contextData.technology_evidence_source) === 'tech_breakdown'
+                              ? 'website technology (no technographics data for this account)'
+                              : 'technographics evidence'}. These are not statements made by
                             any contact.
                           </p>
                         </div>

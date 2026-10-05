@@ -53,7 +53,7 @@ PRIORITY_ORDER = (
     "exec_key_metrics",
     "exec_strategic_priorities",
     "exec_urgency_score",
-    "exec_hiring_velocity",
+    "hiring_postings_summary",
     "stakeholder_contacts_grid",
     "stakeholder_influence_map",
     "stakeholder_talking_points",
@@ -70,7 +70,9 @@ PRIORITY_ORDER = (
     "webstack_breakdown",
     "intent_topics_table",
     "intent_category_summary",
-    "intent_hiring_demand",
+    "hiring_family_breakdown",
+    "hiring_theme_cards",
+    "hiring_tech_tags",
     "tech_detections_reference",
 )
 

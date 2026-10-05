@@ -1,7 +1,13 @@
 """Which PredictLeads job openings count for an account.
 
-One selection, shared by every place that shows a hiring number, so the
-Executive Dashboard tile and the Hiring Signals page can never disagree.
+One selection, and the only way any feature reads job openings: Hiring
+Signals, the Executive Dashboard tile, the urgency score, Content Studio's
+role personas and the rulebook evidence all call `account_jobs`, so no two of
+them can count different jobs. The split script applies the same
+`select_jobs` when it builds job_openings.csv, so the uploaded file already
+holds only these jobs and the rows it drops are kept beside it with a reason
+(reference/job_openings_excluded.csv). Applying it again here is a no-op on
+that file and still guards a raw PredictLeads upload.
 Source: Hiring_Signals_Rule_Set_Final.docx (Dhruvi, 1 Oct 2026) plus the
 answers given to the open questions on it the same day:
 
@@ -24,9 +30,11 @@ import re
 from dataclasses import dataclass, field
 from datetime import date, datetime
 
-# Bump on any change to the selection below. The Executive Dashboard's regen
-# node references it, so a bump marks every account's hiring tile stale.
-HIRING_RULES_VERSION = 1
+# Bump on any change to the selection below. Every regen node that reads job
+# openings references it, so a bump marks each of them stale.
+# 2: one selection for every reader (5 Oct) - urgency, Content Studio and the
+# rulebook evidence read every row before.
+HIRING_RULES_VERSION = 2
 
 # The date the PredictLeads job openings file was pulled. The 12-month window
 # ends here. Update it (and HIRING_RULES_VERSION) when a new pull is loaded.
@@ -103,6 +111,8 @@ class HiringJobs:
     dropped_older: int = 0
     dropped_undated: int = 0
     notes: list = field(default_factory=list)
+    # (row, reason) for every row a rule removed, in file order.
+    excluded: list = field(default_factory=list)
 
     def basis(self) -> dict:
         return {
@@ -198,13 +208,29 @@ def select_jobs(account_name: str, rows: list) -> HiringJobs:
     for row in rows:
         if code and not location_in_country(row.get("location"), code):
             out.dropped_other_country += 1
+            out.excluded.append((row, "location outside %s" % code))
             continue
         seen = _first_seen(row)
         if seen is None:
             out.dropped_undated += 1
+            out.excluded.append((row, "no first_seen_at"))
             continue
         if seen < start:
             out.dropped_older += 1
+            out.excluded.append((row, "first seen before %s" % start.isoformat()))
             continue
         out.jobs.append(row)
     return out
+
+
+def account_jobs(account_id: str) -> HiringJobs:
+    """The account's job openings after the selection above. Every feature
+    reads jobs through here; nothing reads the job_openings dataset directly.
+
+    Non-strict: an account with no job file has no jobs, not an error."""
+    from app.services.extractors.datasets import (
+        account_display_name,
+        read_dataset_records,
+    )
+    rows = read_dataset_records(account_id, "job_openings", strict=False) or []
+    return select_jobs(account_display_name(account_id), rows)

@@ -141,3 +141,41 @@ def test_basis_records_what_was_dropped():
     assert basis["window_end"] == "2026-09-18"
     assert basis["dropped_other_country"] == 1
     assert basis["dropped_older_than_window"] == 1
+
+
+# -- one selection for every reader -------------------------------------------
+
+def test_every_dropped_row_is_kept_with_its_reason():
+    rows = [job("Tokyo, Japan", title="abroad"), job(seen="2015-03-21T00:00:00Z", title="old"),
+            job(seen="", title="undated"), job(title="kept")]
+    out = select_jobs("AUSTRALIA POST - AU", rows)
+    assert [r["title"] for r in out.jobs] == ["kept"]
+    assert [(r["title"], why) for r, why in out.excluded] == [
+        ("abroad", "location outside AU"),
+        ("old", "first seen before 2025-09-18"),
+        ("undated", "no first_seen_at")]
+
+
+def test_selection_is_idempotent_on_its_own_output():
+    """The split script writes the selected rows; the app selects them again."""
+    rows = [job("Tokyo, Japan"), job(seen="2015-03-21T00:00:00Z"), job(), job("Sydney, Australia")]
+    once = select_jobs("AUSTRALIA POST - AU", rows).jobs
+    assert select_jobs("AUSTRALIA POST - AU", once).jobs == once
+
+
+def test_account_jobs_reads_the_dataset_and_selects(monkeypatch):
+    from app.services.extractors import datasets
+    rows = [job("Tokyo, Japan"), job(title="kept")]
+    monkeypatch.setattr(datasets, "read_dataset_records",
+                        lambda _account_id, key, **_: rows if key == "job_openings" else [])
+    monkeypatch.setattr(datasets, "account_display_name",
+                        lambda *_: "AUSTRALIA POST - AU")
+    out = hiring_jobs.account_jobs("acc-1")
+    assert [r["title"] for r in out.jobs] == ["kept"]
+    assert out.dropped_other_country == 1
+
+
+def test_postings_summary_carries_the_sample_roles():
+    from app.services.extractors.hiring_signals import postings_summary
+    jobs = [job(title=t) for t in ("A", "B", "A", "C", "D", "E", "F")]
+    assert postings_summary(jobs)["sample_roles"] == ["A", "B", "C", "D", "E"]

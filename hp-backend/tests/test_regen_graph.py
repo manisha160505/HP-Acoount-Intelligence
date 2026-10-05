@@ -47,11 +47,17 @@ def test_every_registered_widget_has_exactly_one_owner_or_is_a_user_output():
 def test_every_widget_owner_belongs_to_the_widgets_feature():
     from app.api.v1.widgets import WIDGET_REGISTRY
 
+    # A contract names its own feature; a page may also list a widget another
+    # feature produces (the Executive Dashboard reads hiring_postings_summary).
+    cross_listed = set()
     for feature, contracts in WIDGET_REGISTRY.items():
         for c in contracts:
             owner = DEFAULT.owner.get(c["widget_key"])
             if owner:
-                assert DEFAULT[owner].feature == feature, c["widget_key"]
+                assert DEFAULT[owner].feature == c.get("feature_key", feature), c["widget_key"]
+            if c.get("feature_key", feature) != feature:
+                cross_listed.add((feature, c["widget_key"]))
+    assert cross_listed == {("executive_dashboard", "hiring_postings_summary")}
 
 
 def test_every_feature_maps_to_at_least_one_producer():

@@ -85,10 +85,10 @@ INDEX_REGISTRY = {
         # The cleaned feature outputs ABX Step 4 names: "reuse the cleaned
         # Recent News, Stakeholder Map, Tech Landscape and Intent outputs".
         "widgets": ["exec_summary_card", "exec_key_metrics",
-                    "exec_hiring_velocity", "news_signals_feed",
+                    "hiring_postings_summary", "hiring_family_breakdown",
+                    "hiring_theme_cards", "news_signals_feed",
                     "opportunity_trigger_signals", "stakeholder_influence_map",
-                    "technographic_map", "intent_topics_table",
-                    "intent_hiring_demand"],
+                    "technographic_map", "intent_topics_table"],
         "required_widgets": ["exec_summary_card"],
         # Chunks only - no graph walk, and none to walk. `mix` retrieved
         # entities and relationships that this feature never saw: `priorities.py`

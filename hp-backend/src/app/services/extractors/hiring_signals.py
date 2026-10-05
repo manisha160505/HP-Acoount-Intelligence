@@ -7,11 +7,16 @@ Source: Hiring_Signals_Rule_Set_Final.docx and the worked example "Hiring
 Signals - Australia Post (desktop)" (Dhruvi, 1 Oct 2026). Entirely
 deterministic - no model call. The jobs are the shared selection in
 `hp/hiring_jobs.py` (country check, last 12 months to the pull date, open and
-closed), the same jobs the Executive Dashboard counts.
+closed), the same jobs every other feature reads.
+
+This is the one hiring output. The Executive Dashboard's job postings tile,
+Strategy Chat and the Strategic Priorities evidence all read these widgets;
+nothing else computes a hiring number.
 
 Four widgets, one per block of the section:
 
-  hiring_postings_summary  tile 1 (job postings) and tile 2 (hybrid roles)
+  hiring_postings_summary  tile 1 (job postings), tile 2 (hybrid roles) and up
+                           to 5 sample roles (the Executive Dashboard tile)
   hiring_family_breakdown  "What they're hiring for": O*NET families, top 6 + Other
   hiring_tech_tags         "Tech named in job ads": up to 30 tags from column W
   hiring_theme_cards       "Hiring signals for HP": one card per theme with jobs
@@ -34,7 +39,6 @@ from app.observability import pipeline
 from app.services.extractors.datasets import (
     account_display_name,
     account_domain,
-    read_dataset_records,
     requires_local_datasets,
 )
 from app.services.hp import hiring_jobs, hiring_themes
@@ -126,6 +130,21 @@ def _first_seen_range(jobs: list) -> tuple:
     return (firsts[0] if firsts else None, lasts[-1] if lasts else None)
 
 
+SAMPLE_ROLES = 5
+
+
+def sample_roles(jobs: list) -> list:
+    """The first distinct job titles, in file order."""
+    roles = []
+    for j in jobs:
+        title = str(j.get("title") or j.get("normalized_title") or "").strip()
+        if title and title not in roles:
+            roles.append(title)
+            if len(roles) == SAMPLE_ROLES:
+                break
+    return roles
+
+
 def postings_summary(jobs: list) -> dict:
     total = len(jobs)
     hybrid = sum(1 for j in jobs if _is_hybrid(j))
@@ -138,6 +157,7 @@ def postings_summary(jobs: list) -> dict:
         "hybrid_count": hybrid,
         "hybrid_pct": round(100 * hybrid / total) if total else 0,
         "hybrid_rule": "column F contains hybrid, remote or work from home",
+        "sample_roles": sample_roles(jobs),
     }
 
 
@@ -229,11 +249,11 @@ def extract_hiring_signals(account_id: str) -> list[dict]:
     db = get_db()
     now = datetime.now(UTC)
 
-    rows = read_dataset_records(account_id, "job_openings", strict=False) or []
     name = account_display_name(account_id)
-    selected = hiring_jobs.select_jobs(name, rows)
+    selected = hiring_jobs.account_jobs(account_id)
     jobs = selected.jobs
-    pipeline.step("selection", "", rows=len(rows), jobs=len(jobs),
+    pipeline.step("selection", "", rows=len(jobs) + len(selected.excluded),
+                  jobs=len(jobs),
                   dropped_other_country=selected.dropped_other_country,
                   dropped_older=selected.dropped_older,
                   dropped_undated=selected.dropped_undated)

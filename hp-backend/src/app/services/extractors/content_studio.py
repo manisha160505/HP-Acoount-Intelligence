@@ -38,6 +38,7 @@ from app.services.hp import (
     case_studies as cs,
     content_audit,
     content_gates,
+    hiring_jobs,
 )
 from app.services.regen import context as run_context, store as widget_store
 
@@ -292,8 +293,8 @@ def _derive_role_proxy_personas(job_records: list[dict]) -> list[dict]:
     A persona here is a role type - department + seniority - with the postings
     that produced it listed as evidence. Nothing names a person. Relevance is
     scored by the helper Stakeholder Map applies to a named contact; junior and
-    intern postings are gated out before clustering. No status filter, matching
-    intent_hiring_demand, which counts every row."""
+    intern postings are gated out before clustering. The jobs are the one
+    selection every feature reads (hp/hiring_jobs.py), open and closed."""
     groups: dict[tuple[str, str], dict] = {}
     for row in job_records:
         title = str(row.get("normalized_title") or row.get("title") or "").strip()
@@ -1601,7 +1602,7 @@ def _build_generation_context(db, account_id: str, persona_id: str, content_type
 
     firmo_records = _read_dataset_records(account_id, "firmographics")
     contacts_records = _read_dataset_records(account_id, "prospect_contacts")
-    job_records = _read_dataset_records(account_id, "job_openings")
+    job_records = hiring_jobs.account_jobs(account_id).jobs
 
     persona = _persona_by_id(db, account_id, job_records, persona_id)
     if not persona:
@@ -1619,7 +1620,7 @@ def _build_generation_context(db, account_id: str, persona_id: str, content_type
     if hiring_clusters:
         parts = [f"{c['posting_count']} {c['department']} ({c['seniority']}): {', '.join(c['sample_titles'])}"
                  for c in hiring_clusters]
-        account_items.append(("Open hiring", f"{len(job_records)} open postings; HP-relevant roles - "
+        account_items.append(("Open hiring", f"{len(job_records)} job postings in the last 12 months; HP-relevant roles - "
                               + "; ".join(parts)))
 
     # The rest of the account's published intelligence - the estate, the intent
@@ -2095,7 +2096,7 @@ def extract_content_studio(account_id: str) -> list[dict]:
     now = datetime.now(UTC)
 
     firmo_records = _read_dataset_records(account_id, "firmographics")
-    job_records = _read_dataset_records(account_id, "job_openings")
+    job_records = hiring_jobs.account_jobs(account_id).jobs
 
     pipeline.step("datasets", "", firmographics=len(firmo_records or []),
                   jobs=len(job_records or []))

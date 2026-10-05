@@ -20,17 +20,16 @@ the dictionary in services/hp/intent_topic_map.py for the raw topic view and
 theme summaries. Sheet 6 (workforce trends) holds role shares, not
 technologies, so it takes no part in step 3.
 
-Source B is job_openings, used for the hiring-linked demand card together with
-the Bombora topics that relate to staffing.
+Job openings are not read here. The page's Hiring Signals section is its own
+regen node (extractors/hiring_signals.py), the one hiring output.
 
-Three widgets, all computed here in Python - nothing is generated:
+Two widgets, all computed here in Python - nothing is generated:
 
   intent_topics_table     every Bombora topic as received, with the
                           dictionary's theme and HP category beside it
   intent_category_summary category scores from the category file, their
                           supporting signals and technologies, and theme
                           summaries from exactly the included topics
-  intent_hiring_demand    postings seen, open postings and seniority mix
 
 Intent is reported as research activity only. It can strengthen an opportunity
 other account evidence already supports; on its own it recommends nothing.
@@ -40,7 +39,6 @@ import json
 import logging
 import math
 import re
-from collections import Counter
 from datetime import UTC, datetime
 
 from app.core.llm import generate_gpt4o_json_completion
@@ -53,7 +51,7 @@ from app.services.extractors.datasets import (
     read_dataset_rows,
     requires_local_datasets,
 )
-from app.services.hp import evidence_tier, intent_topic_map as tm
+from app.services.hp import bombora_hp_classifier as hpc, evidence_tier, intent_topic_map as tm
 from app.services.hp.guardrails import tier_language_faults
 from app.services.regen import store as widget_store
 
@@ -88,9 +86,6 @@ PROVIDER = {
 DISCLAIMER = ("Intent indicates research activity, not confirmed purchase intent. "
               "It can strengthen an opportunity that other account evidence already "
               "supports; it does not create one on its own.")
-
-# A posting counts as open when job_openings gives it no closing status.
-OPEN_STATUSES = {"", "open", "active"}
 
 # How the category file marks an empty cell. "\ufffd" is its em dash read
 # through a UTF-8 decoder that replaced it.
@@ -744,61 +739,6 @@ def _write(db, payload: dict) -> dict:
     return payload
 
 
-def _hiring_widget(account_id: str, job_records: list[dict], now) -> dict:
-    """Source B. postings_seen counts every row, the same figure the Executive
-    Dashboard shows; open_postings is reported beside it, never in its place."""
-    payload = {
-        "account_id": account_id,
-        "feature_key": "intent_demand_signals",
-        "widget_key": "intent_hiring_demand",
-        "data_classification": "deterministic",
-        "status": "empty",
-        "data": {},
-        "source_datasets": ["job_openings"],
-        "extracted_at": now,
-        "updated_at": now,
-    }
-    if not job_records:
-        return payload
-
-    sen_counter, cat_counter, status_counter = Counter(), Counter(), Counter()
-    for j in job_records:
-        sen_counter[_clean(j.get("seniority")).lower() or "unspecified"] += 1
-        status_counter[_clean(j.get("status")).lower() or "unspecified"] += 1
-
-        cat_raw = _clean(j.get("categories"))
-        if cat_raw:
-            try:
-                # JSON array string e.g. ["information_technology", "management"]
-                cat_list = json.loads(cat_raw)
-                if isinstance(cat_list, list):
-                    for c in cat_list:
-                        cat_counter[str(c).strip().lower()] += 1
-                else:
-                    cat_counter[cat_raw.lower()] += 1
-            except Exception:
-                cat_counter[cat_raw.lower()] += 1
-
-    open_postings = sum(1 for j in job_records
-                        if _clean(j.get("status")).lower() in OPEN_STATUSES)
-    first_seen = sorted(_clean(j.get("first_seen_at")) for j in job_records if _clean(j.get("first_seen_at")))
-    last_seen = sorted(_clean(j.get("last_seen_at")) for j in job_records if _clean(j.get("last_seen_at")))
-
-    payload["status"] = "available"
-    payload["data"] = {
-        "source": "Source B",
-        "postings_seen": len(job_records),
-        "open_postings": open_postings,
-        "open_postings_rule": "status blank, 'open' or 'active'",
-        "status_breakdown": dict(status_counter),
-        "seniority_breakdown": dict(sen_counter),
-        "category_breakdown": dict(cat_counter.most_common(10)),
-        "first_seen": first_seen[0][:10] if first_seen else None,
-        "last_seen": last_seen[-1][:10] if last_seen else None,
-    }
-    return payload
-
-
 # How many topics a business unit's summary line names.
 BU_TOP_TOPICS = 3
 
@@ -819,11 +759,11 @@ BU_READ_PROMPT_VERSION = 2
 BU_READ_MIN_WORDS = 18
 BU_READ_MAX_WORDS = 40
 
-BU_READ_SYSTEM = """You write one short read per research theme from a company's Bombora intent topics.
+BU_READ_SYSTEM = """You write one short read per HP business category from a company's Bombora intent topics.
 
-You are given, for each theme, the topics this company's people have been researching and the composite score of each. Those numbers are computed and are not yours to change.
+You are given, for each category (given under "theme"), the Bombora topics this company's people have been researching that were classified into that category. The scores are computed and are not yours to change.
 
-A theme is what this company is researching. It is NOT an HP product line. Several of these themes - cloud and infrastructure, security, financial services, e-commerce and logistics - are context: they say what the account is working on, and HP may have nothing to sell into them at all.
+Write about what the company is researching within that category - the topics themselves - not about HP.
 
 RULES - these are failures, not preferences:
 1. ONE sentence per theme, BETWEEN {min_words} AND {max_words} WORDS.
@@ -832,7 +772,8 @@ RULES - these are failures, not preferences:
 4. NEVER name an HP product, and never say what HP should sell, pitch or position. You are describing what the company is looking at, not what to do about it. The HP plays live elsewhere on this page and are not yours to write.
 5. NEVER write a number, a score, a percentage or a date. The card already carries them; a figure you write is a figure you invented.
 6. Each theme reads differently. Do not reuse one sentence shape across them.
-7. Also write one "overview" sentence, {min_words} to {max_words} words, naming the two or three themes the research leans towards across the whole account.
+7. Also write one "overview" sentence, {min_words} to {max_words} words, naming the one to three categories the research leans towards across the whole account.
+8. Write only for the categories given. A category not listed has no read.
 
 Output JSON:
 {{"overview": "...", "themes": [{{"theme": "<exactly as given>", "read": "..."}}]}}
@@ -847,7 +788,7 @@ def _bu_reads(company: str, units: list[dict]) -> dict:
     """
     payload = [{"theme": u["category"],
                 "topics": [t["topic"] for t in (u.get("bombora_top_topics") or [])]}
-               for u in units]
+               for u in units if u.get("bombora_top_topics")]
     if not any(p["topics"] for p in payload):
         return {}
 
@@ -912,88 +853,108 @@ def _has_figure(text: str, allowed=()) -> bool:
     return False
 
 
-def _bu_summary(topics: list[dict], categories: list[dict]) -> dict:
-    """Intent across HP's five business units, one line each, for the top of
-    the tab (Sahaj, 27 Sep): "for the 173 accounts for which Bombora intent is
-    available, let's lead with those and add a broad summary at the start that
-    mentions intent around HP's key business units - Workstation, Print, 3D,
-    PC, Poly. For the accounts post the 173 accounts, please use the
-    Predictleads data for capturing intent."
+def _file_unit(cat: dict, by_name: dict) -> dict:
+    """One HP category scored from the HP category intent file (PredictLeads)."""
+    primary = (by_name.get(cat["category"]) or {}).get("primary") or {}
+    return {
+        "category": cat["category"],
+        "hp_play": cat["hp_play"],
+        "score": primary.get("score"),
+        "score_basis": "category_file" if primary.get("score") is not None else None,
+        "bombora_topic_count": 0,
+        "bombora_average": None,
+        "bombora_score_sum": None,
+        "bombora_max": None,
+        "bombora_topics": [],
+        "bombora_top_topics": [],
+        "category_file_score": primary.get("score"),
+        "category_file_stage": primary.get("stage"),
+    }
 
-    Bombora leads where the account has topics: each unit gets the topics the
-    dictionary maps to it, their count and maximum, and the strongest names.
-    Otherwise the unit's line is the HP category intent file's score (the
-    PredictLeads-sourced file). Both are shown as received - nothing is blended
-    into a new score, so a reader can check every number against its source.
+
+def _bu_summary(topics: list[dict], categories: list[dict],
+                hp_labels: dict | None = None) -> dict:
+    """Intent across HP's five business units, for the top of the tab.
+
+    Sahaj, 27 Sep: "for the 173 accounts for which Bombora intent is available,
+    let's lead with those and add a broad summary at the start that mentions
+    intent around HP's key business units - Workstation, Print, 3D, PC, Poly.
+    For the accounts post the 173 accounts, please use the Predictleads data."
+
+    Client email, 5 Oct, which replaces the 30 Sep grouping by research theme:
+    on a Bombora account the model classifies each topic into one of HP's five
+    categories (services/hp/bombora_hp_classifier.py), and a category's score
+    is the AVERAGE of the Bombora composite scores of the topics placed in it.
+    Every other topic is the long tail, listed as received in a dropdown.
+    `score_sum` and the full topic list travel with each unit so the average
+    can be re-derived by hand.
+
+    Client answer, 5 Oct: where a Bombora account has no HP-relevant topic at
+    all, the HP category scores come from the PredictLeads file if it has them,
+    and the whole Bombora export is the long tail.
+
+    `hp_labels` is {topic_key: {"category", "reason"}} from the classifier.
     """
     included = [t for t in topics if t.get("included")]
-    lead = "Bombora" if included else "PredictLeads"
     by_name = {c.get("category"): c for c in categories}
 
-    if lead == "Bombora":
-        # The account's own research themes, not HP's five business units.
-        #
-        # Sahaj, 30 Sep: on an account with Bombora, group by the broad topic
-        # rather than by HP line - "we directly show the broad topic and the
-        # cards shown will contain their summary". Advantest researches across
-        # eight themes; folding those into five HP units discarded most of what
-        # the export says and made five cards out of an estate that does not
-        # divide that way.
-        #
-        # The themes are the dictionary's own and keep its display order, which
-        # is HP-owned themes first, then the context themes. `Other / Low
-        # Relevance` is excluded: it is the residue rather than a theme, and it
-        # has its own section further down the tab.
-        units = []
-        for theme in tm.THEMES:
-            if theme == tm.THEME_OTHER:
-                continue
-            mapped = sorted((t for t in included if t.get("theme") == theme),
-                            key=lambda t: -(t.get("composite_score") or 0))
-            if not mapped:
-                continue
-            units.append({
-                "category": theme,
-                # A theme is what the account is researching, not a line HP
-                # sells - the dictionary gives its context themes no HP
-                # category on purpose, and inventing one here would put an HP
-                # play behind "E-commerce & Logistics".
-                "hp_play": None,
-                "bombora_topic_count": len(mapped),
-                "bombora_max": mapped[0].get("composite_score"),
-                "bombora_top_topics": [{"topic": t.get("topic_name"),
-                                        "score": t.get("composite_score")}
-                                       for t in mapped[:BU_TOP_TOPICS]],
-                "category_file_score": None,
-                "category_file_stage": None,
-            })
-        units.sort(key=lambda u: (-(u["bombora_max"] or -1),
-                                  -u["bombora_topic_count"]))
-        return {"lead_source": lead, "unit_kind": "theme",
-                "source_label": "Bombora", "units": units}
+    if not included:
+        # No Bombora for this account, so the HP category intent file leads.
+        units = [_file_unit(cat, by_name) for cat in tm.HP_CATEGORIES]
+        units.sort(key=lambda u: -(u["category_file_score"] or -1))
+        return {"lead_source": "PredictLeads", "unit_kind": "hp_category",
+                "source_label": "PredictLeads", "score_source": "PredictLeads",
+                "units": units, "long_tail": []}
 
-    # No Bombora for this account, so the HP category intent file leads and the
-    # units are HP's own five. Unchanged.
+    labels = hp_labels or {}
+    placed: dict[str, list[dict]] = {c["category"]: [] for c in tm.HP_CATEGORIES}
+    long_tail = []
+    for t in sorted(included, key=lambda t: -(t.get("composite_score") or 0)):
+        label = hpc.label_for(labels, t.get("topic_name")) or {}
+        cat = label.get("category")
+        entry = {"topic": t.get("topic_name"), "score": t.get("composite_score")}
+        if cat in placed:
+            placed[cat].append({**entry, "reason": label.get("reason") or None})
+        else:
+            long_tail.append(entry)
+
+    if not any(placed.values()):
+        units = [_file_unit(cat, by_name) for cat in tm.HP_CATEGORIES]
+        units.sort(key=lambda u: -(u["score"] if u["score"] is not None else -1))
+        return {"lead_source": "Bombora", "unit_kind": "hp_category",
+                "source_label": "Bombora", "score_source": "PredictLeads",
+                "units": units, "long_tail": long_tail,
+                "classifier": {"prompt_version": hpc.PROMPT_VERSION}}
+
     units = []
     for cat in tm.HP_CATEGORIES:
-        name = cat["category"]
-        primary = (by_name.get(name) or {}).get("primary") or {}
+        mapped = placed[cat["category"]]
+        stats = _stats([{"composite_score": m["score"], "topic_name": m["topic"]}
+                        for m in mapped])
         units.append({
-            "category": name,
+            "category": cat["category"],
             "hp_play": cat["hp_play"],
-            "bombora_topic_count": 0,
-            "bombora_max": None,
-            "bombora_top_topics": [],
-            "category_file_score": primary.get("score"),
-            "category_file_stage": primary.get("stage"),
+            "score": stats["average"],
+            "score_basis": "bombora_average" if mapped else None,
+            "bombora_topic_count": stats["topic_count"],
+            "bombora_average": stats["average"],
+            "bombora_score_sum": stats["score_sum"] if mapped else None,
+            "bombora_max": stats["max"],
+            "bombora_topics": mapped,
+            "bombora_top_topics": mapped[:BU_TOP_TOPICS],
+            "category_file_score": None,
+            "category_file_stage": None,
         })
-    units.sort(key=lambda u: -(u["category_file_score"] or -1))
-    return {"lead_source": lead, "unit_kind": "hp_category",
-            "source_label": "PredictLeads", "units": units}
+    units.sort(key=lambda u: (-(u["score"] if u["score"] is not None else -1),
+                              -u["bombora_topic_count"]))
+    return {"lead_source": "Bombora", "unit_kind": "hp_category",
+            "source_label": "Bombora", "score_source": "Bombora",
+            "units": units, "long_tail": long_tail,
+            "classifier": {"prompt_version": hpc.PROMPT_VERSION}}
 
 
 @requires_local_datasets(
-    "intent_score", "intent_topics", "job_openings", "hp_category_intent",
+    "intent_score", "intent_topics", "hp_category_intent",
     "technographics", "webstack",
 )
 @pipeline.feature("intent_demand_signals")
@@ -1003,14 +964,12 @@ def extract_intent_demand_signals(account_id: str) -> list[dict]:
 
     score_records = _read_dataset_records(account_id, "intent_score")
     topics_meta_records = _read_dataset_records(account_id, "intent_topics")
-    job_records = _read_dataset_records(account_id, "job_openings")
     category_rows = read_dataset_rows(account_id, "hp_category_intent")
     inventory = _tech_inventory(_read_dataset_records(account_id, "technographics"),
                                 _read_dataset_records(account_id, "webstack"))
 
     pipeline.step("datasets", "", intent_score=len(score_records or []),
                   intent_topics=len(topics_meta_records or []),
-                  jobs=len(job_records or []),
                   hp_category_intent=len(category_rows or []),
                   technologies=len(inventory or []))
 
@@ -1127,7 +1086,13 @@ def extract_intent_demand_signals(account_id: str) -> list[dict]:
         # (Sahaj, 28 Sep). The reads are written only where Bombora leads -
         # they are a reading of the research, and an account with none has
         # nothing for them to read.
-        bu = _bu_summary(topics, summary.get("hp_categories") or [])
+        # Client email, 5 Oct: the model places each Bombora topic in one of
+        # HP's five categories; the averages are Python's. A failed
+        # classification raises, so the widget keeps its previous build rather
+        # than publishing averages over half the topics.
+        hp_labels = (hpc.classify_topics(db, [t["topic_name"] for t in included])
+                     if included else None)
+        bu = _bu_summary(topics, summary.get("hp_categories") or [], hp_labels)
         if bu["lead_source"] == "Bombora":
             written = _bu_reads(company, bu["units"])
             if written:
@@ -1170,5 +1135,4 @@ def extract_intent_demand_signals(account_id: str) -> list[dict]:
     return [
         _write(db, topics_payload),
         _write(db, summary_payload),
-        _write(db, _hiring_widget(account_id, job_records, now)),
     ]

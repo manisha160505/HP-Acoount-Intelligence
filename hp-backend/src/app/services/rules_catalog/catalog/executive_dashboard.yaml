@@ -158,35 +158,81 @@ rules:
   parent: exec_summary_card
   name: Parent company
   kind: selection
-  summary: Shows the parent company only when the corporate structure information names one.
-  purpose: Shows the parent company only when the corporate structure information names one.
+  summary: Shows the parent company named in the corporate structure information, unless it is the account
+    itself.
+  purpose: Shows the parent company named in the corporate structure information, unless it is the account
+    itself.
   inputs:
-  - 'The corporate structure information: parent company name'
-  logic: 'The parent shown is the parent company name from the corporate structure information, with spaces
-    trimmed, exactly as supplied. If it is blank, nothing is shown and nothing is flagged. The parent
-    is never looked for anywhere else: not in the ultimate-parent name and not in a ''subsidiary of''
-    phrase in the business description.'
+  - 'The corporate structure information: ultimate parent name (column E) and id, parent company name
+    (column C), the company''s own id'
+  - The account's name
+  logic: 'The parent is the ultimate parent name (column E), exactly as supplied with spaces trimmed. It
+    is skipped when it is the account itself: its id is the company''s own id, or it is the account''s
+    own name (''canon'' for Canon Inc.; ''mitsubishi'' for Mitsubishi Motors). When column E gives no
+    other company, the parent company name (column C) is used under the same test. A parent held for
+    client review because the source names the wrong company is not shown. With neither, nothing is
+    shown. The parent is never looked for in the business description.'
   conditions:
-  - 'Blank or whitespace-only parent name: line hidden'
-  - The ultimate-parent name is never used (client decision, Sep 2026)
+  - 'Column E first; column C only when column E names no other company'
+  - 'Blank, the account itself, or held for review: not shown'
+  - 9 accounts' parents are held (e.g. MUFG -> US Bancorp, Shiseido -> Henkel); a corrected value in a
+    later file is shown
   example:
-    scenario: 'Three accounts: one with parent name '' Jardine Matheson '', one with a blank parent but
-      an ultimate parent ''X'', one with no corporate structure row.'
+    scenario: 'Four accounts: BDO with column E ''sm investments''; San Miguel whose column E is San Miguel
+      itself and column C ''top frontier investment holdings''; Canon whose column E is ''canon''; MUFG
+      whose column E is ''us bancorp''.'
     steps:
-    - 'First: spaces trimmed to ''Jardine Matheson''.'
-    - 'Second: the parent is blank, so the ultimate parent is ignored.'
-    - 'Third: no row, so nothing is shown.'
-    result: '''Jardine Matheson'', nothing, nothing.'
+    - 'BDO: column E names another company, shown.'
+    - 'San Miguel: column E is the account itself, so column C is used.'
+    - 'Canon: column E is its own name, nothing shown.'
+    - 'MUFG: held for client review, nothing shown.'
+    result: '''sm investments'', ''top frontier investment holdings'', nothing, nothing.'
     verified: true
     expect:
-    - Jardine Matheson
+    - sm investments
+    - top frontier investment holdings
     - ''
     - ''
   output: Parent company (hidden on screen when blank)
   sources:
   - hp-backend/src/app/services/extractors/executive_dashboard.py:_resolve_parent
+  - hp-backend/src/app/services/extractors/executive_dashboard.py:HELD_PARENTS
   - hp-frontend/src/app/dashboard/page.tsx:parentVal
-  doc_source: Client ruling Sep 2026, quoted in code comment
+  doc_source: Client, 5 Oct (issue list v3) - column E of the company hierarchy sheet
+  confidence: high
+- id: summary_subsidiaries
+  parent: exec_summary_card
+  name: Subsidiaries
+  kind: display
+  summary: Lists the subsidiaries named in the subsidiaries information.
+  purpose: Lists the subsidiaries named in the subsidiaries information.
+  inputs:
+  - 'The subsidiaries information: subsidiary name (column A)'
+  logic: 'Every subsidiary name, exactly as supplied with spaces trimmed, in the order supplied. Blank
+    names and repeats (ignoring case) are dropped, and so are the account''s own name and its parent,
+    since neither is its subsidiary. A name that only starts with the account''s name is kept (''toyota
+    motor'' is a Toyota Group subsidiary). The screen shows the first few and folds the rest. With none,
+    the line is hidden.'
+  conditions:
+  - 'No subsidiaries: line hidden'
+  - Names are not corrected or translated
+  example:
+    scenario: 'Woolworths Group with subsidiaries ''woolworths'', ''Big W'', ''big w'', a blank, ''endeavour
+      group'' and its parent ''wesfarmers''.'
+    steps:
+    - '''woolworths'' is the account itself, dropped.'
+    - '''big w'' repeats ''Big W'', dropped; the blank is dropped.'
+    - '''wesfarmers'' is the parent, dropped.'
+    result: '''Big W'', ''endeavour group''.'
+    verified: true
+    expect:
+    - Big W
+    - endeavour group
+  output: Subsidiary names
+  sources:
+  - hp-backend/src/app/services/extractors/executive_dashboard.py:_subsidiaries
+  - hp-frontend/src/app/dashboard/page.tsx:subsidiariesVal
+  doc_source: Client, 5 Oct (issue list v3) - column A of the subsidiaries sheet
   confidence: high
 - id: summary_description_bullets
   parent: exec_summary_card
