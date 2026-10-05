@@ -403,6 +403,16 @@ class Graph:
                 stack.extend(self.nodes[nid].upstream)
         return seen
 
+    def has_data(self, node_id: str, rows: dict) -> bool:
+        """Whether any dataset this node is built from - its own or an
+        ancestor's - has a file for the account. A node that reads no dataset
+        at all (Strategy snapshot) counts as having data. `rows` is the
+        account's {dataset_key: [file rows]}."""
+        closure = set(self.nodes[node_id].datasets)
+        for up in self.ancestors(node_id):
+            closure.update(self.nodes[up].datasets)
+        return (not closure) or any(rows.get(k) for k in closure)
+
     def descendants(self, node_id: str) -> set:
         seen, stack = set(), list(self.downstream[node_id])
         while stack:

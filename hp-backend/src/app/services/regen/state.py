@@ -153,7 +153,8 @@ def is_usable_upstream(entry: dict) -> bool:
     return entry["lifecycle"] == CURRENT
 
 
-def derive(graph, states: dict, expected_fps: dict, live_jobs: dict) -> dict:
+def derive(graph, states: dict, expected_fps: dict, live_jobs: dict,
+           rows: dict | None = None) -> dict:
     """node_id -> {lifecycle, reasons, blocked_by} for one account.
 
     Walked in dependency order so a node can see its ancestors' result:
@@ -169,6 +170,10 @@ def derive(graph, states: dict, expected_fps: dict, live_jobs: dict) -> dict:
     CURRENT is checked before FAILED: a run that failed and was then superseded
     by a successful one for the same inputs is current, whatever the failure
     record still says.
+
+    With `rows` (the account's {dataset_key: [file rows]}), an upstream node
+    with no data at all - Hiring on an account with no job file - does not hold
+    its readers back: it is never built, and they are built without it.
     """
     out = {}
     for nid in graph.order:
@@ -180,7 +185,8 @@ def derive(graph, states: dict, expected_fps: dict, live_jobs: dict) -> dict:
         want = expected_fps.get(nid)
 
         bad_up = [up for up in node.upstream
-                  if out.get(up, {}).get("lifecycle") != CURRENT]
+                  if out.get(up, {}).get("lifecycle") != CURRENT
+                  and (rows is None or graph.has_data(up, rows))]
         reasons, blocked_by = [], None
 
         if job and job.get("status") == "RUNNING":
