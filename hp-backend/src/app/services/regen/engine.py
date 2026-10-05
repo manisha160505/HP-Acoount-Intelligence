@@ -228,7 +228,7 @@ class Engine:
         snapshot = load_snapshot(self.db, account_id)
         manifests, fps = self.expected_all(snapshot)
         derived = state.derive(self.graph, snapshot.states, fps,
-                               jobs.live(self.db, account_id))
+                               jobs.live(self.db, account_id), rows=snapshot.rows)
         for nid, entry in derived.items():
             current = (snapshot.states.get(nid) or {}).get("current") or {}
             entry["changed_inputs"] = (
@@ -393,14 +393,18 @@ class Engine:
         snapshot = load_snapshot(self.db, account_id)
         manifests, fps = self.expected_all(snapshot)
         live = jobs.live(self.db, account_id)
-        derived = state.derive(self.graph, snapshot.states, fps, live)
+        derived = state.derive(self.graph, snapshot.states, fps, live,
+                               rows=snapshot.rows)
 
         # Gate: build only on upstream output that is itself current. An
         # ancestor the run queued is waited for; one nobody queued (it failed
         # earlier in this run, or the plan could not include it) will not
         # become current by waiting, so the job ends here and the node stays
         # stale with `blocked_by`. Nothing is pulled in: only a run adds work.
-        bad = [up for up in node.upstream if derived[up]["lifecycle"] != state.CURRENT]
+        # An upstream with no data at all is never built and is not waited
+        # for (see planner.plan_account): this node runs without its widgets.
+        bad = [up for up in node.upstream if derived[up]["lifecycle"] != state.CURRENT
+               and self.graph.has_data(up, snapshot.rows)]
         stuck = [up for up in bad if up not in live]
         if stuck:
             jobs.finish(self.db, job, jobs.SKIPPED,

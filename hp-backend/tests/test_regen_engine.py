@@ -139,7 +139,7 @@ class Harness:
                 read_dataset_records(account_id, "d3")
             if nid in self.foreign:
                 widget_store.put(account_id, "dw", {"status": "available", "data": {}})
-            key = {"A": "a", "B": "b", "C": "c", "D": "dw"}[nid]
+            key = {"A": "a", "B": "b", "C": "c", "D": "dw", "E": "e"}[nid]
             if nid not in self.skip_widget:
                 widget_store.put(account_id, key, {"status": "available", "data": data})
             if nid in self.partial_then_fail:
@@ -383,6 +383,26 @@ def test_a_section_with_no_data_is_not_run(h):
     h.submit(acct)
     h.drain()
     assert sorted(h.ran(acct)) == ["A", "B", "C"]
+
+
+def test_an_upstream_with_no_data_does_not_block_its_reader(db, tmp_path, monkeypatch):
+    """E reads A (has data) and D (no file ever). D is never built; E is built
+    without it, becomes current, and costs nothing on the next run - the way
+    the dashboard index reads Hiring on an account with no job file."""
+    monkeypatch.setattr(jobs, "GATE_RETRY_SECONDS", 0)
+    from app.database import mongodb
+    monkeypatch.setattr(mongodb.db_instance, "db", db)
+    h = Harness(db, tmp_path, nodes=(*NODES, Node("E", "fe", widgets=("e",), upstream=("A", "D"))))
+    acct = h.account()
+    h.add_file(acct, "d1", "x\n1\n")
+    plan = planner.plan(h.engine, accounts=[acct])
+    actions = {i["node_id"]: i["action"] for i in plan["accounts"][0]["items"]}
+    assert actions["D"] == planner.CANNOT_RUN and actions["E"] == planner.RUN
+    h.submit(acct)
+    h.drain()
+    assert "E" in h.ran(acct) and "D" not in h.ran(acct)
+    assert h.lifecycle(acct, "E") == "CURRENT"
+    assert planner.plan(h.engine, accounts=[acct])["totals"]["run"] == 0
 
 
 def test_unbound_jobs_are_never_claimed(h):
@@ -980,3 +1000,56 @@ def test_two_workers_lift_one_pause_between_them(h):
         {"$set": {"resume_after": datetime.now(UTC) - timedelta(seconds=1)}})
     lifted = [jobs.lift_expired_pause(h.db), jobs.lift_expired_pause(h.db)]
     assert lifted == [True, False]
+
+
+# --------------------------------------------------------------------------
+# Rebase: a release's code change, accepted where it changes no output
+# --------------------------------------------------------------------------
+
+def _bumped(h):
+    """The same graph with section A's logic version bumped, as a deploy does."""
+    nodes = tuple(Node(n.id, n.feature, widgets=n.widgets, datasets=n.datasets,
+                       upstream=n.upstream, logic_version=2 if n.id == "A" else n.logic_version)
+                  for n in NODES)
+    return h.make_engine(graph=Graph(nodes))
+
+
+def test_rebase_restamps_a_code_only_change_without_running(h):
+    from app.services.regen import rebase
+    acct = _loaded(h)
+    engine = _bumped(h)
+    assert engine.status(acct)["nodes"]["A"]["lifecycle"] == "STALE"
+    out = rebase.rebase_account(engine, acct, set(), dry_run=False, label="test")
+    assert out["A"] == "rebased"
+    assert engine.status(acct)["nodes"]["A"]["lifecycle"] == "CURRENT"
+    assert engine.status(acct)["nodes"]["B"]["lifecycle"] == "CURRENT"
+    assert h.log == []                                   # nothing generated
+    doc = h.db["node_state"].find_one({"_id": f"{acct}:A"}) or \
+        h.db["node_state"].find_one({"account_id": acct, "node_id": "A"})
+    assert doc["current"]["rebased"]["by"] == "test"
+
+
+def test_rebase_leaves_affected_sections_stale(h):
+    from app.services.regen import rebase
+    acct = _loaded(h)
+    engine = _bumped(h)
+    out = rebase.rebase_account(engine, acct, {"A"}, dry_run=False)
+    assert out["A"] == "affected"
+    assert engine.status(acct)["nodes"]["A"]["lifecycle"] == "STALE"
+
+
+def test_rebase_never_hides_a_changed_file(h):
+    from app.services.regen import rebase
+    acct = _loaded(h)
+    h.add_file(acct, "d1", "x\n9\n")
+    out = rebase.rebase_account(h.engine, acct, set(), dry_run=False)
+    assert out["A"].startswith("kept_stale")
+    assert h.lifecycle(acct, "A") == "STALE"
+
+
+def test_rebase_dry_run_writes_nothing(h):
+    from app.services.regen import rebase
+    acct = _loaded(h)
+    engine = _bumped(h)
+    assert rebase.rebase_account(engine, acct, set(), dry_run=True)["A"] == "rebased"
+    assert engine.status(acct)["nodes"]["A"]["lifecycle"] == "STALE"

@@ -91,7 +91,8 @@ def account_view(engine, account_id: str) -> dict:
     snapshot = load_snapshot(engine.db, account_id)
     manifests, fps = engine.expected_all(snapshot)
     live = jobs.live(engine.db, account_id)
-    derived = state.derive(engine.graph, snapshot.states, fps, live)
+    derived = state.derive(engine.graph, snapshot.states, fps, live,
+                           rows=snapshot.rows)
 
     nodes = {}
     for nid in engine.graph.order:
@@ -138,7 +139,7 @@ def account_view(engine, account_id: str) -> dict:
         closure = set(node.datasets)
         for up in engine.graph.ancestors(nid):
             closure.update(engine.graph[up].datasets)
-        has_data = (not closure) or any(snapshot.rows.get(k) for k in closure)
+        has_data = engine.graph.has_data(nid, snapshot.rows)
         if not has_data and status in NEEDS_RUN:
             status = NO_DATA
             why.insert(0, reasons.no_data(sorted(closure)))
@@ -274,13 +275,16 @@ def plan_account(engine, account_id: str, requested: list, *, force: bool = Fals
         if nid in wanted:
             decisions[nid] = {"action": decide(nid), "needed_by": [], "forced": False}
 
-    # Ancestors that must be current before a planned node can be built.
+    # Ancestors that must be current before a planned node can be built. One
+    # with no data at all (Hiring on an account with no job file) is not
+    # waited for: it will never be built, and the node runs without it, the
+    # same way a section runs on the datasets it has.
     for nid in list(graph.order):
         d = decisions.get(nid)
         if not d or d["action"] != RUN:
             continue
         for up in graph.ancestors(nid):
-            if nodes[up]["status"] in (CURRENT, DEGRADED):
+            if nodes[up]["status"] in (CURRENT, DEGRADED) or not nodes[up]["has_data"]:
                 continue
             if up in decisions and decisions[up]["action"] != SKIP_CURRENT:
                 decisions[up]["needed_by"].append(nid)
@@ -294,7 +298,8 @@ def plan_account(engine, account_id: str, requested: list, *, force: bool = Fals
         if not d or d["action"] != RUN:
             continue
         stuck = [up for up in graph.ancestors(nid)
-                 if decisions.get(up, {}).get("action") == CANNOT_RUN]
+                 if decisions.get(up, {}).get("action") == CANNOT_RUN
+                 and nodes[up]["has_data"]]
         if stuck:
             d["action"] = CANNOT_RUN
             d["blocked_by"] = stuck
