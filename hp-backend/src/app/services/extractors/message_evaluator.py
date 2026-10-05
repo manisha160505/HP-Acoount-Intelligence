@@ -232,7 +232,7 @@ def _personas_from_hiring(job_records: list) -> list:
 
 
 @requires_local_datasets(
-    "firmographics", "job_openings", "prospect_contacts",
+    "firmographics", "prospect_contacts",
 )
 @pipeline.feature("message_evaluator")
 def extract_message_evaluator(account_id: str) -> list[dict]:
@@ -333,7 +333,7 @@ def extract_message_evaluator(account_id: str) -> list[dict]:
             "persona_pack_version": bp.PERSONA_PACK_VERSION,
             "business_context": business_context
         },
-        "source_datasets": ["prospect_contacts", "job_openings", "firmographics"],
+        "source_datasets": ["prospect_contacts", "firmographics"],
         "extracted_at": now,
         "updated_at": now
     }

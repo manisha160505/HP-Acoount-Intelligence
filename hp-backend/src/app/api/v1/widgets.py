@@ -120,8 +120,8 @@ WIDGET_REGISTRY = {
             "description": "Company identity, domain, business description, industry classification, HQ location, and corporate hierarchy (Parent & Ultimate Parent)",
             "widget_type": "summary_card",
             "data_classification": "deterministic",
-            "source_datasets": ["firmographics", "company_hierarchy"],
-            "source_fields": ["company_name", "domain", "business_description", "industry_classification", "hq_location", "company_hierarchy"],
+            "source_datasets": ["firmographics", "company_hierarchy", "subsidiaries"],
+            "source_fields": ["company_name", "domain", "business_description", "industry_classification", "hq_location", "company_hierarchy", "subsidiaries"],
             "display_order": 1
         },
         {
@@ -135,15 +135,17 @@ WIDGET_REGISTRY = {
             "source_fields": ["employee_count", "revenue"],
             "display_order": 2
         },
+        # The job postings tile. Produced by the Hiring Signals node (the one
+        # hiring output) and listed here so this page reads it too.
         {
-            "widget_key": "exec_hiring_velocity",
-            "widget_name": "Hiring Velocity Signal",
-            "feature_key": "executive_dashboard",
-            "description": "Job postings in the last 12 months (country-checked, open and closed), the same count as Hiring Signals",
+            "widget_key": "hiring_postings_summary",
+            "widget_name": "Job Postings (last 12 months)",
+            "feature_key": "intent_demand_signals",
+            "description": "Job postings in the last 12 months after the country check, open and closed - the Hiring Signals count",
             "widget_type": "metric_card",
             "data_classification": "deterministic",
             "source_datasets": ["job_openings"],
-            "source_fields": ["job_postings_12m"],
+            "source_fields": ["job_postings", "sample_roles"],
             "display_order": 3
         },
         {
@@ -475,21 +477,10 @@ WIDGET_REGISTRY = {
             "source_fields": ["hp_category_score", "hp_category_context", "supporting_topics", "topic_theme", "theme_summary", "supporting_evidence"],
             "display_order": 2
         },
-        {
-            "widget_key": "intent_hiring_demand",
-            "widget_name": "Hiring-Linked Demand Signals",
-            "feature_key": "intent_demand_signals",
-            "description": "Job postings seen, open postings and seniority mix as the hiring-linked intent demand signal",
-            "widget_type": "signal_card",
-            "data_classification": "deterministic",
-            "source_datasets": ["job_openings"],
-            "source_fields": ["hiring_linked_demand"],
-            "display_order": 3
-        },
         # Hiring Signals section at the bottom of this page
         # (Hiring_Signals_Rule_Set_Final.docx, Dhruvi, 1 Oct). The jobs are the
-        # shared selection in hp/hiring_jobs.py, the same ones the Executive
-        # Dashboard's job postings tile counts.
+        # shared selection in hp/hiring_jobs.py; the Executive Dashboard's job
+        # postings tile reads hiring_postings_summary.
         {
             "widget_key": "hiring_postings_summary",
             "widget_name": "Job Postings & Hybrid Roles",
@@ -555,10 +546,12 @@ FEATURE_EXTRACTORS = {
 
 @router.get("/widgets", response_model=list[WidgetContract])
 def list_all_widgets(current_user: dict = Depends(require_user_role)):
-    all_widgets = []
+    # A widget listed under two pages (hiring_postings_summary) appears once.
+    seen = {}
     for _feature_key, widgets in WIDGET_REGISTRY.items():
-        all_widgets.extend(widgets)
-    return all_widgets
+        for w in widgets:
+            seen.setdefault(w["widget_key"], w)
+    return list(seen.values())
 
 @router.get("/widgets/{feature_key}", response_model=list[WidgetContract])
 def get_feature_widgets(feature_key: str, current_user: dict = Depends(require_user_role)):

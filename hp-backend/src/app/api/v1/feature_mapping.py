@@ -25,8 +25,8 @@ FEATURE_MAPPINGS = {
         # ("most figures are empty - let's drop this all together"), the count
         # went with it, and nothing this feature writes reads contacts now.
         # filings_financials: the filings index behind the Key Metrics cards.
-        "dependent_datasets": ["firmographics", "company_hierarchy", "job_openings",
-                               "compliance_filings", "filings_financials"],
+        "dependent_datasets": ["firmographics", "company_hierarchy", "subsidiaries",
+                               "job_openings", "compliance_filings", "filings_financials"],
         "mapped_fields": [
             {
                 "field_key": "company_name",
@@ -94,16 +94,25 @@ FEATURE_MAPPINGS = {
             {
                 "field_key": "company_hierarchy",
                 "display_name": "Company Hierarchy",
-                "purpose": "Parent company, shown only when the hierarchy sheet names one. A blank Parent Company Name means the parent relationship is ignored for now (client instruction, Sep 2026): nothing is shown and nothing is flagged",
+                "purpose": "Parent company (client, 5 Oct): column E, Ultimate Parent Name, as supplied - unless it is the account itself (Ultimate Parent Id = Business Id, or the account's own name). Otherwise column C, Parent Company Name, under the same test. Parents held for client review are not shown. With neither, nothing is shown",
                 "dataset_key": "company_hierarchy",
                 "source_sheet": "2_Company_Hierarchy",
-                "source_column": "Parent Company Name",
+                "source_column": "Ultimate Parent Name (E); Parent Company Name (C) when E names no other company",
+                "data_type": "DETERMINISTIC"
+            },
+            {
+                "field_key": "subsidiaries",
+                "display_name": "Subsidiaries",
+                "purpose": "Subsidiary names as supplied, in file order (client, 5 Oct). Blanks, repeats, the account's own name and its parent are left out. Hidden when there are none",
+                "dataset_key": "subsidiaries",
+                "source_sheet": "2_Subsidiaries",
+                "source_column": "Subsidiary Name (column A)",
                 "data_type": "DETERMINISTIC"
             },
             {
                 "field_key": "hiring_velocity",
                 "display_name": "Job Postings (last 12 months)",
-                "purpose": "Job postings after the Hiring Signals country check, first seen in the 12 months to the PredictLeads pull date, open and closed - the same count as the Hiring Signals page",
+                "purpose": "Read from the Hiring Signals job postings tile (hiring_postings_summary): job postings after the country check, first seen in the 12 months to the PredictLeads pull date, open and closed. This page computes no count of its own",
                 "dataset_key": "job_openings",
                 "source_sheet": "job_openings",
                 "source_column": "account_country_code, location, first_seen_at (filtered row count)",
@@ -560,7 +569,8 @@ FEATURE_MAPPINGS = {
         "feature_key": "objection_playbook",
         "display_name": "Objection Playbook",
         "purpose": "Anticipated competitor objections, reframes, proof points, and counter-questions",
-        "dependent_datasets": ["technographics", "firmographics", "prospect_contacts"],
+        "dependent_datasets": ["technographics", "tech_breakdown", "firmographics",
+                               "prospect_contacts"],
         "mapped_fields": [
             {
                 "field_key": "incumbent_technology",
@@ -587,6 +597,15 @@ FEATURE_MAPPINGS = {
                 "dataset_key": "technographics",
                 "source_sheet": "4_Technographics",
                 "source_column": "Full Tech Stack, category columns",
+                "data_type": "DETERMINISTIC"
+            },
+            {
+                "field_key": "evidence_website_fallback",
+                "display_name": "Per-Area Website Technology Evidence (fallback)",
+                "purpose": "Used only when 4_Technographics holds no data for the account: every technology the website breakdown names (page metadata columns skipped), matched against the same vendor tokens. The evidence string names tech_breakdown and technology_evidence_source records which source a card used. Website technology says nothing about the device, print or security estate. With neither source, no card is written",
+                "dataset_key": "tech_breakdown",
+                "source_sheet": "5_Tech_Breakdown",
+                "source_column": "all category columns",
                 "data_type": "DETERMINISTIC"
             },
             {
@@ -972,15 +991,6 @@ FEATURE_MAPPINGS = {
                 "dataset_key": "technographics, webstack",
                 "source_sheet": "4_Technographics, 5_Webstack",
                 "source_column": "Category columns / Full Tech Stack; Technologies Used By Company Website",
-                "data_type": "DETERMINISTIC"
-            },
-            {
-                "field_key": "hiring_linked_demand",
-                "display_name": "Hiring-Linked Intent Category",
-                "purpose": "Postings seen (every row), open postings (no closing status) and seniority mix as hiring-linked intent signal",
-                "dataset_key": "job_openings",
-                "source_sheet": "job_openings",
-                "source_column": "status, seniority (row count)",
                 "data_type": "DETERMINISTIC"
             },
             {

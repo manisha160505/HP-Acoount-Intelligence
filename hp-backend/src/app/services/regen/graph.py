@@ -71,6 +71,15 @@ class Node:
     run: str = ""                      # "module:function", resolved lazily
     extra: dict = field(default_factory=dict, compare=False, hash=False)
 
+    def __post_init__(self):
+        # Every reader of job openings goes through hp/hiring_jobs.py, so every
+        # node that declares the dataset depends on its selection rules too.
+        if "job_openings" in self.datasets and HIRING_RULES_REF not in self.logic_refs:
+            object.__setattr__(self, "logic_refs", (*self.logic_refs, HIRING_RULES_REF))
+
+
+HIRING_RULES_REF = "app.services.hp.hiring_jobs:HIRING_RULES_VERSION"
+
 
 _P = "app.services.regen.producers"
 
@@ -118,34 +127,37 @@ NODES = (
          run=f"{_P}:tech_core"),
     Node("objection", "objection_playbook",
          widgets=("objection_incumbent_context", "objection_reframe_cards"),
-         datasets=tuple(sorted({"technographics", "firmographics",
+         # tech_breakdown is the evidence fallback when technographics is empty.
+         datasets=tuple(sorted({"technographics", "tech_breakdown", "firmographics",
                                 "prospect_contacts", *RULEBOOK_EVIDENCE})),
          knowledge=("rulebook", "case_studies"), llm=True,
          logic_refs=("app.services.extractors.objection_playbook:OBJECTION_PROMPT_VERSION",),
          run=f"{_P}:objection"),
     Node("intent", "intent_demand_signals",
-         widgets=("intent_topics_table", "intent_category_summary",
-                  "intent_hiring_demand"),
-         datasets=("intent_score", "intent_topics", "job_openings",
+         widgets=("intent_topics_table", "intent_category_summary"),
+         datasets=("intent_score", "intent_topics",
                    "hp_category_intent", "technographics", "webstack",
                    "firmographics"),
          knowledge=("case_studies",), llm=True,
          logic_refs=("app.services.hp.intent_topic_map:DICTIONARY_VERSION",
                      "app.services.extractors.intent_demand_signals:"
-                     "BU_READ_PROMPT_VERSION"),
+                     "BU_READ_PROMPT_VERSION",
+                     "app.services.hp.bombora_hp_classifier:PROMPT_VERSION"),
          # 2: Sahaj 27 Sep - no trend or volume in the So What, no proof point,
          # a business-unit summary led by Bombora.
-         logic_version=2,
+         # 3: intent_hiring_demand removed; jobs are the hiring node's alone.
+         logic_version=3,
          run=f"{_P}:intent"),
-    # The Hiring Signals section of Intent & Demand Signals. Its own node so a
-    # job upload rebuilds it without re-running the intent model calls.
-    # Deterministic: the shared job selection plus the O*NET theme table.
+    # The Hiring Signals section of Intent & Demand Signals, and the one hiring
+    # output: the Executive Dashboard's job postings tile reads
+    # hiring_postings_summary too. Its own node so a job upload rebuilds it
+    # without re-running the intent model calls. Deterministic: the shared job
+    # selection plus the O*NET theme table.
     Node("hiring", "intent_demand_signals",
          widgets=("hiring_postings_summary", "hiring_family_breakdown",
                   "hiring_tech_tags", "hiring_theme_cards"),
          datasets=("job_openings",),
-         logic_refs=("app.services.hp.hiring_jobs:HIRING_RULES_VERSION",
-                     "app.services.hp.hiring_themes:THEMES_VERSION"),
+         logic_refs=("app.services.hp.hiring_themes:THEMES_VERSION",),
          run=f"{_P}:hiring"),
     Node("opp_core", "solution_narrative_opportunity_map",
          widgets=("opportunity_context_card", "opportunity_narrative_plays"),
@@ -214,9 +226,8 @@ NODES = (
          upstream=("news",), account_record=False,
          run=f"{_P}:opp_triggers"),
     Node("exec_core", "executive_dashboard",
-         widgets=("exec_summary_card", "exec_key_metrics", "exec_hiring_velocity",
-                  "exec_urgency_score"),
-         datasets=("firmographics", "company_hierarchy", "job_openings",
+         widgets=("exec_summary_card", "exec_key_metrics", "exec_urgency_score"),
+         datasets=("firmographics", "company_hierarchy", "subsidiaries", "job_openings",
                    "technographics", "webstack",
                    "intent_score", "hp_category_intent", "extended_company",
                    "google_news", "news_events", "compliance_filings",
@@ -226,8 +237,7 @@ NODES = (
          # The company description is reorganised into bullets by one cached,
          # grounded model call (client feedback 1.a, 27 Sep).
          llm=True,
-         logic_refs=("app.services.extractors.executive_dashboard:SUMMARY_PROMPT_VERSION",
-                     "app.services.hp.hiring_jobs:HIRING_RULES_VERSION"),
+         logic_refs=("app.services.extractors.executive_dashboard:SUMMARY_PROMPT_VERSION",),
          # 2: exec_key_metrics lists the filings on record (the filings list
          # CSV uploaded with the PDFs under compliance_filings); Quick Stats
          # counts and the contacts read dropped (client feedback 1.e).
@@ -235,12 +245,15 @@ NODES = (
          # (filings_financials.csv) when it is uploaded.
          # 4: exec_hiring_velocity counts the Hiring Signals selection (country
          # check + last 12 months) as job_postings_12m, not every row.
-         logic_version=4,
+         # 5: exec_hiring_velocity removed; the tile reads hiring_postings_summary.
+         # job_openings stays for the urgency score's Growth driver.
+         # 6: exec_summary_card's parent is Ultimate Parent Name (column E) and it
+         # lists the Subsidiaries sheet (client, 5 Oct, issue list v3).
+         logic_version=6,
          run=f"{_P}:exec_core"),
     Node("evaluator_personas", "message_evaluator",
          widgets=("evaluator_persona_context",),
-         datasets=("firmographics", "prospect_contacts", "company_personas",
-                   "job_openings"),
+         datasets=("firmographics", "prospect_contacts", "company_personas"),
          upstream=("stakeholder_roster", "stakeholder_talking_points"),
          # 2: the 30 Sep build specification, Sections 4.2 and 4.3. The audience
          # is the client's eight target roles and each one now carries its
@@ -264,11 +277,13 @@ NODES = (
     Node("idx_executive_dashboard", "executive_dashboard", kind=INDEX,
          datasets=("compliance_filings",),
          upstream=("exec_core", "news", "opp_triggers", "stakeholder_roster",
-                   "tech_core", "intent"),
+                   "tech_core", "intent", "hiring"),
          llm=True,
          # 2: PredictLeads filings (PDFs written from their text) join the
          # narrative but not the financial claims.
-         logic_version=2, run=f"{_P}:index_executive_dashboard"),
+         # 3: hiring documents read the Hiring Signals widgets, not
+         # exec_hiring_velocity / intent_hiring_demand.
+         logic_version=3, run=f"{_P}:index_executive_dashboard"),
     Node("exec_priorities", "executive_dashboard",
          widgets=("exec_strategic_priorities",),
          upstream=("idx_executive_dashboard", "exec_core", "tech_recs", "opp_core"),
@@ -279,7 +294,7 @@ NODES = (
     Node("strategy_snapshot", "strategy_chat",
          widgets=("strategy_snapshot_context", "strategy_chat_interface"),
          upstream=("exec_core", "stakeholder_roster", "opp_core", "tech_core",
-                   "intent", "news", "exec_priorities"),
+                   "intent", "hiring", "news", "exec_priorities"),
          run=f"{_P}:strategy_snapshot"),
     # No idx_strategy: Strategy Chat reads the account's committed widgets whole
     # on every question (services/strategy/context.py), so there is no index to

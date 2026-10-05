@@ -1,0 +1,1612 @@
+# Rules page catalog for `content_studio`. Read by app/services/rules_catalog.
+# `ref:` values are read live; `stated` is what the prose was written against.
+# Examples marked `verified` are recomputed by tests/test_rules_examples.py.
+feature_key: content_studio
+purpose: Writes outreach for an HP seller (an email, a LinkedIn message or a one-pager) aimed at a chosen
+  buying persona, using only the account's own evidence, then checks every draft against fixed rules before
+  the seller sees it.
+final_output: A ready-to-copy email, LinkedIn message or one-pager for one of HP's eight buying personas,
+  with the evidence labels it used, an attached HP case study where one fits, any remaining style warnings,
+  and a history of the last 20 assets.
+how_it_combines: 'The seller picks a persona, a format and an HP topic. The app builds numbered evidence
+  lines from the account''s own data and the persona''s allowed HP lines, and the AI writes the draft.
+  Every draft is then checked by a set of gates, G1-G13: some gates reject the draft, the others only
+  warn. After up to two rewrites, the cleanest draft without serious faults is published with its warnings;
+  if none qualifies, a plain template is used. A case study is attached afterwards.'
+rules:
+- id: cs_evidence_sources
+  parent: null
+  name: What the writer may use as evidence
+  kind: source
+  summary: Fixes the only material a generated asset may state as fact about the account.
+  purpose: Fixes the only material a generated asset may state as fact about the account.
+  inputs:
+  - The company profile
+  - Job openings
+  - The contact list
+  - The account's buyer-persona list
+  - 'Published dashboard sections: technology landscape, buying-intent themes, opportunity signals (or
+    news signals), opportunity plays and key financial figures'
+  - The seller's topic, additional context and chosen angle
+  - The account team's own instructions and guardrails
+  logic: Every request builds one list of numbered evidence lines. Account lines are labelled A1, A2...
+    and persona lines P1, P2... The AI is told to use only these for any claim about the account and to
+    name the labels it used. The seller's topic and additional context are shown to the AI but marked
+    'NOT evidence'. The account team's custom instructions and guardrails (set per account) steer tone
+    and can only narrow what is written.
+  output: 'A labelled list of evidence lines: account lines A1..An and persona lines P1..Pn.'
+  sources:
+  - hp-backend/src/app/services/extractors/content_studio.py:_build_generation_context
+  - hp-backend/src/app/services/extractors/content_studio.py:_build_system_prompt
+  doc_source: HP 220 - Content Studio & Message Evaluator - Build Specification v1.0 (30 Sep 2026), as
+    quoted in code comments; the document itself is not in the repo or the scratchpad docs, Section 3.3;
+    Recommendation Tuning row 8 (cited in code)
+  confidence: high
+- id: cs_account_evidence_lines
+  parent: cs_evidence_sources
+  name: Account evidence lines, in fixed order
+  kind: selection
+  summary: Defines which account facts reach the writer and how many of each.
+  purpose: Defines which account facts reach the writer and how many of each.
+  logic: 'Lines are added in this order and skipped entirely when their source is empty (no placeholder):
+    1) Business description (company profile); 2) Industry (the LinkedIn, NAICS and SIC industry labels
+    joined with '' / ''); 3) Open hiring (HP-relevant hiring clusters, see the hiring clusters rule);
+    4) Technology estate: the total count and the first 5 technology families; 5) Research intent: the
+    first 3 themes, always followed by the sentence ''This is research, not confirmed buying intent.'';
+    6) Published signals: the first 3 headlines from the opportunity signals (otherwise from the news
+    signals); 7) Qualified opportunities: the first 3 Opportunity Map plays that have a priority; 8) Filings
+    on record: the first 2 filing titles from the key financial figures. Each line becomes a numbered
+    evidence line ''[A<n>] <name>: <text>''.'
+  constants:
+  - label: Technology families shown
+    ref: py:app.services.extractors.content_studio:EVIDENCE_TECH_FAMILIES
+    stated: 5
+  - label: Intent themes shown
+    ref: py:app.services.extractors.content_studio:EVIDENCE_INTENT_THEMES
+    stated: 3
+  - label: Signals shown
+    ref: py:app.services.extractors.content_studio:EVIDENCE_SIGNALS
+    stated: 3
+  - label: Opportunity plays shown
+    ref: py:app.services.extractors.content_studio:EVIDENCE_PLAYS
+    stated: 3
+  - label: Filings shown
+    ref: py:app.services.extractors.content_studio:EVIDENCE_FILINGS
+    stated: 2
+  example:
+    scenario: An account whose company profile has a description and an industry.
+    steps:
+    - Business description -> [A1]
+    - Industry -> [A2]
+    - The lines are numbered in order
+    result: '[A1] Business description: Maker of motorcycles / [A2] Industry: Automotive'
+    verified: true
+    expect:
+    - |-
+      [A1] Business description: Maker of motorcycles
+      [A2] Industry: Automotive
+    - A1: 'Business description: Maker of motorcycles'
+      A2: 'Industry: Automotive'
+  output: Ordered list of evidence lines (name and text).
+  sources:
+  - hp-backend/src/app/services/extractors/content_studio.py:_account_evidence
+  - hp-backend/src/app/services/extractors/content_studio.py:_published_evidence
+  - hp-backend/src/app/services/extractors/content_studio.py:_label_block
+  confidence: high
+- id: cs_hiring_clusters
+  parent: cs_evidence_sources
+  name: Open-hiring clusters used as evidence
+  kind: selection
+  summary: Turns job postings into HP-relevant role clusters for the 'Open hiring' evidence line.
+  purpose: Turns job postings into HP-relevant role clusters for the 'Open hiring' evidence line.
+  logic: 'For each posting: the title is the standardised title if there is one, otherwise the posting''s
+    own title. Skip it if seniority is empty or one of junior, intern, internship, entry, entry level
+    or trainee. The department comes from the posting''s job categories. Skip internships, and skip postings
+    whose every category is non-IT (military and protective services, human resources, legal, sales, marketing,
+    administration, manual work, healthcare services, education, food). Score HP relevance with the same
+    job-title scoring the Stakeholder Map uses; if a posting mixes non-IT categories with no IT category,
+    cap the score at 40. Drop the posting if its band is ''low'' (score below 40). Group by department
+    and seniority; keep the top 3 standard titles (business-unit suffixes like '' - GSI'' are removed).
+    Sort clusters by best score, then number of postings, then title; keep at most 5.'
+  constants:
+  - label: Most clusters
+    ref: py:app.services.extractors.content_studio:ROLE_PROXY_MAX
+    stated: 5
+  - label: Excluded seniority levels
+    ref: py:app.services.extractors.content_studio:PROXY_EXCLUDED_SENIORITY
+    stated:
+    - entry
+    - entry_level
+    - intern
+    - internship
+    - junior
+    - trainee
+  - label: Non-IT title score cap
+    ref: py:app.services.extractors.stakeholder_map:NON_IT_TITLE_CAP
+    stated: 40
+  - label: HP relevance bands
+    ref: py:app.services.extractors.stakeholder_map:HP_RELEVANCE_BAND_THRESHOLDS
+  example:
+    scenario: 'Five postings: two mid-senior data engineers, one IT intern, one ''Security Supervisor''
+      under protective services, one IT Infrastructure Manager.'
+    steps:
+    - The intern is dropped (seniority)
+    - The Security Supervisor is dropped (only a non-IT category)
+    - 'The two data engineers form one cluster: Information Technology / Mid-senior'
+    - The IT Infrastructure Manager forms Information Technology / Manager
+    result: 'Two clusters: ''Information Technology - Mid-senior'' (2 postings) and ''Information Technology
+      - Manager'' (1 posting), both in the high band.'
+    verified: true
+    expect:
+    - - Information Technology — Mid-senior
+      - 2
+      - high
+    - - Information Technology — Manager
+      - 1
+      - high
+  output: 'The ''Open hiring'' evidence line: ''<N> open postings; HP-relevant roles - <count> <department>
+    (<seniority>): <titles>; ...'''
+  sources:
+  - hp-backend/src/app/services/extractors/content_studio.py:_derive_role_proxy_personas
+  - hp-backend/src/app/services/extractors/content_studio.py:_job_department
+  - hp-backend/src/app/services/extractors/content_studio.py:_canonical_title
+  confidence: high
+- id: cs_grounding_corpus
+  parent: cs_evidence_sources
+  name: Evidence pool and the unsourced-number rule
+  kind: source
+  summary: Every figure in the copy must already exist in the account's own data.
+  purpose: Every figure in the copy must already exist in the account's own data.
+  logic: The pool is every non-empty value in the company profile, contact list and job openings, plus
+    the seller's topic and additional context, plus the text of every evidence line. A number is checked
+    only if it has 2 or more digits. Commas and spaces are ignored ('4,500' = '4500'), and '36' matches
+    '36.0'. A percentage must appear as a percentage in the data ('47%' is not satisfied by a bare 47).
+    Numbers are matched whole, not as part of a longer number. A web address that is not in the data is
+    removed from the copy rather than causing the draft to be rejected.
+  example:
+    scenario: The copy says 'Your 4,500 staff and 47% growth'; the data holds an employee range of 4500
+      and 'growth 12%'.
+    steps:
+    - '4,500 -> 4500 is in the data: fine'
+    - '47% is not a stored percentage: unsourced'
+    result: 47% is flagged as unsourced.
+    verified: true
+    expect:
+    - 47%
+  output: List of unsourced numbers; unsourced web addresses removed.
+  sources:
+  - hp-backend/src/app/services/extractors/grounding.py:unsourced_numbers
+  - hp-backend/src/app/services/extractors/grounding.py:check_text
+  - hp-backend/src/app/services/extractors/grounding.py:strip_unsourced_urls
+  - hp-backend/src/app/services/extractors/content_studio.py:_build_generation_context
+  confidence: high
+- id: cs_seller_input_limits
+  parent: cs_evidence_sources
+  name: Seller input limits
+  kind: filter
+  summary: Bounds what the seller can type into a request.
+  purpose: Bounds what the seller can type into a request.
+  logic: A topic is required and is cut to 200 characters. Additional context is cut to 2,000 characters.
+    A chosen angle is cut to 200 characters. An unknown or retired format, an unknown persona or an empty
+    topic is refused with a readable error.
+  constants:
+  - label: Topic maximum characters
+    ref: py:app.services.extractors.content_studio:TOPIC_MAX_CHARS
+    stated: 200
+  - label: Additional context maximum characters
+    ref: py:app.services.extractors.content_studio:CONTEXT_MAX_CHARS
+    stated: 2000
+  sources:
+  - hp-backend/src/app/services/extractors/content_studio.py:_build_generation_context
+  - hp-backend/src/app/services/extractors/content_studio.py:generate_content_asset
+  confidence: high
+- id: cs_persona_selection
+  parent: null
+  name: 'Target persona menu: HP''s eight buying roles'
+  kind: selection
+  summary: Decides who the seller can write to.
+  purpose: Decides who the seller can write to.
+  inputs:
+  - The account's buyer-persona list (target role, contact name, actual job title, contact status)
+  - HP's fixed list of eight buying personas
+  logic: The menu always shows the same eight personas on every account, in a fixed order. Each is matched
+    to the account's buyer-persona list by comparing the words in the job title (a trailing '(CFO)' is
+    tolerated). If the list names a contact for that role, the persona is FILLED (the contact's name and
+    actual title are shown); otherwise it is UNFILLED ('no contact identified for this role'). An account
+    without a list still shows all eight, unfilled. Title, department and committee angle always come
+    from HP's fixed persona list, not from the account's list. Older persona types (named contacts, hiring-based
+    roles and generic archetypes) are no longer offered, but assets already built on them still display.
+  table:
+    columns:
+    - Persona title
+    - Department
+    - Committee angle
+    rows:
+    - - VP / Head of Information Technology
+      - IT
+      - Economic Buyer
+    - - Chief Financial Officer
+      - Executive / C-Suite
+      - Finance - Budget Owner
+    - - IT Asset Manager
+      - IT
+      - Technical Buyer
+    - - Head of Procurement
+      - Procurement
+      - Gatekeeper - Procurement & Legal
+    - - IT Security Manager
+      - IT / Security
+      - Technical Buyer
+    - - Device Lifecycle & Refresh Manager
+      - IT
+      - Finance - Budget Owner
+    - - PC Fleet & Hardware Standards Owner
+      - IT
+      - Technical Buyer
+    - - AV & Collaboration Systems Manager
+      - IT
+      - Technical Buyer
+  example:
+    scenario: The account's buyer-persona list shows 'Chief Financial Officer (CFO)', 'Head of Procurement'
+      and 'Chief Marketing Officer'.
+    steps:
+    - '''Chief Financial Officer (CFO)'' matches the Chief Financial Officer persona'
+    - '''Head of Procurement'' matches the Head of Procurement persona'
+    - '''Chief Marketing Officer'' is not one of the eight, so there is no match'
+    result: Chief Financial Officer, Head of Procurement, no match
+    verified: true
+    expect:
+    - cfo
+    - head-procurement
+    - null
+  output: Eight personas on the menu, each marked filled or unfilled.
+  sources:
+  - hp-backend/src/app/services/extractors/content_studio.py:_derive_client_personas
+  - hp-backend/src/app/services/extractors/content_studio.py:extract_content_studio
+  - hp-backend/src/app/services/hp/buyer_personas.py:match_role
+  - hp-backend/src/app/services/extractors/personas.py:read_roles
+  doc_source: HP 220 - Content Studio & Message Evaluator - Build Specification v1.0 (30 Sep 2026), as
+    quoted in code comments; the document itself is not in the repo or the scratchpad docs, Sections 1.4,
+    2.2
+  confidence: high
+- id: cs_persona_evidence
+  parent: cs_persona_selection
+  name: What the writer is told about the persona
+  kind: selection
+  summary: Keeps persona pain points out of what the writer is given.
+  purpose: Keeps persona pain points out of what the writer is given.
+  logic: 'For the eight roles the persona information is exactly: P1 Role, P2 Department, P3 Buying-committee
+    angle, P4 ''What this role owns'' and P5 ''What this role is measured on'' (key metrics). Only when
+    the persona is FILLED are P6 Name and P7 Actual job title added; when UNFILLED they are left out,
+    not left blank. Goals, pain points, value drivers and decision criteria are deliberately NOT given
+    to the writer.'
+  example:
+    scenario: CFO persona.
+    steps:
+    - Read HP's evidence lines for the CFO persona
+    result: Five lines, P1 to P5.
+    verified: true
+    expect:
+    - - P1
+      - 'Role: Chief Financial Officer'
+    - - P2
+      - 'Department: Executive / C-Suite'
+    - - P3
+      - 'Buying-committee angle: Finance - Budget Owner'
+    - - P4
+      - 'What this role owns at an enterprise: Signs off the capital budget and the financing model -
+        lease versus buy - for any large device or print fleet purchase.'
+    - - P5
+      - 'What this role is measured on: 3-year TCO per seat, cash out by year, payback or NPV, total lease
+        liability / right-of-use asset, cost of delay, supplier price-protection terms'
+  sources:
+  - hp-backend/src/app/services/hp/buyer_personas.py:generation_evidence
+  - hp-backend/src/app/services/extractors/content_studio.py:_persona_evidence
+  doc_source: HP 220 - Content Studio & Message Evaluator - Build Specification v1.0 (30 Sep 2026), as
+    quoted in code comments; the document itself is not in the repo or the scratchpad docs, Section 3.3
+  confidence: high
+- id: cs_named_vs_role
+  parent: cs_persona_selection
+  name: 'Person or role: the one switch'
+  kind: selection
+  summary: Decides whether copy may address a named person.
+  purpose: Decides whether copy may address a named person.
+  logic: A persona is a named person only if it is a contact from the stakeholder list (older style) or
+    an HP buying role that is FILLED. Everything else is a role. This one test decides which writing rule
+    is used, whether contact names are banned in the copy, whether gate G7 runs, and how the email is
+    greeted.
+  example:
+    scenario: An unfilled and a filled HP buying role.
+    steps:
+    - Unfilled -> role
+    - Filled -> person
+    result: No (a role), Yes (a person)
+    verified: true
+    expect:
+    - false
+    - true
+  sources:
+  - hp-backend/src/app/services/extractors/content_studio.py:_is_named_person
+  confidence: high
+- id: cs_formats_topics
+  parent: null
+  name: Formats and topics the seller can pick
+  kind: selection
+  summary: Restricts the request to the formats and topics HP approved.
+  purpose: Restricts the request to the formats and topics HP approved.
+  logic: 'Formats offered, in order: Email, LinkedIn Message, One-Pager. LinkedIn Post, Executive Brief,
+    Follow-up Note, Branded Emailer and Landing Page are retired: asking for one returns ''<name> is no
+    longer generated''. Topic pills: the five HP business units, then up to 5 Live Signals headlines from
+    the news signals (only when that section has data; duplicates removed).'
+  table:
+    columns:
+    - Topic option (fixed)
+    rows:
+    - - HP Elite & Pro PCs
+    - - Z by HP Workstations
+    - - Poly collaboration hardware
+    - - HP Enterprise Printing & Managed Print Services
+    - - HP Multi Jet Fusion (3D)
+  constants:
+  - label: Formats offered
+    ref: py:app.services.extractors.content_studio:OFFERED_CONTENT_TYPES
+    stated:
+    - email
+    - linkedin_message
+    - one_pager
+  - label: Most live-signal topics
+    ref: py:app.services.extractors.content_studio:LIVE_SIGNAL_TOPICS_MAX
+    stated: 5
+  sources:
+  - hp-backend/src/app/services/extractors/content_studio.py:extract_content_studio
+  - hp-backend/src/app/services/extractors/content_studio.py:_build_generation_context
+  doc_source: 'Client feedback 27 Sep (Sahaj): ''Formats that we need to support - email, linkedin message,
+    One pager...''; ''on topics - let''s keep only the 5 HP BUs and live signals as topic.'''
+  confidence: high
+- id: cs_email_contract
+  parent: cs_formats_topics
+  name: Email contract
+  kind: guardrail
+  summary: Shape of a generated email.
+  purpose: Shape of a generated email.
+  logic: 'Required: subject line, opening, body sections and closing ask. The subject must start with
+    ''Re: '' and be at most 80 characters (both are serious faults). 1 to 3 body paragraphs, no headings.
+    Word budget 120-180 across opening, body and closing ask (checked by gate G12, a soft warning). The
+    greeting and sign-off are added by the app, never written by the AI. The sign-off is ''Sincerely,''
+    followed by ''The HP Inc. Team''.'
+  constants:
+  - label: Subject maximum characters
+    ref: py:app.services.extractors.content_studio:CONTENT_TYPE_CONTRACTS.email.subject_max
+    stated: 80
+  - label: Word budget
+    ref: py:app.services.hp.content_gates:WORD_BUDGETS.email
+    stated:
+    - 120
+    - 180
+  - label: Sign-off
+    ref: py:app.services.extractors.content_studio:EMAIL_SIGNOFF
+    stated: |-
+      Sincerely,
+
+      The HP Inc. Team
+  sources:
+  - hp-backend/src/app/services/extractors/content_studio.py:CONTENT_TYPE_CONTRACTS
+  - hp-backend/src/app/services/extractors/content_studio.py:_validate_asset
+  doc_source: HP 220 - Content Studio & Message Evaluator - Build Specification v1.0 (30 Sep 2026), as
+    quoted in code comments; the document itself is not in the repo or the scratchpad docs, Section 3.4;
+    HP_ABX_v3_final subject format
+  confidence: high
+- id: cs_linkedin_contract
+  parent: cs_formats_topics
+  name: LinkedIn Message contract
+  kind: guardrail
+  summary: Shape of a direct LinkedIn message.
+  purpose: Shape of a direct LinkedIn message.
+  logic: 'Required: opening, body sections and closing ask. 1 or 2 body paragraphs. No headline, no hashtags,
+    no greeting and no sign-off. Word budget 60-110 (gate G12, soft).'
+  constants:
+  - label: Word budget
+    ref: py:app.services.hp.content_gates:WORD_BUDGETS.linkedin_message
+    stated:
+    - 60
+    - 110
+  sources:
+  - hp-backend/src/app/services/extractors/content_studio.py:CONTENT_TYPE_CONTRACTS
+  doc_source: HP 220 - Content Studio & Message Evaluator - Build Specification v1.0 (30 Sep 2026), as
+    quoted in code comments; the document itself is not in the repo or the scratchpad docs, Section 3.4
+  confidence: high
+- id: cs_one_pager_contract
+  parent: cs_formats_topics
+  name: One-Pager contract (structured)
+  kind: guardrail
+  summary: Shape of the one-page brief.
+  purpose: Shape of the one-page brief.
+  logic: 'Required: headline (under 70 characters is requested but not checked), subtitle, ''why now'',
+    pillars and closing ask; an HP play is optional. Pillars: the AI is asked for exactly 2 or 3, each
+    with a heading, a challenge, an HP response and its own cited evidence. A pillar missing a heading
+    or challenge is dropped; invented labels inside a pillar are removed and reported to G2 (which rejects).
+    The finished document is: ''why now'' as the opening, one section per pillar (challenge and HP response),
+    a ''The HP Play'' section if there is an HP play, then a ''Proof Points'' section added by the app.
+    Allowed section count 2-5. Word budget 350-500 (G12, soft). G13 checks for 2-3 pillars, each citing
+    evidence (soft).'
+  constants:
+  - label: Word budget
+    ref: py:app.services.hp.content_gates:WORD_BUDGETS.one_pager
+    stated:
+    - 350
+    - 500
+  - label: Section count range
+    ref: py:app.services.extractors.content_studio:CONTENT_TYPE_CONTRACTS.one_pager.sections
+    stated:
+    - 2
+    - 5
+  example:
+    scenario: The AI returns two pillars; the first has no challenge, the second cites label A9, which
+      was never supplied.
+    steps:
+    - Pillar 1 is dropped (no challenge)
+    - Pillar 2 is kept with A9 removed; A9 is reported as dropped
+    result: One pillar kept; the dropped label A9 is reported.
+    verified: true
+    expect:
+    - - heading: Security baseline
+        challenge: Mixed estate
+        hp_response: HP Wolf Security
+        evidence_used:
+        - A1
+    - - - pillars[1].evidence_used
+        - A9
+  sources:
+  - hp-backend/src/app/services/extractors/content_studio.py:CONTENT_TYPE_CONTRACTS
+  - hp-backend/src/app/services/extractors/content_studio.py:_parse_pillars
+  - hp-backend/src/app/services/extractors/content_studio.py:_validate_asset
+  doc_source: HP 220 - Content Studio & Message Evaluator - Build Specification v1.0 (30 Sep 2026), as
+    quoted in code comments; the document itself is not in the repo or the scratchpad docs, Section 3.4
+  confidence: high
+- id: cs_line_eligibility
+  parent: null
+  name: HP line eligibility matrix
+  kind: guardrail
+  summary: Stops a well-written email pitching the wrong HP line to a persona (for example Poly to a CFO).
+  purpose: Stops a well-written email pitching the wrong HP line to a persona (for example Poly to a CFO).
+  logic: Each persona has an allowed list and a denied list of HP lines. The writing rules give the AI
+    both lists. After the draft is written, gate G4 rejects any asset that names a denied line in its
+    product list or anywhere in the text (ignoring capital letters). Lines on neither list are not rejected
+    by G4. HP has not yet confirmed this matrix.
+  table:
+    columns:
+    - Persona
+    - Allowed lines
+    - Denied lines
+    rows:
+    - - VP / Head of Information Technology
+      - HP Elite / Pro PCs, HP EliteBook, HP ProBook, HP Wolf Security, HP Workforce Experience Platform,
+        HP Deployment & Configuration Services, HP Care Pack Services, HP Anyware / DaaS, HP IQ for Enterprise,
+        Z by HP Workstations
+      - HP Multi Jet Fusion (3D)
+    - - Chief Financial Officer
+      - HP Anyware / DaaS, HP Care Pack Services, HP Lifecycle & Sustainability Services, HP Enterprise
+        Print / MPS, HP Elite / Pro PCs
+      - Poly Collaboration, Poly Studio, Poly Lens, HP Poly Room Compute, Z by HP Workstations, HP Wolf
+        Security, HP IQ for Enterprise, HP Multi Jet Fusion (3D)
+    - - IT Asset Manager
+      - HP Workforce Experience Platform, HP Lifecycle & Sustainability Services, HP Care Pack Services,
+        HP Deployment & Configuration Services, HP Wolf Security, HP Enterprise Print / MPS
+      - Poly Collaboration, Poly Studio, Poly Lens, HP Poly Room Compute, HP IQ for Enterprise, HP Multi
+        Jet Fusion (3D), Z by HP Workstations
+    - - Head of Procurement
+      - HP Elite / Pro PCs, HP Care Pack Services, HP Deployment & Configuration Services, HP Enterprise
+        Print / MPS, HP Anyware / DaaS, HP Lifecycle & Sustainability Services
+      - Poly Collaboration, Poly Studio, Poly Lens, HP Poly Room Compute, Z by HP Workstations, HP Wolf
+        Security, HP IQ for Enterprise, HP Multi Jet Fusion (3D), HP EliteBook, HP ProBook, HP Workforce
+        Experience Platform
+    - - IT Security Manager
+      - HP Wolf Security, HP Elite / Pro PCs, HP EliteBook, HP ProBook, HP Workforce Experience Platform,
+        HP Deployment & Configuration Services, HP Enterprise Print / MPS
+      - Poly Collaboration, Poly Studio, Poly Lens, HP Poly Room Compute, HP Multi Jet Fusion (3D), HP
+        Anyware / DaaS, HP IQ for Enterprise, HP Lifecycle & Sustainability Services
+    - - Device Lifecycle & Refresh Manager
+      - HP Elite / Pro PCs, HP Care Pack Services, HP Deployment & Configuration Services, HP Lifecycle
+        & Sustainability Services, HP Workforce Experience Platform, HP Anyware / DaaS
+      - Poly Collaboration, Poly Studio, Poly Lens, HP Poly Room Compute, HP Multi Jet Fusion (3D), Z
+        by HP Workstations, HP Wolf Security
+    - - PC Fleet & Hardware Standards Owner
+      - HP Elite / Pro PCs, Z by HP Workstations, HP Deployment & Configuration Services, HP Wolf Security,
+        HP Care Pack Services
+      - Poly Collaboration, Poly Studio, Poly Lens, HP Poly Room Compute, HP Enterprise Print / MPS, HP
+        Multi Jet Fusion (3D), HP Anyware / DaaS
+    - - AV & Collaboration Systems Manager
+      - Poly Collaboration, Poly Studio, Poly Lens, HP Poly Room Compute, HP Care Pack Services
+      - Z by HP Workstations, HP Wolf Security, HP Enterprise Print / MPS, HP Multi Jet Fusion (3D), HP
+        Anyware / DaaS
+  constants:
+  - label: Matrix confirmed by HP
+    ref: py:app.services.hp.buyer_personas:MATRIX_CONFIRMED_BY_HP
+    stated: false
+  example:
+    scenario: A CFO email whose product is Care Pack but whose body mentions 'a Poly Studio bar'.
+    steps:
+    - Poly Studio is on the CFO's denied list
+    - It is found in the text
+    result: 'G4 rejects the draft: Poly Studio is named in the text.'
+    verified: true
+    expect:
+    - gate: G4
+      action: reject
+      audit: audit_line_eligibility.csv
+      denied_line_named: Poly Studio
+      where_found: prose
+      sentence: A Poly Studio bar could help your finance team.
+  output: G4 findings (reject).
+  sources:
+  - hp-backend/src/app/services/hp/buyer_personas.py
+  - hp-backend/src/app/services/hp/content_gates.py:g4_line_eligibility
+  doc_source: HP 220 - Content Studio & Message Evaluator - Build Specification v1.0 (30 Sep 2026), as
+    quoted in code comments; the document itself is not in the repo or the scratchpad docs, Section 2.3
+  confidence: high
+- id: cs_line_qualifiers
+  parent: cs_line_eligibility
+  name: Allowed-line framing qualifiers
+  kind: guardrail
+  summary: Some allowed lines may only be framed one way.
+  purpose: Some allowed lines may only be framed one way.
+  logic: These qualifiers are recorded with the matrix for review. They are NOT given to the AI and NOT
+    checked by any gate.
+  table:
+    columns:
+    - Persona
+    - HP line
+    - Qualifier
+    rows:
+    - - VP / Head of Information Technology
+      - Z by HP Workstations
+      - only where engineering workloads are evidenced
+    - - Chief Financial Officer
+      - HP Anyware / DaaS
+      - as a financing structure
+    - - Chief Financial Officer
+      - HP Care Pack Services
+      - fixed multi-year cost
+    - - Chief Financial Officer
+      - HP Lifecycle & Sustainability Services
+      - residual value, disposal
+    - - Chief Financial Officer
+      - HP Enterprise Print / MPS
+      - cost-per-page
+    - - Chief Financial Officer
+      - HP Elite / Pro PCs
+      - fleet-level economics only, never the device
+    - - IT Asset Manager
+      - HP Wolf Security
+      - BIOS/firmware baselines only
+    - - IT Asset Manager
+      - HP Enterprise Print / MPS
+      - fleet visibility only
+    - - IT Security Manager
+      - HP Enterprise Print / MPS
+      - printer-firmware angle only
+    - - IT Security Manager
+      - HP Lifecycle & Sustainability Services
+      - secure disposal only
+    - - PC Fleet & Hardware Standards Owner
+      - HP Wolf Security
+      - as a built-in baseline that removes per-model exceptions
+    - - Device Lifecycle & Refresh Manager
+      - HP Wolf Security
+      - never as a primary hook
+    - - Head of Procurement
+      - Any line
+      - commercial wrapper only - never a product pitch
+  example:
+    scenario: CFO and HP Anyware / DaaS.
+    steps:
+    - Look up the qualifier
+    result: as a financing structure
+    verified: true
+    expect: as a financing structure
+  sources:
+  - hp-backend/src/app/services/hp/buyer_personas.py:LINE_QUALIFIERS
+  - hp-backend/src/app/services/hp/buyer_personas.py:qualifier
+  confidence: medium
+- id: cs_one_line_max
+  parent: cs_line_eligibility
+  name: At most one HP line (G5)
+  kind: guardrail
+  summary: One earned product per asset, no portfolio tour.
+  purpose: One earned product per asset, no portfolio tour.
+  logic: The product list may hold 0 or 1 HP line; an empty list (a discovery-led piece) is valid. If
+    more than one is declared, or if the copy names a second HP line in the text besides the declared
+    one, G5 raises a finding that asks for a rewrite (a soft warning in Content Studio). Product names
+    supplied by the AI are matched to the standard HP lines; names that match no HP line are dropped from
+    the product list.
+  example:
+    scenario: The asset declares HP Wolf Security but the text also names HP Elite / Pro PCs.
+    steps:
+    - A second line is found in the text
+    result: G5 finding asking for a rewrite.
+    verified: true
+    expect:
+    - gate: G5
+      action: regenerate
+      audit: audit_line_eligibility.csv
+      denied_line_named: HP Elite / Pro PCs
+      where_found: prose
+      detail: a second HP line appears in the copy
+  sources:
+  - hp-backend/src/app/services/hp/content_gates.py:g5_one_line_maximum
+  - hp-backend/src/app/services/extractors/grounding.py:filter_enum_list
+  confidence: high
+- id: cs_ask_bound
+  parent: cs_line_eligibility
+  name: The ask is bounded by the committee angle (G6)
+  kind: guardrail
+  summary: Keeps the closing ask appropriate to the persona's role in the buying committee.
+  purpose: Keeps the closing ask appropriate to the persona's role in the buying committee.
+  logic: 'The closing ask is checked against the persona''s committee angle. Gatekeeper: fails if it names
+    any HP line, or contains ''choose'', ''select'' or ''pick''. Finance - Budget Owner: fails on any
+    currency symbol or code ($, EUR, IDR, ...) or a commercial term (price, pricing, quote, quotation,
+    discount, rate card, contract terms, per seat cost, cost per seat). Technical Buyer: fails on a decision
+    term (decide, decision, sign off, approve, approval, commit to, commitment, place an order, purchase
+    order, choose hp, select hp, go ahead, move forward with hp) or a commercial term. Economic Buyer:
+    no check. The action is ''rewrite'', which Content Studio treats as a soft warning.'
+  table:
+    columns:
+    - Committee angle
+    - May ask for
+    - Never
+    rows:
+    - - Economic Buyer
+      - a decision-oriented ask is acceptable
+      - '-'
+    - - Technical Buyer
+      - an evaluation, a technical review, a pilot
+      - a decision, a commercial term
+    - - Finance - Budget Owner
+      - cost, lifecycle, the shape of the business case
+      - a price, a discount, an assumption that a budget exists
+    - - Gatekeeper - Procurement & Legal
+      - the process - how a vendor is evaluated, what documentation is needed
+      - a product pitch, asking them to choose a vendor
+  example:
+    scenario: A CFO (Finance - Budget Owner) email closing 'Could I send you pricing for a 200-seat refresh?'.
+    steps:
+    - The committee angle is Finance - Budget Owner
+    - '''pricing'' is a commercial term'
+    result: 'G6 finding: names a commercial term (pricing).'
+    verified: true
+    expect:
+    - gate: G6
+      action: regenerate
+      audit: audit_ask_bound.csv
+      committee_angle: Finance - Budget Owner
+      ask_text: Could I send you pricing for a 200-seat refresh?
+      violation_type: names a commercial term (pricing) to a Finance - Budget Owner
+  sources:
+  - hp-backend/src/app/services/hp/content_gates.py:g6_ask_bound
+  - hp-backend/src/app/services/hp/buyer_personas.py:ASK_BOUNDS
+  doc_source: HP 220 - Content Studio & Message Evaluator - Build Specification v1.0 (30 Sep 2026), as
+    quoted in code comments; the document itself is not in the repo or the scratchpad docs, Section 2.2
+  confidence: high
+- id: cs_prompt_rules
+  parent: null
+  name: Rules the AI is instructed to follow
+  kind: model
+  summary: The writing rules given to the AI; only some are checked automatically (see the gates).
+  purpose: The writing rules given to the AI; only some are checked automatically (see the gates).
+  logic: 'The AI is told to: (1) never call a competitor (''Dell, Lenovo, Huawei, Acer, Canon, Zoom, Apple,
+    Asus or Samsung'') ''our'' product, and never disparage one; (2) ground every statement about the
+    account in the evidence, inventing no numbers, web addresses, names, product codes or events; (2a)
+    quote the data rather than characterise the business; (2b) never use industry as the reason for a
+    technology need; (3) treat the topic as not evidence, and hedge with may, could or suggests; (4) earn
+    any HP play from the persona''s remit plus the evidence, otherwise name no product and write a discovery-led
+    piece, and name at most one HP line; (5) follow the persona rule for the kind of persona (filled role:
+    write to the person and never imply private concerns; unfilled role: name and greet nobody and address
+    the role; older hiring-based or archetype variants); (6) have the opening name one evidence item by
+    its content; (7) name the labels it used; (8) use HP''s voice: no concessive ''However'' pattern,
+    no hollow abstractions, no benefit lists or superiority claims, no ''I hope this finds you well'',
+    no exclamation marks, and never treat Windows 10 support (which ended in October 2025) as upcoming;
+    (9) leave a field out rather than fill it with empty text; (10) respect the persona''s allowed and
+    denied HP lines; (11) keep the closing ask within the committee angle. The checks applied automatically
+    are listed under the draft checks and the gate suite. The rest (for example 2a, the ''earned'' chain
+    in 4, and voice) are judged by the AI only.'
+  sources:
+  - hp-backend/src/app/services/extractors/content_studio.py:_build_system_prompt
+  - hp-backend/src/app/core/llm.py:generate_gpt4o_json_completion
+  confidence: high
+- id: cs_validator
+  parent: null
+  name: Checks on each draft
+  kind: guardrail
+  summary: Decides whether a draft can be published, must be rewritten, or is withheld.
+  purpose: Decides whether a draft can be published, must be rewritten, or is withheld.
+  inputs:
+  - The AI's draft
+  - The rules for the chosen format
+  - The persona
+  - The evidence labels
+  - The evidence pool
+  - Known contact names
+  - The account's industry
+  logic: 'SERIOUS FAULTS (the draft cannot be published): no draft content; a required part is missing;
+    the number of body sections is outside the format''s range; the subject is over 80 characters; the
+    subject does not start with ''Re: ''; (for a role persona, not a named person) any known contact''s
+    full name appears in the copy; ''<our> <competitor>'' for any of dell, lenovo, huawei, acer, canon,
+    zoom, apple, asus, samsung; any unsourced number; or none of the supplied evidence labels is cited.
+    If any serious fault exists, the gate suite is not run. Otherwise the gate suite runs on the cleaned
+    draft: every gate finding that says ''reject'' becomes a serious fault, and every finding that asks
+    for a rewrite becomes a style warning. SOFT WARNINGS also come from Content Studio''s own filler-phrase
+    list and from any ''!''. Unsourced web addresses are removed silently.'
+  example:
+    scenario: A CFO email (unfilled) with the subject 'Quick question about your PCs' and a body claiming
+      '47% faster rollouts'.
+    steps:
+    - 'The subject does not start with ''Re: '' -> serious fault'
+    - 47% is not in the data -> serious fault
+    - The gates are not run because serious faults exist
+    result: The draft is rejected with two faults; these go back to the AI as notes for the rewrite.
+    verified: true
+    expect:
+    - null
+    - - 'subject_line must start with "Re: " and then name the specific initiative or challenge; got "Quick
+        question about your PCs"'
+      - unsourced number(s) 47% - remove them or use only figures written in the evidence
+    - []
+  output: A cleaned draft (or none), the serious faults and the style warnings.
+  sources:
+  - hp-backend/src/app/services/extractors/content_studio.py:_validate_asset
+  confidence: high
+- id: cs_banned_phrases_cs
+  parent: cs_validator
+  name: Content Studio's own filler-phrase list
+  kind: guardrail
+  summary: Soft warnings for hollow phrases.
+  purpose: Soft warnings for hollow phrases.
+  logic: A match anywhere in the copy, ignoring capital letters. Each hit is a soft warning (the draft
+    is sent back for a rewrite; it is published with the warning if the rewrites run out). Gate G9 carries
+    a longer list (see G9).
+  constants:
+  - label: Phrases
+    ref: py:app.services.extractors.content_studio:BANNED_PHRASES
+    stated:
+    - i hope this finds you well
+    - i hope this email finds you
+    - as threats evolve
+    - unlock value
+    - drive efficiencies
+    - uncover opportunities
+    - best possible experience
+    - game-changing
+    - synerg
+    - stay ahead of the curve
+  sources:
+  - hp-backend/src/app/services/extractors/content_studio.py:BANNED_PHRASES
+  - hp-backend/src/app/services/extractors/content_studio.py:_validate_asset
+  confidence: high
+- id: cs_gate_suite
+  parent: null
+  name: Gate suite G1-G13 (run on every draft)
+  kind: guardrail
+  summary: The automatic checks HP specified.
+  purpose: The automatic checks HP specified.
+  logic: 'Gates run in order, G1 to G13, on the cleaned draft. Each returns findings with an action. In
+    Content Studio, ''reject'' means a serious fault (the draft cannot be published) and ''rewrite'' means
+    a style warning (the draft is rewritten, but can still be published with the warning). Rejecting gates:
+    G2, G4, G7, G8, G11 (and G1 only if no evidence pool is supplied). Rewrite gates: G1, G3, G5, G6,
+    G9, G10, G12, G13.'
+  table:
+    columns:
+    - Gate
+    - Checks
+    - Action
+    rows:
+    - - G1
+      - a number that is not in the account's data
+      - rewrite (reject if no evidence pool)
+    - - G2
+      - a cited evidence label that was never supplied
+      - reject
+    - - G3
+      - no evidence cited, or the opening shares no word with the cited evidence
+      - rewrite
+    - - G4
+      - a denied HP line is named
+      - reject
+    - - G5
+      - more than one HP line
+      - rewrite
+    - - G6
+      - closing ask outside the committee angle
+      - rewrite
+    - - G7
+      - an unfilled role is addressed or greeted by name
+      - reject
+    - - G8
+      - a competitor is called 'our' or is disparaged
+      - reject
+    - - G9
+      - banned phrase, '!', 'however'-style pivot, or urgency built on the Windows 10 deadline that has
+        passed
+      - rewrite
+    - - G10
+      - industry used as the reason for a need
+      - rewrite
+    - - G11
+      - a required part is present but empty
+      - reject
+    - - G12
+      - word budget
+      - rewrite
+    - - G13
+      - one-pager pillar count or pillar evidence
+      - rewrite
+  sources:
+  - hp-backend/src/app/services/hp/content_gates.py:run
+  - hp-backend/src/app/services/hp/content_gates.py
+  - hp-backend/src/app/services/extractors/content_studio.py:_validate_asset
+  doc_source: HP 220 - Content Studio & Message Evaluator - Build Specification v1.0 (30 Sep 2026), as
+    quoted in code comments; the document itself is not in the repo or the scratchpad docs, Section 6
+  confidence: high
+- id: cs_g1
+  parent: cs_gate_suite
+  name: G1 Unsourced number
+  kind: guardrail
+  summary: No figure the data does not contain.
+  purpose: No figure the data does not contain.
+  logic: Every piece of text a reader sees is checked against the evidence pool (see the evidence pool
+    rule). Each number that is not in the pool is a finding.
+  example:
+    scenario: Opening 'Your 4,500 staff and 47% growth'; the pool has 4500 and 12%.
+    steps:
+    - 4,500 is fine
+    - 47% is unsourced
+    result: One G1 finding, for 47%.
+    verified: true
+    expect:
+    - gate: G1
+      action: regenerate
+      audit: audit_unsourced_numbers.csv
+      offending_token: 47%
+      sentence: Your 4,500 staff and 47% growth
+  sources:
+  - hp-backend/src/app/services/hp/content_gates.py:g1_unsourced_numbers
+  confidence: high
+- id: cs_g2
+  parent: cs_gate_suite
+  name: G2 Invalid evidence label
+  kind: guardrail
+  summary: Citations must be real.
+  purpose: Citations must be real.
+  logic: Every label cited as evidence, including the labels cited by each pillar, must be one that was
+    supplied to the AI. Labels already removed during checking are passed in and reported too.
+  example:
+    scenario: 'Cited labels: A1 and A9; supplied labels: A1, A2 and P1.'
+    steps:
+    - A9 was not supplied
+    result: G2 rejects the draft for A9.
+    verified: true
+    expect:
+    - gate: G2
+      action: reject
+      audit: audit_evidence_labels.csv
+      invalid_label: A9
+      where_found: evidence_used
+  sources:
+  - hp-backend/src/app/services/hp/content_gates.py:g2_evidence_labels_valid
+  confidence: high
+- id: cs_g3
+  parent: cs_gate_suite
+  name: G3 Evidence coverage
+  kind: guardrail
+  summary: The opening must trace to cited evidence.
+  purpose: The opening must trace to cited evidence.
+  logic: Fails if no evidence is cited, or if the opening (or 'why now') shares no content word (4 or
+    more letters, leaving out a short list of common words) with the text of any cited label.
+  example:
+    scenario: 'Opening ''Technology plays a critical role.'' citing A1 = ''Business description: automotive
+      assembly plant in Cikarang''.'
+    steps:
+    - No content word is shared
+    result: G3 finding asking for a rewrite.
+    verified: true
+    expect:
+    - gate: G3
+      action: regenerate
+      audit: audit_evidence_labels.csv
+      invalid_label: A1
+      where_found: opening
+      detail: the opening shares no content with any cited label
+  sources:
+  - hp-backend/src/app/services/hp/content_gates.py:g3_evidence_coverage
+  confidence: high
+- id: cs_g7
+  parent: cs_gate_suite
+  name: G7 Name leak on an unfilled persona
+  kind: guardrail
+  summary: An unfilled role is never addressed by name.
+  purpose: An unfilled role is never addressed by name.
+  logic: Skipped when the persona is a named person. Otherwise fails for any known contact's full name
+    in the copy, and for any greeting followed by a capitalised name ('Dear Budi,', 'Hi Robert Tan.').
+    Role greetings in capitals ('Dear CIO,') and 'Hi there', 'Hi team' or 'Hi all' are allowed. Known
+    names are the full names (first and last) from the stakeholder contacts and the contact list.
+  example:
+    scenario: Unfilled CFO copy opening 'Dear Budi Santoso, thanks.'.
+    steps:
+    - A known name is found
+    - A greeting by name is found
+    result: Two G7 rejections; 'Dear CIO,' would pass.
+    verified: true
+    expect:
+    - - gate: G7
+        action: reject
+        audit: audit_name_leak.csv
+        leaked_name: budi santoso
+        sentence: Dear Budi Santoso, thanks.
+      - gate: G7
+        action: reject
+        audit: audit_name_leak.csv
+        leaked_name: Budi Santoso
+        sentence: Dear Budi Santoso, thanks.
+    - []
+  sources:
+  - hp-backend/src/app/services/hp/content_gates.py:g7_name_leak
+  - hp-backend/src/app/services/extractors/content_studio.py:_build_generation_context
+  confidence: high
+- id: cs_g8
+  parent: cs_gate_suite
+  name: G8 Competitor handling
+  kind: guardrail
+  summary: Never call a competitor ours, never disparage one.
+  purpose: Never call a competitor ours, never disparage one.
+  logic: 'For each competitor (dell, lenovo, huawei, acer, canon, zoom, apple, asus, samsung): fails on
+    ''our <name>'', and on the name followed within 60 characters (in the same sentence) by inferior,
+    outdated, obsolete, unreliable, insecure, failing, poor, weak, inadequate or ''legacy and risky''.'
+  example:
+    scenario: '''Unlike our Dell fleet, Lenovo devices are outdated and costly.'''
+    steps:
+    - '''our dell'''
+    - dell ... outdated
+    - lenovo ... outdated
+    result: Three G8 rejections.
+    verified: true
+    expect:
+    - gate: G8
+      action: reject
+      audit: audit_other.csv
+      detail: refers to dell as "our" product
+      sentence: Unlike our Dell fleet, Lenovo devices are outdated and costly.
+    - gate: G8
+      action: reject
+      audit: audit_other.csv
+      detail: disparages dell (outdated)
+      sentence: Unlike our Dell fleet, Lenovo devices are outdated and costly.
+    - gate: G8
+      action: reject
+      audit: audit_other.csv
+      detail: disparages lenovo (outdated)
+      sentence: Unlike our Dell fleet, Lenovo devices are outdated and costly.
+  sources:
+  - hp-backend/src/app/services/hp/content_gates.py:g8_competitors
+  - hp-backend/src/app/services/extractors/content_studio.py:COMPETITORS
+  confidence: high
+- id: cs_g9
+  parent: cs_gate_suite
+  name: G9 Banned phrases and voice
+  kind: guardrail
+  summary: Removes filler and stale urgency.
+  purpose: Removes filler and stale urgency.
+  logic: 'Asks for a rewrite on: any phrase in the G9 list; any ''!''; the concessive pivot '', however,''
+    / '', that said,'' / '', nevertheless,''; a sentence putting the Windows 10 deadline in the future
+    (before, ahead of, in advance of, prior to, or by ... Windows 10 ... deadline, end of support, end
+    of life or cut-off).'
+  constants:
+  - label: G9 phrase list
+    ref: py:app.services.hp.content_gates:BANNED_PHRASES
+    stated:
+    - industry-leading
+    - best-in-class
+    - world-class
+    - cutting-edge
+    - state-of-the-art
+    - unlock value
+    - drive efficiencies
+    - uncover opportunities
+    - as threats evolve
+    - in today's fast-paced
+    - digital transformation journey
+    - seamlessly integrate
+    - i hope this finds you well
+    - i hope you're doing well
+    - i wanted to reach out
+    - game-changer
+    - revolutionary
+    - robust and scalable
+    - empower your teams
+    - i hope this email finds you
+    - best possible experience
+    - game-changing
+    - synerg
+    - stay ahead of the curve
+  example:
+    scenario: '''We offer industry-leading devices! Move before the Windows 10 end of support deadline.
+      Your team is great, however, there is more to gain.'''
+    steps:
+    - industry-leading
+    - a deadline that has passed
+    - '''!'''
+    - the concessive pivot
+    result: Four G9 findings.
+    verified: true
+    expect:
+    - gate: G9
+      action: regenerate
+      audit: audit_banned_phrases.csv
+      phrase: industry-leading
+      sentence: We offer industry-leading devices!
+    - gate: G9
+      action: regenerate
+      audit: audit_banned_phrases.csv
+      phrase: urgency built on a deadline that has passed
+      sentence: Move before the Windows 10 end of support deadline.
+    - gate: G9
+      action: regenerate
+      audit: audit_banned_phrases.csv
+      phrase: '!'
+      sentence: We offer industry-leading devices!
+    - gate: G9
+      action: regenerate
+      audit: audit_banned_phrases.csv
+      phrase: <praise> ... However, <vague upside>
+      sentence: Your team is great, however, there is more to gain.
+  sources:
+  - hp-backend/src/app/services/hp/content_gates.py:g9_banned_phrases
+  confidence: high
+- id: cs_g10
+  parent: cs_gate_suite
+  name: G10 Industry is not justification
+  kind: guardrail
+  summary: Industry may not be the reason for a need.
+  purpose: Industry may not be the reason for a need.
+  logic: A sentence fails if it contains (a) the account's industry words (each ' / ' part) or the word
+    industry or sector, (b) a causal word (because, since, given, as a/an, being a/an, operating in, in
+    the), and (c) a need word (need(s), require(s), must, demand(s), rely/relies, critical, essential).
+  example:
+    scenario: '''Because you operate in automotive manufacturing, your systems must be reliable.'''
+    steps:
+    - An industry term, plus 'because', plus 'must'
+    result: G10 finding.
+    verified: true
+    expect:
+    - gate: G10
+      action: regenerate
+      audit: audit_other.csv
+      detail: industry used as the reason for a need
+      sentence: Because you operate in automotive manufacturing, your systems must be reliable.
+  sources:
+  - hp-backend/src/app/services/hp/content_gates.py:g10_industry_as_justification
+  confidence: high
+- id: cs_g11
+  parent: cs_gate_suite
+  name: G11 Empty required field
+  kind: guardrail
+  summary: Leave a part out rather than fill it with nothing.
+  purpose: Leave a part out rather than fill it with nothing.
+  logic: A required part that is present but blank fails (reject).
+  example:
+    scenario: The closing ask is only blank spaces.
+    steps:
+    - It is present but blank
+    result: G11 rejects the draft.
+    verified: true
+    expect:
+    - gate: G11
+      action: reject
+      audit: audit_other.csv
+      detail: cta is an empty string
+      sentence: ''
+  sources:
+  - hp-backend/src/app/services/hp/content_gates.py:g11_empty_string_fill
+  confidence: high
+- id: cs_g12
+  parent: cs_gate_suite
+  name: G12 Word budget
+  kind: guardrail
+  summary: Keeps each format to its length.
+  purpose: Keeps each format to its length.
+  logic: 'Words are counted over what the reader sees: headline, title and subtitle, opening (or ''why
+    now''), body and closing ask, and body sections (headings and text); for a structured one-pager, the
+    pillars, HP play and proof point. The subject line and persona framing are left out. Budgets: email
+    120-180, LinkedIn message 60-110, one-pager 350-500. Outside the range -> a finding that asks for
+    a rewrite (soft).'
+  formula: word count = number of words in all the visible parts; pass if the minimum <= word count <=
+    the maximum
+  table:
+    columns:
+    - Format
+    - Minimum words
+    - Maximum words
+    rows:
+    - - Email
+      - 120
+      - 180
+    - - LinkedIn message
+      - 60
+      - 110
+    - - One-pager
+      - 350
+      - 500
+  example:
+    scenario: A 100-word email.
+    steps:
+    - 100 is below 120
+    result: 'G12: the email is 100 words; the budget is 120-180.'
+    verified: true
+    expect:
+    - gate: G12
+      action: regenerate
+      audit: audit_other.csv
+      detail: email is 100 words; the budget is 120-180
+      sentence: ''
+  sources:
+  - hp-backend/src/app/services/hp/content_gates.py:asset_word_count
+  - hp-backend/src/app/services/hp/content_gates.py:g12_word_budget
+  confidence: high
+- id: cs_g13
+  parent: cs_gate_suite
+  name: G13 Pillar count
+  kind: guardrail
+  summary: A one-pager has 2-3 evidenced pillars.
+  purpose: A one-pager has 2-3 evidenced pillars.
+  logic: 'One-pager only: fails if the number of pillars is not 2 or 3, and for each pillar that cites
+    no evidence.'
+  example:
+    scenario: A one-pager with a single pillar.
+    steps:
+    - 1 is not between 2 and 3
+    result: 'G13: 1 pillar; exactly 2 or 3 are needed.'
+    verified: true
+    expect:
+    - gate: G13
+      action: regenerate
+      audit: audit_other.csv
+      detail: 1 pillars; exactly 2 or 3
+      sentence: ''
+  sources:
+  - hp-backend/src/app/services/hp/content_gates.py:g13_pillar_count
+  confidence: high
+- id: cs_retry_publish
+  parent: null
+  name: Retry, choose and publish
+  kind: selection
+  summary: How many attempts are made and which draft the seller sees.
+  purpose: How many attempts are made and which draft the seller sees.
+  logic: Attempt 1, then up to 2 rewrites while the draft has a serious fault or any style warning. Each
+    rewrite tells the AI exactly which faults or warnings to fix and to use calibrated language. The 'best'
+    draft is the publishable one (no serious faults) with the fewest warnings; it is published with its
+    remaining warnings attached. If no attempt was publishable, the plain fallback template is used (see
+    the fallback template rule); if even that cannot be built, nothing is published, earlier assets are
+    kept and an error notice is shown. If the same request is made again with unchanged evidence, persona,
+    format, topic, context, instructions and guardrails, the earlier draft is returned instead of a new
+    one being written. The last 20 assets are kept as history.
+  constants:
+  - label: Rewrite rounds
+    ref: py:app.services.extractors.content_studio:RETRY_ROUNDS
+    stated: 2
+  - label: History kept
+    ref: py:app.services.extractors.content_studio:ASSET_HISTORY_MAX
+    stated: 20
+  - label: Version of the writing instructions
+    ref: py:app.services.extractors.content_studio:CONTENT_PROMPT_VERSION
+    stated: 2026-10-01.1
+  sources:
+  - hp-backend/src/app/services/extractors/content_studio.py:generate_content_asset
+  - hp-backend/src/app/services/extractors/content_studio.py:_request_fingerprint
+  confidence: high
+- id: cs_fallback
+  parent: cs_retry_publish
+  name: Plain fallback template
+  kind: selection
+  summary: Gives the seller something grounded when every generated draft failed.
+  purpose: Gives the seller something grounded when every generated draft failed.
+  logic: 'Built by fixed rules with no AI: needs at least one account evidence label. Opening = ''At HP,
+    we track publicly reported developments at <company>. This note follows one of them: <text of the
+    first account evidence line>''. One body paragraph names the persona''s title as counterparts and
+    frames it as a question. The closing ask requests a short briefing. An email gets the subject ''Re:
+    <topic>'' (maximum 80). A one-pager gets two pillars (''What was reported'', ''What it depends on'')
+    with no HP response. No HP line, no proof point. It is marked as a fallback, with a warning, and the
+    screen must not present it as generated copy.'
+  example:
+    scenario: 'A CFO email on ''HP Elite & Pro PCs'' where all drafts failed; A1 = ''Business description:
+      Maker of motorcycles''.'
+    steps:
+    - The text of A1 is the trigger
+    - Compose the opening, body and closing ask
+    - 'Subject ''Re: HP Elite & Pro PCs'''
+    result: 'A template email that cites A1 only. Opening: ''At HP, we track publicly reported developments
+      at Astra. This note follows one of them: Business description: Maker of motorcycles''. Body: ''We
+      work with Chief Financial Officer counterparts on the device, security and workforce implications
+      of changes like this. What applies to Astra depends on your current estate and plans, which is why
+      this is a question rather than a recommendation.'' Closing ask: ''Would a short briefing be useful
+      to establish whether this is relevant to your roadmap?'' Subject: ''Re: HP Elite & Pro PCs''.'
+    verified: true
+    expect:
+      opening: 'At HP, we track publicly reported developments at Astra. This note follows one of them:
+        Business description: Maker of motorcycles'
+      body_sections:
+      - heading: null
+        text: We work with Chief Financial Officer counterparts on the device, security and workforce
+          implications of changes like this. What applies to Astra depends on your current estate and
+          plans, which is why this is a question rather than a recommendation.
+      cta: Would a short briefing be useful to establish whether this is relevant to your roadmap?
+      persona_framing: Role-based version for Chief Financial Officer; composed from account evidence
+        only.
+      evidence_used:
+      - A1
+      subject_line: 'Re: HP Elite & Pro PCs'
+  sources:
+  - hp-backend/src/app/services/extractors/content_studio.py:_safe_fallback_asset
+  doc_source: HP_ABX_v3_final, Fallback handling (quoted in code)
+  confidence: high
+- id: cs_greeting
+  parent: cs_retry_publish
+  name: Salutation and sign-off (email only)
+  kind: selection
+  summary: Who the email is addressed to, decided by fixed rules.
+  purpose: Who the email is addressed to, decided by fixed rules.
+  logic: 'Named person (filled role): ''Dear <first name>,'' (''Dear [Name],'' if there is no usable first
+    name). Unfilled HP role or generic archetype: ''Dear [<role> Name],'' where the role is the title
+    up to the first ''/'' or ''(''. Other kinds: ''Dear [Name],''. Then the body and the sign-off ''Sincerely,''
+    followed by ''The HP Inc. Team''. LinkedIn messages and one-pagers have no greeting.'
+  example:
+    scenario: A filled CFO 'Budi Santoso', an unfilled CFO, and an unfilled 'VP / Head of Information
+      Technology'.
+    steps:
+    - Use the first name
+    - Use a role placeholder
+    - Cut the title at '/'
+    result: Dear Budi, / Dear [Chief Financial Officer Name], / Dear [VP Name],
+    verified: true
+    expect:
+    - Dear Budi,
+    - Dear [Chief Financial Officer Name],
+    - Dear [VP Name],
+  sources:
+  - hp-backend/src/app/services/extractors/content_studio.py:_compose_greeting
+  - hp-backend/src/app/services/extractors/content_studio.py:_compose_plain_text
+  confidence: high
+- id: cs_proof_point
+  parent: null
+  name: HP case study attached after writing
+  kind: score
+  summary: Adds one real HP customer story for the line the draft earned, without letting the AI pick
+    it.
+  purpose: Adds one real HP customer story for the line the draft earned, without letting the AI pick
+    it.
+  logic: 'The AI never sees case studies. After a draft passes, the app maps the draft''s HP line to case-study
+    lines, ranks the studies and attaches one (skipped for the fallback and when there is no HP line).
+    Ranking points: +100 per shared use-case tag (tags come from the topic and the format), +10 same industry,
+    +4 has an outcome, +2 published by HP itself, +1 has a challenge, +2 told as a story (not only a customer
+    quote). Ties go to the study with more source documents, then by customer name. Content Studio picks
+    after the Objection Playbook, Opportunity Map and Messaging, so it prefers a study that none of those
+    cites (soft) and never repeats one already on its own stored assets (hard). A swap for variety may
+    not lose the industry match or the story form. One-pager: added as a ''Proof Points'' section only
+    if the copy stays within 500 words; always stored with the asset.'
+  formula: score = 100 x shared tags + 10 x same industry + 4 x has outcome + 2 x published by HP + 1
+    x has challenge + 2 x told as a story (each yes/no item counts 1 for yes and 0 for no)
+  constants:
+  - label: Per shared use-case tag
+    ref: py:app.services.hp.case_studies:SCORE_PER_SHARED_SIGNAL
+    stated: 100
+  - label: Same industry
+    ref: py:app.services.hp.case_studies:SCORE_SAME_INDUSTRY
+    stated: 10
+  - label: Has outcome
+    ref: py:app.services.hp.case_studies:SCORE_HAS_OUTCOME
+    stated: 4
+  - label: Published by HP
+    ref: py:app.services.hp.case_studies:SCORE_HP_PUBLISHED
+    stated: 2
+  - label: Has challenge
+    ref: py:app.services.hp.case_studies:SCORE_HAS_CHALLENGE
+    stated: 1
+  - label: Told as a story
+    ref: py:app.services.hp.case_studies:SCORE_NARRATED
+    stated: 2
+  example:
+    scenario: Topic 'HP Elite & Pro PCs' for an industrial-machinery account; a study tagged Fleet-Refresh
+      in Industrial Manufacturing with an outcome, published by HP, a challenge and told as a story.
+    steps:
+    - Topic -> use-case tag Fleet-Refresh
+    - 100 + 10 + 4 + 2 + 1 + 2
+    result: Score 119.
+    verified: true
+    expect:
+    - 119
+    - 1
+    - acme
+  sources:
+  - hp-backend/src/app/services/extractors/content_studio.py:generate_content_asset
+  - hp-backend/src/app/services/extractors/content_studio.py:_attach_proof_point
+  - hp-backend/src/app/services/hp/case_studies.py:_score
+  - hp-backend/src/app/services/hp/case_studies.py:allocate
+  - hp-backend/src/app/services/hp/case_studies.py:SURFACE_ORDER
+  doc_source: 'Client ranking 25 Sep (quoted in case_studies.py): same use case > same industry > region
+    > outcome > T0 before T2'
+  confidence: high
+- id: cs_angles
+  parent: null
+  name: Suggested angles (co-creation step)
+  kind: selection
+  summary: Offers 2-3 directions before writing (not offered on the current screen).
+  purpose: Offers 2-3 directions before writing (not offered on the current screen).
+  logic: Uses the same evidence and writing rules as a draft, plus an instruction to propose exactly 3
+    angles, each based on a different evidence item. An angle with no label or summary, a placeholder
+    label, or any unsourced figure is dropped; angles with the same summary are dropped as duplicates;
+    at most 3 are shown. If there are none, the result is empty with the message 'You can generate directly
+    instead.' A chosen angle is added to the writing request. The current screen no longer offers this
+    step.
+  sources:
+  - hp-backend/src/app/services/extractors/content_studio.py:suggest_content_angles
+  - hp-backend/src/app/api/v1/widgets.py:suggest_content_angles_endpoint
+  confidence: high
+- id: cs_audit_ledger
+  parent: null
+  name: Gate audit records and review exports
+  kind: guardrail
+  internal: true
+  summary: Makes every gate finding reviewable.
+  purpose: Makes every gate finding reviewable.
+  logic: 'Every attempt''s findings are stored with an outcome: ''published'' (the attempt the seller
+    saw), ''rewritten'' (an earlier attempt that a later one replaced) or ''withheld'' (no attempt stood,
+    or the fallback was used). An export writes 7 review files (one per gate type, plus a catch-all),
+    always including empty ones. The release check passes only if every file is empty. A failure to record
+    never blocks writing.'
+  table:
+    columns:
+    - Review file
+    - Details recorded
+    rows:
+    - - Unsourced numbers
+      - account, persona, format, offending number, sentence
+    - - Line eligibility
+      - account, persona, denied line named, where found
+    - - Closing ask
+      - account, persona, committee angle, ask text, type of violation
+    - - Name leaks
+      - account, persona, leaked name, sentence
+    - - Banned phrases
+      - account, persona, phrase, sentence
+    - - Evidence labels
+      - account, persona, invalid label
+    - - Other
+      - account, persona, format, gate, detail
+  example:
+    scenario: An export where only the 'Other' file has 2 rows.
+    steps:
+    - Any count above 0 fails the release check
+    result: Not clean (No).
+    verified: true
+    expect: false
+  sources:
+  - hp-backend/src/app/services/hp/content_audit.py:record
+  - hp-backend/src/app/services/extractors/content_studio.py:_record_gate_audit
+  doc_source: HP 220 - Content Studio & Message Evaluator - Build Specification v1.0 (30 Sep 2026), as
+    quoted in code comments; the document itself is not in the repo or the scratchpad docs, Sections 6-7
+  confidence: high
+- id: cs_business_context
+  parent: null
+  name: Business Context panel
+  kind: selection
+  summary: Account facts shown beside the generator.
+  purpose: Account facts shown beside the generator.
+  logic: 'From the company profile: company display name, domain, business description, industry (the
+    LinkedIn, NAICS and SIC labels joined), headquarters (city, region, country), employee range and revenue
+    range. Empty when the company profile is missing.'
+  sources:
+  - hp-backend/src/app/services/extractors/content_studio.py:extract_content_studio
+  confidence: high
+- id: cs_hp_fact_guardrails
+  parent: null
+  name: HP claim guardrails (applied to HP facts before any feature quotes them)
+  kind: guardrail
+  summary: How HP product facts are filtered before any feature may quote them.
+  purpose: How HP product facts are filtered before any feature may quote them.
+  logic: These filters are not applied while Content Studio is drafting. The product-deck quality filter
+    runs when HP's product decks are first loaded. The guardrails filter the HP facts stored with each
+    account's HP recommendations, which the Message Evaluator uses as its list of approved HP facts. The
+    country lists are also used directly by the Message Evaluator.
+  sources:
+  - hp-backend/scripts/extract_hp_decks.py
+  - hp-backend/src/app/services/hp/recommendations.py
+  - hp-backend/src/app/services/evaluator/sources.py
+  confidence: high
+- id: cs_claim_quality
+  parent: cs_hp_fact_guardrails
+  name: Product-deck claim quality filter
+  kind: filter
+  summary: Keeps only concrete, usable lines from HP product decks.
+  purpose: Keeps only concrete, usable lines from HP product decks.
+  logic: 'A line is dropped if it is empty; has fewer than 4 words; starts with a fragment word (and,
+    or, with, the, a, an, to, for, of, in, on, that, plus, your, by, from, at, as, is, are, be); is legal
+    or housekeeping boilerplate; or is only a product name. Otherwise it must carry something concrete:
+    a measurement with a unit, a named feature term, a support or availability condition, or qualifiers.
+    Marketing wording is fatal only when nothing concrete is present. Duplicates are merged per product
+    family, generation, form factor and restriction flags.'
+  constants:
+  - label: Minimum words
+    ref: py:app.services.hp.claim_quality:MIN_WORDS
+    stated: 4
+  example:
+    scenario: Four deck lines.
+    steps:
+    - '''Up to 14 hours of battery life on select configurations'' -> concrete'
+    - '''Raw power that stops what others cannot see'' -> marketing'
+    - '''HP EliteBook 8 G2i 14-inch Next Gen AI PC'' -> product name only'
+    - '''and more'' -> too short'
+    result: keep, drop, drop, drop
+    verified: true
+    expect:
+    - - true
+      - null
+    - - false
+      - positioning language with no specification
+    - - false
+      - product name only
+    - - false
+      - too short
+  sources:
+  - hp-backend/src/app/services/hp/claim_quality.py:assess
+  confidence: high
+- id: cs_country_guardrails
+  parent: cs_hp_fact_guardrails
+  name: Country restrictions on HP claims
+  kind: guardrail
+  summary: Superlatives and competitor comparisons are blocked in listed markets.
+  purpose: Superlatives and competitor comparisons are blocked in listed markets.
+  logic: The country is the last comma-separated part of the headquarters location. Superlative claims
+    (world's, industry's, market's, most, best, first, only, fastest, strongest, safest, leading) are
+    rejected in 21 markets; competitor-comparison claims are rejected in a longer list (Middle East, Africa,
+    CIS, China, Vietnam, Indonesia, Malaysia, Brazil, Mexico...). A comparison naming a competitor needs
+    benchmark context. Claims about 5G, HP Go, Wi-Fi 7, Sure View, discrete graphics and 'up to N displays'
+    must carry their qualifier.
+  constants:
+  - label: Markets where superlatives are blocked
+    ref: py:app.services.hp.guardrails:SUPERLATIVE_BLOCK_COUNTRIES
+    stated:
+    - armenia
+    - belarus
+    - brazil
+    - china
+    - indonesia
+    - kazakhstan
+    - kyrgyzstan
+    - malaysia
+    - mexico
+    - moldova
+    - romania
+    - russia
+    - slovakia
+    - tajikistan
+    - turkey
+    - turkmenistan
+    - uae
+    - ukraine
+    - united arab emirates
+    - uzbekistan
+    - vietnam
+  example:
+    scenario: A rulebook rule with a superlative fact and an unqualified Sure View fact, for an Indonesian
+      account.
+    steps:
+    - Indonesia blocks superlatives
+    - The Sure View fact lacks 'optional'
+    result: Both facts are rejected.
+    verified: true
+    expect:
+    - slide_id: WOLF 01
+      kept: false
+      guardrail: G2 superlative by country
+      reason: restricted superlative claim in indonesia
+    - slide_id: WOLF 01
+      kept: false
+      guardrail: G6/G7 missing qualifier
+      reason: Sure View is optional
+  sources:
+  - hp-backend/src/app/services/hp/guardrails.py:approve_rulebook_facts
+  confidence: high
+- id: cs_tier_language
+  parent: cs_hp_fact_guardrails
+  name: Evidence-level wording
+  kind: guardrail
+  summary: Wording may not claim more than the evidence level allows.
+  purpose: Wording may not claim more than the evidence level allows.
+  logic: Below the Opportunity level, 'is relevant / is a strong fit / clearly addresses' is a fault.
+    At the Context Only level, 'recommend / propose / should deploy' is a fault. Below the Opportunity
+    level, a sentence that is not about HP and says the account needs, requires, plans to, is evaluating
+    or has budget is a fault. Also G15 (a Next Gen AI PC must be 40-60 TOPS) and G16 (no product generation
+    that the approved facts never state).
+  example:
+    scenario: '''HP WXP is relevant to this opportunity. Astra requires endpoint protection.'' at a level
+      below Opportunity.'
+    steps:
+    - It claims settled relevance
+    - It claims a confirmed need
+    result: Two faults.
+    verified: true
+    expect:
+    - 'tier Conversation Starter: says ''is relevant'', which states settled relevance. On this evidence
+      an offering may only "be relevant", never "is relevant"'
+    - 'tier Conversation Starter: says ''requires'', which states a confirmed need, project or buying
+      motion that only the Opportunity tier may claim'
+  sources:
+  - hp-backend/src/app/services/hp/guardrails.py:tier_language_faults
+  confidence: high
+undetermined:
+- 'services/messaging/pillars.py is NOT part of Content Studio: it is the generator of the removed Content
+  Messaging feature (messaging_pillars_output). Nothing in Content Studio imports it; its regen node and
+  retrieval index are disabled. Its rules are therefore not listed here.'
+- 'Content Messaging (services/extractors/content_messaging.py): still imported only by regen/producers.py:messaging_context,
+  a producer that no regen graph node schedules (graph.py:77 ''Content Messaging ... was removed on 28
+  Sep ... Its producers and corpus builder are still in the code, unscheduled''). feature_mapping.py:820
+  and retrieval/registry.py (enabled: False) still declare it. Effectively dead code.'
+- Whether the deployed LLM is gemini-2.5-flash or gpt-4o depends on LLM_PROVIDER in the environment (default
+  'gemini'); generate_gpt4o_json_completion uses settings.chat_model despite its name.
+- Which of the LLM-instructed rules (2a quote-the-data, the 'earned' HP-play chain, voice) the model actually
+  follows is model-judged; only the checks under cs_validator / cs_gate_suite are guaranteed.
+- The model-supplied headline length (<70 chars for the one-pager) and why_now length (2-3 sentences)
+  are requested in the prompt but not checked in code.
+- For a FILLED persona, both the validator's name check and G7 are skipped entirely, so the copy may name
+  any contact on the roster, not only the addressee (content_studio.py:1230, content_gates.py:394).
+- 'Observation on claim_quality.assess: any deck line beginning with ''The'' is dropped as a ''sentence
+  fragment'' because ''the'' is in FRAGMENT_RE (e.g. ''The HP Wolf Security suite isolates email attachments''
+  is dropped). Not judged here; flagged for review.'
+- Known contact names for G7 come from stakeholder_contacts_grid and prospect_contacts only; names in
+  company_personas (other filled roles) are not in the ban list.
+discrepancies:
+- rule_id: cs_gate_suite
+  doc: 'content_gates.py:46-51 (describing spec Section 6): ''REGENERATE means try once more with the
+    fault fed back; if the second attempt fails the same gate, it becomes a rejection.'''
+  code: 'content_studio.py:1313-1314 and 1932-1935: regenerate findings are style warnings; up to RETRY_ROUNDS=2
+    retries (3 attempts), then the cleanest draft without hard faults is published with the warnings attached.'
+  note: A draft that still fails G1(gate)/G3/G5/G6/G9/G10/G12/G13 after retries is published, not rejected.
+- rule_id: cs_ask_bound
+  doc: 'Prompt rule 11 (content_studio.py:1016): ''An ask outside the angle is a failed output even if
+    everything else is correct.'' and buyer_personas.py:89 ''Checked after generation, not merely requested
+    in the prompt.'''
+  code: content_gates.py:352 G6 uses ACTION_REGENERATE, which Content Studio publishes as a warning after
+    retries.
+  note: An out-of-angle ask can reach the seller with a warning.
+- rule_id: cs_ask_bound
+  doc: 'content_studio.py:894-905 filled-role prompt rule: ''the client supplies one of five'' angles,
+    including ''Influencer / Line-of-Business Champion''.'
+  code: buyer_personas.py:79-84 defines four ANGLES; no persona card uses an Influencer angle and G6 has
+    no branch for it.
+  note: Prompt text and data disagree on the number of angles.
+- rule_id: cs_g12
+  doc: 'content_gates.py:589-594 comment: ''WIDER than the word caps the current content contracts carry
+    (email at most 110, LinkedIn Message at most 80, one-pager at most 400) ... The contracts move to
+    these numbers when Content Studio is rewired''.'
+  code: content_studio.py CONTENT_TYPE_CONTRACTS carry no 'words' caps any more; the prompt states 120-180
+    / 60-110 / 350-500 and G12 enforces the same.
+  note: The comment is stale; code is consistent with the spec budgets.
+- rule_id: cs_line_qualifiers
+  doc: 'buyer_personas.py:1363-1364: ''carried so the prompt can say it and a reviewer can see it''.'
+  code: No caller of bp.qualifier / LINE_QUALIFIERS in content_studio.py; the prompt lists only allowed/denied
+    lines.
+  note: 'Qualifiers (e.g. CFO: Elite/Pro ''fleet-level economics only'') are not given to the model or
+    checked.'
+- rule_id: cs_angles
+  doc: 'BridgeAI response to 29 Sep feedback: ''The Suggested Angles section has been removed''.'
+  code: widgets.py:383-393 still registers content_angle_options and widgets.py:812 still serves POST
+    .../content_studio/angles; the frontend no longer calls it.
+  note: Removed in the UI only.
+- rule_id: cs_line_eligibility
+  doc: 'buyer_personas.py:345-350 (spec 2.3): IT Security Manager is denied Lifecycle & Sustainability
+    ''except secure disposal''.'
+  code: DENIED_LINES['it-security-manager'] includes HP Lifecycle & Sustainability Services outright;
+    the carve-out is listed in OPEN_WITH_CLIENT.
+  note: Pending HP confirmation.
+- rule_id: cs_prompt_rules
+  doc: 'content_studio.py:538 COMPETITORS: dell, lenovo, huawei, acer, canon, zoom, apple, asus, samsung.'
+  code: evaluator/sources.py:92 COMPETITOR_RE and guardrails.py:94 COMPETITOR_RE use different lists (e.g.
+    toshiba, fujitsu, msi, razer, microsoft surface; no canon/zoom).
+  note: Three competitor lists in the codebase.

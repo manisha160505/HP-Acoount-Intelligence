@@ -1,0 +1,2559 @@
+# Rules page catalog for `executive_dashboard`. Read by app/services/rules_catalog.
+# `ref:` values are read live; `stated` is what the prose was written against.
+# Examples marked `verified` are recomputed by tests/test_rules_examples.py.
+feature_key: executive_dashboard
+purpose: 'Gives a seller a one-page view of the account: who the company is, its size and filed financials,
+  its hiring, how urgent it is for HP, and its evidenced strategic priorities.'
+final_output: Company profile (with description bullets and parent company), size bands, filed figures
+  with growth and CEO, a 12-month job-postings tile, a 0-100 Urgency Score with four driver breakdowns
+  (or 'No signal observed' when less than 60% of the inputs are available), and up to 6 strategic priority
+  cards grouped by theme, each with an evidence score, HP-focused bullets, source points and an optional
+  case-study proof.
+how_it_combines: 'Five independent cards, each with its own rules.
+
+  1. Executive Summary: identity, location, industry and parent company come straight from the company''s
+  records; the description bullets are written by AI and checked for invented numbers.
+
+  2. Key Metrics: size bands from the company profile, plus financial figures and the CEO taken from the
+  filings on record.
+
+  3. Hiring Velocity: job postings in the account''s own country over the 12 months before the job data
+  was collected.
+
+  4. Urgency Score: four drivers, each out of 100, weighted {{scoring:urgency.weights.workplace_os|pct}}
+  / {{scoring:urgency.weights.ai_workstation|pct}} / {{scoring:urgency.weights.growth_expansion|pct}}
+  / {{scoring:urgency.weights.hp_solution_intent|pct}} and rounded; withheld when too few inputs are present.
+
+  5. Strategic Priorities: AI proposes priorities; only those whose cited evidence exists and is on topic
+  are kept, near-duplicates are merged, and each one''s Evidence Strength is scored (filings + recency
+  + source diversity).'
+rules:
+- id: feature_build
+  parent: null
+  name: When the Executive Dashboard is built
+  kind: selection
+  internal: true
+  summary: Explains which information the dashboard needs and which parts are rebuilt together.
+  purpose: Explains which information the dashboard needs and which parts are rebuilt together.
+  inputs:
+  - The company profile, corporate structure and job postings (required)
+  - The company's installed technology, website technology, online research topics, HP's own category
+    scores, social-media figures, news coverage, company events, filings and filing figures (optional)
+  logic: 'The core of the dashboard (Executive Summary, Key Metrics, Hiring Velocity and the Urgency Score)
+    is built in one step that needs the account''s company profile, corporate structure and job postings
+    to be present. The Urgency Score is calculated at the end of that step; if it fails for an unexpected
+    reason the account loses only its urgency card, not the rest of the dashboard. Strategic Priorities
+    are built in a separate later step, only after the account''s searchable collection of filed documents
+    and other evidence has been built. Nothing is rebuilt on its own: a change to the data or the rules
+    marks the cards as out of date, and an administrator''s request rebuilds them.'
+  conditions:
+  - 'Required information: company profile, corporate structure, job postings'
+  - An urgency failure does not stop the other cards from being shown
+  - Strategic Priorities need the account's evidence collection to be built (current or slightly out of
+    date); otherwise nothing is shown for that card
+  - Changing the urgency scoring settings or the hiring rules marks the core cards as out of date; changing
+    the evidence strength settings marks Strategic Priorities as out of date
+  constants:
+  - label: Hiring rules version
+    ref: py:app.services.hp.hiring_jobs:HIRING_RULES_VERSION
+    stated: 2
+  - label: 'Business-description bullets: version of the wording instructions'
+    ref: py:app.services.extractors.executive_dashboard:SUMMARY_PROMPT_VERSION
+    stated: 1
+  - label: 'Strategic priorities: version of the wording instructions'
+    ref: py:app.services.dashboard.priorities:PROMPT_VERSION
+    stated: 1
+  output: 'Five cards: Executive Summary, Key Metrics, Hiring Velocity, Urgency Score and Strategic Priorities.'
+  sources:
+  - hp-backend/src/app/services/extractors/executive_dashboard.py:extract_executive_dashboard
+  - hp-backend/src/app/services/regen/graph.py
+  - hp-backend/src/app/services/dashboard/priorities.py:generate_dashboard_intelligence
+  confidence: high
+- id: exec_summary_card
+  parent: null
+  name: Executive Summary card
+  kind: display
+  summary: 'Shows who the company is: name, website, business description, industry, headquarters and
+    parent company.'
+  purpose: 'Shows who the company is: name, website, business description, industry, headquarters and
+    parent company.'
+  inputs:
+  - The company profile (first row)
+  - The company's corporate structure information (first row)
+  - The account's name
+  logic: All fields are copied from the first company-profile row and the first corporate-structure row;
+    nothing is scored. The only AI step is reorganising the business description into bullets, which is
+    checked before it is shown. If the account has no company-profile row, the card is shown empty.
+  conditions:
+  - 'No company-profile row: the card is empty and shows no data'
+  output: Company profile card at the top of the dashboard.
+  sources:
+  - hp-backend/src/app/services/extractors/executive_dashboard.py:extract_executive_dashboard
+  confidence: high
+- id: summary_identity
+  parent: exec_summary_card
+  name: Company name and website
+  kind: selection
+  summary: Makes the company name match the account list rather than the data supplier's naming.
+  purpose: Makes the company name match the account list rather than the data supplier's naming.
+  inputs:
+  - The account's own record
+  - 'The company profile: domain and website address'
+  logic: The company name is the account's own name from the account list, not the data supplier's name
+    for the website. The website is the company's domain; if that is blank, its website address is used.
+  conditions:
+  - 'Website order: domain first, then website address'
+  example:
+    scenario: The company profile has a blank domain and the website address 'astra.co.id'.
+    steps:
+    - The domain is blank, so the website address is used.
+    result: 'Website shown: astra.co.id'
+  output: Company name and website
+  sources:
+  - hp-backend/src/app/services/extractors/executive_dashboard.py:extract_executive_dashboard
+  confidence: high
+- id: summary_hq_location
+  parent: exec_summary_card
+  name: Headquarters location
+  kind: selection
+  summary: Shows where the company is headquartered.
+  purpose: Shows where the company is headquartered.
+  inputs:
+  - 'The company profile: city, region and country'
+  logic: City, region and country are joined with commas, skipping any that are blank. If all three are
+    blank the value is 'N/A'.
+  formula: City, Region, Country (blanks skipped)
+  example:
+    scenario: City 'Jakarta', Region blank, Country 'Indonesia'.
+    steps:
+    - The region is blank and skipped.
+    - The rest are joined with ', '.
+    result: Jakarta, Indonesia
+  output: Headquarters location
+  sources:
+  - hp-backend/src/app/services/extractors/executive_dashboard.py:extract_executive_dashboard
+  confidence: high
+- id: summary_industry
+  parent: exec_summary_card
+  name: Industry classification
+  kind: selection
+  summary: Shows the industry using all three classifications the data supplier provides.
+  purpose: Shows the industry using all three classifications the data supplier provides.
+  inputs:
+  - 'The company profile: LinkedIn industry category, NAICS description and SIC description'
+  logic: The LinkedIn industry, NAICS description and SIC description are joined with ' / ' in that order,
+    skipping blanks and dropping exact repeats. If all are blank the value is 'N/A'.
+  formula: LinkedIn / NAICS / SIC (blanks and exact duplicates removed)
+  example:
+    scenario: LinkedIn 'Motor Vehicle Manufacturing', NAICS 'Automobile Manufacturing', SIC 'Automobile
+      Manufacturing'.
+    steps:
+    - SIC repeats NAICS exactly and is dropped.
+    result: Motor Vehicle Manufacturing / Automobile Manufacturing
+  output: Industry classification
+  sources:
+  - hp-backend/src/app/services/extractors/executive_dashboard.py:extract_executive_dashboard
+  confidence: high
+- id: summary_parent_company
+  parent: exec_summary_card
+  name: Parent company
+  kind: selection
+  summary: Shows the parent company named in the corporate structure information, unless it is the account
+    itself.
+  purpose: Shows the parent company named in the corporate structure information, unless it is the account
+    itself.
+  inputs:
+  - 'The corporate structure information: ultimate parent name (column E) and id, parent company name
+    (column C), the company''s own id'
+  - The account's name
+  logic: 'The parent is the ultimate parent name (column E), exactly as supplied with spaces trimmed. It
+    is skipped when it is the account itself: its id is the company''s own id, or it is the account''s
+    own name (''canon'' for Canon Inc.; ''mitsubishi'' for Mitsubishi Motors). When column E gives no
+    other company, the parent company name (column C) is used under the same test. A parent held for
+    client review because the source names the wrong company is not shown. With neither, nothing is
+    shown. The parent is never looked for in the business description.'
+  conditions:
+  - 'Column E first; column C only when column E names no other company'
+  - 'Blank, the account itself, or held for review: not shown'
+  - 9 accounts' parents are held (e.g. MUFG -> US Bancorp, Shiseido -> Henkel); a corrected value in a
+    later file is shown
+  example:
+    scenario: 'Four accounts: BDO with column E ''sm investments''; San Miguel whose column E is San Miguel
+      itself and column C ''top frontier investment holdings''; Canon whose column E is ''canon''; MUFG
+      whose column E is ''us bancorp''.'
+    steps:
+    - 'BDO: column E names another company, shown.'
+    - 'San Miguel: column E is the account itself, so column C is used.'
+    - 'Canon: column E is its own name, nothing shown.'
+    - 'MUFG: held for client review, nothing shown.'
+    result: '''sm investments'', ''top frontier investment holdings'', nothing, nothing.'
+    verified: true
+    expect:
+    - sm investments
+    - top frontier investment holdings
+    - ''
+    - ''
+  output: Parent company (hidden on screen when blank)
+  sources:
+  - hp-backend/src/app/services/extractors/executive_dashboard.py:_resolve_parent
+  - hp-backend/src/app/services/extractors/executive_dashboard.py:HELD_PARENTS
+  - hp-frontend/src/app/dashboard/page.tsx:parentVal
+  doc_source: Client, 5 Oct (issue list v3) - column E of the company hierarchy sheet
+  confidence: high
+- id: summary_subsidiaries
+  parent: exec_summary_card
+  name: Subsidiaries
+  kind: display
+  summary: Lists the subsidiaries named in the subsidiaries information.
+  purpose: Lists the subsidiaries named in the subsidiaries information.
+  inputs:
+  - 'The subsidiaries information: subsidiary name (column A)'
+  logic: 'Every subsidiary name, exactly as supplied with spaces trimmed, in the order supplied. Blank
+    names and repeats (ignoring case) are dropped, and so are the account''s own name and its parent,
+    since neither is its subsidiary. A name that only starts with the account''s name is kept (''toyota
+    motor'' is a Toyota Group subsidiary). The screen shows the first few and folds the rest. With none,
+    the line is hidden.'
+  conditions:
+  - 'No subsidiaries: line hidden'
+  - Names are not corrected or translated
+  example:
+    scenario: 'Woolworths Group with subsidiaries ''woolworths'', ''Big W'', ''big w'', a blank, ''endeavour
+      group'' and its parent ''wesfarmers''.'
+    steps:
+    - '''woolworths'' is the account itself, dropped.'
+    - '''big w'' repeats ''Big W'', dropped; the blank is dropped.'
+    - '''wesfarmers'' is the parent, dropped.'
+    result: '''Big W'', ''endeavour group''.'
+    verified: true
+    expect:
+    - Big W
+    - endeavour group
+  output: Subsidiary names
+  sources:
+  - hp-backend/src/app/services/extractors/executive_dashboard.py:_subsidiaries
+  - hp-frontend/src/app/dashboard/page.tsx:subsidiariesVal
+  doc_source: Client, 5 Oct (issue list v3) - column A of the subsidiaries sheet
+  confidence: high
+- id: summary_description_bullets
+  parent: exec_summary_card
+  name: Business description as bullets
+  kind: model
+  summary: Turns a long supplier paragraph into 3-5 easy-to-read bullets without adding anything.
+  purpose: Turns a long supplier paragraph into 3-5 easy-to-read bullets without adding anything.
+  inputs:
+  - 'The company profile: business description'
+  logic: If the description has fewer than 40 words it is shown as written. Otherwise AI reorganises it
+    into 3-5 bullets, each one sentence of at most 25 words, copying every number exactly and adding no
+    judgement or HP implication. The answer is kept only if it has at least 3 bullets (extra bullets beyond
+    5 are cut) and every number in it can be found in the account's company profile. If either check fails,
+    the original paragraph is shown instead. The bullets are saved and reused until the paragraph changes.
+  conditions:
+  - 'Below 40 words: AI is not used and the paragraph is shown'
+  - 'Fewer than 3 bullets: the paragraph is shown'
+  - 'More than 5 bullets: only the first 5 are kept'
+  - 'Any number not found in the company profile: all bullets are withheld and the paragraph is shown'
+  - The number check looks at everything in the company profile, not only the description paragraph
+  constants:
+  - label: Minimum words before bullets are made
+    ref: py:app.services.extractors.executive_dashboard:DESCRIPTION_POINTS_MIN_WORDS
+    stated: 40
+  - label: Minimum bullets
+    ref: py:app.services.extractors.executive_dashboard:DESCRIPTION_POINTS_MIN
+    stated: 3
+  - label: Maximum bullets
+    ref: py:app.services.extractors.executive_dashboard:DESCRIPTION_POINTS_MAX
+    stated: 5
+  example:
+    scenario: The description is 'Acme makes cement in Indonesia.' (5 words).
+    steps:
+    - 5 words is below the 40-word threshold, so AI is not used.
+    result: No bullets; the paragraph is shown, because the description is 5 words - short enough to read
+      as it is.
+    verified: true
+    expect:
+    - []
+    - the description is 5 words - short enough to read as it is
+  output: Description bullets (or the paragraph)
+  sources:
+  - hp-backend/src/app/services/extractors/executive_dashboard.py:_description_points
+  - hp-backend/src/app/services/extractors/executive_dashboard.py:POINTS_SYSTEM
+  doc_source: Client feedback 27 Sep (quoted in code)
+  confidence: high
+- id: exec_key_metrics
+  parent: null
+  name: Financial & Workforce Key Metrics
+  kind: selection
+  summary: Shows company size bands, figures the company actually filed, the CEO and the filings on record.
+  purpose: Shows company size bands, figures the company actually filed, the CEO and the filings on record.
+  inputs:
+  - The company profile
+  - The company's list of filings
+  - Figures read from the filings
+  logic: Supplier size bands are shown beside, never instead of, the figures read from filings. If there
+    is no company-profile row, the card is shown empty (no bands, no filed figures).
+  conditions:
+  - 'No company-profile row: the card is empty even if filings exist'
+  output: 'Metric tiles: employee band, revenue band, filed figures with change, CEO in the header.'
+  sources:
+  - hp-backend/src/app/services/extractors/executive_dashboard.py:extract_executive_dashboard
+  confidence: high
+- id: key_metrics_bands
+  parent: exec_key_metrics
+  name: Employee and revenue bands
+  kind: display
+  summary: Shows the data supplier's size buckets as supplied.
+  purpose: Shows the data supplier's size buckets as supplied.
+  inputs:
+  - 'The company profile: employee-size range and yearly revenue range'
+  logic: Both bands are copied as written. A blank band is stored as 'N/A', and the screen hides a band
+    tile whose value is N/A, NA, none, '-' or blank.
+  conditions:
+  - Bands are never converted into numbers
+  - An empty band tile is hidden on screen
+  output: Employee and revenue bands
+  sources:
+  - hp-backend/src/app/services/extractors/executive_dashboard.py:extract_executive_dashboard
+  - hp-frontend/src/app/dashboard/page.tsx:isBand
+  confidence: high
+- id: filings_on_record
+  parent: exec_key_metrics
+  name: Filings on record (last 12 months)
+  kind: selection
+  summary: Lists the account's filed documents from the agreed filings list.
+  purpose: Lists the account's filed documents from the agreed filings list.
+  inputs:
+  - The company's list of filings (annual reports and regulatory filings), uploaded with the documents
+  logic: 'Each filing is shown with a link: the document link if present, otherwise the link to the page
+    it was found on (never a local file). Its date is the publication date, otherwise the period-end date.
+    A filing is left out (and counted) if it has no link, no readable date, a date outside the last 365
+    days up to tomorrow, or the same link as one already listed (ignoring http/https, www and a trailing
+    slash). The rest are listed newest first.'
+  conditions:
+  - 'No link: left out (''no link'')'
+  - 'No date: left out (''undated'')'
+  - 'Filed more than 365 days ago or more than 1 day ahead: left out (''outside the window'')'
+  - 'Same link as one already listed: left out (''duplicate'')'
+  - The window is measured from the day the card is generated
+  - '''Document on file'' is true when the document has been downloaded successfully or generated from
+    text'
+  - 'Accepted dates: ISO format, YYYY/MM/DD, DD/MM/YYYY (day first), Unix seconds, and forms like ''May
+    12, 2026''; anything else is undated'
+  constants:
+  - label: Window (days)
+    ref: py:app.services.dashboard.filings_register:WINDOW_DAYS
+    stated: 365
+  example:
+    scenario: 'Six rows, generated on 5 Oct 2026: Annual Report 2025 (20 Mar 2026, document link), a copy
+      of it (21 Mar 2026, same link via the source page with www), Annual Report 2023 (Mar 2024), a notice
+      with no date, a half-year report with no link, and an 8-K filing dated 1 Sep 2025 (given as a Unix
+      timestamp).'
+    steps:
+    - 'Copy: same link after tidying, so a duplicate.'
+    - 'The 2023 report and the 8-K (1 Sep 2025) fall before 5 Oct 2025: outside the window.'
+    - 'Notice: undated.'
+    - 'Half-year report: no link.'
+    result: '1 of 6 listed (Annual Report 2025); left out: no link 1, outside the window 2, undated 1,
+      duplicate 1.'
+    verified: true
+    expect:
+    - 1
+    - 6
+    - no_url: 1
+      outside_window: 2
+      undated: 1
+      duplicate: 1
+    - - Annual Report 2025
+  output: The list of filings on record (stored with the card; not shown as a tile on the dashboard page,
+    but used by other parts of the app)
+  sources:
+  - hp-backend/src/app/services/dashboard/filings_register.py:register
+  - hp-backend/src/app/services/dashboard/filings_register.py:_entry
+  - hp-backend/src/app/services/dashboard/filings_register.py:_date
+  doc_source: 'Client answers opens_1 #10, opens_2 #11/#13, 18 Sep link rule (quoted in code)'
+  confidence: high
+- id: reported_financials
+  parent: exec_key_metrics
+  name: Filed financial figures (revenue, net income, employees)
+  kind: source
+  summary: Shows the latest whole-company figures the company reported, with growth, from figures read
+    and checked against its filings.
+  purpose: Shows the latest whole-company figures the company reported, with growth, from figures read
+    and checked against its filings.
+  inputs:
+  - 'Figures read from each filing document: period, values, page and verification checks'
+  logic: 'The figures are read from the filing documents in advance (AI reads them and each figure is
+    checked against its page). The choice of what to show is rule-based: for each of Revenue, Net income
+    and Employees, the newest usable full-year figure is picked. For Revenue and Net income, a newer interim
+    figure (quarter, half-year, nine months) is also shown when it is newer than the last full year or
+    when there is no full year. Cards appear in the order Revenue, Net income, Employees.'
+  conditions:
+  - Only figures that pass the usability check are used (see sub-rule)
+  - 'Nothing usable: no filed-figure cards (if no checked figures exist for the account, the figures collected
+    for strategic priorities are used instead; see source precedence)'
+  constants:
+  - label: Full-year period types
+    ref: py:app.services.dashboard.filings_financials:ANNUAL
+    stated:
+    - FY
+  - label: Interim period types
+    ref: py:app.services.dashboard.filings_financials:INTERIM
+    stated:
+    - Q1
+    - Q2
+    - Q3
+    - 1H
+    - 9M
+  - label: Metrics with interim cards
+    ref: py:app.services.dashboard.filings_financials:INTERIM_METRICS
+    stated:
+    - revenue
+    - net_income
+  example:
+    scenario: Acme has FY2025 (revenue 1,200 m USD verified with prior-year 1,000; net income 90 unverified;
+      employees 5,200 verified), FY2024 (revenue 1,000; net income 80 verified) and 1H 2026 (revenue 700
+      vs 600 a year earlier).
+    steps:
+    - Revenue FY2025 = USD 1,200 million, +20.0% from its own comparative.
+    - 'Revenue 1H 2026 is newer than FY2025 so it gets its own card: USD 700 million, +16.7% vs the same
+      half a year earlier.'
+    - Net income in FY2025 is not verified, so FY2024 (USD 80 million) is shown with a note that the latest
+      filing does not state it.
+    - Employees FY2025 = 5,200.
+    result: 'Cards: Revenue FY2025 USD 1,200 million +20.0%; Revenue (1H) 2026-1H USD 700 million +16.7%;
+      Net income FY2024 USD 80 million (fallback); Employees FY2025 5,200 employees.'
+    verified: true
+    expect:
+    - - Revenue
+      - USD 1,200 million
+      - FY2025
+      - +20.0%
+    - - Revenue (1H)
+      - USD 700 million
+      - 2026-1H
+      - +16.7%
+    - - Net income
+      - USD 80 million
+      - FY2024
+      - null
+    - - Employees
+      - 5,200 employees
+      - FY2025
+      - null
+  output: Filed-figure cards
+  sources:
+  - hp-backend/src/app/services/dashboard/filings_financials.py:reported_metrics
+  doc_source: HP_ABX_v3_final Feature 1 (quoted in code; document not in provided set)
+  confidence: high
+- id: financials_usable
+  parent: reported_financials
+  name: When a filed figure may be used
+  kind: guardrail
+  summary: Prevents unverified, segment-only or undated figures from being shown as company totals.
+  purpose: Prevents unverified, segment-only or undated figures from being shown as company totals.
+  inputs:
+  - 'For each figure: its verification check, value, scope, whether the filing is the account''s own company,
+    and the period end date'
+  logic: A figure is usable only if its check is 'verified', its value is a number, its scope is 'consolidated'
+    or 'standalone only', the filing's company match is 'same', 'different' or 'unknown', and the period
+    end is a valid date. Segment-only and parent-only figures are never used.
+  conditions:
+  - Scope must be consolidated or standalone only
+  - The check must be 'verified'
+  constants:
+  - label: Accepted scopes
+    ref: py:app.services.dashboard.filings_financials:GROUP_SCOPES
+    stated:
+    - consolidated
+    - standalone_only
+  example:
+    scenario: FY2025 net income 90 with check 'unverified'.
+    steps:
+    - Check is not 'verified'.
+    result: Not usable; the card falls back to an older verified year.
+    verified: true
+    expect: false
+  output: Usable or not usable
+  sources:
+  - hp-backend/src/app/services/dashboard/filings_financials.py:_usable
+  confidence: high
+- id: financials_selection_fallback
+  parent: reported_financials
+  name: Which filing's figure is shown, and fallback
+  kind: selection
+  summary: Shows the latest verified figure and says when an older filing had to be used.
+  purpose: Shows the latest verified figure and says when an older filing had to be used.
+  inputs:
+  - Figures from filings of one period type (full-year or interim)
+  logic: Among filings of the right type, usable figures more than 2 years (2 x 366 days) older than the
+    newest filing of that type are discarded. Figures from the account's own company ('same') win; if
+    there are none, figures from a filing that does not name its company ('unknown'); if neither, another
+    company's figures. The newest by period end (then publication date) is shown. If the newest filing
+    of that type does not state the figure, the last filing that does is used and a note records that
+    the latest filing does not state it (the note is kept but not shown to the client).
+  conditions:
+  - Fallback is limited to 2 years behind the newest filing of that type
+  - The account's own company beats a newer filing of another company
+  constants:
+  - label: Maximum fallback age (years)
+    ref: py:app.services.dashboard.filings_financials:MAX_FALLBACK_YEARS
+    stated: 2
+  output: Chosen figure per metric
+  sources:
+  - hp-backend/src/app/services/dashboard/filings_financials.py:_choose
+  - hp-backend/src/app/services/dashboard/filings_financials.py:_card
+  - hp-frontend/src/app/dashboard/page.tsx
+  confidence: high
+- id: financials_growth
+  parent: reported_financials
+  name: Period-on-period change
+  kind: score
+  summary: Shows growth only when two comparable figures exist.
+  purpose: Shows growth only when two comparable figures exist.
+  inputs:
+  - The chosen figure, its own prior-period value, or another filing's figure
+  logic: Growth is taken first from the same filing's own comparison figure, when that figure is non-zero
+    and its period end is a year earlier (within 20 days). Otherwise another filing is used whose period
+    end is a year earlier (within 20 days), from the same company (names compared allowing legal suffixes
+    and spelling variants) and in the same currency. Values are converted to the same scale (thousand,
+    million, billion, lakh, crore and so on) before comparing. A quarter is only compared with the same
+    quarter. If no comparable figure exists, no change is shown.
+  formula: change % = (current - previous) / previous (ignoring its sign) x 100, shown with one decimal
+    and a sign
+  conditions:
+  - The two periods must be a year apart, with a tolerance of 20 days
+  - Same currency and same company required when comparing across filings
+  - Interim figures are compared only with the same period type
+  constants:
+  - label: Year-apart tolerance (days)
+    ref: py:app.services.dashboard.filings_financials:YEAR_TOLERANCE_DAYS
+    stated: 20
+  example:
+    scenario: FY2025 revenue USD 1,200 million; the same filing reports FY2024 revenue 1,000.
+    steps:
+    - (1,200 - 1,000) / 1,000 x 100 = 20.0
+    result: +20.0% (up)
+    verified: true
+    expect: +20.0%
+  output: Change text, direction and the basis of the comparison
+  sources:
+  - hp-backend/src/app/services/dashboard/filings_financials.py:_change
+  - hp-backend/src/app/services/dashboard/filings_financials.py:_year_apart
+  confidence: high
+- id: financials_series_display
+  parent: reported_financials
+  name: History series and number formatting
+  kind: display
+  summary: Gives up to five years of history and readable amounts.
+  purpose: Gives up to five years of history and readable amounts.
+  inputs:
+  - Figures from filings of the same company and currency
+  - Each figure's scale and currency
+  logic: Full-year cards carry up to the 5 most recent years (the newest filing wins for a year it restated),
+    only from the same company and currency; a series of one year is not shown. An amount stated in thousands
+    that is 100,000 or more is shown in millions (the original value is kept). A currency is written before
+    the amount ('IDR 323,392 billion'); a count is written after it ('5,200 employees').
+  constants:
+  - label: Series years
+    ref: py:app.services.dashboard.filings_financials:SERIES_YEARS
+    stated: 5
+  - label: Show thousands as millions from
+    ref: py:app.services.dashboard.filings_financials:DISPLAY_IN_MILLIONS_FROM
+    stated: 100000
+  example:
+    scenario: Revenue of 250,000 in IDR thousands.
+    steps:
+    - 250,000 is 100,000 or more and the scale is thousands, so divide by 1,000.
+    result: IDR 250 million
+    verified: true
+    expect: IDR 250 million
+  output: Displayed value and history
+  sources:
+  - hp-backend/src/app/services/dashboard/filings_financials.py:_series
+  - hp-backend/src/app/services/dashboard/filings_financials.py:_display
+  - hp-backend/src/app/services/dashboard/priorities.py:_format_value
+  confidence: high
+- id: financials_entity_label
+  parent: reported_financials
+  name: Another company's figure is labelled
+  kind: display
+  summary: Stops a parent's or group member's figures being read as this account's.
+  purpose: Stops a parent's or group member's figures being read as this account's.
+  inputs:
+  - Whether each filing is from the account's own company, and the filing company's name
+  logic: If a filing is another company's ('different'), its card label gets that company's name ('Revenue
+    - <company>'). If a group account's own filings come from several group companies, every card names
+    its company. A filing that does not name its company ('unknown') is used but flagged as 'company unconfirmed'.
+  output: Metric label, company note and flags
+  sources:
+  - hp-backend/src/app/services/dashboard/filings_financials.py:_card
+  - hp-backend/src/app/services/dashboard/filings_financials.py:reported_metrics
+  confidence: high
+- id: ceo
+  parent: exec_key_metrics
+  name: CEO in the header
+  kind: selection
+  summary: Names the chief executive from the company's own filing.
+  purpose: Names the chief executive from the company's own filing.
+  inputs:
+  - 'Filing data: CEO name and title, whether the CEO was verified, whether the filing is the account''s
+    own company, and the period end'
+  logic: Only filings where the CEO was verified in the filing text and the filing is the account's own
+    company ('same') are used. The newest by period end wins.
+  example:
+    scenario: Acme's FY2025 annual report names Jane Doe, President Director, verified on page 5.
+    steps:
+    - Only that filing has a verified CEO for the same company.
+    result: Jane Doe (President Director), from Annual Report 2025, page 5, as of 2025-12-31.
+    verified: true
+    expect:
+      name: Jane Doe
+      title: President Director
+      source: AR2025.pdf p.5
+      as_of: '2025-12-31'
+      filing_label: Annual Report 2025
+  output: CEO name, title and source
+  sources:
+  - hp-backend/src/app/services/dashboard/filings_financials.py:ceo
+  confidence: high
+- id: reported_metrics_precedence
+  parent: exec_key_metrics
+  name: Which source the filed-figure cards come from
+  kind: source
+  summary: Keeps one owner for the filed figures so they don't overwrite each other.
+  purpose: Keeps one owner for the filed figures so they don't overwrite each other.
+  inputs:
+  - Figures read from the filings
+  - Figures collected from the company's filings while preparing strategic priorities
+  logic: 'When the checked filing figures give any card or a CEO, those are the Key Metrics cards. Otherwise
+    the screen falls back to the reported figures carried with Strategic Priorities, which come from the
+    evidence collected from the company''s filings: only whole-company tables (financial highlights and
+    market position), the newest period per metric per table, with the change versus the previous period
+    (a percentage, or a point difference for figures already in %; withheld when the earlier value is
+    missing or 0).'
+  conditions:
+  - When checked filing figures exist, the evidence-based figures never overwrite them
+  - Change for % metrics shows '+x.x pts', for others '+x.x%'
+  - Segment tables are never used
+  output: Filed-figure cards on Key Metrics or on Strategic Priorities
+  sources:
+  - hp-backend/src/app/services/extractors/executive_dashboard.py:extract_executive_dashboard
+  - hp-backend/src/app/services/dashboard/priorities.py:_reported_metrics
+  - hp-backend/src/app/services/dashboard/priorities.py:_publish_metrics
+  - hp-frontend/src/app/dashboard/page.tsx:reportedMetrics
+  confidence: high
+- id: exec_hiring_velocity
+  parent: null
+  name: Hiring Velocity tile (job postings, last 12 months)
+  kind: display
+  summary: Counts the account's job postings using exactly the same selection as the Hiring Signals page.
+  purpose: Counts the account's job postings using exactly the same selection as the Hiring Signals page.
+  inputs:
+  - 'The company''s job postings: company name, country code, location, first-seen date and title'
+  logic: Jobs pass a country check and then a 12-month window; open and closed postings both count. The
+    tile shows the count and up to 5 distinct job titles in the original order. If no job remains, the
+    card is empty and the tile is hidden.
+  conditions:
+  - 'A count of 0: the card is empty and the tile is not shown'
+  - Location is used only for the check and is never shown
+  example:
+    scenario: 'Five jobs for a Malaysian account: KL Malaysia (Mar 2026), Singapore (Apr 2026), blank
+      location (May 2026), ''Remote'' (Aug 2025), Penang Malaysia with no first-seen date.'
+    steps:
+    - 'Singapore job: other country, dropped.'
+    - 'Penang job: no first-seen date, dropped.'
+    - 'Remote job: first seen 1 Aug 2025, before the window start of 18 Sep 2025, dropped.'
+    - KL and blank-location jobs are kept.
+    result: '2 postings; sample roles Data Engineer, IT Support; dropped: other country 1, older than
+      the window 1, undated 1.'
+    verified: true
+    expect:
+    - 2
+    - - Data Engineer
+      - IT Support
+    - rules: Hiring_Signals_Rule_Set_Final.docx
+      rules_version: 2
+      account_country_code: MY
+      window_start: '2025-09-18'
+      window_end: '2026-09-18'
+      dropped_other_country: 1
+      dropped_older_than_window: 1
+      dropped_no_first_seen: 1
+  output: Job-posting count, sample roles and counts of jobs dropped
+  sources:
+  - hp-backend/src/app/services/extractors/hiring_signals.py:postings_summary
+  - hp-backend/src/app/services/hp/hiring_jobs.py:account_jobs
+  - scripts/split_account_data.py:select_job_openings
+  - hp-backend/src/app/services/hp/hiring_jobs.py:select_jobs
+  - hp-frontend/src/app/dashboard/page.tsx
+  doc_source: Hiring_Signals_Rule_Set_Final + client answers 1 Oct (#6)
+  confidence: high
+- id: hiring_country_code
+  parent: exec_hiring_velocity
+  name: Account's own country
+  kind: selection
+  summary: Works out which country the account is in, including rows shared by two countries.
+  purpose: Works out which country the account is in, including rows shared by two countries.
+  inputs:
+  - 'The company''s job postings: company names and country codes'
+  - The account's name
+  logic: For rows carrying two companies and two codes ('X - MY; Y - SG' with 'MY; SG'), the code paired
+    with the account's exact name is used. Otherwise the ' - XX' ending of the account name is used, then
+    the most common single code on the account's rows. Only AU, NZ, SG, MY, TH, ID, PH, VN, JP and KR
+    are recognised. If no code is found, the country check is skipped (and a note is made).
+  table:
+    columns:
+    - Code
+    - Country names looked for in the job location
+    rows:
+    - - AU
+      - Australia
+    - - NZ
+      - New Zealand
+    - - SG
+      - Singapore
+    - - MY
+      - Malaysia
+    - - TH
+      - Thailand
+    - - ID
+      - Indonesia
+    - - PH
+      - Philippines
+    - - VN
+      - Vietnam, Viet Nam
+    - - JP
+      - Japan
+    - - KR
+      - South Korea, Korea
+  output: Account country
+  sources:
+  - hp-backend/src/app/services/hp/hiring_jobs.py:account_country_code
+  - hp-backend/src/app/services/hp/hiring_jobs.py:ACCOUNT_COUNTRY_NAMES
+  confidence: high
+- id: hiring_country_check
+  parent: exec_hiring_velocity
+  name: Country check on job location
+  kind: guardrail
+  summary: Drops jobs located in another country.
+  purpose: Drops jobs located in another country.
+  inputs:
+  - Job location
+  logic: A job is dropped only when its location names a country and none of the named countries is the
+    account's. A blank location, or one naming no country ('Columbus, OH', 'Europe', 'Remote'), is kept
+    as the account's own country. Country names are matched as whole words, longest first, so 'North Korea'
+    is not read as 'Korea' and 'Papua New Guinea' is not read as 'Guinea'.
+  example:
+    scenario: Korean account (KR), five locations.
+    steps:
+    - '''Seoul, South Korea'': KR, kept.'
+    - '''Pyongyang, North Korea'': another country, dropped.'
+    - '''Columbus, OH'': no country, kept.'
+    - 'Blank: kept.'
+    - '''Tokyo, Japan'': dropped.'
+    result: Kept, dropped, kept, kept, dropped.
+    verified: true
+    expect:
+    - true
+    - false
+    - true
+    - true
+    - false
+  output: Kept or dropped
+  sources:
+  - hp-backend/src/app/services/hp/hiring_jobs.py:location_in_country
+  doc_source: Hiring_Signals_Rule_Set_Final, 'Preparing an account's jobs'
+  confidence: high
+- id: hiring_window
+  parent: exec_hiring_velocity
+  name: Last 12 months to the job data collection date
+  kind: filter
+  summary: Counts only recent postings, measured from when the data was collected.
+  purpose: Counts only recent postings, measured from when the data was collected.
+  inputs:
+  - Job first-seen date
+  logic: The window runs from 12 calendar months before the date the job data was collected (18 Sep 2026)
+    to that date, so it starts on 18 Sep 2025. A job first seen before the start is dropped; a job with
+    no first-seen date is dropped. There is no upper cut-off.
+  conditions:
+  - Only the first-seen date is used (not the posting date)
+  - The reference date is fixed at the data collection date, not today
+  constants:
+  - label: Job data collection date
+    ref: py:app.services.hp.hiring_jobs:PREDICTLEADS_PULL_DATE
+    stated: '2026-09-18'
+  - label: Window (months)
+    ref: py:app.services.hp.hiring_jobs:WINDOW_MONTHS
+    stated: 12
+  example:
+    scenario: Data collected on 18 Sep 2026.
+    steps:
+    - 12 months back gives 18 Sep 2025.
+    result: Window 2025-09-18 to 2026-09-18
+    verified: true
+    expect: '2025-09-18'
+  output: Window start and end
+  sources:
+  - hp-backend/src/app/services/hp/hiring_jobs.py:window_start
+  - hp-backend/src/app/services/hp/hiring_jobs.py:select_jobs
+  doc_source: 'Client answer #6, 1 Oct (quoted in code)'
+  confidence: high
+- id: urgency_score
+  parent: null
+  name: Urgency & Opportunity Score
+  kind: score
+  summary: One 0-100 number for how urgent the account is, from four weighted drivers.
+  purpose: One 0-100 number for how urgent the account is, from four weighted drivers.
+  inputs:
+  - The company profile
+  - The company's installed technology and website technology
+  - The company's online research topics
+  - HP's own interest scores for its product categories
+  - The company's social-media workforce figures
+  - The company's job postings
+  - Recent news coverage and company events
+  logic: Each of the four drivers is scored out of 100 (limited to 0-100). Each driver's contribution
+    is its score times its weight, rounded to 2 decimals (halves round up); the exact score is the sum
+    of the four contributions (2 decimals), and the headline score is that sum rounded to a whole number
+    (halves round up). The score is shown only when at least 60% of the weighted inputs are present (see
+    the 60% coverage gate). AI is not used anywhere in this score.
+  formula: Urgency = 20% x Workplace Technology & OS + 25% x AI & Workstation + 30% x Growth & Expansion
+    + 25% x HP Solution Intent
+  conditions:
+  - Each driver is limited to 0-100
+  - Contribution = driver score x weight, rounded to 2 decimals; headline = sum of contributions rounded
+    to a whole number (halves round up)
+  - The four weights must add up to 100%
+  table:
+    columns:
+    - Driver
+    - Weight
+    rows:
+    - - Workplace Technology and OS Opportunity
+      - 20%
+    - - AI and Workstation Opportunity
+      - 25%
+    - - Growth and Expansion Signals
+      - 30%
+    - - HP Solution Intent
+      - 25%
+  constants:
+  - label: Workplace Technology and OS weight
+    ref: scoring:urgency.weights.workplace_os
+    stated: 0.2
+  - label: AI and Workstation weight
+    ref: scoring:urgency.weights.ai_workstation
+    stated: 0.25
+  - label: Growth and Expansion weight
+    ref: scoring:urgency.weights.growth_expansion
+    stated: 0.3
+  - label: HP Solution Intent weight
+    ref: scoring:urgency.weights.hp_solution_intent
+    stated: 0.25
+  - label: Driver maximum
+    ref: scoring:urgency.driver_max
+    stated: 100
+  example:
+    scenario: 'Astra, the client''s worked example: drivers 75, 63.3, 70 and 50.4.'
+    steps:
+    - 75 x 20% = 15.00
+    - 63.3 x 25% = 15.825, rounded half-up to 15.83
+    - 70 x 30% = 21.00
+    - 50.4 x 25% = 12.60
+    - Sum = 64.43; coverage 100%
+    result: Exact 64.43, headline Urgency Score 64/100
+    verified: true
+    expect:
+      score: 64
+      coverage_percent: 100.0
+      publishable: true
+      weighted_contributions:
+        workplace_os: 15.0
+        ai_workstation: 15.83
+        growth_expansion: 21.0
+        hp_solution_intent: 12.6
+      exact_score: 64.43
+  output: Score (0-100) or withheld, drivers, weighted contributions, exact score and coverage percentage
+  sources:
+  - hp-backend/src/app/services/dashboard/urgency.py:score
+  - hp-backend/src/app/services/dashboard/urgency.py:_round_half_up
+  - hp-backend/src/app/services/dashboard/urgency.py:build_urgency_score
+  - hp-backend/config/scoring.yaml:urgency
+  doc_source: HP_Urgency_Score_Updated_Final (client), 'Overall scoring model' and 'Astra worked result'
+  confidence: high
+- id: urgency_missing_input
+  parent: urgency_score
+  name: Missing-input rule
+  kind: guardrail
+  summary: A missing data source costs only its own component, not the whole score.
+  purpose: A missing data source costs only its own component, not the whole score.
+  inputs:
+  - The information behind each component
+  logic: A component whose input is absent scores 0 and is marked as 'missing input'; the other components
+    are still calculated. A driver that could not be calculated at all is scored 0, with one 'All components'
+    item marked missing. The missing components are listed, and on screen they read 'No signal observed'
+    (there is no partial-data flag on the card). The card status is 'partial' when any component is missing,
+    otherwise 'available'.
+  conditions:
+  - A missing component scores 0 points and is flagged as a missing input
+  - The status is 'partial' if any input is missing
+  output: List of missing inputs and card status
+  sources:
+  - hp-backend/src/app/services/dashboard/urgency.py:_term
+  - hp-backend/src/app/services/dashboard/urgency.py:score
+  - hp-backend/src/app/services/dashboard/urgency.py:build_urgency_score
+  - hp-backend/src/app/services/dashboard/urgency.py:rationale_lines
+  doc_source: 'HP_Urgency_Score_Updated_Final (client): ''Missing inputs contribute 0 points only to the
+    affected component.'''
+  confidence: high
+- id: urgency_coverage_gate
+  parent: urgency_score
+  name: 60% coverage gate
+  kind: guardrail
+  summary: Withholds the overall number when too little of the account was measured.
+  purpose: Withholds the overall number when too little of the account was measured.
+  inputs:
+  - Which components have their information present
+  logic: 'Coverage is measured on inputs, not points: for each driver, the share of its components'' maximum
+    points whose input is present, times the driver''s weight, summed and shown as a percentage (1 decimal).
+    A component that is present but scores 0 counts as covered. If coverage is below 60%, the headline
+    score is withheld (shown as ''No signal observed'' with a tooltip giving the coverage); the drivers
+    are still shown and the score that would have been shown is kept for reference.'
+  formula: 'coverage % = 100 x the sum, over the four drivers, of: driver weight x (maximum points of
+    components with input present / maximum points of all components of that driver)'
+  conditions:
+  - The score is shown only if coverage is 60.0% or more
+  - A driver with no itemised components counts as fully covered
+  constants:
+  - label: Minimum coverage (%)
+    ref: py:app.services.dashboard.urgency:COVERAGE_MIN_PERCENT
+    stated: 60.0
+  example:
+    scenario: An account with only a company profile (1,001-5,000 employees) and 25 recent job postings;
+      no technology, research, news or social data.
+    steps:
+    - 'Workplace: account scale covered (30 of 100 max points) -> 0.20 x 0.30 = 6%'
+    - 'Growth: hiring volume covered (50 of 100) -> 0.30 x 0.50 = 15%'
+    - AI and HP Solution Intent drivers not calculated -> 0%
+    - Coverage 21.0% < 60%
+    result: Score withheld (it would have been 9); coverage 21.0%
+    verified: true
+    expect:
+      score: null
+      coverage_percent: 21.0
+      publishable: false
+      withheld_score: 9
+  output: Whether the score is shown, coverage percentage and the withheld score
+  sources:
+  - hp-backend/src/app/services/dashboard/urgency.py:score
+  - hp-frontend/src/app/dashboard/page.tsx
+  doc_source: Client email 16 Sep (quoted in code); not in the urgency PDF
+  confidence: high
+- id: urgency_inputs
+  parent: urgency_score
+  name: Where each urgency input comes from
+  kind: source
+  summary: Records which information feeds which part of the score.
+  purpose: Records which information feeds which part of the score.
+  inputs:
+  - Described below
+  logic: 'Employee band: the employee-size range in the company profile. Technology names: the company''s
+    installed technology and website technology, combined in the same way as on the Intent tab. Research
+    topics: the company''s online research topics with their scores. HP categories (and the Workstations
+    score): HP''s own interest scores for its product categories. Workforce history: dated counts of associated
+    members on the company''s social-media profile. Jobs: the same job postings the Hiring Velocity tile
+    counts (in the company''s own country, first seen in the 12 months before the job data was collected).
+    News: recent news coverage plus company events.'
+  conditions:
+  - Urgency hiring starts from the same job postings as the Hiring Velocity tile
+  - The 12-month window is counted back from the day the score is generated
+  output: Driver inputs
+  sources:
+  - hp-backend/src/app/services/dashboard/urgency.py:build_urgency_score
+  - hp-backend/src/app/services/dashboard/urgency.py:_tech_names
+  - hp-backend/src/app/services/dashboard/urgency.py:_hp_categories
+  - hp-backend/src/app/services/dashboard/urgency.py:_social_stats
+  - hp-backend/src/app/services/dashboard/urgency.py:_workstation_intent_score
+  confidence: high
+- id: urgency_window
+  parent: urgency_score
+  name: 12-month window for jobs and news
+  kind: filter
+  summary: Only recent jobs and news count toward urgency.
+  purpose: Only recent jobs and news count toward urgency.
+  inputs:
+  - News event date
+  - Job posting date and first-seen date
+  logic: A news event or job counts only if its date is within 365 days before the scoring date (the day
+    the score is generated). A news event with no usable date is left out rather than assumed to be recent.
+    Dates must be written year-month-day (YYYY-MM-DD).
+  constants:
+  - label: Window (days)
+    ref: scoring:urgency.window_days
+    stated: 365
+  output: Eligible events and jobs
+  sources:
+  - hp-backend/src/app/services/dashboard/urgency.py:_recent
+  - hp-backend/src/app/services/dashboard/urgency.py:_parse_date
+  doc_source: 'HP_Urgency_Score_Updated_Final (client): ''only records dated within the latest 12 months
+    are eligible'''
+  confidence: high
+- id: urgency_explanation
+  parent: urgency_score
+  name: Driver explanation lines (i button)
+  kind: display
+  summary: Explains each driver's score in short bullets.
+  purpose: Explains each driver's score in short bullets.
+  inputs:
+  - The calculated driver components
+  logic: 'For each driver the explanation is built from the calculated numbers only: first ''Weight X%
+    of the total.'', then one line per component ''Label: points/max - reason'' (a missing component reads
+    ''No signal observed''), then notes and caveats. Long dashes are replaced by plain hyphens. Evidence
+    items supporting more than one driver are linked to each of them and listed as shared evidence.'
+  example:
+    scenario: 1,001-5,000 employees, technologies 'Windows 11' and 'Microsoft Intune'.
+    steps:
+    - Account scale 15/30
+    - 'OS: Windows only 25/40'
+    - 'Footprint: ''Microsoft Intune'' matches two list entries (intune, microsoft intune) -> counted
+      as 2 -> 10/30'
+    result: 'Lines: ''Weight 20.0% of the total.'', ''Account scale: 15.0/30 - ...'', ''OS environment:
+      25.0/40 - ...'', ''Workplace technology footprint: 10.0/30 - 2 distinct ... (intune, microsoft intune)'',
+      then two caveats.'
+    verified: true
+    expect:
+    - Weight 20.0% of the total.
+    - 'Account scale: 15.0/30 - employee range ''1001-5000'' on the PDF''s size ladder'
+    - 'OS environment: 25.0/40 - windows detected - highest applicable rule (windows)'
+    - 'Workplace technology footprint: 10.0/30 - 2 distinct qualifying HP-relevant workplace technologies
+      (intune, microsoft intune)'
+    - 'Caveat: A technology qualifies for the footprint component only where the PDF names it or its category.
+      Technologies outside that list do not count, so this component under-counts rather than over-counts.'
+    - 'Caveat: Account scale is the employee range''s position on a fixed ladder; no number is parsed
+      from the band string.'
+  output: Explanation lines and shared evidence
+  sources:
+  - hp-backend/src/app/services/dashboard/urgency.py:rationale_lines
+  - hp-backend/src/app/services/dashboard/urgency.py:score
+  doc_source: Client feedback 27 Sep and 1 Oct (quoted in code)
+  confidence: high
+- id: driver_workplace_os
+  parent: urgency_score
+  name: 'Driver 1: Workplace Technology and OS Opportunity (20%)'
+  kind: score
+  summary: Scale and complexity of the device and workplace environment.
+  purpose: Scale and complexity of the device and workplace environment.
+  inputs:
+  - Employee band
+  - Technology names
+  logic: Sum of Account scale (max 30), OS environment (max 40) and Workplace technology footprint (max
+    30), limited to 100.
+  formula: Account scale + OS environment + Workplace technology footprint
+  example:
+    scenario: 'Astra: 10001+ employees; Linux, Microsoft Windows OS, Apple iOS, Microsoft Teams, VMware.'
+    steps:
+    - Scale 25
+    - 'OS: Linux + Windows = 40'
+    - 'Footprint: Teams and VMware = 2 -> 10'
+    result: 75/100
+    verified: true
+    expect: 75.0
+  output: Driver value 0-100
+  sources:
+  - hp-backend/src/app/services/dashboard/urgency.py:workplace_os
+  doc_source: HP_Urgency_Score_Updated_Final (client) section 1
+  confidence: high
+- id: wos_account_scale
+  parent: driver_workplace_os
+  name: Account scale (30 points)
+  kind: score
+  summary: Bigger companies score higher.
+  purpose: Bigger companies score higher.
+  inputs:
+  - 'The company profile: employee-size range'
+  logic: 'The range text is compared with the ladder below, ignoring capital letters and every character
+    except letters, digits and ''+''; no number is read out of it. A range that does not match any ladder
+    row scores 0. ''10001+'', ''50001+'' and ''50000 or more'' are recognised. These ranges are not recognised
+    and score 0: 1-10, 11-50, 51-200, 201-500, 501-1000, 1-250 and 250-1000.'
+  conditions:
+  - The label must match exactly; it is never read as a number
+  - 'In the 220 accounts currently loaded: 10001+ (177 accounts) = 25, 5001-10000 (17) = 20, 1001-5000
+    (14) = 15; 1-10, 11-50, 51-200, 201-500, 501-1000 (12 accounts) = 0'
+  table:
+    columns:
+    - Employee range
+    - Points
+    rows:
+    - - 50000+
+      - 30
+    - - 10001-49999 (also '10001+')
+      - 25
+    - - 5001-10000
+      - 20
+    - - 1001-5000
+      - 15
+    - - 251-1000
+      - 10
+    - - below250
+      - 5
+    - - Not matched / blank
+      - 0
+  constants:
+  - label: Employee bands
+    ref: scoring:urgency.employee_bands
+    stated:
+    - - 50000+
+      - 30
+    - - 10001-49999
+      - 25
+    - - 5001-10000
+      - 20
+    - - 1001-5000
+      - 15
+    - - 251-1000
+      - 10
+    - - below250
+      - 5
+  - label: Maximum
+    ref: scoring:urgency.account_scale_max
+    stated: 30
+  - label: Accepted alternative spellings
+    ref: py:app.services.dashboard.urgency:EMPLOYEE_BAND_ALIASES
+  example:
+    scenario: 'Eight bands: ''50,000+'', ''10001+'', ''5001-10000'', ''1001-5000'', ''201-500'', ''11-50'',
+      ''10001-50000'', blank.'
+    steps:
+    - Each range is tidied up and looked up.
+    result: 30, 25, 20, 15, 0, 0, 0, 0
+    verified: true
+    expect:
+    - 30
+    - 25
+    - 20
+    - 15
+    - 0
+    - 0
+    - 0
+    - 0
+  output: 0-30 points
+  sources:
+  - hp-backend/src/app/services/dashboard/urgency.py:_employee_band_points
+  - hp-backend/src/app/services/dashboard/urgency.py:_normalise_band
+  - hp-backend/src/app/services/dashboard/urgency.py:EMPLOYEE_BAND_ALIASES
+  doc_source: HP_Urgency_Score_Updated_Final (client) 1A
+  confidence: high
+- id: wos_os_environment
+  parent: driver_workplace_os
+  name: OS environment (40 points)
+  kind: score
+  summary: Mixed Linux and Windows estates score highest.
+  purpose: Mixed Linux and Windows estates score highest.
+  inputs:
+  - Technology names (installed technology and website technology)
+  logic: All technology names are joined into one text, ignoring capital letters, and searched for operating-system
+    family words. This is a plain text search, so a word can match inside a longer word. The highest applicable
+    combination below wins.
+  conditions:
+  - 'Windows: windows, microsoft windows'
+  - 'Apple: macos, mac os, osx, os x, ios, ipados, apple ios (iOS counts as Apple)'
+  - 'Linux: linux, centos, ubuntu, red hat, redhat, debian, suse, fedora'
+  - 'Other: chromeos, chrome os, unix, android, solaris, aix'
+  - 'Plain text search: for example ''Adobe Creative Studios'' contains ''ios'' and is detected as Apple'
+  table:
+    columns:
+    - Detected OS families
+    - Points
+    rows:
+    - - Linux + Windows
+      - 40
+    - - Linux + Apple
+      - 35
+    - - Linux + Other
+      - 35
+    - - Windows + Apple
+      - 30
+    - - Windows + Other
+      - 30
+    - - Apple + Other
+      - 20
+    - - Linux only
+      - 30
+    - - Windows only
+      - 25
+    - - Apple only
+      - 15
+    - - Other only
+      - 10
+    - - None
+      - 0
+  constants:
+  - label: Maximum
+    ref: scoring:urgency.os_environment_max
+    stated: 40
+  - label: Points by combination
+    ref: py:app.services.dashboard.urgency:OS_COMBINATION_POINTS
+  - label: Words that identify each OS family
+    ref: py:app.services.dashboard.urgency:OS_FAMILIES
+  example:
+    scenario: 'Astra: Linux, Microsoft Windows OS, Apple iOS.'
+    steps:
+    - 'Families: linux, windows, apple'
+    - Linux+Windows 40 beats Linux+Apple 35 and Windows+Apple 30
+    result: 40/40
+    verified: true
+    expect: 40.0
+  output: 0-40 points
+  sources:
+  - hp-backend/src/app/services/dashboard/urgency.py:workplace_os
+  doc_source: HP_Urgency_Score_Updated_Final (client) 1B
+  confidence: high
+- id: wos_footprint
+  parent: driver_workplace_os
+  name: Workplace technology footprint (30 points)
+  kind: score
+  uses:
+  - workplace_technologies
+  summary: Breadth of HP-relevant workplace tools, capped.
+  purpose: Breadth of HP-relevant workplace tools, capped.
+  inputs:
+  - Technology names
+  logic: 'Each technology name is checked against a fixed list of qualifying names (the name must contain
+    the list entry). The count is the number of distinct list entries matched, not the number of products:
+    one product can match several entries (for example ''VMware vSphere'' matches ''vmware'', ''vsphere''
+    and ''vmware vsphere''; ''Microsoft Intune'' matches ''intune'' and ''microsoft intune''). Anything
+    not on the list does not count.'
+  conditions:
+  - 'Qualifying list: microsoft intune, intune, microsoft entra, entra id, azure ad, azure active directory,
+    servicenow, power bi, tableau, power automate, microsoft teams, vmware vsphere, vmware esxi, vmware
+    horizon, vsphere, esxi, vmware, microsoft 365, office 365, google workspace, g suite, sharepoint,
+    zoom, webex, splunk'
+  - No further check of HP relevance beyond the list
+  table:
+    columns:
+    - Distinct qualifying entries
+    - Points
+    rows:
+    - - 5 or more
+      - 30
+    - - 3-4
+      - 20
+    - - 1-2
+      - 10
+    - - '0'
+      - 0
+  constants:
+  - label: Bands
+    ref: scoring:urgency.workplace_footprint_bands
+    stated:
+    - - 5
+      - 30
+    - - 3
+      - 20
+    - - 1
+      - 10
+  - label: Maximum
+    ref: scoring:urgency.workplace_footprint_max
+    stated: 30
+  - label: Qualifying list
+    ref: py:app.services.dashboard.urgency:WORKPLACE_TECHNOLOGIES
+  example:
+    scenario: 'Stack has two products: ''VMware vSphere'' and ''Microsoft Intune''.'
+    steps:
+    - VMware vSphere matches vmware, vsphere, vmware vsphere (3)
+    - Microsoft Intune matches intune, microsoft intune (2)
+    - 5 distinct entries -> top band
+    result: 30/30
+    verified: true
+    expect: 30.0
+  output: 0-30 points
+  sources:
+  - hp-backend/src/app/services/dashboard/urgency.py:workplace_os
+  - hp-backend/src/app/services/dashboard/urgency.py:WORKPLACE_TECHNOLOGIES
+  doc_source: HP_Urgency_Score_Updated_Final (client) 1C
+  confidence: high
+- id: driver_ai_workstation
+  parent: urgency_score
+  name: 'Driver 2: AI and Workstation Opportunity (25%)'
+  kind: score
+  summary: AI/ML breadth and depth, workstation research and recent AI initiatives.
+  purpose: AI/ML breadth and depth, workstation research and recent AI initiatives.
+  inputs:
+  - The company's online research topics
+  - Technology names
+  - HP's interest score for Workstations
+  - News
+  logic: Sum of AI/ML breadth (max 35), AI/ML depth (max 35), Workstation intent (max 15) and Recent AI
+    initiatives (max 15), limited to 100.
+  formula: AI/ML breadth + AI/ML depth + Workstation intent + Recent AI initiatives
+  example:
+    scenario: 'Topics Artificial Intelligence, Machine Learning, HTML5, Vector Database; tech TensorFlow,
+      Salesforce; Workstations intent 26; news: ''Acme opens AI centre of excellence in Jakarta'' twice
+      (10-11 Jun 2026) and ''Acme upgrades ERP system''. Scored 5 Oct 2026.'
+    steps:
+    - 'Breadth: AI and ML families = 2 -> 21'
+    - 'Depth: 3 AI topics (HTML5 does not match ''ml'' as a whole word) + TensorFlow = 4 items -> 7'
+    - 'Workstation: 26/100 x 15 = 3.9'
+    - 'AI events: identical headline counted once, ERP not AI -> 1 x 5 = 5'
+    result: 21 + 7 + 3.9 + 5 = 36.9/100
+    verified: true
+    expect: 36.9
+  output: Driver value 0-100
+  sources:
+  - hp-backend/src/app/services/dashboard/urgency.py:ai_workstation
+  doc_source: HP_Urgency_Score_Updated_Final (client) section 2
+  confidence: high
+- id: ai_breadth
+  parent: driver_ai_workstation
+  name: AI/ML breadth (35 points)
+  kind: score
+  summary: How many of the four core AI/ML families appear in the research topics.
+  purpose: How many of the four core AI/ML families appear in the research topics.
+  inputs:
+  - Research topic names
+  logic: A family is present if any topic contains one of its words; short acronyms (ai, ml, llm, vllm,
+    genai) must appear as whole words. Each family counts once.
+  conditions:
+  - 'AI: ''artificial intelligence'', ''ai'''
+  - 'ML: ''machine learning'', ''ml'''
+  - 'GenAI: ''generative ai'', ''genai'', ''gen ai'''
+  - 'LLM: ''llm'', ''large language model'', ''vllm'''
+  - The topic's score is not considered; any listed topic counts
+  table:
+    columns:
+    - Core families found
+    - Points
+    rows:
+    - - 4
+      - 35
+    - - 3
+      - 28
+    - - 2
+      - 21
+    - - 1
+      - 14
+    - - 0
+      - 0
+  constants:
+  - label: Points by family count
+    ref: scoring:urgency.ai_breadth_points
+    stated:
+      '4': 35
+      '3': 28
+      '2': 21
+      '1': 14
+      '0': 0
+  - label: Maximum
+    ref: scoring:urgency.ai_breadth_max
+    stated: 35
+  example:
+    scenario: Astra topics include artificial intelligence, machine learning, generative ai, no LLM.
+    steps:
+    - 3 families
+    result: 28/35
+    verified: true
+    expect: 28.0
+  output: 0-35 points
+  sources:
+  - hp-backend/src/app/services/dashboard/urgency.py:ai_workstation
+  - hp-backend/src/app/services/dashboard/urgency.py:AI_CORE_FAMILIES
+  doc_source: HP_Urgency_Score_Updated_Final (client) 2A Breadth
+  confidence: high
+- id: ai_depth
+  parent: driver_ai_workstation
+  name: AI/ML depth (35 points)
+  kind: score
+  summary: How much detailed AI/ML evidence exists.
+  purpose: How much detailed AI/ML evidence exists.
+  inputs:
+  - Research topic names
+  - Technology names
+  logic: The count of distinct research topics containing an AI/ML term (short acronyms as whole words)
+    plus the distinct AI/ML technologies found in the technology list. Topics that also define a breadth
+    family (for example 'Artificial Intelligence') are counted here too.
+  conditions:
+  - 'Research topic terms: ai, artificial intelligence, machine learning, ml, deep learning, neural, generative
+    ai, genai, llm, large language model, openai, gpt, vector database, model training, inference, mlops,
+    ai chips, computer vision, nlp, natural language processing, transformer, embedding'
+  - 'Technologies: pytorch, tensorflow, keras, scikit-learn, scikit learn, sklearn, spark mllib, mllib,
+    hugging face, huggingface, onnx, xgboost, lightgbm, mlflow, kubeflow, sagemaker, vertex ai, azure
+    machine learning, databricks ml, openai, anthropic, langchain, nvidia cuda, cudnn, tensorrt (each
+    list entry matched counts once)'
+  table:
+    columns:
+    - Evidence items
+    - Points
+    rows:
+    - - 20 or more
+      - 35
+    - - 15-19
+      - 28
+    - - 10-14
+      - 21
+    - - 5-9
+      - 14
+    - - 1-4
+      - 7
+    - - '0'
+      - 0
+  constants:
+  - label: Bands
+    ref: scoring:urgency.ai_depth_bands
+    stated:
+    - - 20
+      - 35
+    - - 15
+      - 28
+    - - 10
+      - 21
+    - - 5
+      - 14
+    - - 1
+      - 7
+  - label: Maximum
+    ref: scoring:urgency.ai_depth_max
+    stated: 35
+  example:
+    scenario: 'Astra: 16 AI topics + PyTorch, Keras, scikit-learn, Apache Spark MLlib.'
+    steps:
+    - 16 + 4 = 20 items
+    result: 35/35
+    verified: true
+    expect: 35.0
+  output: 0-35 points
+  sources:
+  - hp-backend/src/app/services/dashboard/urgency.py:ai_workstation
+  - hp-backend/src/app/services/dashboard/urgency.py:AI_DEPTH_TERMS
+  - hp-backend/src/app/services/dashboard/urgency.py:AI_ML_TECHNOLOGIES
+  doc_source: HP_Urgency_Score_Updated_Final (client) 2A Depth
+  confidence: high
+- id: ai_workstation_intent
+  parent: driver_ai_workstation
+  name: Workstation intent (15 points)
+  kind: score
+  summary: Research interest in workstations.
+  purpose: Research interest in workstations.
+  inputs:
+  - HP's own interest score for the first product category whose name contains 'workstation'
+  logic: 'Linear: the Workstations score out of 100 times 15. If there is no such category the result
+    is 0 and it is marked missing. A score of 0 gives 0 (counted as covered).'
+  formula: Workstation score / 100 x 15
+  constants:
+  - label: Maximum
+    ref: scoring:urgency.workstation_intent_max
+    stated: 15
+  example:
+    scenario: Astra Workstations score 2.
+    steps:
+    - 2 / 100 x 15 = 0.3
+    result: 0.3/15
+    verified: true
+    expect: 0.3
+  output: 0-15 points
+  sources:
+  - hp-backend/src/app/services/dashboard/urgency.py:ai_workstation
+  doc_source: HP_Urgency_Score_Updated_Final (client) 2B
+  confidence: high
+- id: ai_recent_events
+  parent: driver_ai_workstation
+  name: Recent AI initiatives (15 points)
+  kind: score
+  summary: Credits AI-specific news in the last 12 months.
+  purpose: Credits AI-specific news in the last 12 months.
+  inputs:
+  - News headlines and dates
+  logic: A dated event within 365 days qualifies if its headline contains an AI event phrase. Each distinct
+    headline text scores 5, up to a maximum of 15. Only identical headlines are merged; there is no check
+    by AI or against the original sources.
+  formula: 5 x distinct qualifying headlines, up to a maximum of 15
+  conditions:
+  - 'Phrases: artificial intelligence, machine learning, generative ai, genai, large language model, llm,
+    ai centre/center of excellence, ai infrastructure, ai partnership, ai investment, ai lab, ai research,
+    deep learning'
+  - Undated events are left out
+  - 'No news at all: marked missing'
+  constants:
+  - label: Points per event
+    ref: scoring:urgency.points_per_ai_event
+    stated: 5
+  - label: Maximum
+    ref: scoring:urgency.ai_event_max
+    stated: 15
+  example:
+    scenario: Two copies of 'Acme opens AI centre of excellence in Jakarta' and 'Acme upgrades ERP system'.
+    steps:
+    - Identical headlines merged -> 1
+    - ERP headline has no AI phrase
+    result: 5/15
+    verified: true
+    expect: 5.0
+  output: 0-15 points
+  sources:
+  - hp-backend/src/app/services/dashboard/urgency.py:ai_workstation
+  - hp-backend/src/app/services/dashboard/urgency.py:AI_EVENT_TERMS
+  doc_source: HP_Urgency_Score_Updated_Final (client) 2C
+  confidence: high
+- id: driver_growth_expansion
+  parent: urgency_score
+  name: 'Driver 3: Growth and Expansion Signals (30%)'
+  kind: score
+  summary: Workforce growth, recent hiring and expansion news (replaces the former separate Hiring driver).
+  purpose: Workforce growth, recent hiring and expansion news (replaces the former separate Hiring driver).
+  inputs:
+  - The company's social-media workforce figures
+  - Job postings
+  - News
+  logic: Sum of Workforce growth proxy (max 25), Recent hiring volume (max 50) and Verified growth and
+    expansion events (max 25), limited to 100.
+  formula: Workforce growth + Hiring volume + Growth events
+  example:
+    scenario: 'Members 1,000 (1 Oct 2025) -> 1,035 (1 Sep 2026); 30 open jobs posted May 2026, 5 jobs
+      with a blank posting date but first seen Jan 2026, 10 closed jobs from 2024; news: new plant in
+      Vietnam, acquires local distributor, wins award. Scored 5 Oct 2026.'
+    steps:
+    - Growth 3.5% -> 7.5
+    - 35 eligible jobs -> 20
+    - Plant and acquisition qualify, award excluded -> 2 x 10 = 20
+    result: 7.5 + 20 + 20 = 47.5/100
+    verified: true
+    expect: 47.5
+  output: Driver value 0-100
+  sources:
+  - hp-backend/src/app/services/dashboard/urgency.py:growth_expansion
+  doc_source: HP_Urgency_Score_Updated_Final (client) section 3
+  confidence: high
+- id: growth_workforce
+  parent: driver_growth_expansion
+  name: Workforce growth proxy (25 points)
+  kind: score
+  summary: Growth in LinkedIn associated members as a headcount proxy.
+  purpose: Growth in LinkedIn associated members as a headcount proxy.
+  inputs:
+  - Dated counts of associated members on the company's social-media profile
+  logic: Needs at least two dated observations. Growth is measured between the earliest and the latest
+    observation on file, whatever the time between them. Zero, negative or growth under 1% scores 0. Fewer
+    than two observations scores 0 and is marked missing.
+  formula: Growth % = (latest - earliest) / earliest x 100
+  table:
+    columns:
+    - Growth
+    - Points
+    rows:
+    - - 20% or more
+      - 25
+    - - 10% to under 20%
+      - 20
+    - - 5% to under 10%
+      - 15
+    - - 1% to under 5%
+      - 7.5
+    - - under 1%, zero or negative
+      - 0
+    - - fewer than 2 observations
+      - 0
+  constants:
+  - label: Bands
+    ref: scoring:urgency.growth_bands
+    stated:
+    - - 20.0
+      - 25
+    - - 10.0
+      - 20
+    - - 5.0
+      - 15
+    - - 1.0
+      - 7.5
+  - label: Maximum
+    ref: py:app.services.dashboard.urgency:GROWTH_MAX
+    stated: 25
+  example:
+    scenario: 'Astra: 14,217 on 31 Jul 2025 and 16,781 on 30 Jun 2026.'
+    steps:
+    - (16,781 - 14,217) / 14,217 = 18.0%
+    result: 20/25
+    verified: true
+    expect: 20.0
+  output: 0-25 points
+  sources:
+  - hp-backend/src/app/services/dashboard/urgency.py:growth_expansion
+  - hp-backend/src/app/services/dashboard/urgency.py:_social_stats
+  doc_source: HP_Urgency_Score_Updated_Final (client) 3A
+  confidence: high
+- id: growth_hiring_volume
+  parent: driver_growth_expansion
+  name: Recent hiring volume (50 points)
+  kind: score
+  summary: Number of job postings in the last 12 months.
+  purpose: Number of job postings in the last 12 months.
+  inputs:
+  - 'Job postings: posting date, first-seen date and status'
+  logic: A job counts if its posting date (or, when that is blank, its first-seen date) is within 365
+    days before the scoring date. Closed, open and blank-status jobs all count. Jobs with neither date
+    are left out and noted. Only jobs in the company's own country, first seen in the 12 months before
+    the job data was collected, are considered at all - the same jobs the Hiring Velocity tile counts.
+  table:
+    columns:
+    - Eligible jobs
+    - Points
+    rows:
+    - - 200 or more
+      - 50
+    - - 100-199
+      - 40
+    - - 50-99
+      - 30
+    - - 20-49
+      - 20
+    - - 5-19
+      - 10
+    - - below 5
+      - 0
+  constants:
+  - label: Bands
+    ref: scoring:urgency.hiring_volume_bands
+    stated:
+    - - 200
+      - 50
+    - - 100
+      - 40
+    - - 50
+      - 30
+    - - 20
+      - 20
+    - - 5
+      - 10
+  - label: Maximum
+    ref: scoring:urgency.hiring_volume_max
+    stated: 50
+  example:
+    scenario: 'Astra: 60 closed and 40 blank-status jobs posted 1 Mar 2026.'
+    steps:
+    - All 100 eligible
+    result: 40/50
+    verified: true
+    expect: 40.0
+  output: 0-50 points
+  sources:
+  - hp-backend/src/app/services/dashboard/urgency.py:growth_expansion
+  doc_source: HP_Urgency_Score_Updated_Final (client) 3B
+  confidence: high
+- id: growth_events
+  parent: driver_growth_expansion
+  name: Verified growth and expansion events (25 points)
+  kind: score
+  summary: Credits expansion news in the last 12 months.
+  purpose: Credits expansion news in the last 12 months.
+  inputs:
+  - News headlines, event types and dates
+  logic: A dated event within 365 days qualifies if its headline plus event type contains a growth phrase
+    and none of the exclusion phrases. Each distinct headline text scores 10, up to a maximum of 25. Only
+    identical headlines are merged; there is no check by AI or against the original sources.
+  formula: 10 x distinct qualifying headlines, up to a maximum of 25
+  conditions:
+  - 'Growth phrases: new office, headquarters, facility, plant, factory, data centre/center, operational
+    site, new site, expansion, expands, expanding, capacity, new market, market entry, enters, capex,
+    capital expenditure, investment, invests, acquisition, acquires, merger, joint venture, workforce
+    expansion, new business unit, hiring spree, relocat'
+  - 'Exclusions: product launch, launches product, quarterly results, earnings call, annual results, wins
+    award, award for, residential, apartment, housing project'
+  constants:
+  - label: Points per event
+    ref: scoring:urgency.points_per_growth_event
+    stated: 10
+  - label: Maximum
+    ref: scoring:urgency.growth_event_max
+    stated: 25
+  example:
+    scenario: New plant in Vietnam; acquires distributor; wins award for best employer.
+    steps:
+    - Plant and acquisition qualify
+    - '''wins award'' excluded'
+    result: 20/25
+    verified: true
+    expect: 20.0
+  output: 0-25 points
+  sources:
+  - hp-backend/src/app/services/dashboard/urgency.py:growth_expansion
+  - hp-backend/src/app/services/dashboard/urgency.py:GROWTH_EVENT_TERMS
+  - hp-backend/src/app/services/dashboard/urgency.py:GROWTH_EVENT_EXCLUSIONS
+  doc_source: HP_Urgency_Score_Updated_Final (client) 3C
+  confidence: high
+- id: driver_hp_solution_intent
+  parent: urgency_score
+  name: 'Driver 4: HP Solution Intent (25%)'
+  kind: score
+  summary: Direct research activity for HP categories, read from the strongest category.
+  purpose: Direct research activity for HP categories, read from the strongest category.
+  inputs:
+  - 'HP''s own interest scores by category: category name, score, trend, buying stage and research volume'
+  logic: All four components use the details of the highest-scoring HP category (the first one in the
+    data on a tie). The former noisy-keyword filter is empty, so the highest-scoring category is always
+    used. If there are no categories, all four components are 0 and marked missing.
+  formula: Strength + Trend + Buying stage + Research volume
+  example:
+    scenario: PCs 45 (Stable, 'Decision/Purchase', Medium) and Printers 30 (Increasing, Awareness, High).
+    steps:
+    - PCs is highest
+    - 45/100 x 60 = 27
+    - Stable 5
+    - '''Decision/Purchase'' contains ''decision'' -> 15'
+    - Medium 10
+    result: 57/100
+    verified: true
+    expect: 57.0
+  output: Driver value 0-100
+  sources:
+  - hp-backend/src/app/services/dashboard/urgency.py:hp_solution_intent
+  doc_source: HP_Urgency_Score_Updated_Final (client) section 4
+  confidence: high
+- id: hpi_strength
+  parent: driver_hp_solution_intent
+  name: HP-category intent strength (60 points)
+  kind: score
+  summary: Strength of the top category's intent.
+  purpose: Strength of the top category's intent.
+  inputs:
+  - The top category's score
+  logic: 'Linear: top category score / 100 x 60. A score of 0 or blank is marked missing.'
+  formula: score / 100 x 60
+  constants:
+  - label: Maximum
+    ref: scoring:urgency.hp_category_intent_max
+    stated: 60
+  example:
+    scenario: 'Astra: 3D Printers 34.'
+    steps:
+    - 34/100 x 60 = 20.4
+    result: 20.4/60
+    verified: true
+    expect: 20.4
+  output: 0-60 points
+  sources:
+  - hp-backend/src/app/services/dashboard/urgency.py:hp_solution_intent
+  doc_source: HP_Urgency_Score_Updated_Final (client) 4A
+  confidence: high
+- id: hpi_trend
+  parent: driver_hp_solution_intent
+  name: Intent trend (10 points)
+  kind: score
+  summary: Direction of research, as HP's data states it.
+  purpose: Direction of research, as HP's data states it.
+  inputs:
+  - The top category's trend label
+  logic: The trend word supplied is scored as given (capital letters ignored). Any other word scores 0.
+  table:
+    columns:
+    - Trend
+    - Points
+    rows:
+    - - Increasing
+      - 10
+    - - Stable
+      - 5
+    - - Decreasing
+      - 0
+    - - Other / blank
+      - 0
+  constants:
+  - label: Points
+    ref: scoring:urgency.intent_trend_points
+    stated:
+      increasing: 10
+      stable: 5
+      decreasing: 0
+  - label: Maximum
+    ref: scoring:urgency.intent_trend_max
+    stated: 10
+  example:
+    scenario: 'Astra 3D Printers: Increasing.'
+    steps:
+    - Increasing = 10
+    result: 10/10
+    verified: true
+    expect: 10.0
+  output: 0-10 points
+  sources:
+  - hp-backend/src/app/services/dashboard/urgency.py:hp_solution_intent
+  doc_source: HP_Urgency_Score_Updated_Final (client) 4B
+  confidence: high
+- id: hpi_stage
+  parent: driver_hp_solution_intent
+  name: Buying stage (15 points)
+  kind: score
+  summary: How close the account is to buying.
+  purpose: How close the account is to buying.
+  inputs:
+  - The top category's buying stage
+  logic: An exact match comes first; if there is none, the highest score of any stage word contained in
+    the text is used (so 'Decision' or 'Purchase' anywhere gives 15).
+  table:
+    columns:
+    - Stage
+    - Points
+    rows:
+    - - Decision / Purchase / Decision or Purchase
+      - 15
+    - - Consideration
+      - 10
+    - - Awareness
+      - 5
+    - - No signal / blank / other
+      - 0
+  constants:
+  - label: Points
+    ref: scoring:urgency.buying_stage_points
+    stated:
+      decision: 15
+      purchase: 15
+      decision or purchase: 15
+      consideration: 10
+      awareness: 5
+      no signal: 0
+  - label: Maximum
+    ref: scoring:urgency.buying_stage_max
+    stated: 15
+  example:
+    scenario: 'Astra 3D Printers: Awareness.'
+    steps:
+    - Awareness = 5
+    result: 5/15
+    verified: true
+    expect: 5.0
+  output: 0-15 points
+  sources:
+  - hp-backend/src/app/services/dashboard/urgency.py:hp_solution_intent
+  doc_source: HP_Urgency_Score_Updated_Final (client) 4C
+  confidence: high
+- id: hpi_volume
+  parent: driver_hp_solution_intent
+  name: Research volume (15 points)
+  kind: score
+  summary: How much research the account is doing.
+  purpose: How much research the account is doing.
+  inputs:
+  - The top category's research volume
+  logic: Exact word match (capital letters ignored).
+  table:
+    columns:
+    - Volume
+    - Points
+    rows:
+    - - High
+      - 15
+    - - Medium
+      - 10
+    - - Low
+      - 5
+    - - Other / blank
+      - 0
+  constants:
+  - label: Points
+    ref: scoring:urgency.research_volume_points
+    stated:
+      high: 15
+      medium: 10
+      low: 5
+  - label: Maximum
+    ref: scoring:urgency.research_volume_max
+    stated: 15
+  example:
+    scenario: 'Astra 3D Printers: High.'
+    steps:
+    - High = 15
+    result: 15/15
+    verified: true
+    expect: 15.0
+  output: 0-15 points
+  sources:
+  - hp-backend/src/app/services/dashboard/urgency.py:hp_solution_intent
+  doc_source: HP_Urgency_Score_Updated_Final (client) 4D
+  confidence: high
+- id: strategic_priorities
+  parent: null
+  name: Strategic Priorities & Catalysts
+  kind: selection
+  summary: Lists the account's evidenced strategic priorities, each with a short HP-focused explanation,
+    its sources and an evidence score.
+  purpose: Lists the account's evidenced strategic priorities, each with a short HP-focused explanation,
+    its sources and an evidence score.
+  inputs:
+  - A searchable collection of the account's evidence, built from its filed documents (annual reports
+    and filings) and other dashboard evidence (news, technology, research topics, hiring, contacts)
+  - Approved HP facts from the technology recommendations and the opportunity map
+  - HP customer case studies
+  logic: AI only proposes priorities and points to the evidence behind them; every priority is then checked
+    against the stored evidence. Priorities without real, on-topic evidence are dropped. The survivors
+    (at most 6) are ordered by evidence counts, scored for evidence strength, given an AI-written explanation
+    that is checked figure by figure, and optionally a case-study proof point. If no priority survives,
+    nothing is shown. Cards are grouped by theme on screen.
+  conditions:
+  - The account's evidence collection must be built (current or slightly out of date)
+  - 'No surviving priorities: nothing is shown'
+  - At most 6 priorities are shown
+  output: 'Catalyst cards grouped by theme: title, why now, bullets, evidence score, sources with points,
+    HP proof point.'
+  sources:
+  - hp-backend/src/app/services/dashboard/priorities.py:generate_dashboard_intelligence
+  - hp-frontend/src/app/dashboard/page.tsx
+  doc_source: ABX Feature 1 (quoted in code; not in provided set); HP_Recommendation_Tuning_Logic_FINAL_v4
+    'Executive Dashboard'
+  confidence: high
+- id: priority_candidates
+  parent: strategic_priorities
+  name: Candidate priorities (AI step)
+  kind: model
+  summary: Finds possible priorities in the retrieved evidence.
+  purpose: Finds possible priorities in the retrieved evidence.
+  inputs:
+  - The 60 most relevant evidence passages (up to 60,000 characters)
+  logic: AI is asked for 6 to 8 distinct priorities, each with a short title (at most 8 words), a theme
+    from a fixed list, a one-sentence 'why now' without figures, and 2 to 5 references to evidence copied
+    from the passages. It must use only the passages provided, never invent a reference, and state no
+    numbers. These are only candidates; only the title, theme and 'why now' text of priorities that pass
+    the evidence checks is ever shown.
+  conditions:
+  - 'Themes: AI, workforce productivity, hybrid work, expansion, security, fleet refresh, print/workflow,
+    sustainability, cost efficiency, other'
+  - The 'why now' sentence is AI text and is not checked for figures
+  - A missing theme becomes 'other'
+  constants:
+  - label: Retrieved passages
+    internal: true
+    value: 60
+  output: Candidate priorities
+  sources:
+  - hp-backend/src/app/services/dashboard/priorities.py:_candidate_priorities
+  - hp-backend/src/app/services/dashboard/priorities.py:CANDIDATE_SYSTEM
+  - hp-backend/src/app/services/dashboard/priorities.py:PRIORITY_QUESTION
+  confidence: high
+- id: priority_evidence_resolution
+  parent: strategic_priorities
+  name: Evidence must exist
+  kind: selection
+  summary: Drops any priority whose cited evidence cannot be found.
+  purpose: Drops any priority whose cited evidence cannot be found.
+  inputs:
+  - Evidence references cited by AI
+  - The account's evidence
+  logic: Each cited reference is looked up in the account's evidence. References that cannot be found
+    are discarded and counted. A priority with fewer than 1 item found is dropped, with the reason 'no
+    resolvable account evidence'. The sentence shown to the seller is always the original source sentence,
+    never AI's paraphrase.
+  constants:
+  - label: Minimum evidence per priority
+    ref: py:app.services.dashboard.priorities:MIN_EVIDENCE_PER_PRIORITY
+    stated: 1
+  example:
+    scenario: AI cites references X1 and X2; neither exists in the account's evidence.
+    steps:
+    - Neither can be found.
+    result: 'Priority dropped: ''no resolvable account evidence'' (this check needs the stored evidence,
+      so it cannot be recomputed here)'
+  output: Kept or dropped
+  sources:
+  - hp-backend/src/app/services/dashboard/priorities.py:_resolve_priorities
+  confidence: high
+- id: priority_relevance_gate
+  parent: strategic_priorities
+  name: Evidence must be about the priority
+  kind: guardrail
+  summary: Drops evidence that is real but about something else.
+  purpose: Drops evidence that is real but about something else.
+  inputs:
+  - Priority title and theme
+  - Evidence source text
+  logic: The priority's content words (3+ letters, common words removed) are shortened to their first
+    6 letters; an evidence item supports the priority if its text contains any of those word starts. Items
+    that don't are removed; if none remain the priority is dropped ('cited evidence does not mention this
+    priority's subject').
+  example:
+    scenario: Priority 'Strengthen sustainability initiatives'; source A 'We are investing in sustainable
+      manufacturing.'; source B 'Profit optimisation in Document Solutions.'
+    steps:
+    - The word start 'sustai' is found in A.
+    - No word start is found in B.
+    result: A supports the priority (true), B does not (false)
+    verified: true
+    expect:
+    - true
+    - false
+  output: Relevant evidence
+  sources:
+  - hp-backend/src/app/services/dashboard/priorities.py:_supports
+  - hp-backend/src/app/services/dashboard/priorities.py:_content_words
+  confidence: high
+- id: priority_dedup
+  parent: strategic_priorities
+  name: Near-duplicate priorities merged
+  kind: filter
+  summary: Avoids showing the same priority twice.
+  purpose: Avoids showing the same priority twice.
+  inputs:
+  - Priority titles
+  logic: Titles are compared by shared content words (shared words divided by all distinct words). At
+    0.6 or more, the later priority is dropped in favour of the earlier one. Priorities sharing only a
+    theme are kept (a theme can hold several catalysts).
+  formula: similarity = words in both titles / words in either title; merge if 0.6 or more
+  example:
+    scenario: '''Expand data centre capacity'', ''Expand data centre capacity in Indonesia'', ''Scale
+      AI across operations''.'
+    steps:
+    - First two share 4 of 5 words = 0.8 -> merged
+    - Third unrelated
+    result: 'Kept: ''Expand data centre capacity'', ''Scale AI across operations'''
+    verified: true
+    expect:
+    - Expand data centre capacity
+    - Scale AI across operations
+  output: Kept priorities and the merged list
+  sources:
+  - hp-backend/src/app/services/dashboard/priorities.py:_distinct
+  confidence: high
+- id: priority_news_fallback
+  parent: strategic_priorities
+  name: News fallback when fewer than 3
+  kind: source
+  summary: Uses recent events only when filings support too few priorities.
+  purpose: Uses recent events only when filings support too few priorities.
+  inputs:
+  - The 40 most relevant passages answering a question about recent events
+  logic: If fewer than 3 priorities survive, AI is asked a second question about recent events, and its
+    candidates go through the same evidence checks. New ones (title not already present) are added, marked
+    as drawn from recent events, and the merge step runs again.
+  constants:
+  - label: Minimum priorities target
+    ref: py:app.services.dashboard.priorities:MIN_PRIORITIES
+    stated: 3
+  output: Flag that a priority came from recent events, plus a note
+  sources:
+  - hp-backend/src/app/services/dashboard/priorities.py:_news_priorities
+  - hp-backend/src/app/services/dashboard/priorities.py:generate_dashboard_intelligence
+  confidence: high
+- id: priority_ordering
+  parent: strategic_priorities
+  name: Order and limit
+  kind: filter
+  summary: Shows the most-evidenced priorities first.
+  purpose: Shows the most-evidenced priorities first.
+  inputs:
+  - 'Per priority: supporting sentences, distinct document sections, most recent date'
+  logic: Priorities are sorted by the number of supporting source sentences (high first), then the number
+    of distinct document sections (a document, or a page within it), then the most recent supporting date
+    (newest first). Only the first 6 are kept. The evidence-strength score does not affect the order.
+    On screen, cards are grouped by theme in the order their first priority appears.
+  constants:
+  - label: Maximum priorities
+    ref: py:app.services.dashboard.priorities:MAX_PRIORITIES
+    stated: 6
+  output: Ordered priorities with their measures
+  sources:
+  - hp-backend/src/app/services/dashboard/priorities.py:_resolve_priorities
+  - hp-backend/src/app/services/dashboard/priorities.py:_section
+  - hp-backend/src/app/services/dashboard/priorities.py:_recency
+  - hp-frontend/src/app/dashboard/page.tsx
+  confidence: high
+- id: evidence_strength
+  parent: strategic_priorities
+  name: Evidence Strength score (per catalyst, 0-100)
+  kind: score
+  summary: How well evidenced each catalyst is.
+  purpose: How well evidenced each catalyst is.
+  inputs:
+  - The catalyst's supporting sources (filing label, period, link, publisher, origin)
+  - The account's website
+  logic: 'Sum of three terms: Filing evidence (max 25), Recency (max 25) and Source diversity (max 50).
+    Age is measured to the date the card was generated, so the score does not drift. If all three terms
+    are 0, a reason is stored and the card shows ''No signal observed'' instead of 0/100.'
+  formula: Evidence Strength = Filing evidence + Recency + Source diversity
+  constants:
+  - label: Maximum score
+    ref: py:app.services.dashboard.evidence_strength:MAX_SCORE
+    stated: 100
+  example:
+    scenario: 'Scored 5 Oct 2026, account domain acme.com: two sources from Annual Report 2025 (FY2025),
+      one from Q2 2026 report (2026-Jun), a Reuters article (20 Aug 2026), a Google News link from Jakarta
+      Post, and a page on acme.co.id.'
+    steps:
+    - 'Filings: 2 distinct documents x 5 = 10'
+    - 'Recency: newest 20 Aug 2026 is 1 month old -> 25'
+    - 'Diversity: Regulatory Filings, Official Company Sources (acme.co.id), Independent Media (Reuters,
+      Jakarta Post) = 3 x 10 = 30'
+    result: 65/100
+    verified: true
+    expect: 65
+  output: Evidence Strength score with its three terms, and the reason if it is zero
+  sources:
+  - hp-backend/src/app/services/dashboard/evidence_strength.py:score
+  - hp-backend/src/app/services/dashboard/priorities.py:generate_dashboard_intelligence
+  - hp-frontend/src/app/dashboard/page.tsx
+  doc_source: Formula supplied in writing by the client with two worked examples (65 and 55); source document
+    not in provided set
+  confidence: high
+- id: es_filing
+  parent: evidence_strength
+  name: Filing evidence (25 points)
+  kind: score
+  summary: Credits support from filed documents.
+  purpose: Credits support from filed documents.
+  inputs:
+  - Filing labels of the sources
+  logic: 5 points per distinct filing document (many sentences from one report count once), capped at
+    25.
+  formula: 5 x distinct filings, up to a maximum of 25
+  constants:
+  - label: Points per filing
+    ref: scoring:evidence_strength.points_per_filing
+    stated: 5
+  - label: Maximum
+    ref: scoring:evidence_strength.max_filing_points
+    stated: 25
+  example:
+    scenario: Two sentences from Annual Report 2025 and one from Q2 2026 report.
+    steps:
+    - 2 distinct filings x 5
+    result: '10'
+    verified: true
+    expect: 10
+  output: 0-25 points
+  sources:
+  - hp-backend/src/app/services/dashboard/evidence_strength.py:filing_evidence
+  confidence: high
+- id: es_recency
+  parent: evidence_strength
+  name: Recency (25 points)
+  kind: score
+  summary: Credits recent evidence.
+  purpose: Credits recent evidence.
+  inputs:
+  - Period labels of the sources
+  logic: 'The most recent dated source sets the age, in whole calendar months to the generation date (never
+    negative). Period labels: an ISO date; ''YYYY-Mon'' taken at month end; ''FY2025'', ''2025'' or ''FY2025/26''
+    taken at 31 December of the first year. Other shapes (for example ''Q3 2025'') count as undated. No
+    dated source: 0.'
+  table:
+    columns:
+    - Age of newest evidence
+    - Points
+    rows:
+    - - 0-12 months
+      - 25
+    - - 13-24 months
+      - 20
+    - - 25-36 months
+      - 15
+    - - 37-60 months
+      - 10
+    - - over 60 months
+      - 5
+    - - no usable date
+      - 0
+  constants:
+  - label: Bands (upper months, points)
+    ref: scoring:evidence_strength.recency_bands
+    stated:
+    - - 12
+      - 25
+    - - 24
+      - 20
+    - - 36
+      - 15
+    - - 60
+      - 10
+  - label: Beyond bands
+    ref: scoring:evidence_strength.recency_beyond_bands
+    stated: 5
+  - label: No date
+    ref: scoring:evidence_strength.recency_no_date
+    stated: 0
+  - label: Fiscal year end
+    ref: py:app.services.dashboard.evidence_strength:FISCAL_YEAR_END
+  example:
+    scenario: 'Scored 5 Oct 2026, single-source periods: 2026-09-01, 2025-Sep, FY2024, FY2022, FY2020,
+      2019-01-01, ''Q3 2025''.'
+    steps:
+    - Ages 1, 12, 21, 45, 69, 93 months; 'Q3 2025' unparsed
+    result: 25, 25, 20, 10, 5, 5, 0
+    verified: true
+    expect:
+    - 25
+    - 25
+    - 20
+    - 10
+    - 5
+    - 5
+    - 0
+  output: 0-25 points
+  sources:
+  - hp-backend/src/app/services/dashboard/evidence_strength.py:recency
+  - hp-backend/src/app/services/dashboard/evidence_strength.py:parse_period
+  - hp-backend/src/app/services/dashboard/evidence_strength.py:months_between
+  confidence: high
+- id: es_diversity
+  parent: evidence_strength
+  name: Source diversity (50 points)
+  kind: score
+  summary: Credits evidence from different kinds of source.
+  purpose: Credits evidence from different kinds of source.
+  inputs:
+  - Each source's origin, filing label, link and publisher
+  logic: 'Each source gets one category, decided in this order: a regulatory filing (or anything with
+    a filing label) is Regulatory Filings; then by the website of its link (ignoring news.google.com,
+    google.com, bing.com and finance.yahoo.com): a listed stock-exchange or regulator website is Regulatory
+    Filings; a government website is Government Sources; the account''s own website (or the same company
+    name of 4+ letters under another country''s website) is Investor Materials if the address contains
+    ''investor'' or ''ir'', otherwise Official Company Sources; LinkedIn, Facebook, Twitter/X, Instagram
+    or YouTube is uncategorised; if the account''s website is not known, uncategorised; any other website
+    is Independent Media. Without a usable link, a named publisher is Independent Media (Official Company
+    Sources if it equals the company name). Anything else is uncategorised. Each distinct category scores
+    10 points, up to a maximum of 50.'
+  formula: 10 x distinct categories, up to a maximum of 50
+  conditions:
+  - 'Regulator websites: idx.co.id, sec.gov, sgx.com, bursamalaysia.com, set.or.th, hkex.com.hk, bseindia.com,
+    nseindia.com, asx.com.au, jpx.co.jp, edinet-fsa.go.jp, londonstockexchange.com, bundesanzeiger.de,
+    twse.com.tw, krx.co.kr, psx.com.pk, pse.com.ph, hose.vn'
+  - 'Government: the website ends .gov, .go.id, .go.jp, .go.kr, .govt.nz, or has ''gov'', ''govt'' or
+    ''go'' in its last two parts'
+  - Regulators that are not listed fall into Independent Media
+  constants:
+  - label: Points per category
+    ref: scoring:evidence_strength.points_per_category
+    stated: 10
+  - label: Maximum
+    ref: scoring:evidence_strength.max_diversity_points
+    stated: 50
+  example:
+    scenario: Account astra.co.id; links idx.co.id, gov.uk, ir.astra.co.id, careers.astra.com, linkedin.com,
+      a Google News link from Kompas, publisher 'Astra' with no link, and an empty source.
+    steps:
+    - Categorise each source.
+    result: Regulatory Filings, Government Sources, Investor Materials, Official Company Sources, uncategorised,
+      Independent Media, Official Company Sources, uncategorised
+    verified: true
+    expect:
+    - Regulatory Filings
+    - Government Sources
+    - Investor Materials
+    - Official Company Sources
+    - uncategorised
+    - Independent Media
+    - Official Company Sources
+    - uncategorised
+  output: 0-50 points
+  sources:
+  - hp-backend/src/app/services/dashboard/evidence_strength.py:categorise
+  - hp-backend/src/app/services/dashboard/evidence_strength.py:diversity
+  confidence: high
+- id: catalyst_description
+  parent: strategic_priorities
+  name: Catalyst explanation bullets (AI step, checked)
+  kind: model
+  summary: Explains what the account is doing and what it means for HP.
+  purpose: Explains what the account is doing and what it means for HP.
+  inputs:
+  - The priority's supporting source text (up to 4,000 characters)
+  - Approved HP capability statements (up to 40)
+  - Company name, title and theme
+  logic: 'AI writes 2-4 bullets (each one sentence, at most 30 words, 60-110 words in total): first what
+    the account is doing, from the evidence only; last what it implies for HP, from the approved HP statements
+    only. The answer is rejected if it is empty, longer than 110 words, opens with ''The account'', ''The
+    company'', ''This account'' or ''This company'', contains any figure not found in the evidence or
+    HP statements, names an ''HP <Product>'' that is not in the approved statements, or has fewer than
+    2 or more than 4 bullets. A valid answer under 60 words is rewritten once and the longer valid answer
+    is kept; if it is still short it is shown but marked ''below brief''. A rejected answer is replaced
+    by a fixed sentence: ''<title> is evidenced by N source sentence(s) across M section(s) of the account''s
+    filed documents.'''
+  conditions:
+  - Maximum 110 words (firm)
+  - Minimum 60 words (one rewrite, then shown anyway)
+  - 2-4 bullets
+  - Every figure must appear in the evidence or HP facts
+  - HP product names only from approved facts
+  - 'Also asked for, but not checked: no competitors, no claim that the account uses HP, English only,
+    plain hyphens'
+  constants:
+  - label: Min words
+    ref: py:app.services.dashboard.priorities:DESCRIPTION_MIN_WORDS
+    stated: 60
+  - label: Max words
+    ref: py:app.services.dashboard.priorities:DESCRIPTION_MAX_WORDS
+    stated: 110
+  - label: Min bullets
+    ref: py:app.services.dashboard.priorities:DESCRIPTION_MIN_POINTS
+    stated: 2
+  - label: Max bullets
+    ref: py:app.services.dashboard.priorities:DESCRIPTION_MAX_POINTS
+    stated: 4
+  example:
+    scenario: 'Evidence: ''Acme plans a 30 MW data centre in Batam''; HP facts: ''HP Z Workstations: for
+      AI''. Four candidate answers.'
+    steps:
+    - '''... 40 MW ...'' -> rejected: 40 is not in the evidence'
+    - '''... HP Poly devices ...'' -> rejected: HP Poly is not approved'
+    - '''The company is building ...'' -> rejected: stock opening'
+    - '''Acme is building a 30 MW data centre in Batam. HP Z Workstations fit this.'' -> passes'
+    result: Only the last passes the checks
+    verified: true
+    expect:
+    - - false
+      - states 40, which is not in the evidence
+    - - false
+      - names HP Poly, which is not in the approved facts
+    - - false
+      - opens with a stock phrase instead of the specific fact
+    - - true
+      - ok
+  output: Explanation text and bullets, who wrote it (AI or a fixed sentence), and the reason for any
+    rejection
+  sources:
+  - hp-backend/src/app/services/dashboard/priorities.py:_describe
+  - hp-backend/src/app/services/dashboard/priorities.py:_validate_description
+  - hp-backend/src/app/services/dashboard/priorities.py:DESCRIPTION_SYSTEM
+  doc_source: HP_Recommendation_Tuning_Logic_FINAL_v4, Executive Dashboard (length and content); client
+    feedback 27 Sep (bullets)
+  confidence: high
+- id: hp_facts_source
+  parent: catalyst_description
+  name: Approved HP statements the explanation may use
+  kind: source
+  summary: Keeps HP claims to what has already passed HP's wording checks for this account.
+  purpose: Keeps HP claims to what has already passed HP's wording checks for this account.
+  inputs:
+  - 'The technology HP recommendations: approved facts marked as kept'
+  - 'The opportunity map''s service plays: allowed facts'
+  logic: 'Up to 40 statements are collected: first the approved facts kept from the technology recommendations
+    (prefixed by the HP product family), then the allowed facts from the opportunity map''s service plays.
+    If there are none, AI is told to leave out the HP sentence.'
+  constants:
+  - label: Maximum statements
+    value: 40
+  output: List of HP statements
+  sources:
+  - hp-backend/src/app/services/dashboard/priorities.py:_hp_facts
+  confidence: high
+- id: hp_proof_point
+  parent: strategic_priorities
+  name: HP case-study proof point
+  kind: selection
+  summary: Adds a published customer story only for an HP offering the explanation already names.
+  purpose: Adds a published customer story only for an HP offering the explanation already names.
+  inputs:
+  - The finished explanation text
+  - HP case studies
+  - Industry
+  - Proof points already used elsewhere
+  logic: HP product lines named in the explanation are matched to case-study product lines. If none is
+    named, there is no proof point. Otherwise the best case study is chosen by industry and use-case signals
+    from the priority's title and theme; a study already used on another Executive Dashboard card is never
+    repeated (no proof point instead), and studies used in the sections ranked above this one (Objections,
+    Opportunities, Messaging, Content) are avoided where possible.
+  conditions:
+  - A proof point can only follow an HP offering named in the text; it never creates the need
+  - 'Firm rule: no repeats within the dashboard'
+  - 'Soft rule: avoid studies cited in higher-ranked sections'
+  output: HP proof point and its details
+  sources:
+  - hp-backend/src/app/services/dashboard/priorities.py:_proof_for
+  - hp-backend/src/app/services/hp/case_studies.py:SURFACE_ORDER
+  confidence: medium
+- id: claim_points
+  parent: strategic_priorities
+  name: Supporting claims shown as short points
+  kind: selection
+  summary: Shows each source as short points in the source's own words.
+  purpose: Shows each source as short points in the source's own words.
+  inputs:
+  - Source text
+  - Priority title and theme words
+  logic: 'Short sources become one point: the sentence mentioning the most words from the priority (the
+    earliest wins ties), trimmed at a natural break to about 18 words, ending in a full stop. Sources
+    of 60+ words with at least 3 sentences become 3-6 points: sentences mentioning the priority first
+    (up to 6), topped up with the next sentences to reach 3, kept in source order; points under 4 words
+    or repeated are dropped. Nothing is paraphrased; the full source text stays beside the points.'
+  constants:
+  - label: Point length (words)
+    ref: py:app.services.dashboard.priorities:CLAIM_POINT_MAX_WORDS
+    stated: 18
+  - label: Long source threshold (words)
+    ref: py:app.services.dashboard.priorities:LONG_SOURCE_WORDS
+    stated: 60
+  - label: Points for a long source
+    value: 3-6
+  example:
+    scenario: Priority 'Expand data centre capacity'; source of three sentences, the second about expanding
+      data centre capacity in Batam.
+    steps:
+    - The second sentence mentions the most priority words (data, centre, capacity, expand) and is chosen.
+    - It is 24 words, over the 18-word target. The only break inside the limit (before ', which') would
+      leave the opening 'In 2025, the ...' reading as an unfinished aside, so that cut is refused; no
+      other break fits.
+    - With no safe break, the sentence is kept whole rather than cut mid-phrase.
+    result: '''In 2025, the Company expanded its data centre capacity in Batam to support cloud customers,
+      which required new cooling systems and additional power.'''
+    verified: true
+    expect: In 2025, the Company expanded its data centre capacity in Batam to support cloud customers,
+      which required new cooling systems and additional power.
+  output: Short points per source
+  sources:
+  - hp-backend/src/app/services/dashboard/priorities.py:claim_point
+  - hp-backend/src/app/services/dashboard/priorities.py:claim_points
+  doc_source: Client feedback 1 Oct (quoted in code)
+  confidence: medium
+- id: executive_summary_text
+  parent: strategic_priorities
+  name: Executive summary sentences (stored, not shown)
+  kind: display
+  internal: true
+  summary: A short summary assembled from checked material, for the strategy chat.
+  purpose: A short summary assembled from checked material, for the strategy chat.
+  inputs:
+  - Reported figures
+  - Ordered priorities
+  logic: 'Up to 4 sentences: the revenue figure (or the first figure) with its period; the top priority
+    with its support counts; up to two other priority titles; the most recent supporting date. AI does
+    not write it. It is no longer shown on the dashboard page.'
+  example:
+    scenario: Acme, net revenue USD 1,200 million FY2025; priorities 'Expand data centre capacity' (5
+      sentences, 3 sections, FY2025) and 'Scale AI' (2026-08-01).
+    steps:
+    - Assemble four sentences.
+    result: '''Acme reported net revenue of USD 1,200 million for FY2025.'' / ''Its strongest evidenced
+      priority is Expand data centre capacity, supported by 5 source sentence(s) across 3 document section(s).''
+      / ''Other evidenced priorities: Scale AI.'' / ''The most recent supporting evidence is from FY2025.'''
+    verified: true
+    expect:
+    - Acme reported net revenue of USD 1,200 million for FY2025.
+    - Its strongest evidenced priority is Expand data centre capacity, supported by 5 source sentence(s)
+      across 3 document section(s).
+    - 'Other evidenced priorities: Scale AI.'
+    - The most recent supporting evidence is from FY2025.
+  output: Executive summary (stored)
+  sources:
+  - hp-backend/src/app/services/dashboard/priorities.py:_executive_summary
+  - hp-frontend/src/app/dashboard/page.tsx
+  confidence: high
+undetermined:
+- Strategic priority content (titles, themes, 'why now', which evidence is retrieved) is model-judged;
+  there is no fixed formula. Only the checks applied afterwards are deterministic.
+- Evidence resolution, retrieval and index status need the database and search index, so priority_evidence_resolution,
+  priority_candidates and priority_news_fallback have no recomputable example.
+- 'Case-study allocation ranking (cs.allocate: industry, outcome, tier, use-case signals) is only summarised;
+  its full ranking rules belong to the case-studies module and were not traced line by line.'
+- How filings_financials.csv values are extracted and verified (scripts/filings_to_csv.py, model + Python
+  page check) is upstream of this feature and was not traced.
+- The Evidence Strength formula's client source document is not among the provided docs; only the code's
+  account of it (and two worked examples pinned in tests/test_evidence_strength.py) was available, so
+  no doc comparison was possible.
+- HP Category Intent parsing (_parse_category_file in intent_demand_signals.py) decides category names/scores
+  fed to Driver 4 and the Workstations score; it belongs to the Intent feature and was not re-verified
+  here.
+discrepancies:
+- rule_id: urgency_coverage_gate
+  doc: 'HP_Urgency_Score_Updated_Final: ''Missing inputs contribute 0 points only to the affected component.
+    The remaining available components are still calculated.'' WIDGET_REGISTRY description: ''...the remaining
+    components are still calculated and the overall score still publishes.'''
+  code: urgency.py:1017-1049 withholds the headline score (score=None) when weighted input coverage <
+    60% (COVERAGE_MIN_PERCENT, line 126), citing a client email of 16 Sep.
+  note: The 60% gate comes from an email, not the PDF; the registry text and a frontend comment ('The
+    score always computes now') describe the PDF rule only.
+- rule_id: urgency_score
+  doc: 'HP_Urgency_Score_Updated_Final: ''Rounded Astra Urgency Score: 61/100'' (its own table sums to
+    64.43).'
+  code: urgency.py:1002-1005 gives 64 for the same inputs (sum of contributions 64.43, rounded).
+  note: The document is internally inconsistent; code follows the table.
+- rule_id: driver_hp_solution_intent
+  doc: 'HP_Urgency_Score_Updated_Final 4: ''Weighted contribution = 49.3 x 25% = 12.33/25'' while the
+    raw score is 50.4 and the results table shows 12.60.'
+  code: urgency.py:1002 uses 50.4 x 25% = 12.60.
+  note: Document internal inconsistency.
+- rule_id: wos_account_scale
+  doc: 'HP_Urgency_Score_Updated_Final 1A: ''251-1,000 -> 10'', ''Below 250 -> 5''.'
+  code: 'urgency.py:146-153 aliases with hyphens (''1-10'',''11-50'',''51-200'',''201-500'',''501-1000'')
+    never match because _normalise_band (364-370) strips hyphens before the alias lookup (389); these
+    bands score 0. Local data: 12 of 220 accounts affected.'
+  note: Accounts in vendor bands 501-1000, 201-500, 51-200, 11-50, 1-10 get 0/30 instead of 10 or 5.
+- rule_id: wos_footprint
+  doc: 'HP_Urgency_Score_Updated_Final 1C: ''Number of distinct qualifying workplace technologies''; e.g.
+    Teams + VMware = 2.'
+  code: urgency.py:569-577 counts distinct matched list entries; 'VMware vSphere' matches vmware, vsphere
+    and vmware vsphere (3), 'Microsoft Intune' matches intune and microsoft intune (2). Two products can
+    reach 5 and score 30/30.
+  note: Contradicts the code's own caveat that the component 'under-counts rather than over-counts'.
+- rule_id: wos_footprint
+  doc: 'HP_Urgency_Score_Updated_Final 1C: Teams qualifies ''where supported by approved HP material'';
+    VMware ''where the detected environment is relevant to HP Anyware''; other tools ''only where approved
+    HP material establishes a direct HP ... relationship''.'
+  code: urgency.py:189-215 qualifies every listed name unconditionally.
+  note: Conditions in the doc are not checked.
+- rule_id: wos_os_environment
+  doc: 'HP_Urgency_Score_Updated_Final 1B: score the ''Detected OS environment''.'
+  code: urgency.py:559 plain substring search over all tech names; 'ios' matches inside e.g. 'Adobe Creative
+    Studios', which then counts as an Apple OS.
+  note: Possible false OS detections.
+- rule_id: ai_recent_events
+  doc: 'HP_Urgency_Score_Updated_Final 2C: ''unique verified AI event ... Duplicate reports of the same
+    underlying event are counted once.'''
+  code: urgency.py:656-659 keyword match on the headline; only identical headline text is merged; no verification
+    step.
+  note: Two outlets reporting one event with different headlines count twice.
+- rule_id: growth_events
+  doc: 'HP_Urgency_Score_Updated_Final 3C: ''Do not count ... general partnerships ... generic capex or
+    investment with no identified growth purpose, or duplicate reports of the same underlying event.'''
+  code: urgency.py:302-318, 791-803 count any headline containing 'investment', 'invests', 'capex' etc.;
+    exclusions do not cover generic investment; duplicates merged only by identical headline.
+  note: Keyword matching cannot tell generic from growth-purpose investment.
+- rule_id: growth_workforce
+  doc: HP_Urgency_Score_Updated_Final 3A band header 'Twelve-month growth' and '1-4.99% -> 7.5', '0% or
+    negative -> 0'.
+  code: urgency.py:726-730 measures between the earliest and latest observation on file regardless of
+    the span; growth above 0% but below 1% scores 0.
+  note: Span is not constrained to 12 months; doc does not state a value for 0-1%.
+- rule_id: growth_hiring_volume
+  doc: 'Hiring_Signals_Rule_Set_Final + client answer 1 Oct (hiring_jobs.py docstring): country check;
+    window on first_seen_at counted back from the PredictLeads pull date. The job postings tile reads
+    hiring_postings_summary, the Hiring Signals count.'
+  code: urgency.py reads the jobs through hiring_jobs.account_jobs (country check, 12 months to the
+    pull date - the same jobs as the tile), then applies its own window, dated by posted_at then
+    first_seen_at and counted back from the scoring date.
+  note: The urgency PDF's own dating rule (posted_at, fallback first_seen_at) still applies inside the
+    shared selection, so the urgency count can be lower than the tile's but never counts a job the tile
+    leaves out.
+- rule_id: catalyst_description
+  doc: 'HP_Recommendation_Tuning_Logic_FINAL_v4, Output length: ''Executive Dashboard - Catalyst Explanation
+    / Implication for HP + seller focus - Minimum 100 words; maximum 120 words.'''
+  code: priorities.py:87-90 DESCRIPTION_MIN_WORDS=60, DESCRIPTION_MAX_WORDS=110, 2-4 bullets (client feedback
+    27 Sep asked for bullets).
+  note: Length brief changed in code from the tuning document.
+- rule_id: catalyst_description
+  doc: 'HP_Recommendation_Tuning_Logic_FINAL_v4 C: tiers Opportunity / Conversation Starter / Context
+    Only with permitted language; F: every output carries confidence_tier; Executive Dashboard: ''combine
+    the supporting evidence across relevant data pipelines ... Look for corroboration''.'
+  code: priorities.py has no evidence-tier assignment or permitted-language control (evidence_tier is
+    used by recommendations.py and intent_demand_signals.py, not here); the description prompt (686) uses
+    only the catalyst's resolved evidence and approved HP facts, with no explicit cross-pipeline corroboration
+    test.
+  note: Corroboration may occur through retrieval but is not checked.
+- rule_id: priority_ordering
+  doc: 'ABX Feature 1 as quoted in priorities.py docstring: ''40% support frequency + 25% supporting document
+    sections + 20% recency + 15% independent external-source support''.'
+  code: priorities.py:571-578 orders by raw counts (support, sections, recency); the score shown is the
+    separate Evidence Strength formula (evidence_strength.py).
+  note: Stated by the code as a deliberate replacement; a stale frontend comment (~1724-1738) still says
+    the composite is undefined although the score is rendered.
+- rule_id: exec_summary_card
+  doc: 'WIDGET_REGISTRY exec_summary_card: ''... corporate hierarchy (Parent & Ultimate Parent)''.'
+  code: executive_dashboard.py:41-53 shows Parent Company Name only; Ultimate Parent is never used (client
+    ruling Sep 2026).
+  note: Registry description out of date.
+- rule_id: strategic_priorities
+  doc: 'WIDGET_REGISTRY exec_strategic_priorities: ''AI inference model inputs and prompt execution are
+    TBD for future generation.'''
+  code: priorities.py:1151 is fully implemented (retrieval, model candidates, validation, scoring, descriptions).
+  note: Registry description out of date.
+- rule_id: exec_key_metrics
+  doc: 'WIDGET_REGISTRY exec_key_metrics: ''Employee count range and yearly revenue metrics'', source
+    firmographics only.'
+  code: executive_dashboard.py:241-269 also publishes filings on record, filed financial figures and CEO
+    from compliance_filings and filings_financials.
+  note: Registry description incomplete.
+- rule_id: hp_proof_point
+  doc: 'Code comment priorities.py:779: ''The Executive Dashboard picks last of the five surfaces''.'
+  code: case_studies.py:583 SURFACE_ORDER has 8 surfaces with the Executive Dashboard 5th.
+  note: Comment stale; behaviour follows SURFACE_ORDER.

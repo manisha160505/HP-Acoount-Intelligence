@@ -74,7 +74,7 @@ from datetime import UTC, date, datetime
 
 from app.config import scoring as _scoring
 from app.observability import pipeline
-from app.services.hp import intent_topic_map
+from app.services.hp import hiring_jobs, intent_topic_map
 from app.services.regen import store as widget_store
 
 logger = logging.getLogger(__name__)
@@ -1184,7 +1184,8 @@ def build_urgency_score(account_id: str, scored_on: date | None = None) -> dict:
     employee_band = (firm.get("Number Of Employees Range")
                      or firm.get("employee_count"))
 
-    jobs = _read_dataset_records(account_id, "job_openings")
+    # The one job selection every feature reads (hp/hiring_jobs.py).
+    jobs = hiring_jobs.account_jobs(account_id).jobs
     news = (_read_dataset_records(account_id, "google_news")
             + _read_dataset_records(account_id, "news_events"))
     technologies = _tech_names(account_id)

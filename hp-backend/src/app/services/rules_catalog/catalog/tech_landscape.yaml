@@ -1,0 +1,2002 @@
+# Rules page catalog for `tech_landscape`. Read by app/services/rules_catalog.
+# `ref:` values are read live; `stated` is what the prose was written against.
+# Examples marked `verified` are recomputed by tests/test_rules_examples.py.
+feature_key: tech_landscape
+purpose: Shows which technologies the account runs, how they relate to HP (compete, complement, open opportunity
+  or context), and which HP products and services the account's own evidence supports.
+final_output: A Technographic Map of up to seven HP categories, each with vendor cards (detected names,
+  a risk chip, an HP line with a one-line play, and a detection status), a 'What it means for HP' paragraph
+  and optional case-study proof; context lines about integration routes; the whole technology list grouped
+  by family; the full technology matrix, the detection records and the website technology list; and HP
+  Product Recommendation cards placed under the category they concern.
+how_it_combines: 'The detected technology (the installed technology, or website technology only when there
+  is none) is sorted into seven fixed HP categories and labelled by its relationship to HP. Each vendor
+  card gets a confidence score: Driver 1, technology evidence ({{scoring:tech_confidence.weights.technology_evidence|pct}}),
+  plus Driver 2, HP-category intent ({{scoring:tech_confidence.weights.intent_support|pct}}). A card whose
+  Driver 1 is 0 is not created. The percentage itself is no longer displayed. AI writes the narrative
+  within fixed limits, and HP''s approved sales rulebook overrides its HP line where a rule names the
+  technology. HP Product Recommendations are chosen by fixed rules from the rulebook. AI writes only the
+  rationale, which is then checked.'
+rules:
+- id: tl_technology_sources
+  parent: null
+  name: Which technologies count as detected
+  kind: source
+  summary: Decides the list of technologies the whole Technographic Map works from, and where each one
+    came from.
+  purpose: Decides the list of technologies the whole Technographic Map works from, and where each one
+    came from.
+  inputs:
+  - 'Installed technology: the full technology list (first record only)'
+  - 'HP category research data: the related technologies for each HP category (only when its record matches
+    the account''s domain)'
+  - Technology detected on the company's website (first record only)
+  - 'Website technology breakdown: every column except ID, status and SEO columns'
+  logic: 'Technologies are collected in this order and de-duplicated without regard to case. The first
+    list to name a technology keeps it. 1) Every comma-separated entry of the installed technology list
+    (the installed estate). 2) Every related technology listed in the HP category research data, for every
+    category, when that data''s record matches the account''s domain. 3) Only if step 1 found nothing:
+    the website technology lists - the technology detected on the company''s website and every cell of
+    the website technology breakdown (the text before a '':'' is a vendor grouping and is dropped). Each
+    technology keeps the list that named it, and the map records whether it rests on the installed estate
+    or on website technology only.'
+  conditions:
+  - Whether the website lists are read is decided on the installed technology list alone. Related technologies
+    from the HP category research data never stop the website fallback.
+  - 'Website breakdown columns skipped: business id, status, indexed status, established, parked, umbrella,
+    document info, SEO meta, SEO headers, SEO title, language, mobile.'
+  - Values 'nan', 'none', 'null' and blanks are ignored.
+  example:
+    scenario: An account whose installed technology list is 'Microsoft Windows 10, Microsoft Intune, Kaspersky',
+      whose HP category research data names Microsoft Intune and ServiceNow as related technologies, and
+      whose website technology lists Akamai and Google Analytics.
+    steps:
+    - The installed technology list gives 3 technologies, so the estate is not empty.
+    - The category research data adds ServiceNow (Microsoft Intune is already in the list, so it is not
+      added twice).
+    - Because the estate has 3 entries, the website lists are not read at all.
+    result: '4 technologies: Microsoft Windows 10, Microsoft Intune and Kaspersky (installed technology)
+      and ServiceNow (category research data); basis ''installed estate''; Akamai and Google Analytics
+      are not used.'
+    computed_value:
+    - - Microsoft Windows 10
+      - Microsoft Intune
+      - Kaspersky
+      - ServiceNow
+    - microsoft windows 10: technographics
+      microsoft intune: technographics
+      kaspersky: technographics
+      servicenow: hp_category_intent
+    - estate_technologies: 3
+      website_technologies: 0
+      website_sources_used: false
+      basis: installed estate
+    verified: true
+    expect:
+    - - Microsoft Windows 10
+      - Microsoft Intune
+      - Kaspersky
+      - ServiceNow
+    - microsoft windows 10: technographics
+      microsoft intune: technographics
+      kaspersky: technographics
+      servicenow: hp_category_intent
+    - estate_technologies: 3
+      website_technologies: 0
+      website_sources_used: false
+      basis: installed estate
+  output: The list of detected technologies, where each one came from, and a basis label (installed estate,
+    website technology only, or no technology detected).
+  sources:
+  - hp-backend/src/app/services/extractors/tech_landscape.py:detected_technologies
+  - hp-backend/src/app/services/extractors/tech_landscape.py:_breakdown_technologies
+  - hp-backend/src/app/services/extractors/tech_landscape.py:_hp_category_file
+  doc_source: HP_Tech_Landscape_Confidence_Scoring_Logic_FINAL section 2 (Driver 1 sources)
+  confidence: high
+- id: tl_website_fallback
+  parent: tl_technology_sources
+  name: Website technology is used only when there is no installed estate
+  kind: source
+  summary: Stops a category card from resting on a CDN or analytics script when real installed-estate
+    data exists.
+  purpose: Stops a category card from resting on a CDN or analytics script when real installed-estate
+    data exists.
+  inputs:
+  - Technology detected on the company's website
+  - Website technology breakdown
+  logic: The website lists are read only when the installed technology list produced zero technologies.
+    When they are used, every technology still carries where it came from, so a card built on website
+    evidence shows that.
+  example:
+    scenario: 'No installed technology record; the website list says ''Akamai, Google Analytics''; the
+      website breakdown''s Hosting cell says ''Other: Akamai Hosted, AWS''.'
+    steps:
+    - The estate count is 0, so the website lists are read.
+    - The website list adds Akamai and Google Analytics.
+    - 'The breakdown cell ''Other: Akamai Hosted, AWS'' loses its ''Other:'' grouping label and adds Akamai
+      Hosted and AWS.'
+    result: 4 website technologies; basis 'website technology only - no installed technology record for
+      this account'.
+    computed_value:
+      estate_technologies: 0
+      website_technologies: 4
+      website_sources_used: true
+      basis: website technology only - no Technographics row for this account
+    verified: true
+    expect:
+      estate_technologies: 0
+      website_technologies: 4
+      website_sources_used: true
+      basis: website technology only - no Technographics row for this account
+  output: A technology basis note shown on the map and on the technology matrix.
+  sources:
+  - hp-backend/src/app/services/extractors/tech_landscape.py:detected_technologies
+  doc_source: Client instruction quoted in code (Dhruvi, 27 Sep), hp-backend/src/app/services/extractors/tech_landscape.py
+    lines 650-678
+  confidence: high
+- id: tl_category_cards
+  parent: null
+  name: Seven fixed HP technology categories
+  kind: display
+  summary: Builds the Technographic Map's category blocks by looking for named vendors in the detected
+    technology list.
+  purpose: Builds the Technographic Map's category blocks by looking for named vendors in the detected
+    technology list.
+  inputs:
+  - Detected technology list (see the rule on which technologies count as detected)
+  logic: The map always uses the same seven categories, in this order. For each one, the system looks
+    for keywords inside each detected technology name. A keyword must appear as a whole word (no letter
+    or digit on either side), so 'g suite' does not match 'Marketing Suite'. Each vendor row found records
+    the exact detected names it matched. A category with no matching vendor is left out, except PC/Laptop
+    Brands and Print Fleet, which are always shown because they carry an HP whitespace row when HP is
+    absent.
+  conditions:
+  - '''azure ad'' does not count as Intune; bare ''vmware'' does not count as Workspace ONE.'
+  - AI/ML frameworks are a separate row from NVIDIA and are described as not evidencing GPU hardware.
+  table:
+    columns:
+    - Order
+    - Category
+    - Vendor row
+    - Keywords (whole-word match)
+    - Category badge
+    rows:
+    - - 1
+      - Client OS
+      - Microsoft
+      - windows, microsoft windows
+      - Contextual - no direct HP line
+    - - 1
+      - Client OS
+      - Apple
+      - macos, mac os, osx, os x, ios, ipados, apple ios
+      - Contextual - no direct HP line
+    - - 1
+      - Client OS
+      - Linux / Enterprise OS
+      - linux, centos, ubuntu, red hat, redhat, debian, suse, fedora, unix, solaris, aix
+      - Contextual - no direct HP line
+    - - 2
+      - PC/Laptop Brands
+      - Dell (SAN) / Huawei / Lenovo / MSI
+      - dell / huawei / lenovo / msi (client devices only, see the rule on network and server equipment)
+      - Displacement opportunity
+    - - 2
+      - PC/Laptop Brands
+      - HP Inc. (whitespace)
+      - 'added when none of: hp inc, hewlett packard, elitebook, probook'
+      - Displacement opportunity
+    - - 3
+      - UEM/MDM
+      - Jamf / Microsoft Intune / VMware Workspace ONE / AirWatch
+      - jamf / intune / workspace one, airwatch
+      - Complementary attach
+    - - 4
+      - Workstations & High-Performance Compute
+      - NVIDIA CUDA / GPUs
+      - nvidia, cuda
+      - Displacement opportunity
+    - - 4
+      - Workstations & High-Performance Compute
+      - AI / ML frameworks
+      - pytorch, keras, tensorflow, spark mllib
+      - Displacement opportunity
+    - - 4
+      - Workstations & High-Performance Compute
+      - AutoCAD / Autodesk
+      - autocad, autodesk, catia, solidworks, blender
+      - Displacement opportunity
+    - - 5
+      - IT Security & Endpoint Protection
+      - Aruba ClearPass / Cloudflare / Symantec / Kaspersky
+      - aruba clearpass, aruba networks / cloudflare / kaspersky, symantec
+      - Complementary attach
+    - - 6
+      - Collaboration & Hybrid Workplace
+      - Google Workspace / Atlassian Cloud
+      - google workspace, g suite, google sheets / atlassian cloud, jira software, confluence
+      - Complementary attach
+    - - 7
+      - Print Fleet & Document Infrastructure
+      - HP Inc. Print (whitespace)
+      - 'added when none of: hp print, managed print, laserjet'
+      - HP whitespace - open opportunity
+  example:
+    scenario: Is 'Adobe Digital Marketing Suite' evidence of Google Workspace (keyword 'g suite')?
+    steps:
+    - The keyword 'g suite' appears inside 'marketin(g suite)'.
+    - The character before 'g' is the letter 'n', so the whole-word test fails.
+    result: No match - the Collaboration card is not created from this entry.
+    computed_value: false
+    verified: true
+    expect: false
+  output: Up to seven categories, each with a name, a badge and vendor rows.
+  sources:
+  - hp-backend/src/app/services/extractors/tech_landscape.py:extract_tech_landscape
+  - hp-backend/src/app/services/extractors/tech_landscape.py:_kw_in
+  confidence: high
+- id: tl_client_os_keywords
+  parent: tl_category_cards
+  name: Client OS keywords come from the same table as the Urgency score
+  kind: selection
+  summary: Keeps the Client OS card and the Urgency score's OS count in agreement.
+  purpose: Keeps the Client OS card and the Urgency score's OS count in agreement.
+  inputs:
+  - Detected technology list
+  logic: The Microsoft, Apple and Linux keyword lists are taken from the Urgency score's operating-system
+    table. Linux also gets unix, solaris and aix. ChromeOS and Android are not put on this card.
+  constants:
+  - label: Windows keywords
+    ref: py:app.services.extractors.tech_landscape:CLIENT_OS_WINDOWS
+    stated:
+    - windows
+    - microsoft windows
+  - label: Apple keywords
+    ref: py:app.services.extractors.tech_landscape:CLIENT_OS_APPLE
+    stated:
+    - macos
+    - mac os
+    - osx
+    - os x
+    - ios
+    - ipados
+    - apple ios
+  - label: Linux/Unix keywords
+    ref: py:app.services.extractors.tech_landscape:CLIENT_OS_LINUX
+    stated:
+    - linux
+    - centos
+    - ubuntu
+    - red hat
+    - redhat
+    - debian
+    - suse
+    - fedora
+    - unix
+    - solaris
+    - aix
+  example:
+    scenario: The technology data says 'Mac OS X 10.15'.
+    steps:
+    - Each Apple keyword is tested as a whole word against 'mac os x 10.15'.
+    - '''mac os'' and ''os x'' match; ''macos'' does not (no space).'
+    result: An Apple vendor row is created, citing 'Mac OS X 10.15'.
+    computed_value:
+    - mac os
+    - os x
+    verified: true
+    expect:
+    - mac os
+    - os x
+  output: Client OS vendor rows.
+  sources:
+  - hp-backend/src/app/services/extractors/tech_landscape.py
+  - hp-backend/src/app/services/dashboard/urgency.py:OS_FAMILIES
+  confidence: high
+- id: tl_non_client_device_filter
+  parent: tl_category_cards
+  name: Network and server equipment is not a PC brand
+  kind: filter
+  summary: Stops a firewall or storage array from creating a PC/Laptop Brands competitor.
+  purpose: Stops a firewall or storage array from creating a PC/Laptop Brands competitor.
+  inputs:
+  - detected technology list
+  logic: 'For the PC/Laptop Brands vendors only, a detected entry containing any of these words (found
+    anywhere in the name) is ignored: firewall, router, switch, server, storage, san, nas, gateway, access
+    point, load balancer.'
+  constants:
+  - label: Non-client terms
+    value:
+    - firewall
+    - router
+    - switch
+    - server
+    - storage
+    - san
+    - nas
+    - gateway
+    - access point
+    - load balancer
+  example:
+    scenario: The stack contains 'Huawei Firewall' and 'Lenovo ThinkPad'.
+    steps:
+    - '''huawei firewall'' contains ''firewall'', so it is not a client device.'
+    - '''lenovo thinkpad'' contains none of the terms and matches ''lenovo''.'
+    result: PC/Laptop Brands shows Lenovo only; no Huawei row.
+  output: PC/Laptop Brands vendor rows.
+  sources:
+  - hp-backend/src/app/services/extractors/tech_landscape.py
+  confidence: high
+- id: tl_whitespace_rows
+  parent: tl_category_cards
+  name: HP whitespace rows for PCs and Print
+  kind: selection
+  summary: Shows HP's own absence as an open opportunity rather than leaving the category empty.
+  purpose: Shows HP's own absence as an open opportunity rather than leaving the category empty.
+  inputs:
+  - detected technology list
+  - account name
+  logic: 'PC/Laptop Brands: if no detected entry matches ''hp inc'', ''hewlett packard'', ''elitebook''
+    or ''probook'', an ''HP Inc.'' row marked whitespace is added (''No HP client hardware detected in
+    current <account> fleet''). Print Fleet: if none matches ''hp print'', ''managed print'' or ''laserjet'',
+    an ''HP Inc. Print'' whitespace row is added. Whitespace rows are not counted in ''detected signals''.'
+  example:
+    scenario: A stack with Lenovo laptops and no HP hardware or print.
+    steps:
+    - PC/Laptop Brands gets a Lenovo row and an HP Inc. whitespace row; detected signals = 1.
+    - Print Fleet gets only the HP Inc. Print whitespace row; detected signals = 0.
+    result: Two open-opportunity rows, each labelled Medium risk / Open opportunity.
+  output: Vendor rows marked as HP whitespace.
+  sources:
+  - hp-backend/src/app/services/extractors/tech_landscape.py:extract_tech_landscape
+  confidence: high
+- id: tl_relationship_and_risk
+  parent: null
+  name: HP relationship and displacement-risk labels
+  kind: display
+  summary: Turns each category's badge into the relationship and risk chips the seller sees.
+  purpose: Turns each category's badge into the relationship and risk chips the seller sees.
+  inputs:
+  - Category status badge
+  - Whether the vendor row is HP whitespace
+  logic: Each badge maps to a short label, a long explanation and a risk chip (see the table). If every
+    vendor row in a category is HP whitespace, the category is re-badged 'HP whitespace - open opportunity'
+    (a category cannot be 'Compete' when no rival is confirmed). A whitespace row always reads Medium
+    risk / Open opportunity, whatever the category badge. Placeholder values that say the inference is
+    still to be decided are removed. The narrative and HP play are left empty for the narrative step to
+    fill.
+  table:
+    columns:
+    - Category badge
+    - Short label
+    - Long explanation
+    - Risk chip
+    rows:
+    - - displacement opportunity
+      - Compete
+      - Compete - another vendor is confirmed in an HP-relevant category
+      - High risk
+    - - complementary attach
+      - Complement
+      - Complement - HP can work alongside the confirmed technology
+      - Low risk
+    - - hp whitespace - open opportunity
+      - Open opportunity
+      - Possible open opportunity - category need supported, no vendor confirmed
+      - Medium risk
+    - - contextual - no direct hp line
+      - Contextual
+      - Contextual - no direct HP line in this category
+      - null
+  example:
+    scenario: PC/Laptop Brands (badge 'Displacement opportunity') whose only row is the HP Inc. whitespace
+      row.
+    steps:
+    - No confirmed rival in the category.
+    - Badge is changed to 'HP whitespace - open opportunity'.
+    result: Category label 'Open opportunity'; the HP Inc. row shows 'Medium risk'.
+    computed_value:
+    - HP whitespace - open opportunity
+    - Open opportunity
+    - Medium risk
+    verified: true
+    expect:
+    - HP whitespace - open opportunity
+    - Open opportunity
+    - Medium risk
+  output: The relationship and its label on each category; the risk level and relationship label on each
+    vendor.
+  sources:
+  - hp-backend/src/app/services/extractors/tech_landscape.py:RELATIONSHIP_BY_BADGE
+  - hp-backend/src/app/services/extractors/tech_landscape.py:_normalise_hp_fields
+  confidence: high
+- id: tl_detection_status
+  parent: tl_relationship_and_risk
+  name: Detection status and provenance on each vendor
+  kind: selection
+  summary: Says whether the vendor was actually named in the technology data, and in which columns.
+  purpose: Says whether the vendor was actually named in the technology data, and in which columns.
+  inputs:
+  - The vendor's detected names
+  - The installed technology record's category columns
+  logic: 'Whitespace row: ''Unknown'', with provenance ''installed technology -> no vendor found for this
+    category''. Vendor with matched entries: ''Confirmed'', with provenance listing up to 3 of the installed
+    technology''s category columns (alphabetical) whose text contains a matched entry; if none, ''the
+    full technology list''. Vendor with no recorded match: ''Likely'', with a note that the source entry
+    was not recorded.'
+  example:
+    scenario: Symantec / Kaspersky row matched 'Kaspersky'; the installed technology's 'It Security' category
+      contains Kaspersky.
+    steps:
+    - Matched entries exist, so the status is Confirmed.
+    - The 'It Security' category contains 'kaspersky'.
+    result: Confirmed; provenance 'installed technology -> It Security'.
+    computed_value:
+    - Confirmed
+    - technographics -> It Security
+    verified: true
+    expect:
+    - Confirmed
+    - technographics -> It Security
+  output: The detection status (the label actually shown in the card footer), where it came from, and
+    the basis of the evidence.
+  sources:
+  - hp-backend/src/app/services/extractors/tech_landscape.py:_derive_provenance
+  - hp-backend/src/app/services/extractors/tech_landscape.py:_normalise_hp_fields
+  confidence: high
+- id: tl_map_narrative
+  parent: null
+  name: Strategic read, 'What it means for HP' and per-vendor HP play (AI-written, rule-checked)
+  kind: model
+  summary: Writes the sentences a seller reads on the map, inside fixed limits.
+  purpose: Writes the sentences a seller reads on the map, inside fixed limits.
+  inputs:
+  - Account name
+  - 'For each category: name, relationship label, vendor names and descriptions, whitespace flags'
+  - The allowed HP product list
+  logic: 'One AI request writes: a 3-4 sentence account-level ''strategic read''; for each category a
+    ''what it means'' paragraph of 70-100 words that names a detected vendor and the motion (displacement,
+    attach, upgrade, coexistence or whitespace); and for each vendor an HP line and a one-sentence play.
+    This is AI judgement - there is no formula. Fixed checks then constrain it: (1) the HP line must match
+    the approved product list, otherwise the vendor gets no play; (2) any text containing a banned word
+    (guarantees, ensures, fastest, cheapest, best-in-class, the best, always, never fails, 100%, eliminates,
+    proven to) or a number not present in the account''s technology list or name is rejected; (3) a ''what
+    it means'' outside 70-100 words gets one single-category rewrite, which is used only if it passes
+    the same checks and is closer to the band; otherwise the original stands.'
+  conditions:
+  - The AI sees only category names, relationship labels and vendors - not research activity, hiring,
+    news or filings.
+  - This runs before the confidence score, because Driver 1 needs the HP line it produces.
+  constants:
+  - label: Minimum words
+    ref: py:app.services.hp.map_narrative:MEANING_MIN_WORDS
+    stated: 70
+  - label: Maximum words
+    ref: py:app.services.hp.map_narrative:MEANING_MAX_WORDS
+    stated: 100
+  - label: Narrative guidance version
+    ref: py:app.services.hp.map_narrative:MAP_NARRATIVE_PROMPT_VERSION
+    stated: 3
+  example:
+    scenario: Checking three candidate play sentences for an account whose data contains 'Microsoft Windows
+      10'.
+    steps:
+    - '''HP Wolf Security guarantees protection'' contains the banned word ''guarantees'' - rejected.'
+    - '''Wolf Security reduces incidents by 30%'' carries the number 30, which is not in the account data
+      - rejected.'
+    - '''Wolf Security adds below-the-OS protection alongside Kaspersky'' has no banned word or number
+      - accepted.'
+    result: Rejected, rejected, accepted.
+    computed_value:
+    - false
+    - false
+    - true
+    verified: true
+    expect:
+    - false
+    - false
+    - true
+  output: The strategic read; a 'what it means' paragraph (and its word count) for each category; an HP
+    product and play text for each vendor; and a report on the checks.
+  sources:
+  - hp-backend/src/app/services/hp/map_narrative.py:generate_map_narrative
+  - hp-backend/src/app/services/hp/map_narrative.py:_is_acceptable
+  - hp-backend/src/app/services/hp/map_narrative.py:_retry_meaning
+  - hp-backend/src/app/services/extractors/grounding.py:normalize_hp_product
+  doc_source: HP_Recommendation_Tuning_Logic_FINAL_v4 section G (Technographic Map 70-100 words)
+  confidence: high
+- id: tl_rulebook_offering_override
+  parent: tl_map_narrative
+  name: The rulebook overrides the AI's HP line where a rule names the detected technology
+  kind: guardrail
+  uses:
+  - hp_rulebook
+  summary: Makes the HP line on a vendor card the rulebook's answer whenever the rulebook has one.
+  purpose: Makes the HP line on a vendor card the rulebook's answer whenever the rulebook has one.
+  inputs:
+  - The vendor's detected names
+  - HP's approved sales rulebook (service rules)
+  - The HP line chosen by AI
+  logic: For each vendor that is not a whitespace row, the detected names are matched against the rulebook's
+    service rules (hardware rules are excluded, as are rules that only modify, route or are catalogue-only).
+    If a rule matches, its family decides the HP line (security -> HP Wolf Security, collaboration ->
+    Poly Collaboration, print and scan -> HP Enterprise Print / MPS, workforce experience -> HP Workforce
+    Experience Platform, Care Pack support -> HP Care Pack Services, lifecycle -> HP Lifecycle & Sustainability
+    Services, deployment -> HP Deployment & Configuration Services, HP IQ -> HP IQ for Enterprise, ink
+    -> Original HP Ink), replacing the AI's pick. Up to 2 approved sentences and 1 prohibition from the
+    rule are attached. The play is labelled as coming from the rulebook in that case, and as positioning
+    otherwise.
+  example:
+    scenario: A Kaspersky vendor card where AI chose 'Poly Collaboration', and the rulebook has a security
+      rule that recognises 'kaspersky'.
+    steps:
+    - That security rule is a service rule that matches 'Kaspersky Endpoint Security'.
+    - The security family maps to HP Wolf Security.
+    - The AI's line differs, so the line is changed.
+    result: The HP line becomes 'HP Wolf Security' (from the security rule).
+    computed_value:
+    - WOLF 09
+    - HP Wolf Security
+    - true
+    verified: true
+    expect:
+    - WOLF 09
+    - HP Wolf Security
+    - true
+  output: The rulebook offering, the HP product, and where the product came from, on each vendor.
+  sources:
+  - hp-backend/src/app/services/extractors/tech_landscape.py:_rulebook_offering
+  - hp-backend/src/app/services/extractors/tech_landscape.py:_score_card_confidence
+  - hp-backend/src/app/services/hp/rulebook.py:RULEBOOK_FAMILY_TO_HP_LINE
+  confidence: high
+- id: tl_confidence_score
+  parent: null
+  name: Tech Landscape confidence per vendor card
+  kind: score
+  summary: Measures how well the evidence supports what the whole vendor card says; it also decides whether
+    the card exists at all.
+  purpose: Measures how well the evidence supports what the whole vendor card says; it also decides whether
+    the card exists at all.
+  inputs:
+  - Driver 1 - HP-relevant technology evidence (0, 5 or 10)
+  - Driver 2 - HP-category intent support (0, 5 or 10)
+  logic: Confidence % = (Driver 1 x 0.70 + Driver 2 x 0.30) x 10, rounded to a whole number. Only nine
+    results are possible, and the three with Driver 1 = 0 never reach the screen (see the rule on cards
+    with Driver 1 = 0).
+  formula: Confidence = (70% × Technology evidence + 30% × Intent support) × 10, rounded to a whole number
+  table:
+    columns:
+    - Driver 1
+    - Driver 2
+    - Confidence %
+    - Card shown?
+    rows:
+    - - 10
+      - 10
+      - 100
+      - 'yes'
+    - - 10
+      - 5
+      - 85
+      - 'yes'
+    - - 10
+      - 0
+      - 70
+      - 'yes'
+    - - 5
+      - 10
+      - 65
+      - 'yes'
+    - - 5
+      - 5
+      - 50
+      - 'yes'
+    - - 5
+      - 0
+      - 35
+      - 'yes'
+    - - 0
+      - 10
+      - 30
+      - no (suppressed)
+    - - 0
+      - 5
+      - 15
+      - no (suppressed)
+    - - 0
+      - 0
+      - 0
+      - no (suppressed)
+  constants:
+  - label: Driver 1 weight
+    ref: scoring:tech_confidence.weights.technology_evidence
+    stated: 0.7
+  - label: Driver 2 weight
+    ref: scoring:tech_confidence.weights.intent_support
+    stated: 0.3
+  - label: Driver scale
+    ref: scoring:tech_confidence.driver_scale
+    stated: 10
+  example:
+    scenario: Driver 1 = 10 (the rulebook names the technology), Driver 2 = 5 (category intent 34).
+    steps:
+    - 10 x 0.70 = 7.0
+    - 5 x 0.30 = 1.5
+    - (7.0 + 1.5) x 10 = 85
+    result: 85%
+    computed_value: 85
+    verified: true
+    expect: 85
+  output: Each vendor's confidence and the detail behind it (score, weight, basis and the matched rule).
+  sources:
+  - hp-backend/src/app/services/hp/tech_confidence.py:confidence
+  - hp-backend/src/app/services/extractors/tech_landscape.py:_score_card_confidence
+  - hp-backend/config/scoring.yaml
+  doc_source: HP_Tech_Landscape_Confidence_Scoring_Logic_FINAL sections 1 and 4
+  confidence: high
+- id: tl_driver_1
+  parent: tl_confidence_score
+  name: Driver 1 - HP-relevant technology evidence (70%)
+  kind: score
+  uses:
+  - hp_rulebook
+  summary: Scores how directly the detected technology supports the HP opportunity on the card.
+  purpose: Scores how directly the detected technology supports the HP opportunity on the card.
+  inputs:
+  - The vendor's detected names
+  - The card's route (from its HP line)
+  - The card's HP opportunity (its HP line, else its category's HP business category)
+  logic: 10 - a rule in the table of rulebook technologies names the technology (whole-word match) for
+    the card's route. 5 - otherwise, the technology belongs to a family that reaches the card's route
+    (see the related-families rule). 5 - otherwise, any detected technology on a card that carries an
+    HP opportunity (see the fallback rule). 0 - no technology detected, or no HP opportunity on the card.
+    Direct matches are checked across all detections before any family match.
+  table:
+    columns:
+    - Rule area
+    - Route
+    - Family
+    - Named technologies (score 10)
+    rows:
+    - - Workforce experience
+      - HP Workforce Experience Platform
+      - desktop operating system
+      - microsoft windows, windows, windows 10, windows 11, macos, mac os, android
+    - - Workforce experience
+      - HP Workforce Experience Platform
+      - endpoint and device management
+      - microsoft intune, intune, microsoft entra id, entra id, azure ad, azure active directory, servicenow
+    - - Workforce experience
+      - HP Workforce Experience Platform
+      - business intelligence and analytics
+      - microsoft power bi, power bi, power automate, tableau, tableau software
+    - - Care Pack support
+      - HP Care Pack support services
+      - endpoint and device management
+      - intel vpro, vpro
+    - - Deployment
+      - HP deployment and configuration services
+      - endpoint and device management
+      - autopilot, windows autopilot, microsoft intune, intune, azure ad, azure active directory
+    - - Deployment
+      - HP deployment and configuration services
+      - endpoint and device management
+      - sccm, microsoft endpoint configuration manager, configuration manager
+    - - Deployment
+      - HP deployment and configuration services
+      - virtual desktop and workspace
+      - vmware, vmware vsphere, vmware esxi, vmware horizon, vmware workspace one
+    - - Poly support
+      - Poly support services
+      - poly collaboration hardware
+      - poly, polycom, poly studio, poly trio, poly voyager
+    - - HP IQ
+      - HP IQ for Enterprise
+      - poly collaboration hardware
+      - poly x32, poly x52, poly x72
+    - - HP IQ
+      - HP IQ for Enterprise
+      - endpoint and device management
+      - microsoft intune, intune, microsoft entra id, entra id
+    - - Security
+      - HP Wolf Security
+      - desktop operating system
+      - microsoft windows, windows, windows 10, windows 11
+    - - Hardware competitor rule
+      - HP competitive comparison
+      - null
+      - thinkpad x1 carbon gen 13
+  constants:
+  - label: Direct fit
+    ref: scoring:tech_confidence.direct_fit
+    stated: 10
+  - label: Related fit
+    ref: scoring:tech_confidence.related_fit
+    stated: 5
+  - label: No fit
+    ref: scoring:tech_confidence.no_fit
+    stated: 0
+  example:
+    scenario: Client OS card for Microsoft, detected as 'Microsoft Windows'; no specific route.
+    steps:
+    - Route is unspecified, so any rule may answer.
+    - A workforce experience rule names 'microsoft windows'.
+    result: Driver 1 = 10, matched by the workforce experience rule for HP Workforce Experience Platform.
+    computed_value:
+    - 10
+    - WXP 04 names microsoft windows for HP Workforce Experience Platform
+    verified: true
+    expect:
+    - 10
+    - WXP 04 names microsoft windows for HP Workforce Experience Platform
+  output: The technology evidence score and how it was reached.
+  sources:
+  - hp-backend/src/app/services/hp/tech_confidence.py:RULEBOOK_TECHNOLOGIES
+  - hp-backend/src/app/services/hp/tech_confidence.py:driver_1_technology
+  - hp-backend/src/app/services/hp/tech_confidence.py:driver_1_for_card
+  doc_source: HP_Tech_Landscape_Confidence_Scoring_Logic_FINAL section 2
+  confidence: high
+- id: tl_driver_1_route
+  parent: tl_driver_1
+  name: Which route a card is scored against
+  kind: selection
+  summary: Narrows Driver 1 to the HP offering printed on the card where that is possible.
+  purpose: Narrows Driver 1 to the HP offering printed on the card where that is possible.
+  inputs:
+  - The vendor's HP line (after the rulebook override)
+  - Category
+  logic: 'Only two HP lines name a route: ''HP Wolf Security'' gives the HP Wolf Security route and ''Poly
+    Collaboration'' gives the Poly support services route. Every other line, or no line, is scored with
+    no route, meaning any rule in the table may answer. The card''s HP opportunity is its HP line. If
+    it has none, it is the HP business category of its technology category (PC, Workstation, Poly/Collaboration,
+    Print). Client OS, UEM/MDM and IT Security have none.'
+  table:
+    columns:
+    - HP line on card
+    - Route used
+    rows:
+    - - hp wolf security
+      - HP Wolf Security
+    - - poly collaboration
+      - Poly support services
+    - - any other line or none
+      - none (any rule)
+  example:
+    scenario: VMware detected on a card whose HP line is a hardware line (no route).
+    steps:
+    - No route, so every rule is eligible.
+    - A deployment rule names 'vmware'.
+    result: Driver 1 = 10 via that deployment rule, whatever the card's own opportunity is.
+    computed_value: 10
+    verified: true
+    expect: 10
+  output: The route and HP opportunity used to score Driver 1.
+  sources:
+  - hp-backend/src/app/services/extractors/tech_landscape.py:HP_PLAY_TO_ROUTE
+  - hp-backend/src/app/services/extractors/tech_landscape.py:_score_card_confidence
+  confidence: high
+- id: tl_driver_1_related_family
+  parent: tl_driver_1
+  name: Related technology families (score 5)
+  kind: score
+  summary: Gives 5 to a technology in the same family as one the rulebook names for the card's route.
+  purpose: Gives 5 to a technology in the same family as one the rulebook names for the card's route.
+  inputs:
+  - Detected names
+  - Route
+  logic: If there is no direct match, each family whose routes include the card's route is checked. A
+    whole-word match on a family member scores 5.
+  table:
+    columns:
+    - Family
+    - Members (score 5)
+    - Routes it reaches
+    rows:
+    - - microsoft cloud and workplace
+      - microsoft azure, azure, microsoft 365, office 365, sharepoint, microsoft teams, teams, onedrive,
+        exchange online
+      - HP Workforce Experience Platform
+    - - endpoint and device management
+      - jamf, workspace one, mobileiron, manageengine, ivanti, tanium, kandji
+      - HP Workforce Experience Platform, HP deployment and configuration services, HP Care Pack support
+        services, HP IQ for Enterprise
+    - - business intelligence and analytics
+      - looker, qlik, cognos, ibm cognos, sap businessobjects
+      - HP Workforce Experience Platform
+    - - virtual desktop and workspace
+      - citrix, citrix virtual apps, nutanix, hyper-v
+      - HP deployment and configuration services
+    - - desktop operating system
+      - linux, ubuntu, red hat, rhel, centos, debian, chromeos, chrome os, unix
+      - HP Workforce Experience Platform, HP Wolf Security
+    - - poly collaboration hardware
+      - logitech, cisco webex, webex, zoom rooms, jabra
+      - Poly support services, HP IQ for Enterprise
+  example:
+    scenario: Microsoft Azure scored against the workforce experience route (the client's own example).
+    steps:
+    - No workforce experience rule names Azure.
+    - Azure is in the Microsoft cloud and workplace family, which reaches workforce experience.
+    result: Driver 1 = 5 (related).
+    computed_value: 5
+    verified: true
+    expect: 5
+  output: The technology evidence score, marked 'related', with the family.
+  sources:
+  - hp-backend/src/app/services/hp/tech_confidence.py:FAMILY_MEMBERS
+  - hp-backend/src/app/services/hp/tech_confidence.py:FAMILY_REACHES_ROUTE
+  doc_source: HP_Tech_Landscape_Confidence_Scoring_Logic_FINAL section 2, 5/10 Azure example
+  confidence: high
+- id: tl_driver_1_card_fallback
+  parent: tl_driver_1
+  name: Any technology on a card with an HP opportunity scores 5
+  kind: score
+  summary: Treats the card's own category as the shared 'use case', so unlisted technologies are related
+    rather than unsupported.
+  purpose: Treats the card's own category as the shared 'use case', so unlisted technologies are related
+    rather than unsupported.
+  inputs:
+  - detected names
+  - card HP opportunity
+  logic: If neither a direct nor a family match is found, but the card carries an HP opportunity (its
+    HP line, or its category's HP business category), Driver 1 = 5. If the card has no HP opportunity,
+    Driver 1 = 0.
+  example:
+    scenario: '''Kaspersky Endpoint Security'' on the IT Security card whose HP line is HP Wolf Security.'
+    steps:
+    - No rule names Kaspersky for the HP Wolf Security route.
+    - No family member matches.
+    - The card carries HP Wolf Security as its opportunity.
+    result: Driver 1 = 5 (related, same technology environment).
+    computed_value: 5
+    verified: true
+    expect: 5
+  output: The Driver 1 value.
+  sources:
+  - hp-backend/src/app/services/hp/tech_confidence.py:driver_1_for_card
+  doc_source: HP_Tech_Landscape_Confidence_Scoring_Logic_FINAL section 2, 5/10 definition
+  confidence: high
+- id: tl_driver_2
+  parent: tl_confidence_score
+  name: Driver 2 - HP-category intent support (30%)
+  kind: score
+  summary: Adds support when the account also shows intent in the card's own HP business category.
+  purpose: Adds support when the account also shows intent in the card's own HP business category.
+  inputs:
+  - HP category research score for the card's own category (0-100)
+  logic: The card's technology category is mapped to one HP business category, and only that category's
+    score is used. A score of 50 or more gives 10; 25 to 49 gives 5; below 25, missing, or not a number
+    gives 0. If the research record does not match the account's domain, every card is treated as 'missing'
+    (0). Categories with no HP business counterpart always score 0.
+  table:
+    columns:
+    - Card category
+    - HP research category used
+    rows:
+    - - PC/Laptop Brands
+      - PC
+    - - Workstations & High-Performance Compute
+      - Workstation
+    - - Collaboration & Hybrid Workplace
+      - Poly/Collaboration
+    - - Print Fleet & Document Infrastructure
+      - Print
+    - - Client OS
+      - none (Driver 2 = 0)
+    - - UEM/MDM
+      - none (Driver 2 = 0)
+    - - IT Security & Endpoint Protection
+      - none (Driver 2 = 0)
+  constants:
+  - label: Intent bands [lower bound, points]
+    ref: scoring:tech_confidence.intent_bands
+    stated:
+    - - 50
+      - 10
+    - - 25
+      - 5
+  - label: Below bands / missing
+    ref: scoring:tech_confidence.intent_below_bands
+    stated: 0
+  example:
+    scenario: A 3D-category card with the account's 3D intent score of 34 (client's Astra example).
+    steps:
+    - 34 is not >= 50.
+    - 34 is >= 25.
+    result: Driver 2 = 5.
+    computed_value:
+    - 5
+    - 3D intent score 34
+    verified: true
+    expect:
+    - 5
+    - 3D intent score 34
+  output: The intent support score and how it was reached.
+  sources:
+  - hp-backend/src/app/services/hp/tech_confidence.py:driver_2_intent
+  - hp-backend/src/app/services/hp/tech_confidence.py:CATEGORY_TO_HP_CATEGORY
+  - hp-backend/src/app/services/extractors/tech_landscape.py:_hp_category_intent
+  doc_source: HP_Tech_Landscape_Confidence_Scoring_Logic_FINAL section 3
+  confidence: high
+- id: tl_suppression_guardrail
+  parent: tl_confidence_score
+  name: No card when Driver 1 = 0
+  kind: guardrail
+  summary: Intent alone can never put a technology card on screen.
+  purpose: Intent alone can never put a technology card on screen.
+  inputs:
+  - Driver 1
+  logic: 'A vendor card whose Driver 1 is 0 is removed from the category and listed in the suppression
+    report with its reason. HP whitespace rows are exempt: they make no technology claim, carry no confidence
+    at all and are always kept.'
+  example:
+    scenario: A card whose Driver 1 = 0 and Driver 2 = 10.
+    steps:
+    - Confidence would be 30%.
+    - Driver 1 is 0, so the card is not publishable.
+    result: Card suppressed.
+    computed_value:
+    - 30
+    - false
+    verified: true
+    expect:
+    - 30
+    - false
+  output: A suppression report; the vendor disappears from the map.
+  sources:
+  - hp-backend/src/app/services/hp/tech_confidence.py:is_publishable
+  - hp-backend/src/app/services/extractors/tech_landscape.py:_score_card_confidence
+  doc_source: HP_Tech_Landscape_Confidence_Scoring_Logic_FINAL section 1, mandatory guardrail
+  confidence: high
+- id: tl_reconcile_after_suppression
+  parent: tl_suppression_guardrail
+  name: Counts and narrative are corrected after suppression
+  kind: selection
+  summary: Keeps the header count and the 'what it means' text consistent with the cards actually shown.
+  purpose: Keeps the header count and the 'what it means' text consistent with the cards actually shown.
+  inputs:
+  - Categories after suppression
+  - The list of suppressed vendors
+  logic: Each category's count of detected signals is recounted from the surviving vendors that are not
+    whitespace rows. If the category's 'what it means' paragraph names (as a whole word) a vendor that
+    was suppressed, the paragraph is dropped and the card falls back to the fixed relationship sentence.
+  example:
+    scenario: Client OS had Microsoft and Apple; Apple's card was suppressed; the paragraph mentions Apple.
+    steps:
+    - 'Recount: 2 -> 1.'
+    - Paragraph names 'Apple' -> dropped.
+    result: Count 1; the 'what it means' paragraph is removed.
+    computed_value:
+    - 1
+    - null
+    verified: true
+    expect:
+    - 1
+    - null
+  output: Updated signal counts and 'what it means' paragraphs.
+  sources:
+  - hp-backend/src/app/services/extractors/tech_landscape.py:_reconcile_after_suppression
+  confidence: high
+- id: tl_confidence_not_displayed
+  parent: tl_confidence_score
+  name: The percentage is computed but not shown
+  kind: display
+  summary: Records the decision to hide the confidence percentage.
+  purpose: Records the decision to hide the confidence percentage.
+  logic: The vendor card footer shows the detection status (Confirmed / Likely / Unknown) instead of the
+    percentage. The score is still computed and still decides which cards exist (see the rule on cards
+    with Driver 1 = 0). The whole-stack view does not carry it either.
+  example:
+    scenario: A card scoring 85%.
+    steps:
+    - The score is kept with the card's data.
+    - The card footer shows the detection status.
+    result: Seller sees 'Confirmed', not 85%.
+  output: What the seller sees on screen.
+  sources:
+  - hp-frontend/src/app/dashboard/page.tsx
+  - hp-backend/src/app/services/extractors/tech_landscape.py:stack_view
+  doc_source: Client, 27 Sep, quoted in hp-frontend/src/app/dashboard/page.tsx line 4895
+  confidence: high
+- id: tl_header_counts
+  parent: null
+  name: Map header counts
+  kind: selection
+  summary: Explains the numbers at the top of the Technographic Map.
+  purpose: Explains the numbers at the top of the Technographic Map.
+  inputs:
+  - Detected technology list
+  - Categories after suppression
+  logic: Total detected technologies = the length of the detected technology list. Mapped signals = the
+    sum of each category's detected-signal count (whitespace rows excluded). HP-mapped categories = categories
+    with at least one vendor carrying an HP play, out of the categories shown. Opportunity categories
+    = categories flagged as opportunities (all except Client OS). Whitespace categories = categories with
+    a whitespace row. The 7 categories are a fixed list, and the page says so.
+  example:
+    scenario: 220 detected technologies; 6 categories shown; signals 3+2+1+2+0 (print whitespace) + 1;
+      4 categories have a vendor with an HP play.
+    steps:
+    - Mapped signals = 9.
+    - HP-mapped = '4/6'.
+    - Opportunity categories = the count of categories shown other than Client OS.
+    result: Header reads 220 detected technologies, 9 mapped signals, 4/6 HP-mapped.
+  output: Total detected technologies, mapped signal count, HP-mapped categories, opportunity categories,
+    whitespace categories, and a note that the categories are a fixed list.
+  sources:
+  - hp-backend/src/app/services/extractors/tech_landscape.py:extract_tech_landscape
+  confidence: high
+- id: tl_case_study_proof
+  parent: null
+  name: Case-study proof on a category (picks last of all sections)
+  kind: selection
+  summary: Optionally strengthens a category's 'what it means' with an HP customer story that matches
+    the HP line on its cards.
+  purpose: Optionally strengthens a category's 'what it means' with an HP customer story that matches
+    the HP line on its cards.
+  inputs:
+  - The category's 'what it means' paragraph (must not be empty)
+  - HP lines on the category's vendor plays
+  - The account's industry
+  - Case studies already cited by other sections
+  logic: Only a category with a 'what it means' paragraph is considered. Its vendors' HP lines are turned
+    into case-study product lines, and the category name is turned into use-case tags. The best study
+    is then allocated (the ranking is described in the Opportunity Map rule on case-study proof). The
+    Technographic Map picks last of all sections, so it avoids studies already cited elsewhere where an
+    equally good one exists, and never repeats a study across its own categories. No match means no proof.
+  example:
+    scenario: IT Security category whose vendor play is 'HP Wolf Security'.
+    steps:
+    - '''HP Wolf Security'' maps to the ''security'' product line.'
+    - Category name 'IT Security & Endpoint Protection' maps to the 'Security' use-case tag.
+    result: Candidates are security-line studies, ranked with the Security tag first.
+    computed_value:
+    - - security
+    - - Security
+    verified: true
+    expect:
+    - - security
+    - - Security
+  output: A proof point on the category.
+  sources:
+  - hp-backend/src/app/services/extractors/tech_landscape.py:extract_tech_landscape
+  - hp-backend/src/app/services/hp/case_studies.py:allocate
+  - hp-backend/src/app/services/hp/case_studies.py:SURFACE_ORDER
+  doc_source: Client, 24 Sep (F9), quoted in hp-backend/src/app/services/hp/case_studies.py lines 568-578
+  confidence: high
+- id: tl_integration_routes
+  parent: null
+  name: Integration routes (context only)
+  kind: selection
+  summary: Points out a detected technology that an HP offering names as an integration target, without
+    recommending anything.
+  purpose: Points out a detected technology that an HP offering names as an integration target, without
+    recommending anything.
+  inputs:
+  - The full detected technology list
+  - The approved facts of the rulebook's rules
+  logic: A rule counts when its approved facts use integration wording (integrates, interoperates, works
+    with, connects to/into, plugs into, native support for, compatible with). Capitalised product names
+    in those facts (3 or more characters, not HP's own names or generic words such as Microsoft, Windows,
+    Cloud) become targets. A detected technology matches a target only on whole words. Offerings that
+    are HP sales material (deck, playbook, portfolio, slides) are skipped. There is one line per technology,
+    worded exactly '<technology> detected; possible <offering> integration route'. It is never scored
+    and never a recommendation.
+  example:
+    scenario: 'Detected: Microsoft Intune, ServiceNow, Cisco Routers. A workforce experience rule says
+      ''HP WXP integrates with ServiceNow, Microsoft Intune, Power BI and Tableau.'''
+    steps:
+    - 'Targets: ServiceNow, Microsoft Intune, Power BI, Tableau.'
+    - Intune and ServiceNow match whole words; Cisco Routers matches nothing.
+    result: 'Two context lines: ''Microsoft Intune detected; possible HP Workforce Experience Platform
+      integration route'' and the same for ServiceNow.'
+    computed_value:
+    - Microsoft Intune detected; possible HP Workforce Experience Platform integration route
+    - ServiceNow detected; possible HP Workforce Experience Platform integration route
+    verified: true
+    expect:
+    - Microsoft Intune detected; possible HP Workforce Experience Platform integration route
+    - ServiceNow detected; possible HP Workforce Experience Platform integration route
+  output: Integration-route lines, each marked as context only.
+  sources:
+  - hp-backend/src/app/services/hp/integration_routes.py:routes_for
+  - hp-backend/src/app/services/hp/integration_routes.py:targets_by_offering
+  doc_source: Client, 24 Sep, quoted in hp-backend/src/app/services/hp/integration_routes.py lines 3-17;
+    HP_Recommendation_Tuning_Logic_FINAL_v4 K3
+  confidence: high
+- id: tl_stack_matrix_groups
+  parent: null
+  name: Technology Stack Matrix - the estate grouped by the technology data's own categories
+  kind: selection
+  summary: Shows every detected technology under the technology data's 20 category columns.
+  purpose: Shows every detected technology under the technology data's 20 category columns.
+  inputs:
+  - 'Installed technology record: 20 category columns'
+  - Detected technology list
+  logic: Each category cell is split at commas. A trailing '(+N more)' marker is removed and never shown
+    as a technology. Groups are ordered largest first, then by name. A technology filed under several
+    columns appears in each (the count of such technologies is published). Technologies in the detected
+    list that no column names go into a last group, 'Not categorised in the export', whatever its size.
+  example:
+    scenario: Cell 'Python, Java, Google Cloud APIs (+16 more)'.
+    steps:
+    - Split on commas.
+    - Strip the '(+16 more)' marker.
+    result: '[''Python'', ''Java'', ''Google Cloud APIs'']'
+    computed_value:
+    - Python
+    - Java
+    - Google Cloud APIs
+    verified: true
+    expect:
+    - Python
+    - Java
+    - Google Cloud APIs
+  output: The category matrix, the category groups, the count of uncategorised technologies and the technologies
+    filed under several categories. Marked empty when there is no technology and no category.
+  sources:
+  - hp-backend/src/app/services/extractors/tech_landscape.py:_category_names
+  - hp-backend/src/app/services/extractors/tech_landscape.py:category_groups
+  - hp-backend/src/app/services/extractors/tech_landscape.py:multi_category_technologies
+  doc_source: Client, 27 Sep, quoted in hp-backend/src/app/services/extractors/tech_landscape.py category_groups
+    docstring
+  confidence: high
+- id: tl_stack_view
+  parent: tl_stack_matrix_groups
+  name: Whole-stack cards by family, with the HP play where the map found one
+  kind: display
+  summary: Shows one card per technology, folded into seven seller-readable families.
+  purpose: Shows one card per technology, folded into seven seller-readable families.
+  inputs:
+  - Category matrix
+  - Detected technology list and where each came from
+  - Technographic Map categories
+  logic: 'A technology goes to the first family (in this order) that contains any of its category columns:
+    Security; Endpoints, OS & IT Management; Collaboration & Communications; Engineering & Development;
+    Data & Analytics; Networks & Infrastructure; Business Applications; else Other. The HP play, risk
+    label and reason are copied from the map''s vendor card whose detected names include the technology;
+    otherwise none. HP opportunities are grouped by play and sorted by number of technologies. No score
+    is carried.'
+  table:
+    columns:
+    - Family
+    - Categories in the technology data
+    rows:
+    - - Security
+      - It Security
+    - - Endpoints, OS & IT Management
+      - It Management, Platform And Storage
+    - - Collaboration & Communications
+      - Collaboration, Communications, Productivity And Operations
+    - - Engineering & Development
+      - Devops And Development, Prog Langs And Frameworks, Testing And Qa, Product And Design
+    - - Data & Analytics
+      - Bi And Analytics
+    - - Networks & Infrastructure
+      - Computer Networks
+    - - Business Applications
+      - Sales, Marketing, Customer Management, Finance And Accounting, Hr, Ecommerce, Operations Software,
+        Operations Management
+  example:
+    scenario: Kaspersky (It Security, Sales), Tableau (Bi And Analytics), Jira (no category); the IT Security
+      card maps Kaspersky to HP Wolf Security.
+    steps:
+    - Kaspersky -> Security (first family listed).
+    - Tableau -> Data & Analytics.
+    - Jira -> Other.
+    result: 1 HP-relevant technology out of 3; opportunity 'HP Wolf Security' with 1 technology.
+    computed_value:
+    - - Security
+      - Data & Analytics
+      - Other
+    - 1
+    - 3
+    verified: true
+    expect:
+    - - Security
+      - Data & Analytics
+      - Other
+    - 1
+    - 3
+  output: 'The whole-stack view: families, technology cards and HP opportunities.'
+  sources:
+  - hp-backend/src/app/services/extractors/tech_landscape.py:STACK_FAMILIES
+  - hp-backend/src/app/services/extractors/tech_landscape.py:stack_view
+  confidence: high
+- id: tl_detections_reference
+  parent: null
+  name: Digital Technology Detections - copied rows
+  kind: selection
+  summary: Lists the raw detection records.
+  purpose: Lists the raw detection records.
+  inputs:
+  - 'Technology detection records: id, score, first seen, last seen, department occupation codes'
+  logic: Every detection record that has an id or a score is copied as text, unchanged. No scoring or
+    filtering beyond that. Shown as empty when there are none.
+  example:
+    scenario: 3 rows, one with neither id nor score.
+    steps:
+    - Rows with id or score kept.
+    result: 2 detections shown.
+  output: The list of detections and the total count.
+  sources:
+  - hp-backend/src/app/services/extractors/tech_landscape.py:extract_tech_landscape
+  confidence: high
+- id: tl_webstack_breakdown
+  parent: null
+  name: Web & Digital Infrastructure Stack
+  kind: selection
+  summary: Shows the website technology details as delivered.
+  purpose: Shows the website technology details as delivered.
+  inputs:
+  - 'Website technology: technologies used by the company website, number of premium technologies, money
+    spent on website technologies, technology categories'
+  - Website technology breakdown record
+  logic: 'The website technology values are split at commas and copied. The breakdown columns are shown
+    in a fixed order (CMS, Hosting, Server, Web Server, CDN ... SEO fields last), with unknown columns
+    after. Empty values (nan, none, null, ''no data available'', ''-'') are skipped. Each cell is split
+    at ''|'' into vendor groups (''Group: a, b''). Page-description columns (SEO, copyright, robots, language
+    and so on) are flagged as page metadata.'
+  example:
+    scenario: 'Cms cell ''Enterprise: Adobe Experience Manager | Other: WordPress 5.3, Investis''.'
+    steps:
+    - Split on '|' into two groups.
+    - 'Group ''Enterprise'': Adobe Experience Manager; group ''Other'': WordPress 5.3, Investis.'
+    result: Cms shows 3 technologies in 2 groups, not page metadata.
+    computed_value:
+    - group: Enterprise
+      technologies:
+      - Adobe Experience Manager
+    - group: Other
+      technologies:
+      - WordPress 5.3
+      - Investis
+    verified: true
+    expect:
+    - group: Enterprise
+      technologies:
+      - Adobe Experience Manager
+    - group: Other
+      technologies:
+      - WordPress 5.3
+      - Investis
+  output: The website technology list, premium technology count, estimated web spend, category list and
+    the breakdown.
+  sources:
+  - hp-backend/src/app/services/extractors/tech_landscape.py:_parse_tech_breakdown
+  - hp-backend/src/app/services/extractors/tech_landscape.py:TECH_BREAKDOWN_ORDER
+  confidence: high
+- id: tl_hp_recommendations
+  parent: null
+  name: HP Product Recommendations (fixed rules decide; AI writes only the rationale)
+  kind: selection
+  uses:
+  - hp_rulebook
+  - hp_lifecycle
+  summary: Recommends HP products and services from HP's approved sales rulebook, based on the account's
+    own evidence.
+  purpose: Recommends HP products and services from HP's approved sales rulebook, based on the account's
+    own evidence.
+  inputs:
+  - Account research evidence (see the evidence rule below)
+  - HP's approved sales rulebook
+  - HP's product lifecycle list
+  - Technographic Map categories
+  - HP category research scores
+  logic: 'Chain: account evidence -> rulebook rule matching (fixed rules) -> one primary plus separately
+    evidenced secondaries (fixed rules) -> lifecycle check (fixed rules) -> fact guardrails (fixed rules)
+    -> confidence band and evidence tier (fixed rules) -> AI writes a rationale only for hardware cards
+    -> the wording is verified by fixed checks. Service cards are never sent to AI. They carry HP''s approved
+    sentences word for word. Hardware cards come first, then service cards. If nothing qualifies, the
+    section stays pending, with a notice that no product deck is forced.'
+  example:
+    scenario: See the rules below.
+    result: Recommendation cards placed under the category they concern.
+  output: Recommendation cards, the rules blocked, the number of rules evaluated, a report of the checks
+    and the rulebook version.
+  sources:
+  - hp-backend/src/app/services/hp/recommendations.py:generate_hp_recommendations
+  - hp-backend/src/app/services/hp/recommendations.py:_rulebook_candidates
+  doc_source: HP_Recommendation_Tuning_Logic_FINAL_v4 Technographic Map row; Rulebook C 01-C 07
+  confidence: high
+- id: tl_rec_evidence_corpus
+  parent: tl_hp_recommendations
+  name: Evidence the rules are matched against
+  kind: selection
+  summary: Defines what counts as account evidence for a recommendation.
+  purpose: Defines what counts as account evidence for a recommendation.
+  inputs:
+  - Company profile, installed technology, job postings, research topics, news events, Google news, website
+    technology and technology detections (every meaningful entry)
+  - 'From the page: the executive summary''s business description, research topic names, opportunity trigger
+    headlines and the full technology list'
+  logic: Every entry in these eight kinds of information is used if it has at least 4 characters, is not
+    an ID, link, date, score or count field, and is not a bare number, link, timestamp or ID. Contact
+    records are excluded (a person's skills are not a company need). Texts taken from the page are added
+    as technology-map rows when not already present. HP material is never evidence.
+  example:
+    scenario: A job posting with the title 'Data Engineer - AI platform' and the posted date '2026-09-01'.
+    steps:
+    - The title (4 or more characters, meaningful field) is kept.
+    - The posted date is a date field and is skipped.
+    result: Only the title becomes evidence.
+    computed_value:
+    - true
+    - false
+    verified: true
+    expect:
+    - true
+    - false
+  output: Evidence rows, each with where it came from.
+  sources:
+  - hp-backend/src/app/services/hp/recommendations.py:_account_evidence
+  - hp-backend/src/app/services/hp/rulebook.py:account_evidence
+  - hp-backend/src/app/services/hp/rulebook.py:_is_meaningful
+  confidence: high
+- id: tl_rec_rule_matching
+  parent: tl_hp_recommendations
+  name: Which rulebook rules the evidence earns
+  kind: selection
+  uses:
+  - hp_rulebook
+  summary: Selects candidate rules strictly from the account's own evidence.
+  purpose: Selects candidate rules strictly from the account's own evidence.
+  inputs:
+  - Evidence rows
+  - Rulebook rules (signal terms and observable terms prepared in advance)
+  - Account country
+  logic: 'A rule fires when any of its terms appears (as a whole word) in an evidence entry that is not
+    a known look-alike phrase (for example ''vehicle fleet'', ''tokenization'', ''social collaboration'').
+    Terms made only of ubiquitous vendors and generic words (for example ''sap erp'', ''microsoft teams'')
+    are ''indicative'' and cannot earn a rule. A rule that only routes to another offering must also match
+    one of its observable terms. A rule with no qualifying term is refused. HP Wolf Security offerings
+    limited to HP PCs are refused when no HP client hardware is in the evidence. HP IQ rules are refused
+    outside the United States. A testable condition that the account contradicts (only country today)
+    refuses the rule. Conditions that cannot be tested are kept and shown as ''unverified''. Within a
+    family at most 3 standalone rules are kept (modifiers are uncapped). Order: more distinct qualifying
+    terms, then more terms, then more evidence entries, then routing order, then rulebook order.'
+  constants:
+  - label: Max rules per family
+    ref: py:app.services.hp.rulebook:MAX_RULES_PER_FAMILY
+    stated: 3
+  example:
+    scenario: 'Indonesia account; evidence: ''Kaspersky Endpoint Security'', ''Symantec Endpoint Protection'',
+      ''IT Help Desk Analyst - high ticket volume'', ''SAP ERP''. Rules: security rule A (kaspersky, symantec
+      endpoint protection), security rule B (kaspersky), support rule (help desk, ticket volume; seat-count
+      condition), print rule (sap erp), HP IQ rule (kaspersky).'
+    steps:
+    - The HP IQ rule is blocked (not United States).
+    - The print rule matched only 'sap erp', which is indicative - refused.
+    - Security rule A has 2 qualifying terms, the support rule has 2, and security rule B has 1.
+    - The support rule keeps its seat-count condition as unverified.
+    result: 'Candidates in order: security rule A, support rule, security rule B; the print rule is reported
+      as refused.'
+    computed_value:
+    - - WOLF 09
+      - CARE 03
+      - WOLF 10
+    - - PRINT 21
+    verified: true
+    expect:
+    - - WOLF 09
+      - CARE 03
+      - WOLF 10
+    - - PRINT 21
+  output: Ranked candidate rules, and refused rules with reasons.
+  sources:
+  - hp-backend/src/app/services/hp/rulebook.py:candidates
+  - hp-backend/src/app/services/hp/rulebook.py:split_terms
+  - hp-backend/src/app/services/hp/rulebook.py:indicative_term
+  - hp-backend/src/app/services/hp/rulebook.py:check_conditions
+  - hp-backend/src/app/services/hp/rulebook.py:iq_availability
+  - hp-backend/src/app/services/hp/rulebook.py:wolf_offering_allowed
+  doc_source: HP 220 Account Rulebook C 01, C 07 (quoted in hp-backend/src/app/services/hp/rulebook.py
+    docstring)
+  confidence: high
+- id: tl_rec_selection
+  parent: tl_hp_recommendations
+  name: One main recommendation; more only with separate evidence
+  kind: selection
+  summary: Prevents several cards built on the same sentence.
+  purpose: Prevents several cards built on the same sentence.
+  inputs:
+  - ranked candidate rules
+  logic: The best standalone rule (not a modifier, routing or catalogue-only rule) is the primary. A later
+    rule becomes a secondary only if none of its evidence items overlap the primary's or an earlier secondary's.
+    For service rules, at most one rule per opportunity type. Everything else is 'withheld' with the reason.
+    Hardware and service rules are selected from the same matching pass. Service cards are additionally
+    capped at 1 per Technographic Map category.
+  constants:
+  - label: Service cards per category
+    ref: py:app.services.hp.recommendations:MAX_PART_B_PER_CATEGORY
+    stated: 1
+  example:
+    scenario: 'Candidates: security rule A (evidence items 0 and 1), support rule (item 2), security rule
+      B (item 0).'
+    steps:
+    - Security rule A is the primary.
+    - The support rule uses item 2 only - admitted as secondary.
+    - Security rule B reuses item 0 - withheld.
+    result: 'Primary: security rule A; secondary: support rule; security rule B withheld because the same
+      evidence already supports security rule A.'
+    computed_value:
+    - WOLF 09
+    - - CARE 03
+    - - - WOLF 10
+        - the same evidence already supports WOLF 09
+    verified: true
+    expect:
+    - WOLF 09
+    - - CARE 03
+    - - - WOLF 10
+        - the same evidence already supports WOLF 09
+  output: The primary, the secondary and the withheld rules (withheld hardware rules appear as blocked
+    beside the category they would have filled).
+  sources:
+  - hp-backend/src/app/services/hp/rulebook.py:select
+  - hp-backend/src/app/services/hp/recommendations.py:_part_b_cards
+  - hp-backend/src/app/services/hp/recommendations.py:_blocked_placement
+  doc_source: HP 220 Account Rulebook C 06
+  confidence: high
+- id: tl_rec_part_a_placement
+  parent: tl_hp_recommendations
+  name: Hardware card placement
+  kind: display
+  summary: Puts each hardware card under the Technographic Map category its device type belongs to.
+  purpose: Puts each hardware card under the Technographic Map category its device type belongs to.
+  inputs:
+  - Rule number
+  - Device-type table (device type, family, product presentation, exact-competitor flag)
+  logic: 'The rule''s device type comes from the 18-row device table and fixes the category: notebook
+    -> PC/Laptop Brands; tower, sff, mini, aio -> Workstations & High-Performance Compute; no device type
+    -> shown after the categories. Rule 8 additionally requires the exact competitor model ''thinkpad
+    x1 carbon gen 13''.'
+  table:
+    columns:
+    - Hardware rule
+    - Condition
+    - Product presentation
+    - Device type
+    - Category
+    rows:
+    - - 1
+      - Enterprise AI / local AI / AI adoption
+      - HP EliteBook 8 G2 Series
+      - notebook
+      - PC/Laptop Brands
+    - - 2
+      - Enterprise AI at scale / standard fleet
+      - HP EliteBook 6 G2 Series
+      - notebook
+      - PC/Laptop Brands
+    - - 3
+      - SMB / growing-business AI refresh
+      - HP ProBook 4 G2 Series
+      - notebook
+      - PC/Laptop Brands
+    - - 4
+      - Executive / senior leader
+      - HP EliteBook Ultra G1i Customer Presentation
+      - notebook
+      - PC/Laptop Brands
+    - - 5
+      - ARM / Snapdragon mobile AI
+      - HP EliteBook Ultra G1q / G1q8
+      - notebook
+      - PC/Laptop Brands
+    - - 6
+      - Security / cyber risk
+      - Mapped EliteBook / EliteDesk / ProBook deck
+      - null
+      - after the list
+    - - 7
+      - Hybrid work / video meetings
+      - Mapped EliteBook / ProBook / AiO deck
+      - null
+      - after the list
+    - - 8
+      - Lenovo ThinkPad X1 Carbon Gen 13 found
+      - Competitive comparison - EliteBook X G1i vs Lenovo ThinkPad X1 Carbon
+      - notebook
+      - PC/Laptop Brands
+    - - 9
+      - Education / government / RFP notebook
+      - HP 200 G2 Series
+      - notebook
+      - PC/Laptop Brands
+    - - 10
+      - Fixed-office AI / expandable desktop
+      - HP EliteDesk 8 Tower G1i / G1i E Desktop AI PC
+      - tower
+      - Workstations & High-Performance Compute
+    - - 11
+      - Compact desktop / branch / call center
+      - HP EliteDesk 8 Mini G1i / HP ProDesk 4 Mini G1i
+      - mini
+      - Workstations & High-Performance Compute
+    - - 12
+      - Integrated display / front desk / shared workspace
+      - HP EliteStudio 8 AiO G1i / HP ProStudio 4 AiO G1i
+      - aio
+      - Workstations & High-Performance Compute
+    - - 13
+      - Desktop performance with smaller footprint
+      - HP EliteDesk 8 SFF G1i Desktop AI PC
+      - sff
+      - Workstations & High-Performance Compute
+    - - 14
+      - Sustainability / ESG
+      - Product deck for the product already selected
+      - null
+      - after the list
+    - - 15
+      - Fleet serviceability / IT operations
+      - EliteBook 8 / EliteDesk / mapped product deck
+      - null
+      - after the list
+    - - 16
+      - 5G / highly mobile workforce
+      - Mapped notebook deck that supports 5G / HP Go
+      - notebook
+      - PC/Laptop Brands
+    - - 17
+      - User/persona routing before product selection
+      - HP business portfolio sell-in presentation FY26
+      - null
+      - after the list
+    - - 18
+      - Why AI PCs now
+      - HP business portfolio sell-in presentation FY26
+      - null
+      - after the list
+  example:
+    scenario: Hardware rule 10 (Fixed-office AI / expandable desktop).
+    steps:
+    - Device type 'tower'.
+    result: Placed in Workstations & High-Performance Compute.
+    computed_value:
+    - workstations_compute
+    - Workstations & High-Performance Compute
+    verified: true
+    expect:
+    - workstations_compute
+    - Workstations & High-Performance Compute
+  output: A category on each recommendation.
+  sources:
+  - hp-backend/src/app/services/hp/product_rules.py:RULES
+  - hp-backend/src/app/services/hp/recommendations.py:DEVICE_TYPE_TO_CATEGORY
+  confidence: high
+- id: tl_rec_part_b_cards
+  parent: tl_hp_recommendations
+  name: Service cards, quoted word for word
+  kind: display
+  summary: Fills the security, collaboration, print and OS categories that hardware rules cannot reach.
+  purpose: Fills the security, collaboration, print and OS categories that hardware rules cannot reach.
+  inputs:
+  - Service candidate rules
+  - The HP lines on the categories' vendor cards
+  logic: A category's eligible families come from the HP lines on its vendor cards (HP Wolf Security ->
+    security; Poly Collaboration -> collaboration; HP Enterprise Print / MPS -> print and scan; Original
+    HP Ink -> ink; HP Anyware / DaaS -> workforce experience and deployment; HP Workforce Experience Platform
+    -> workforce experience). The first matching rule (in rank order) that is not already used, has not
+    passed its lifecycle end and has at least one approved fact becomes the card (max 1 per category,
+    up to 8 facts). No AI is involved and no confidence band is set.
+  table:
+    columns:
+    - HP line on vendor card
+    - Rulebook families
+    rows:
+    - - hp wolf security
+      - security
+    - - poly collaboration
+      - collaboration
+    - - hp enterprise print / mps
+      - print, scan
+    - - original hp ink
+      - ink
+    - - hp anyware / daas
+      - workforce experience, deployment
+    - - hp workforce experience platform
+      - workforce experience
+  example:
+    scenario: IT Security card with vendor HP line 'HP Wolf Security'.
+    steps:
+    - 'Eligible family: security.'
+    result: The best security rule fired by the evidence becomes this category's service card.
+    computed_value: frozenset({'WOLF'})
+    verified: true
+    expect:
+    - WOLF
+  output: Service cards quoted word for word, with no confidence band and with their evidence tier.
+  sources:
+  - hp-backend/src/app/services/hp/recommendations.py:_category_families
+  - hp-backend/src/app/services/hp/recommendations.py:_part_b_cards
+  doc_source: HP 220 Account Rulebook C 03 ('use exact facts')
+  confidence: high
+- id: tl_rec_lifecycle
+  parent: tl_hp_recommendations
+  name: Lifecycle check
+  kind: guardrail
+  uses:
+  - hp_lifecycle
+  summary: Never recommends an HP product past its end-of-life date; flags one approaching it.
+  purpose: Never recommends an HP product past its end-of-life date; flags one approaching it.
+  inputs:
+  - Offering name of the rule
+  - HP lifecycle records (product, generation markers, identity words, end dates)
+  - Today's date
+  logic: The offering matches a lifecycle row only if they share a generation marker (for example G1i)
+    and at least 2 distinctive words. Not listed -> recommendable. Listed and the LATEST end date has
+    passed -> not recommendable (reported as a blocked rule). Listed and the EARLIEST end date has passed,
+    or the latest is within 180 days -> recommendable with the flag 'approaching lifecycle end'. Otherwise
+    it is listed with end dates in the future. If the lifecycle list cannot be read, the product is recommended.
+  constants:
+  - label: Approaching window (days)
+    ref: py:app.services.hp.lifecycle:APPROACHING_WITHIN_DAYS
+    stated: 180
+  - label: Minimum shared words
+    ref: py:app.services.hp.lifecycle:MIN_SHARED_WORDS
+    stated: 2
+  example:
+    scenario: Today 2026-10-05. The lifecycle list has HP EliteBook 8 G1i (ends 2026-03-01 to 2027-01-31)
+      and HP ProBook 4 G1i (ends 2025-01-01 to 2026-06-30).
+    steps:
+    - '''HP EliteBook 8 G1i Series'': the earliest date has passed, the latest has not -> approaching.'
+    - '''HP ProBook 4 G1i'': the latest date has passed -> past end, not recommended.'
+    - '''HP EliteBook 8 G2 Series'': no G2 row -> not listed, recommended.'
+    result: Approaching / past end / not listed.
+    computed_value:
+    - approaching
+    - past_end
+    - not_listed
+    verified: true
+    expect:
+    - approaching
+    - past_end
+    - not_listed
+  output: A lifecycle status on each recommendation; products past their end date appear as blocked rules.
+  sources:
+  - hp-backend/src/app/services/hp/lifecycle.py:status_for
+  - hp-backend/src/app/services/hp/lifecycle.py:_match
+  doc_source: HP_Recommendation_Tuning_Logic_FINAL_v4 section J
+  confidence: high
+- id: tl_rec_fact_guardrails
+  parent: tl_hp_recommendations
+  name: Which HP facts a card may state
+  kind: guardrail
+  summary: Filters each rule's approved sentences for the account's market and wording rules.
+  purpose: Filters each rule's approved sentences for the account's market and wording rules.
+  inputs:
+  - The rule's allowed facts and conditions
+  - Account country
+  logic: 'Facts come only from the matched rule. A fact is withheld when: it is a superlative (world''s,
+    most, best, first, only, fastest, leading...) and the country is on the superlative-block list; the
+    rule names a competitor and the country is on the competitor-block list; it is a comparison (a %,
+    higher, better, faster, less) in a competitor rule without benchmark context (Cinebench, Procyon,
+    MobileMark, tested, benchmark...); or it mentions 5G, HP Go, Wi-Fi 7, Sure View, discrete graphics
+    or ''up to N displays'' without its required qualifier. Kept facts carry the rule''s conditions as
+    footnotes. If every fact is withheld, the rule is blocked.'
+  example:
+    scenario: 'United States; facts of a competitor rule: ''up to 85% higher CPU performance'' (no benchmark),
+      ''up to 61% better office productivity on the cited Procyon test'', ''Sure View privacy screen'',
+      ''optional Sure View on select models''.'
+    steps:
+    - 'Fact 1: a comparison with no benchmark -> withheld.'
+    - 'Fact 2: names ''Procyon'' -> kept.'
+    - 'Fact 3: Sure View with no ''optional / where supported / select'' -> withheld.'
+    - 'Fact 4: has ''optional'' -> kept.'
+    result: 2 facts kept.
+    computed_value:
+    - - up to 61% better office productivity on the cited Procyon test
+      - optional Sure View on select models
+    - - G5 benchmark context
+      - G6/G7 missing qualifier
+    verified: true
+    expect:
+    - - up to 61% better office productivity on the cited Procyon test
+      - optional Sure View on select models
+    - - G5 benchmark context
+      - G6/G7 missing qualifier
+  output: Approved facts (max 8 per card) and a summary of what was withheld.
+  sources:
+  - hp-backend/src/app/services/hp/guardrails.py:approve_rulebook_facts
+  - hp-backend/src/app/services/hp/guardrails.py:SUPERLATIVE_BLOCK_COUNTRIES
+  - hp-backend/src/app/services/hp/guardrails.py:COMPETITOR_BLOCK_COUNTRIES
+  - hp-backend/src/app/services/hp/guardrails.py:REQUIRED_QUALIFIER_TRIGGERS
+  doc_source: HP 220 Account Rulebook C 02, C 04 and guardrails G2-G7
+  confidence: high
+- id: tl_rec_confidence_band
+  parent: tl_hp_recommendations
+  name: Confidence band on hardware cards (Confirmed / Likely / Discovery)
+  kind: guardrail
+  summary: Labels how far the estate confirms the device category behind a hardware card.
+  purpose: Labels how far the estate confirms the device category behind a hardware card.
+  inputs:
+  - Status badge of the technology category matched to the rule's device type
+  - Whether the account has any trigger headline
+  - Which kinds of information fired the rule
+  logic: 'The status is taken from the first category whose name contains a word for the device type (notebook:
+    client, endpoint, platform, device; tower/sff: platform, storage, compute; mini: platform, device;
+    aio: collaboration, device), else the first category. Band: whitespace / open opportunity -> Discovery;
+    contextual -> Discovery; no trigger headline -> Likely; displacement, complementary or existing HP
+    -> Confirmed; otherwise Likely. If none of the kinds of information that fired the rule is about the
+    technology estate (installed technology, technology detections, website technology or the technology
+    map), the band is removed and the reason recorded. Service cards never get a band.'
+  table:
+    columns:
+    - Category status
+    - Has trigger
+    - Band
+    rows:
+    - - HP whitespace - open opportunity
+      - true
+      - Discovery
+    - - Contextual - no direct HP line
+      - true
+      - Discovery
+    - - Displacement opportunity
+      - false
+      - Likely
+    - - Displacement opportunity
+      - true
+      - Confirmed
+    - - Complementary attach
+      - true
+      - Confirmed
+  example:
+    scenario: A notebook rule on an account whose map shows all seven categories (Client OS first).
+    steps:
+    - '''Client OS'' contains ''client'', so its status ''Contextual - no direct HP line'' is used, not
+      PC/Laptop Brands''.'
+    - Contextual -> Discovery.
+    result: Discovery (a tower rule on the same account reads Workstations -> Displacement -> Confirmed
+      when there is a trigger).
+    computed_value:
+    - Discovery
+    - Confirmed
+    verified: true
+    expect:
+    - Discovery
+    - Confirmed
+  output: A confidence band on each hardware recommendation, and the basis for it.
+  sources:
+  - hp-backend/src/app/services/hp/recommendations.py:_confidence_for
+  - hp-backend/src/app/services/hp/recommendations.py:_category_status_for_rule
+  - hp-backend/src/app/services/hp/recommendations.py:ESTATE_DATASETS
+  confidence: high
+- id: tl_rec_evidence_tier
+  parent: tl_hp_recommendations
+  name: Evidence tier and permitted wording
+  kind: guardrail
+  summary: Limits how strongly a card's wording may claim a need, by counting independent kinds of information.
+  purpose: Limits how strongly a card's wording may claim a need, by counting independent kinds of information.
+  inputs:
+  - The kinds of information in the evidence rows that fired the rule
+  - HP-category research score for the card's category
+  logic: Each kind of information maps to one independent signal (see the table), and duplicates collapse.
+    Company profile and contacts never corroborate. If the card's own HP category research score is exactly
+    0 / 'No Signal', installed technology stops counting. 2 or more corroborating signals -> Opportunity
+    ('is relevant'); 1 -> Conversation Starter ('may be relevant'; no confirmed need); 0 -> Context Only
+    (not recommended; context only). A missing research score does not trigger this demotion.
+  table:
+    columns:
+    - Kind of information
+    - Counts as
+    rows:
+    - - Company profile, company hierarchy and extended company details
+      - Company profile (does not corroborate)
+    - - Installed technology, technology detections, website technology and the technology map
+      - Technology
+    - - HP category research scores, overall research topic scores and topic lists
+      - Intent (research activity)
+    - - Job postings
+      - Hiring
+    - - Google News and news events
+      - News
+    - - Company filings
+      - Filings
+    - - Contact records
+      - Contacts (do not corroborate)
+  constants:
+  - label: Signals needed for Opportunity
+    ref: py:app.services.hp.evidence_tier:PIPELINES_FOR_OPPORTUNITY
+    stated: 2
+  example:
+    scenario: A Poly card fired by installed technology and research topic rows, with the Poly research
+      score = 0.
+    steps:
+    - 'Signals: Technology and Intent.'
+    - The Poly research score is 0, so technology is demoted to context.
+    - 1 corroborating signal is left.
+    result: Conversation Starter.
+    computed_value: Conversation Starter
+    verified: true
+    expect: Conversation Starter
+  output: The evidence tier on each recommendation.
+  sources:
+  - hp-backend/src/app/services/hp/evidence_tier.py:tier_for
+  - hp-backend/src/app/services/hp/evidence_tier.py:DATASET_PIPELINES
+  - hp-backend/src/app/services/hp/recommendations.py:_category_intent
+  doc_source: HP_Recommendation_Tuning_Logic_FINAL_v4 sections C, D, K1
+  confidence: high
+- id: tl_rec_llm_prose
+  parent: tl_hp_recommendations
+  name: Rationale written by AI, then checked
+  kind: guardrail
+  summary: Explains a hardware card without letting AI choose products, facts or scores.
+  purpose: Explains a hardware card without letting AI choose products, facts or scores.
+  inputs:
+  - The rule's condition
+  - Up to 4 account evidence rows
+  - Approved facts with qualifiers and conditions
+  - Evidence tier and permitted language
+  logic: 'The AI returns, for each card, a 2-3 sentence rationale, a 1-2 sentence ''why this product''
+    that uses only approved facts, and one discovery question. Checks: numbers or links in the rationale
+    or question that are not in the account''s evidence -> both are blanked. A ''why this product'' with
+    any number that is not in that card''s approved facts -> blanked. Naming a Next Gen AI PC outside
+    40-60 TOPS, or a product generation that the facts never state -> blanked. Any field that over-claims
+    for its tier -> blanked (below Opportunity: no ''is relevant'' or ''strong fit''; Context Only: no
+    ''recommend''; below Opportunity: no wording that says the account needs, requires, plans to, is evaluating
+    or is replacing something). A blanked field is shown as missing, and the card stays.'
+  example:
+    scenario: 'Conversation Starter card prose: ''Astra needs to replace its endpoint antivirus. HP Wolf
+      Security requires a supported Windows PC.'''
+    steps:
+    - Sentence 1 has the account as its subject and says 'needs' -> fault.
+    - Sentence 2 starts with HP, so 'requires' is a product condition -> allowed.
+    result: One fault; the field is blanked.
+    computed_value: 1
+    verified: true
+    expect: 1
+  output: The rationale, 'why this product' and discovery question (or blank), and a report of the checks.
+  sources:
+  - hp-backend/src/app/services/hp/recommendations.py:SYSTEM_PROMPT
+  - hp-backend/src/app/services/hp/recommendations.py:generate_hp_recommendations
+  - hp-backend/src/app/services/hp/guardrails.py:tier_language_faults
+  - hp-backend/src/app/services/hp/guardrails.py:prose_guardrail_faults
+  doc_source: HP_Recommendation_Tuning_Logic_FINAL_v4 section C; Rulebook guardrails 15-16
+  confidence: high
+- id: tl_rec_ordering
+  parent: tl_hp_recommendations
+  name: Card order
+  kind: display
+  summary: Orders the recommendation cards.
+  purpose: Orders the recommendation cards.
+  inputs:
+  - Hardware candidates
+  - Service cards
+  logic: 'Hardware cards: Confirmed band first, then more approved facts first. Service cards follow in
+    category order. There is no cap on the number of cards beyond the one-primary-and-separate-evidence
+    selection (the older cap of 5 is not used).'
+  example:
+    scenario: Hardware cards A (Likely, 6 facts), B (Confirmed, 3 facts), C (Confirmed, 8 facts) and one
+      service card.
+    steps:
+    - 'Confirmed first: C (8), B (3).'
+    - Then A.
+    - Then the service card.
+    result: C, B, A, service card.
+  output: The order of the recommendation cards.
+  sources:
+  - hp-backend/src/app/services/hp/recommendations.py:generate_hp_recommendations
+  confidence: high
+- id: tl_regeneration_cache
+  parent: null
+  name: When the recommendations are rebuilt
+  kind: selection
+  internal: true
+  summary: Avoids asking AI again unless an input changed.
+  purpose: Avoids asking AI again unless an input changed.
+  inputs:
+  - Version of the recommendation guidance
+  - Product knowledge version and rulebook version
+  - Matched rules
+  - Account evidence texts
+  - Headquarters location
+  logic: A fingerprint of these inputs is stored. If the stored cards are available and the fingerprint
+    is unchanged, they are reused. A change to any input rebuilds the cards.
+  constants:
+  - label: Recommendation guidance version
+    ref: py:app.services.hp.recommendations:RECOMMENDATION_PROMPT_VERSION
+    stated: 20
+  - label: Confidence scoring settings version
+    value: 5dcf1a1ce147
+  example:
+    scenario: The rulebook is reloaded.
+    steps:
+    - The rulebook version changes, so the fingerprint changes.
+    result: Cards are rebuilt on the next run.
+  output: The stored fingerprint.
+  sources:
+  - hp-backend/src/app/services/hp/recommendations.py:_fingerprint
+  confidence: high
+undetermined:
+- strategic_read, what_it_means and per-vendor play_text/hp_product are written by GPT-4o; only the constraints
+  in tl_map_narrative are fixed - the wording and which allowed HP line the model picks (before any rulebook
+  override) have no formula.
+- Which rulebook rules exist, and their signal_tokens/observable_terms, are loaded into MongoDB (hp_rulebook)
+  by scripts/load_rulebook.py, where both term lists are derived by GPT-4o at load time; the live rule
+  set is not in the repo, so which rules fire for a given account cannot be stated without the database.
+- The lifecycle file contents (hp_lifecycle) and case-study corpus (hp_case_studies) live in MongoDB;
+  examples here use synthetic rows.
+- Part A rationale, why_this_product and discovery_question are model-written; there is no fixed formula,
+  only the post-checks in tl_rec_llm_prose.
+discrepancies:
+- rule_id: tl_technology_sources
+  doc: 'HP_Tech_Landscape_Confidence_Scoring_Logic_FINAL s.2: ''Check both 4_Technographics and 5_Tech_Breakdown
+    ... Combine the usable technology evidence found across both sheets when evaluating Driver 1.'' and
+    ''Full Tech Stack may be used as a consolidated reference, but it should not be treated as a separate
+    independent source.'''
+  code: hp-backend/src/app/services/extractors/tech_landscape.py:detected_technologies (718) - Full Tech
+    Stack is the primary list; Tech_Breakdown and WebStack are read only 'if not estate_count' (no Technographics
+    entries); Related Technologies from hp_category_intent are added.
+  note: Code comment cites a later client instruction (Dhruvi, 27 Sep) for the website-only fallback.
+- rule_id: tl_driver_1
+  doc: 'HP_Tech_Landscape_Confidence_Scoring_Logic_FINAL s.2: Driver 1 is decided against ''the HP Rulebook''
+    / ''HP 220 Account Combined Product, Services and Solutions guidance''.'
+  code: hp-backend/src/app/services/hp/tech_confidence.py:RULEBOOK_TECHNOLOGIES (222) - a hand-transcribed
+    table of about 40 names in 12 rows plus FAMILY_MEMBERS; the loaded hp_rulebook collection is not consulted
+    for Driver 1.
+  note: The rulebook is consulted separately to change a card's HP line (tl_rulebook_offering_override),
+    not to score it.
+- rule_id: tl_driver_1_card_fallback
+  doc: 'HP_Tech_Landscape_Confidence_Scoring_Logic_FINAL s.2: ''0/10 The detected technology is not meaningfully
+    related to the HP opportunity being evaluated, and the Rulebook provides no supported connection.'''
+  code: hp-backend/src/app/services/hp/tech_confidence.py:driver_1_for_card (373) - any detected technology
+    on a card that carries an HP opportunity scores 5; hp_opportunity = product or hp_category (hp-backend/src/app/services/extractors/tech_landscape.py
+    line 862), so every PC/Laptop Brands, Workstations, Collaboration and Print vendor card has an opportunity
+    and cannot score 0.
+  note: In practice suppression can only hit Client OS, UEM/MDM and IT Security cards whose vendor has
+    no HP line and no named/family match.
+- rule_id: tl_driver_1_route
+  doc: 'HP_Tech_Landscape_Confidence_Scoring_Logic_FINAL s.2 0/10 example: ''VMware is detected, but the
+    proposed card is for an HP 3D Printing opportunity ... -> 0/10.'''
+  code: hp-backend/src/app/services/extractors/tech_landscape.py:HP_PLAY_TO_ROUTE (519) narrows the route
+    only for HP Wolf Security and Poly Collaboration; other cards pass route=None, and driver_1_technology(['VMware'],
+    None) returns 10 via DEPLOY 03.
+  note: 'Verified: driver_1_technology([''VMware''], None)[0] == 10.'
+- rule_id: tl_driver_2
+  doc: 'HP_Tech_Landscape_Confidence_Scoring_Logic_FINAL s.3: ''The Tech Landscape card already has an
+    HP business category. Retrieve only that category''s Intent Score.'''
+  code: hp-backend/src/app/services/hp/tech_confidence.py:CATEGORY_TO_HP_CATEGORY (168) - mapping authored
+    in code; client_os, uem_mdm and it_security_parity map to None (Driver 2 always 0); no card category
+    maps to 3D.
+  note: 'Code comment: ''Nothing in the codebase mapped between them, so this is the mapping, authored
+    here.'''
+- rule_id: tl_confidence_not_displayed
+  doc: 'HP_Tech_Landscape_Confidence_Scoring_Logic_FINAL ''Card element ... Confidence: How strongly the
+    evidence supports this HP-relevant card-level opportunity/recommendation''.'
+  code: 'hp-frontend/src/app/dashboard/page.tsx 4894-4906 renders detection_status instead; comment quotes
+    the client, 27 Sep: ''let''s drop the confidence score''.'
+  note: Score still computed and still suppresses cards.
+- rule_id: tl_map_narrative
+  doc: 'HP_Recommendation_Tuning_Logic_FINAL_v4 Technographic Map: ''Interpret the detected technologies
+    together ... then corroborate this with relevant Intent, Hiring, News and Filings.'''
+  code: hp-backend/src/app/services/hp/map_narrative.py:generate_map_narrative (163) - the prompt payload
+    carries only account name, category name, relationship label and vendor names/descriptions; no intent,
+    hiring, news or filings.
+- rule_id: tl_map_narrative
+  doc: 'HP_Recommendation_Tuning_Logic_FINAL_v4 K1: Poly intent 0 / No Signal -> ''Treat collaboration
+    technology as contextual evidence; do not prioritize a Poly opportunity''.'
+  code: 'hp-backend/src/app/services/extractors/tech_landscape.py line 1349: Collaboration & Hybrid Workplace
+    is always badged ''Complementary attach'' (is_opportunity True); the narrative model is not given
+    the Poly intent. K1 is applied only to recommendation-card tiers (hp-backend/src/app/services/hp/evidence_tier.py:tier_for).'
+- rule_id: tl_rec_evidence_tier
+  doc: 'Client relevance ladder, 25 Sep, quoted in hp-backend/src/app/services/hp/evidence_tier.py lines
+    85-90: "Technology only (Intune/ServiceNow): an internal ''possible fit'' only, NOT recommended."'
+  code: hp-backend/src/app/services/hp/evidence_tier.py:tier_for - Technographics is a corroborating pipeline,
+    so technology-only evidence is Conversation Starter -> relevance 'may be relevant' (RELEVANCE_BY_TIER),
+    and Part B cards are published whatever the tier (hp-backend/src/app/services/hp/recommendations.py:_part_b_cards
+    has no tier gate).
+  note: 'Verified: tier_for([{''dataset'':''technographics''}])[''tier''] == ''Conversation Starter''.'
+- rule_id: tl_rec_evidence_tier
+  doc: 'HP_Recommendation_Tuning_Logic_FINAL_v4 C: Context Only includes evidence that is ''older based
+    on its own event/source date''; Opportunity needs 2 ''logically related'' independent pipelines.'
+  code: hp-backend/src/app/services/hp/evidence_tier.py:tier_for counts distinct pipelines only; no date
+    or relatedness test.
+- rule_id: tl_rec_confidence_band
+  doc: 'hp-backend/src/app/services/hp/recommendations.py comment on DEVICE_TYPE_TO_CATEGORY/_category_status_for_rule:
+    ''The technographic status most relevant to this rule''s device type.'''
+  code: hp-backend/src/app/services/hp/recommendations.py:_category_status_for_rule (224) - for notebook/mini
+    rules the first category whose name contains 'client' is 'Client OS' (badge Contextual), giving Discovery
+    even when PC/Laptop Brands is a Displacement opportunity.
+  note: Code-comment intent vs observed behaviour; verified in the example.

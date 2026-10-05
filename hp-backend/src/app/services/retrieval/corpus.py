@@ -1064,7 +1064,8 @@ def executive_dashboard_documents(account_id: str,
     # -- ownership ------------------------------------------------------------
     parent = _text(summary.get("parent_company"))
     ultimate = _text(summary.get("ultimate_parent"))
-    if parent or ultimate:
+    subsidiaries = [_text(x) for x in (summary.get("subsidiaries") or []) if _text(x)]
+    if parent or ultimate or subsidiaries:
         def fill_structure(b):
             out = []
             if parent:
@@ -1075,44 +1076,24 @@ def executive_dashboard_documents(account_id: str,
                 out.append("Ultimate parent: %s"
                            % b.line(ultimate, field="ultimate_parent",
                                     dataset="company_hierarchy"))
+            if subsidiaries:
+                out.append("Subsidiaries: %s"
+                           % b.line("; ".join(subsidiaries), field="subsidiaries",
+                                    dataset="subsidiaries"))
             return out
         docs.append(_build(account_id, index, "executive_dashboard",
                            "corporate_structure",
                            "Corporate structure - %s" % company,
-                           {"parent": parent, "ultimate": ultimate},
+                           {"parent": parent, "ultimate": ultimate,
+                            "subsidiaries": subsidiaries},
                            fill_structure))
 
     # -- hiring ---------------------------------------------------------------
-    hiring = _widget(db, account_id, "exec_hiring_velocity")
-    demand = _widget(db, account_id, "intent_hiring_demand")
-    if hiring or demand:
-        payload = {"hiring": hiring, "demand": demand}
-
-        def fill_hiring(b):
-            out = []
-            count = _text(hiring.get("job_postings_12m"))
-            if count:
-                out.append("Job postings in the last 12 months (open and closed): %s"
-                           % b.line(count, field="job_postings_12m",
-                                    dataset="job_openings"))
-            roles = [_text(r) for r in (hiring.get("sample_roles") or []) if _text(r)]
-            if roles:
-                out.append("Roles posted in the last 12 months: %s"
-                           % b.line(", ".join(roles[:10]), field="sample_roles",
-                                    dataset="job_openings"))
-            for key, label in (("seniority_breakdown", "Hiring by seniority"),
-                               ("category_breakdown", "Hiring by function")):
-                breakdown = demand.get(key) or {}
-                if isinstance(breakdown, dict) and breakdown:
-                    rendered = ", ".join("%s %s" % (k, v)
-                                         for k, v in sorted(breakdown.items()))
-                    out.append("%s: %s" % (label, b.line(rendered, field=key,
-                                                         dataset="job_openings")))
-            return out
-
+    hiring = _hiring_widgets(db, account_id)
+    if hiring["summary"]:
         docs.append(_build(account_id, index, "executive_dashboard",
                            "hiring_signal", "Hiring signal - %s" % company,
-                           payload, fill_hiring))
+                           hiring, lambda b: _hiring_lines(b, hiring, company)))
 
     # -- events ---------------------------------------------------------------
     docs.extend(_signal_documents(db, account_id, index, company))
@@ -1217,6 +1198,36 @@ def executive_dashboard_documents(account_id: str,
     docs.extend(_filing_documents(account_id, index, company))
 
     return [d for d in docs if not d.is_empty()]
+
+
+def _hiring_widgets(db, account_id) -> dict:
+    """The one hiring output (extractors/hiring_signals.py), as one payload."""
+    return {"summary": _widget(db, account_id, "hiring_postings_summary"),
+            "families": _widget(db, account_id, "hiring_family_breakdown"),
+            "themes": _widget(db, account_id, "hiring_theme_cards")}
+
+
+def _hiring_lines(b, hiring, company) -> list:
+    summary, out = hiring["summary"], []
+    count = _text(summary.get("job_postings"))
+    if count:
+        out.append("Job postings in the last 12 months (open and closed): %s"
+                   % b.line(count, field="job_postings", dataset="job_openings"))
+    roles = [_text(r) for r in (summary.get("sample_roles") or []) if _text(r)]
+    if roles:
+        out.append("Roles %s is hiring for include: %s" % (company, b.line(
+            "; ".join(roles), field="sample_roles", dataset="job_openings")))
+    bars = [x for x in (hiring["families"].get("bars") or []) if isinstance(x, dict)]
+    if bars:
+        out.append("Hiring by job family: %s" % b.line(
+            ", ".join("%s %s" % (x.get("family"), x.get("count")) for x in bars),
+            field="family_breakdown", dataset="job_openings"))
+    cards = [c for c in (hiring["themes"].get("cards") or []) if isinstance(c, dict)]
+    if cards:
+        out.append("Hiring themes for HP: %s" % b.line(
+            ", ".join("%s %s" % (c.get("theme"), c.get("job_count")) for c in cards),
+            field="theme_cards", dataset="job_openings"))
+    return out
 
 
 def _signal_documents(db, account_id, index, company) -> list:
@@ -1414,40 +1425,11 @@ def _strategy_account_documents(db, account_id, index, company, summary) -> list
         docs.append(_sd(account_id, index, "reported_financials",
                         "Reported financials - %s" % company, metrics, fill_metrics))
 
-    hiring = _widget(db, account_id, "intent_hiring_demand")
-    # `exec_hiring_velocity` counts a filtered selection (country check, last
-    # 12 months) while this widget counts every row, so only its
-    # `sample_roles` joins this document; its count is in the hiring document
-    # above, labelled with its window.
-    velocity = _widget(db, account_id, "exec_hiring_velocity")
-    if hiring or velocity:
-        def fill_hiring(b, velocity=velocity):
-            out = []
-            for field, label in (("postings_seen", "Job postings seen"),
-                                 ("open_postings", "Open postings"),
-                                 ("open_postings_rule", "What counts as open"),
-                                 ("first_seen", "First posting seen"),
-                                 ("last_seen", "Most recent posting seen")):
-                value = _text(hiring.get(field))
-                if value:
-                    out.append("%s: %s" % (label, b.line(value, field=field,
-                                                         dataset="job_openings")))
-            for key, label in (("seniority_breakdown", "Hiring by seniority"),
-                               ("category_breakdown", "Hiring by function")):
-                block = hiring.get(key)
-                if isinstance(block, dict) and block:
-                    out.append("%s: %s" % (label, b.line(
-                        ", ".join("%s %s" % (k, v) for k, v in sorted(block.items())),
-                        field=key, dataset="job_openings")))
-            roles = [_text(r) for r in (velocity.get("sample_roles") or []) if _text(r)]
-            if roles:
-                out.append("Roles %s is hiring for include: %s" % (company, b.line(
-                    "; ".join(roles), field="sample_roles",
-                    dataset="job_openings")))
-            return out
+    hiring = _hiring_widgets(db, account_id)
+    if hiring["summary"]:
         docs.append(_sd(account_id, index, "hiring_demand",
-                        "Hiring demand - %s" % company,
-                        {"hiring": hiring, "velocity": velocity}, fill_hiring))
+                        "Hiring demand - %s" % company, hiring,
+                        lambda b: _hiring_lines(b, hiring, company)))
 
     docs.extend(_strategy_urgency_documents(db, account_id, index, company))
     return docs

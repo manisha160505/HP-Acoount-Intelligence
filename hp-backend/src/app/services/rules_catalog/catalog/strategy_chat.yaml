@@ -1,0 +1,682 @@
+# Rules page catalog for `strategy_chat`. Read by app/services/rules_catalog.
+# `ref:` values are read live; `stated` is what the prose was written against.
+# Examples marked `verified` are recomputed by tests/test_rules_examples.py.
+feature_key: strategy_chat
+purpose: Lets a seller ask questions about one account (advisor mode) or rehearse a conversation with
+  the role of one of its real stakeholders (roleplay mode). Answers come only from what the account's
+  dashboard already shows.
+final_output: 'One of three things: a structured answer (a short answer, optional supporting facts, optional
+  recommended next steps) with footnote citations pointing to dashboard sections; an in-character rehearsal
+  reply; or a plain explanation of why no answer could be backed by evidence.'
+how_it_combines: 'Every answer is built only from the account''s dashboard sections.
+
+  - Advisor mode: the AI writes its reply as a series of short parts, each labelled as a fact, a derived
+  point, a conclusion, a recommendation or general advice. Each part is then checked. For example, a fact
+  must quote the section it cites word for word. If any part fails, the AI tries again. After the last
+  attempt, only the parts that passed are shown.
+
+  - Roleplay mode: the AI plays the role of a real stakeholder, never the person by name. Every sentence
+  that says something substantive must cite a dashboard section.'
+rules:
+- id: sc_snapshot_widget
+  parent: null
+  name: Account snapshot at the top of the chat
+  kind: selection
+  summary: Shows what the chat is based on and offers starter questions.
+  purpose: Shows what the chat is based on and offers starter questions.
+  inputs:
+  - Executive summary
+  - Opportunity plays
+  - Technology map
+  - Intent topics
+  - Recent news signals
+  - Strategic priorities
+  logic: 'Built only from what the account''s other dashboard sections already show (only sections that
+    are available). It never uses raw data files and has no fallback numbers: if a section is missing,
+    its count is left blank and shown as a dash.
+
+    Counts: solutions = the number of plays on the Opportunity Map; installed vendors = the total number
+    of technologies detected on the technology map; live signals = the total number of news signals; intent
+    topics = the total number of intent topics; priorities = the number of strategic priorities. There
+    is no stakeholder count, because the client asked for it to be dropped.
+
+    Lists: the first 5 intent topics, the first 15 different vendors from the technology map, and the
+    first 5 news headlines in the order the feed shows them.
+
+    The company name comes from the executive summary, otherwise from the account record. With no company
+    name, the snapshot is shown as empty.
+
+    Six fixed starter questions are written using the company name.'
+  constants:
+  - label: Topics shown
+    ref: py:app.services.extractors.strategy_chat:MAX_SNAPSHOT_TOPICS
+    stated: 5
+  - label: Vendors shown
+    ref: py:app.services.extractors.strategy_chat:MAX_SNAPSHOT_VENDORS
+    stated: 15
+  - label: Signals shown
+    ref: py:app.services.extractors.strategy_chat:MAX_SNAPSHOT_SIGNALS
+    stated: 5
+  example:
+    scenario: Account 'Astra'.
+    steps:
+    - Write the six starter questions
+    result: 'Six starter questions: entry point, what to sell, who to act on, AI PCs, objections, revenue.'
+    verified: true
+    expect:
+    - - entry_point
+      - Who is the strongest entry point at Astra, and why?
+    - - what_to_sell
+      - Based on Astra's own evidence, which HP line has the strongest case right now?
+    - - who_to_act_on
+      - There are a lot of signals for Astra. Which ones should I act on first?
+    - - ai_pcs
+      - Who should I message at Astra about AI PCs, and what should I open with?
+    - - objections
+      - What objections should I expect from Astra, and how do I handle each one?
+    - - revenue
+      - Tell me about Astra's revenue and what it means for our approach.
+  output: Counts, the short lists above, and six starter questions.
+  sources:
+  - hp-backend/src/app/services/extractors/strategy_chat.py:extract_strategy_chat
+  - hp-backend/src/app/services/extractors/strategy_chat.py:_suggested_prompts
+  doc_source: 'Client feedback 27 Sep: ''Strategy Chat - please drop mention of 22 stakeholders'''
+  confidence: high
+- id: sc_interface_widget
+  parent: null
+  name: Which sections the chat can use
+  kind: selection
+  summary: Says which dashboard sections the chat can draw on.
+  purpose: Says which dashboard sections the chat can draw on.
+  logic: 'Lists which of these sections have content for the account: Executive Dashboard, Stakeholder
+    Map, Recent Signals, Tech Landscape, Intent & Demand and Opportunity Map. If none do, the chat is
+    shown as empty.'
+  sources:
+  - hp-backend/src/app/services/extractors/strategy_chat.py:extract_strategy_chat
+  confidence: high
+- id: sc_context_payload
+  parent: null
+  name: 'What the chat reads: the whole account'
+  kind: selection
+  summary: Gives the AI every dashboard section of the account at once.
+  purpose: Gives the AI every dashboard section of the account at once.
+  logic: 'Every dashboard section of the account is included, except those that belong to Content Studio,
+    Message Evaluator and Strategy Chat itself. A section is included only if it is available and has
+    content. Each one is labelled with its name and the feature it belongs to, followed by its content.
+
+    Order: a fixed priority list comes first (the executive summary first, the raw technology detections
+    last). Any other section follows in alphabetical order.
+
+    Nothing is searched for or cut down. If the total goes above 900,000 characters, a warning is recorded
+    but nothing is removed. Only this one account''s information is ever used.'
+  constants:
+  - label: Size warning level (characters)
+    ref: py:app.services.strategy.context:MAX_PAYLOAD_CHARS
+    stated: 900000
+  - label: Features left out
+    ref: py:app.services.strategy.context:EXCLUDED_FEATURES
+    stated:
+    - content_studio
+    - message_evaluator
+    - strategy_chat
+  - label: Order of dashboard sections
+    ref: py:app.services.strategy.context:PRIORITY_ORDER
+    stated:
+    - exec_summary_card
+    - exec_key_metrics
+    - exec_strategic_priorities
+    - exec_urgency_score
+    - hiring_postings_summary
+    - stakeholder_contacts_grid
+    - stakeholder_influence_map
+    - stakeholder_talking_points
+    - news_signals_feed
+    - news_relevance_summary
+    - opportunity_narrative_plays
+    - opportunity_trigger_signals
+    - opportunity_context_card
+    - objection_reframe_cards
+    - objection_incumbent_context
+    - technographic_map
+    - technographic_hp_recommendations
+    - tech_stack_matrix
+    - webstack_breakdown
+    - intent_topics_table
+    - intent_category_summary
+    - hiring_family_breakdown
+    - hiring_theme_cards
+    - hiring_tech_tags
+    - tech_detections_reference
+  example:
+    scenario: Where do the executive summary and a new, unlisted section sort?
+    steps:
+    - The executive summary is first in the priority list
+    - Sections not on the list go after all listed ones
+    result: The executive summary sorts first (position 0). A new unlisted section sorts after every listed
+      one, in alphabetical order.
+    verified: true
+    expect:
+    - - 0
+      - 0
+    - - 1
+      - zzz_new_widget
+  sources:
+  - hp-backend/src/app/services/strategy/context.py:account_widgets
+  - hp-backend/src/app/services/strategy/context.py:build
+  confidence: high
+- id: sc_small_talk
+  parent: null
+  name: Greetings get a fixed reply
+  kind: selection
+  summary: Simple greetings such as 'hi' get a fixed reply without asking the AI.
+  purpose: Simple greetings such as 'hi' get a fixed reply without asking the AI.
+  logic: If the question is shorter than 3 characters, or (once punctuation is trimmed) matches a fixed
+    list of short phrases (hi, hello, thanks, ok, help, what can you do, and so on), a fixed greeting
+    is returned. In roleplay the greeting stays in character, for example 'You have my attention. I am
+    the <title> here...'.
+  example:
+    scenario: Three inputs.
+    steps:
+    - '''hi'' is a greeting'
+    - '''Who is the CEO?'' is a question'
+    - '''ok'' is a greeting'
+    result: Greeting, question, greeting.
+    verified: true
+    expect:
+    - true
+    - false
+    - true
+  sources:
+  - hp-backend/src/app/services/strategy/chat.py:_is_small_talk
+  - hp-backend/src/app/services/strategy/chat.py:_greeting
+  confidence: high
+- id: sc_question_resolution
+  parent: null
+  name: Follow-up questions are rewritten; earlier answers are never evidence
+  kind: guardrail
+  summary: Lets a follow-up such as 'what about them?' work without treating earlier answers as sources.
+  purpose: Lets a follow-up such as 'what about them?' work without treating earlier answers as sources.
+  logic: 'On the first question, the wording is used as it is. After that, the AI looks at the last 12
+    turns of the conversation (each cut to 800 characters). It replaces words like ''them'' or ''that''
+    with what they refer to, and files the question under one topic: stakeholder, priority, technology,
+    objection, opportunity, evidence or general. Anything else is filed as general. The topic is only
+    a label and does not narrow the information used. The AI also sees up to 12 earlier turns when it
+    answers, but the rules require every fact to come from the account''s dashboard, not from earlier
+    answers.'
+  constants:
+  - label: Earlier turns considered
+    ref: py:app.services.strategy.chat:MAX_HISTORY_TURNS
+    stated: 12
+  sources:
+  - hp-backend/src/app/services/strategy/chat.py:_resolve_question
+  - hp-backend/src/app/services/strategy/chat.py:_answer_turns
+  confidence: high
+- id: sc_advisor_answer
+  parent: null
+  name: 'Advisor answer: labelled parts'
+  kind: model
+  summary: How an advisor answer is structured and grounded.
+  purpose: How an advisor answer is structured and grounded.
+  logic: 'The AI replies as a list of short parts. Each part is labelled as a fact, a derived point, a
+    conclusion (synthesis), a recommendation or general advice, and also has a display style (paragraph,
+    bullet, heading or label).
+
+    Shape asked for: an ''ANSWER:'' heading every time; a ''FACTS:'' list (at most 5 for a single topic,
+    up to 8 for a multi-part question) only when useful; and ''RECOMMENDED NEXT STEPS:'' (2-3 actions)
+    only when the question asks what to do.
+
+    Length is left to the AI''s judgement, with no target. About 30 parts is treated as padding. The platform''s
+    own scores (relevance scores, priority or tier labels, urgency or confidence, match percentages) must
+    not be quoted. This is an instruction to the AI and is not checked.
+
+    At most 60 parts are read.
+
+    Unfamiliar labels are tidied up: heading, label and title become general; conclusion becomes synthesis;
+    inference becomes derived; advice, next step, plan and action become recommendation. Duplicate part
+    ids are renamed. A conclusion or recommendation that does not say what it rests on is linked to the
+    evidenced parts above it, or to the parts that name the same things.'
+  table:
+    columns:
+    - Label
+    - Must carry
+    - May not contain
+    rows:
+    - - Fact / Derived
+      - One or more valid dashboard sections, and a quote that appears word for word in the account's
+        information and in a cited section
+      - Nothing further
+    - - Synthesis
+      - The parts it rests on
+      - Any name or figure that is missing from those parts, their sections and the account's information
+        as a whole
+    - - Recommendation
+      - Nothing extra (the parts it rests on are optional)
+      - Names or figures that are not in the account's information, except plan figures (week 1, 30 days,
+        30/60/90) and plan or channel words
+    - - General
+      - Nothing
+      - The company name, or any figure other than a plan figure
+  constants:
+  - label: Maximum parts read per answer
+    ref: py:app.services.strategy.claims:MAX_SEGMENTS
+    stated: 60
+  - label: Answer-rules version
+    ref: py:app.services.strategy.chat:PROMPT_VERSION
+    stated: 8
+  sources:
+  - hp-backend/src/app/services/strategy/chat.py:ANSWER_SYSTEM
+  - hp-backend/src/app/services/strategy/claims.py:parse
+  - hp-backend/src/app/services/strategy/claims.py:_infer_dependencies
+  confidence: high
+- id: sc_fact_check
+  parent: sc_advisor_answer
+  name: Fact and derived-point check
+  kind: guardrail
+  summary: A fact must quote the section it cites.
+  purpose: A fact must quote the section it cites.
+  logic: 'The part fails if: it cites no section; it cites a section that is not part of this account''s
+    information (this keeps accounts separate); its quote is empty; the quote cannot be found anywhere
+    in the account''s information; or the quote cannot be found in the text of the cited section or sections.'
+  example:
+    scenario: A fact citing the technology table with the quote 'SolidWorks', which the account's information
+      does not contain. A conclusion naming Siemens. A general-advice part containing '4,000 seats'.
+    steps:
+    - 'Part c1: its quote is not in the data'
+    - Part c2 names 'siemens' (and also rests on the failed c1)
+    - Part c3 is general advice but carries a figure
+    result: All three parts fail.
+    verified: true
+    expect:
+    - false
+    - - id: c1
+        reason: its quote 'SolidWorks' does not appear in this account's data
+      - id: c2
+        reason: it names siemens, which does not appear in this account's evidence
+      - id: c3
+        reason: it carries a figure, so it is a claim about the account
+    - []
+  sources:
+  - hp-backend/src/app/services/strategy/claims.py:_segment_failure
+  confidence: high
+- id: sc_synthesis_check
+  parent: sc_advisor_answer
+  name: Conclusion and recommendation checks
+  kind: guardrail
+  summary: Conclusions and advice may add nothing new about the customer.
+  purpose: Conclusions and advice may add nothing new about the customer.
+  logic: A conclusion must say which parts it rests on. Both conclusions and recommendations fail if a
+    part they rest on is missing; if a figure appears that is not in those parts, their sections or the
+    account's information as a whole; or if a capitalised word (not at the start of a sentence, at least
+    3 letters, not all capitals) or an HP product line name appears in none of those places. The company
+    name's words and words from the question are always allowed. A recommendation may also use plan figures
+    and channel or plan words (linkedin, email, webinar, workshop, phase, week, pilot, brief, demo, and
+    so on).
+  constants:
+  - label: Channel words
+    ref: py:app.services.strategy.claims:GENERIC_CHANNELS
+    stated:
+    - email
+    - inmail
+    - linkedin
+    - newsletter
+    - roadshow
+    - webinar
+    - workshop
+  example:
+    scenario: 'A valid answer: two quoted facts, a conclusion built on them, and the recommendation ''Open
+      on the CAD estate in week 1, then send three touches over 30 days.'''
+    steps:
+    - The quotes 'AutoCAD' and 'Critical' are found in their sections
+    - The conclusion introduces nothing new
+    - '''Week 1'' and ''30 days'' are plan figures'
+    result: Valid. The cited sections are the technology matrix and the opportunity plays.
+    verified: true
+    expect:
+    - true
+    - []
+    - - tech_stack_matrix
+      - opportunity_narrative_plays
+  sources:
+  - hp-backend/src/app/services/strategy/claims.py:_synthesis_introduces
+  - hp-backend/src/app/services/strategy/claims.py:_recommendation_introduces
+  confidence: high
+- id: sc_plan_figures
+  parent: sc_synthesis_check
+  name: Plan figures
+  kind: selection
+  summary: Numbers that belong to the seller's plan, not to the customer.
+  purpose: Numbers that belong to the seller's plan, not to the customer.
+  logic: A figure counts as a plan figure when it appears as '<unit> N' (week 2, phase 1, weeks 1-4),
+    'N <unit>' (30 days, 90-day, 3 touches) or 'N/N' (30/60/90). The units are day, week, month, quarter,
+    year, hour, minute, touch, email, call, meeting, session, follow-up, step, phase, sprint, wave and
+    message. Numbers written out in words ('three') are not treated as figures at all.
+  example:
+    scenario: '''three touches over 30 days, week 2 and a 90-day plan, 30/60/90'''
+    steps:
+    - 30 days
+    - week 2
+    - 90-day
+    - 30/60/90
+    result: 'Plan figures: 2, 30, 60, 90.'
+    verified: true
+    expect:
+    - '2'
+    - '30'
+    - '60'
+    - '90'
+  sources:
+  - hp-backend/src/app/services/strategy/claims.py:_PLAN_FIGURE_RE
+  - hp-backend/src/app/services/strategy/claims.py:_plan_figures
+  confidence: high
+- id: sc_whole_answer_checks
+  parent: sc_advisor_answer
+  name: Whole-answer checks
+  kind: guardrail
+  summary: A last sweep over everything that would be shown.
+  purpose: A last sweep over everything that would be shown.
+  logic: 'A part that rests on a failed part also fails. Then, over the text that is left: every figure
+    (except in recommendations) must appear in the account''s information, and any HP product line named
+    (phrases starting with HP, Poly, or Z by HP) must appear in the account''s information. The HP line
+    check also applies to recommendations.'
+  example:
+    scenario: The answer says 'Lead with HP Wolf Security.' but the account's information never mentions
+      it.
+    steps:
+    - Tidy the phrase to 'HP Wolf Security'
+    - It is not in the account's information
+    result: 'Fault: the answer names HP Wolf Security.'
+    verified: true
+    expect: HP Wolf Security
+  sources:
+  - hp-backend/src/app/services/strategy/claims.py:validate
+  - hp-backend/src/app/services/strategy/claims.py:_unsupported_hp_line
+  confidence: high
+- id: sc_retry_partial
+  parent: sc_advisor_answer
+  name: Retries and partial answers
+  kind: selection
+  summary: What happens when an answer fails the checks.
+  purpose: What happens when an answer fails the checks.
+  logic: There are up to 3 attempts. After a failure, the AI is given a note for each failed part (up
+    to 8 notes) so it can fix them. If the reply was cut off, it is asked for a much shorter answer. If
+    the AI service gives an unusable reply (blocked, failed or empty), the process stops at once and the
+    'service' message is shown. If all 3 attempts fail, the parts that passed (and do not rest on a failed
+    part) are checked again and shown, with any heading that has nothing under it removed. The response
+    records how many parts were dropped. If nothing substantive survives, the 'could not evidence' message
+    is shown.
+  constants:
+  - label: Attempts
+    internal: true
+    ref: py:app.services.strategy.chat:MAX_VALIDATION_ATTEMPTS
+    stated: 3
+  example:
+    scenario: The three-part bad answer from the fact check, after the attempts are used up.
+    steps:
+    - All three parts failed
+    - Nothing survives
+    result: Nothing can be shown, so the seller sees a refusal message.
+    verified: true
+    expect: []
+  sources:
+  - hp-backend/src/app/services/strategy/chat.py:_answer_advisor
+  - hp-backend/src/app/services/strategy/claims.py:surviving
+  - hp-backend/src/app/services/strategy/claims.py:repair_notes
+  confidence: high
+- id: sc_render
+  parent: sc_advisor_answer
+  name: Citations shown to the seller
+  kind: display
+  summary: Citations are added after the checks pass.
+  purpose: Citations are added after the checks pass.
+  logic: Facts and derived points show their own sections. Conclusions and recommendations show all the
+    sections of the parts they rest on. General advice shows none. Each citation is shown as footnote
+    tags and turned into footnotes labelled with a readable section name and the feature's display name.
+    A clean copy without the tags is also provided.
+  example:
+    scenario: The valid answer from the conclusion and recommendation checks.
+    steps:
+    - Show the answer with its citations
+    result: Each line ends with its section tags.
+    verified: true
+    expect: 'ANSWER:
+
+
+      Their estate runs AutoCAD and CATIA. [tech_stack_matrix]
+
+
+      Workstations are rated Critical. [opportunity_narrative_plays]
+
+
+      So the workstation line has the strongest case. [tech_stack_matrix, opportunity_narrative_plays]
+
+      - Open on the CAD estate in week 1, then send three touches over 30 days. [tech_stack_matrix]'
+  sources:
+  - hp-backend/src/app/services/strategy/claims.py:render
+  - hp-backend/src/app/services/strategy/chat.py:_citation
+  - hp-backend/src/app/services/strategy/chat.py:SECTION_LABELS
+  confidence: high
+- id: sc_roleplay_personas
+  parent: null
+  name: Roleplay personas
+  kind: selection
+  summary: Who the seller can rehearse against.
+  purpose: Who the seller can rehearse against.
+  logic: Only the account's real stakeholder contacts with a usable job title are offered. A title is
+    not usable if it is blank, '-', n/a, none, employee, staff, member or unknown. Contacts are sorted
+    by stakeholder score, highest first. There are no default personas. The person's name is shown in
+    the menu but is never given to the AI. The AI is given only the title, department, seniority, influence,
+    decision power, the HP focus for that person, up to 4 recorded pain points and up to 5 objection cards
+    that the same title is expected to raise. A persona from another account is refused. Roleplay mode
+    needs a persona to be chosen, and a persona cannot be chosen outside roleplay.
+  example:
+    scenario: A COO contact with 5 pain points and one objection.
+    steps:
+    - Write the role lines
+    - Use the first 4 pain points
+    - Add the 1 objection
+    result: A role brief that leaves out the person's name.
+    verified: true
+    expect: 'You are playing THE CHIEF OPERATING OFFICER.
+
+      - Department: Executive
+
+      - Seniority: C-Suite
+
+      - Influence in the buying group: Decision Maker
+
+      - A concern recorded against this role [stakeholder_talking_points]: a
+
+      - A concern recorded against this role [stakeholder_talking_points]: b
+
+      - A concern recorded against this role [stakeholder_talking_points]: c
+
+      - A concern recorded against this role [stakeholder_talking_points]: d
+
+      - An objection this role is expected to raise [objection_reframe_cards]: We already standardise
+      on Dell'
+  sources:
+  - hp-backend/src/app/services/strategy/personas.py:options
+  - hp-backend/src/app/services/strategy/personas.py:resolve
+  - hp-backend/src/app/services/strategy/personas.py:prompt_block
+  - hp-backend/src/app/api/v1/widgets.py:_check_chat_mode
+  confidence: high
+- id: sc_roleplay_validator
+  parent: sc_roleplay_personas
+  name: Roleplay reply checks (sentence by sentence)
+  kind: guardrail
+  summary: The role may sound real, but what it says must come from the data.
+  purpose: The role may sound real, but what it says must come from the data.
+  logic: 'A reply fails if: any cited section is not in the account''s information; any banned name appears
+    (every full name in the stakeholder list, plus each part of a name longer than 4 characters); any
+    sentence lacks a valid citation, unless it is filler (''ok'', ''go on'', ''hmm'', and so on), has
+    no meaningful words, or is a question; any figure has no source; or a cited sentence shares no meaningful
+    word with the section it cites. Bold markers and a speaker label at the start are ignored. There are
+    3 attempts. After that, an out-of-character message says ''The rehearsal stopped here''.'
+  constants:
+  - label: Reply must share wording with its cited section
+    ref: py:app.services.strategy.chat:ROLEPLAY_REQUIRE_SECTION_OVERLAP
+    stated: true
+  example:
+    scenario: Three replies.
+    steps:
+    - '''Hmm. Go on. We run AutoCAD and CATIA [technology section]. What would switching gain us?'' passes'
+    - '''Talk to Santoso about it.'' names a real person'
+    - '''We are locked into a three-year agreement.'' has no source'
+    result: Pass, fail, fail.
+    verified: true
+    expect:
+    - - true
+      - ok
+    - - false
+      - it named a real person (Santoso) - the role speaks, never the individual
+    - - false
+      - 'it said 1 thing(s) in character with no source: We are locked into a three-year agreement.'
+  sources:
+  - hp-backend/src/app/services/strategy/chat.py:_validate_roleplay
+  - hp-backend/src/app/services/strategy/personas.py:banned_names
+  confidence: high
+- id: sc_roleplay_starters
+  parent: sc_roleplay_personas
+  name: Rehearsal starter suggestions
+  kind: model
+  summary: Openers built from the persona's own evidence.
+  purpose: Openers built from the persona's own evidence.
+  logic: 'There is always ''Make your opening''. Then one ''Handle: <area>'' for each of the first 2 matching
+    objections. Then ''Probe the concern'' if the persona has recorded pain points. Finally, ''Test the
+    fit'' is always offered.'
+  example:
+    scenario: A persona with 3 objections and pain points.
+    steps:
+    - Opening
+    - 2 objections
+    - Pain point
+    - Fit test
+    result: 5 starter suggestions.
+    verified: true
+    expect:
+    - open
+    - objection_0
+    - objection_1
+    - pain
+    - why_you
+  sources:
+  - hp-backend/src/app/services/strategy/personas.py:suggested_prompts
+  confidence: high
+- id: sc_prose_validator
+  parent: null
+  name: Sentence citation check
+  kind: guardrail
+  summary: Every sentence that states something must carry a citation.
+  purpose: Every sentence that states something must carry a citation.
+  logic: Every cited section must be in the account's information. Every sentence that states something
+    must carry a valid citation. This applies up to any 'Next steps:' or 'Recommendations:' heading. It
+    does not apply to filler, to refusal phrases such as 'does not hold', or to a bare heading. All figures
+    must be in the account's information. Markdown bold and '### heading' marks are cleaned away first.
+  example:
+    scenario: Three answers.
+    steps:
+    - Figure 500 is not in the data
+    - One cites the key metrics, which are not in the account's information
+    - '''They run AutoCAD.'' has no citation'
+    result: All three are rejected.
+    verified: true
+    expect:
+    - - false
+      - 'it states figure(s) that are not in the evidence: 500'
+    - - false
+      - 'it cited 1 section(s) that are not in this account''s data: exec_key_metrics'
+    - - false
+      - 'it states 1 thing(s) about the account without citing any evidence: They run AutoCAD.'
+  sources:
+  - hp-backend/src/app/services/strategy/chat.py:_validate
+  - hp-backend/src/app/services/strategy/chat.py:_asserts_facts
+  - hp-backend/src/app/services/strategy/chat.py:_claim_sentences
+  confidence: high
+- id: sc_streaming
+  parent: null
+  name: Streaming safety
+  kind: guardrail
+  summary: Nothing unchecked is shown while the reply appears.
+  purpose: Nothing unchecked is shown while the reply appears.
+  logic: Advisor answers do not appear bit by bit. The whole answer is checked first and then shown at
+    once. Roleplay shows only the first attempt as it arrives, and only up to the last complete citation,
+    and only if that part passes the same checks. Later attempts are prepared silently and replace what
+    was shown.
+  sources:
+  - hp-backend/src/app/services/strategy/chat.py:_stream_advisor
+  - hp-backend/src/app/services/strategy/chat.py:answer_stream
+  - hp-backend/src/app/services/strategy/chat.py:_validated_prefix
+  confidence: high
+  internal: true
+- id: sc_unavailable
+  parent: null
+  name: Refusal messages
+  kind: selection
+  summary: Tells the seller why there is no answer.
+  purpose: Tells the seller why there is no answer.
+  logic: 'There are three causes. If there is no data: ''No feature has published anything for this account''.
+    If the AI service fails: ''The AI did not return a usable answer ... a fault on our side''. If the
+    answer cannot be evidenced: ''I drafted an answer ... but could not evidence all of it''. Each adds
+    a pointer to the Stakeholder Map, Tech Landscape or Recent Signals. The message is shown as a normal
+    reply that says no answer is available.'
+  table:
+    columns:
+    - Cause
+    - Opening text
+    rows:
+    - - No data
+      - I have nothing to answer from for {company} yet. No feature has published anything for this account,
+        so there is no account intelligence to read.
+    - - AI service
+      - I could not finish that answer for {company}. The model did not return a usable answer, so there
+        is nothing I can stand behind. This is a fault on our side, not a gap in the data.
+    - - Not evidenced
+      - I drafted an answer about {company} but could not evidence all of it. Rather than show you claims
+        I cannot trace to this account's data, I have held it back.
+  sources:
+  - hp-backend/src/app/services/strategy/chat.py:CAUSE_OPENING
+  - hp-backend/src/app/services/strategy/chat.py:_unavailable
+  confidence: high
+undetermined:
+- Answer length, which facts are chosen, and whether the model obeys 'never quote the platform's own scores'
+  are model-judged; only the segment checks are enforced in code.
+- 'The deployed chat model depends on LLM_PROVIDER/GEMINI_MODEL_NAME env settings (defaults: provider
+  gemini, model gemini-2.5-flash, temperature 0.3, max output 16,384 tokens). The question-rewrite call
+  uses settings.chat_model in JSON mode at temperature 0.2.'
+- A non-numeric claim phrased as a question can pass the roleplay validator (acknowledged in chat.py:885-890).
+- Capitalised-word detection treats only proper-noun-shaped tokens as 'names'; a lowercase invented vendor
+  or a name written in ALL CAPS is not caught by the SYNTHESIS/RECOMMENDATION name check.
+discrepancies:
+- rule_id: sc_advisor_answer
+  doc: 'BridgeAI response to 29 Sep feedback: ''Every answer now follows a fixed structure: ANSWER (two
+    or three sentences ...), then FACTS (up to five points, each with its source), then RECOMMENDED NEXT
+    STEPS (two or three actions).'''
+  code: 'chat.py:58-90 (PROMPT_VERSION 8) and ANSWER_SYSTEM:325-378: ANSWER length is the model''s judgement;
+    FACTS up to 5 or up to 8 for multi-part questions; FACTS and NEXT STEPS are omitted when not called
+    for.'
+  note: Structure loosened after the response was sent.
+- rule_id: sc_advisor_answer
+  doc: 'ANSWER_SYSTEM line 244: ''Use RECOMMENDATION for every line under RECOMMENDED NEXT STEPS:'''
+  code: 'ANSWER_SYSTEM line 373-374: ''RECOMMENDED NEXT STEPS: ... each a SYNTHESIS segment'''
+  note: The prompt contradicts itself; SYNTHESIS is checked more strictly than RECOMMENDATION.
+- rule_id: sc_interface_widget
+  doc: 'WIDGET_REGISTRY strategy_chat_interface description (widgets.py:412): ''Conversational RAG grounding
+    and response generation are TBD for future AI generation.'' data_classification ''inferred'', source_fields
+    [''chat_response''].'
+  code: strategy_chat.py:167-180 writes a deterministic availability widget; chat answers are served by
+    /strategy_chat/ask, not stored on the widget.
+  note: Registry text is stale.
+- rule_id: sc_snapshot_widget
+  doc: WIDGET_REGISTRY strategy_snapshot_context lists 9 source_datasets (firmographics ... technology_detections).
+  code: 'strategy_chat.py reads only other features'' widgets and writes source_datasets: [].'
+  note: Registry still describes the old dataset-reading version.
+- rule_id: sc_context_payload
+  doc: 'context.py:15 docstring: ''Two features are deliberately absent. Content Studio ... and Message
+    Evaluator ...'''
+  code: 'EXCLUDED_FEATURES has three: content_studio, message_evaluator, strategy_chat.'
+  note: Minor; Strategy Chat's own widgets are also excluded.
+- rule_id: sc_roleplay_personas
+  doc: Content Studio and Message Evaluator offer only the client's eight personas (spec 1.4 / 4.2).
+  code: Strategy Chat roleplay offers the account's stakeholder_contacts_grid contacts (personas.py:73),
+    not the eight.
+  note: Different persona sets across the three features.

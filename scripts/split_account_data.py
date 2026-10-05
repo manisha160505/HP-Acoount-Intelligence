@@ -2058,6 +2058,68 @@ def attach_personas(rows: list[dict], by_apollo_row: dict, by_prospect_id: dict)
     return filled
 
 
+def refresh_jobs_in_place(only: list[str], dry_run: bool) -> dict:
+    """Re-apply the job selection to the job files already in the split.
+
+    Reads job_openings.csv plus reference/job_openings_excluded.csv (so a
+    second run sees every row again and gives the same answer), selects, and
+    rewrites both. Nothing else in the folder is touched; readiness is
+    recomputed because a job file can go from rows to none.
+    """
+    from types import SimpleNamespace
+
+    accounts = read_split_accounts()
+    if only:
+        wanted = {s.strip().upper() for s in only if s.strip()}
+        accounts = [a for a in accounts if a["account_slug"].upper() in wanted]
+        if not accounts:
+            sys.exit(f"no account in the split matched: {', '.join(only)}")
+    summary = {"generated_at": datetime.now(UTC).isoformat(), "dry_run": dry_run,
+               "accounts": len(accounts), "raw_rows": 0, "kept_rows": 0,
+               "excluded_rows": 0, "with_jobs": 0, "without_jobs": []}
+    deps = load_feature_dependencies()
+    manifests = []
+    for acct in accounts:
+        folder = OUTPUT_DIR / acct["account_slug"]
+        path = folder / "_manifest.json"
+        if not path.exists():
+            continue
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+        frames = []
+        for f in (folder / "job_openings.csv",
+                  folder / REFERENCE_DIR / f"{JOB_OPENINGS_EXCLUDED}.csv"):
+            if f.exists() and f.stat().st_size:
+                frames.append(pd.read_csv(f, dtype=str, keep_default_na=False,
+                                          encoding=ENCODING))
+        raw = (pd.concat(frames, ignore_index=True).drop(
+                   columns=["excluded_reason"], errors="ignore")
+               if frames else None)
+        name = acct.get("sales_territory_name") or acct.get("account_name")
+        kept, excluded, basis = select_job_openings(SimpleNamespace(name=name), raw)
+        raw_rows = 0 if raw is None else len(raw)
+        if kept is not None and not dry_run:
+            kept.to_csv(folder / "job_openings.csv", index=False, encoding=ENCODING)
+        info = manifest["datasets"].setdefault("job_openings", {})
+        info.update({"rows": 0 if kept is None else len(kept), "reason": None})
+        info["status"] = "ok" if info["rows"] else "empty"
+        record_job_selection(folder, manifest, raw_rows, excluded, basis, dry_run)
+        summary["raw_rows"] += raw_rows
+        summary["kept_rows"] += info["rows"]
+        summary["excluded_rows"] += info["excluded_rows"]
+        if info["rows"]:
+            summary["with_jobs"] += 1
+        else:
+            summary["without_jobs"].append(acct["account_slug"])
+        manifest["jobs_refreshed_at"] = summary["generated_at"]
+        manifests.append(manifest)
+        if not dry_run:
+            path.write_text(json.dumps(manifest, indent=2))
+    if deps and manifests and not dry_run and not only:
+        nobody_has = write_readiness(manifests, deps)
+        write_root_indexes(manifests, deps, nobody_has)
+    return summary
+
+
 def refresh_in_place(only: list[str], dry_run: bool) -> dict:
     """Rewrite prospect_contacts.csv and company_personas.csv across the split."""
     accounts = read_split_accounts()
@@ -2267,6 +2329,60 @@ def _append_refresh_corrections(summary: dict):
 # Per-account run
 # --------------------------------------------------------------------------
 
+# --------------------------------------------------------------------------
+# Job openings: one file, the jobs every feature counts
+# --------------------------------------------------------------------------
+# job_openings.csv holds only the jobs that pass the client's rules
+# (Hiring_Signals_Rule_Set_Final.docx): the account's country, first seen in
+# the 12 months to the PredictLeads pull date, open and closed. The rules are
+# the backend's own `hiring_jobs.select_jobs`, imported rather than copied, so
+# the file and the app can never disagree. Every row a rule drops is kept in
+# reference/job_openings_excluded.csv with the reason. Explorium 12_Hiring_Events
+# is not merged in: on the 5 Oct split none of its hiring events passed the
+# country check for an account without PredictLeads jobs (they are head-office
+# roles abroad), so it stays a reference table.
+JOB_OPENINGS_EXCLUDED = "job_openings_excluded"
+
+
+def _hiring_jobs():
+    src_dir = REPO_ROOT / "hp-backend" / "src"
+    if str(src_dir) not in sys.path:
+        sys.path.insert(0, str(src_dir))
+    from app.services.hp import hiring_jobs  # type: ignore
+    return hiring_jobs
+
+
+def select_job_openings(account: Account, df):
+    """(kept, excluded, basis) for one account's job_openings rows."""
+    if df is None or df.empty:
+        return df, None, None
+    hj = _hiring_jobs()
+    cols = list(df.columns)
+    rows = df.fillna("").astype(str).to_dict("records")
+    selected = hj.select_jobs(account.name, rows)
+    kept = pd.DataFrame(selected.jobs, columns=cols)
+    excluded = None
+    if selected.excluded:
+        excluded = pd.DataFrame([{**r, "excluded_reason": why}
+                                 for r, why in selected.excluded],
+                                columns=[*cols, "excluded_reason"])
+    return kept, excluded, selected.basis()
+
+
+def record_job_selection(out_dir: Path, manifest: dict, raw_rows: int,
+                         excluded, basis, dry_run: bool) -> dict:
+    """Write the excluded rows and note the selection in the manifest."""
+    excluded_rows = write_reference(out_dir, JOB_OPENINGS_EXCLUDED, excluded, dry_run)
+    info = manifest["datasets"]["job_openings"]
+    info.update({"rows_before_selection": raw_rows, "excluded_rows": excluded_rows,
+                 "selection": basis})
+    if raw_rows and not info["rows"]:
+        info["reason"] = ("no job passes the country check and 12-month window "
+                          "(%d rows in %s/%s.csv)" % (excluded_rows, REFERENCE_DIR,
+                                                      JOB_OPENINGS_EXCLUDED))
+    return info
+
+
 def process_account(account: Account, sources: SourceData,
                     dry_run: bool) -> dict:
     out_dir = OUTPUT_DIR / account.slug
@@ -2311,6 +2427,9 @@ def process_account(account: Account, sources: SourceData,
             continue
 
         df, header, reason = extract_dataset(account, dataset_key, spec, sources)
+        if dataset_key == "job_openings":
+            raw_rows = 0 if df is None else len(df)
+            df, excluded, basis = select_job_openings(account, df)
         rows = write_dataset(out_dir, dataset_key, df, header,
                              spec.get("two_row_header", False), dry_run)
 
@@ -2321,6 +2440,10 @@ def process_account(account: Account, sources: SourceData,
             "status": "ok" if rows else "empty",
             "reason": reason or None,
         }
+        if dataset_key == "job_openings":
+            info = record_job_selection(out_dir, manifest, raw_rows, excluded,
+                                        basis, dry_run)
+            reason = info.get("reason") or reason
         if not rows:
             missing.append((dataset_key, reason or "no rows"))
 
@@ -2370,6 +2493,15 @@ def process_account(account: Account, sources: SourceData,
                 "says Astra's PredictLeads data is a separate delivery, and the "
                 "seed is that delivery")
         missing = [(k, r) for k, r in missing if manifest["datasets"][k]["rows"] == 0]
+        # A seeded job file goes through the same selection as any other.
+        if manifest["datasets"]["job_openings"].get("source") == "seed" and not dry_run:
+            seeded = pd.read_csv(out_dir / "job_openings.csv", dtype=str,
+                                 keep_default_na=False, encoding=ENCODING)
+            kept, excluded, basis = select_job_openings(account, seeded)
+            kept.to_csv(out_dir / "job_openings.csv", index=False, encoding=ENCODING)
+            manifest["datasets"]["job_openings"]["rows"] = len(kept)
+            record_job_selection(out_dir, manifest, len(seeded), excluded, basis,
+                                 dry_run)
 
     # Reference tables: split for completeness, never uploaded.
     manifest["reference"] = {}
@@ -2405,13 +2537,13 @@ def process_account(account: Account, sources: SourceData,
             "",
         ]
         lines += [f"  {key:<26} {reason}" for key, reason in missing]
-        hiring = manifest["reference"].get("explorium_hiring_events", {}).get("rows", 0)
-        if manifest["datasets"].get("job_openings", {}).get("rows", 0) == 0 and hiring:
+        excluded = manifest["datasets"].get("job_openings", {}).get("excluded_rows", 0)
+        if excluded:
             lines += [
                 "",
-                f"  note: job_openings is empty, but {REFERENCE_DIR}/explorium_hiring_events.csv",
-                f"        holds {hiring} Explorium hiring events for this account. No",
-                "        dataset_key reads them yet; they are the nearest hiring signal we hold.",
+                f"  note: {excluded} job opening(s) failed the country check or the",
+                f"        12-month window; they are in {REFERENCE_DIR}/{JOB_OPENINGS_EXCLUDED}.csv",
+                "        with the reason, and are not counted anywhere in the app.",
             ]
         filings_rows = manifest["filings_index"]["rows"]
         if filings_rows:
@@ -3597,6 +3729,11 @@ def main():
                         help="Rewrite prospect_contacts.csv and company_personas.csv "
                              "in the existing split from Company_Personas_Enriched.xlsx, "
                              "then recompute readiness. Touches nothing else.")
+    parser.add_argument("--refresh-jobs", action="store_true",
+                        help="Re-apply the job selection (country check, 12-month "
+                             "window) to job_openings.csv in the existing split; "
+                             "dropped rows go to reference/job_openings_excluded.csv. "
+                             "Touches nothing else.")
     parser.add_argument("--regenerate", action="store_true",
                         help="With --upload: submit one regeneration run per "
                              "account once its files are in.")
@@ -3604,7 +3741,8 @@ def main():
                         help="Create the account and POST its datasets to the API. "
                              "Use with --accounts.")
     parser.add_argument("--accounts", default="",
-                        help="Comma-separated account slugs, for --refresh and --upload.")
+                        help="Comma-separated account slugs, for --refresh, "
+                             "--refresh-jobs and --upload.")
     parser.add_argument("--base-url", default="",
                         help="API base URL for --upload (default $HP_BASE_URL or "
                              "http://localhost:8000).")
@@ -3615,6 +3753,13 @@ def main():
     # Both of these work off the split that is already on disk, so neither needs
     # the vendor drop - which matters, because the source workbooks are not all
     # present under their configured names on every machine.
+    if args.refresh_jobs:
+        summary = refresh_jobs_in_place(slugs, args.dry_run)
+        print(json.dumps({k: v for k, v in summary.items() if k != "without_jobs"},
+                         indent=2))
+        print("accounts with no job after the selection (%d): %s"
+              % (len(summary["without_jobs"]), ", ".join(summary["without_jobs"])))
+        return
     if args.refresh:
         for warning in check_registry_drift():
             print(f"WARNING: {warning}")

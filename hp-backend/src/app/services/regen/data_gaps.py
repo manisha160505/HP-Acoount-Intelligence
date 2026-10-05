@@ -85,8 +85,12 @@ def _rules(node: dict):
         yield ("not_assessed_count", MODEL_NOT_ASSESSED,
                "%d signal(s) have no relevance judgement" % get("not_assessed_count"))
     if get("not_in_technographics") is True:
+        # The Objection Playbook falls back to tech_breakdown when
+        # technographics is empty; the flag keeps its name, the source differs.
         yield ("not_in_technographics", NOT_IN_SOURCE,
-               "no vendor for this area in the technographics export")
+               "no vendor for this area in the website technology (tech_breakdown)"
+               if get("evidence_source") == "tech_breakdown"
+               else "no vendor for this area in the technographics export")
     if get("unverified_conditions"):
         yield "unverified_conditions", UNVERIFIED_CONDITION, _text(get("unverified_conditions"))
     if get("is_fallback") is True:
