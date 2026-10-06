@@ -1,5 +1,7 @@
 'use client';
 
+import ScoreInfo from '@/components/common/ScoreInfo';
+import type { ScoreTopic } from '@/lib/scoreExplanations';
 import { caseStudyUrl } from '@/lib/caseStudies';
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
@@ -156,19 +158,89 @@ const EVIDENCE_ID_RE = /[a-z][a-z0-9]*(?:_[a-z0-9]+)+/g;
 // established news channels, T2 paid licensed tools, T3 long tail. Unverifiable
 // carries no tier - their list defines four - so it falls back to the scoring
 // document's own word.
-const SOURCE_TIERS: Record<number, [string, string]> = {
-  10: ['T0', 'First-party'],
-  8: ['T1', 'Established news'],
-  6: ['T2', 'Licensed data tool'],
-  3: ['T3', 'Long tail'],
-  0: ['', 'Unverifiable'],
+//
+// Shown in plain words (client, 6 Oct: no internal terminology): the tier
+// codes (T0-T3) and labels like "long tail" are dropped from the screen; the
+// bands and scores are unchanged.
+// "For this account" in the score ⓘ: the account's own sum, from the numbers
+// the widget already carries, so a reader can see how the shown figure is
+// reached. Plain labels only - the backend's term names are mapped here.
+const fmtNum = (n: any): string =>
+  typeof n === 'number' ? String(Math.round(n * 100) / 100) : String(n ?? '');
+
+const TERM_LABELS: Record<string, string> = {
+  'Account scale': 'Company size',
+  'OS environment': 'Operating systems',
+  'Workplace technology footprint': 'Workplace tools',
+  'AI/ML breadth': 'AI breadth',
+  'AI/ML depth': 'AI depth',
+  'Workstation intent': 'Workstation interest',
+  'Recent AI initiatives': 'AI news',
+  'Workforce growth proxy': 'Workforce growth',
+  'Recent hiring volume': 'Hiring',
+  'Verified growth and expansion events': 'Expansion news',
+  'HP-category intent strength': 'Interest strength',
+  'Intent trend': 'Trend',
+  'Filing evidence': 'Filings',
+  'Source diversity': 'Variety of sources',
+};
+
+function urgencyWorked(u: any): string | null {
+  const drivers = u?.drivers;
+  if (!Array.isArray(drivers) || !drivers.length || u.score == null) return null;
+  const exact = u.exact_score ?? u.score;
+  const sum = drivers.map((d: any) => `${fmtNum(d.value)} × ${Math.round((d.weight ?? 0) * 100)}%`).join(' + ');
+  return `${sum} = ${fmtNum(exact)}${exact !== u.score ? ` → ${u.score}` : ''}`;
+}
+
+function termsWorked(terms: any, total: any): string | null {
+  if (!Array.isArray(terms) || !terms.length || total == null) return null;
+  return `${terms.map((t: any) => `${TERM_LABELS[t.label] ?? t.label} ${fmtNum(t.points ?? 0)}`).join(' + ')} = ${fmtNum(total)}`;
+}
+
+const SIGNAL_PARTS: [string, string][] = [
+  ['relevance_impact', 'Relevance'], ['recency', 'Recency'], ['source_reliability', 'Source'],
+];
+
+function signalWorked(scores: any, weights: any, total: any): string | null {
+  if (!scores || total == null || !SIGNAL_PARTS.every(([k]) => scores[k] != null && weights?.[k] != null)) return null;
+  const sum = SIGNAL_PARTS.map(([k, label]) => `${label} ${fmtNum(scores[k])} × ${Math.round(weights[k] * 100)}%`).join(' + ');
+  return `${sum} = ${fmtNum(total)}`;
+}
+
+const MESSAGE_LABELS: Record<string, string> = {
+  relevance: 'Relevance', impact: 'Impact', brand_recall: 'Brand recall', clarity: 'Clarity',
+  creativity: 'Creativity', emotional_connection: 'Emotional appeal', next_step_strength: 'Call to action',
+};
+
+function messageWorked(evaluation: any): string | null {
+  const dims = evaluation?.dimensions, weights = evaluation?.dimension_weights;
+  if (!dims || !weights || evaluation.composite == null) return null;
+  const used = Object.keys(weights).filter((k) => weights[k] && dims[k] != null);
+  if (!used.length) return null;
+  const sum = used.map((k) => `${MESSAGE_LABELS[k] ?? k} ${fmtNum(dims[k])} × ${Math.round(weights[k] * 100)}%`).join(' + ');
+  return `${sum} = ${fmtNum(evaluation.composite)}`;
+}
+
+// The ⓘ beside each urgency driver: what goes into it, in plain words.
+const DRIVER_INFO: Record<string, ScoreTopic> = {
+  workplace_os: 'urgencyWorkplace',
+  ai_workstation: 'urgencyAi',
+  growth_expansion: 'urgencyGrowth',
+  hp_solution_intent: 'urgencyHpIntent',
+};
+
+const SOURCE_TIERS: Record<number, string> = {
+  10: 'The company’s own announcement or filing',
+  8: 'Established news outlet',
+  6: 'Business data provider',
+  3: 'Smaller or less established site',
+  0: 'Source could not be verified',
 };
 
 function sourceReliabilityLine(points: unknown, publisher: unknown): string {
-  const entry = SOURCE_TIERS[Number(points)];
-  if (!entry) return '';
-  const [tier, label] = entry;
-  const head = tier ? `${tier} - ${label}` : label;
+  const head = SOURCE_TIERS[Number(points)];
+  if (!head) return '';
   const name = String(publisher ?? '').trim();
   return name ? `${head}: ${name}` : head;
 }
@@ -332,11 +404,6 @@ function HpRecommendationCard({ rec, xray }: { rec: any; xray?: boolean }) {
               {conf}
             </span>
           )}
-          {rec.quoted_verbatim && (
-            <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border bg-white text-slate-500 border-slate-200">
-              quoted from the rulebook
-            </span>
-          )}
           {/* How strongly this may be put. Not a score - the confidence band
               beside it is the score. This says what the prose is allowed to
               claim, and it is keyed on how many independent data pipelines saw
@@ -350,12 +417,11 @@ function HpRecommendationCard({ rec, xray }: { rec: any; xray?: boolean }) {
                   ? 'bg-sky-50 text-sky-700 border-sky-200'
                   : 'bg-slate-100 text-slate-600 border-slate-200'
               }`}
-              title={[rec.evidence_tier?.basis, rec.evidence_tier?.permitted_language]
-                .filter(Boolean).join(' — ')}
             >
               {rec.confidence_tier}
             </span>
           )}
+          {(conf || rec.confidence_tier) && <ScoreInfo topic="hpRecommendation" align="right" />}
         </div>
         {/* Section 3: "Do not expose internal rule IDs ... Seller-facing
             output should contain the conclusion, not the backend logic." The
@@ -495,8 +561,6 @@ export default function UserDashboardPage() {
   const [provenanceSourceFilter, setProvenanceSourceFilter] = useState('ALL');
 
   // Urgency Score Driver Popover & Tooltip State
-  const [activeDriverPopover, setActiveDriverPopover] = useState<string | null>(null);
-  const [hoveredDriverTooltip, setHoveredDriverTooltip] = useState<string | null>(null);
 
   // Key Metrics Source Citation Popover State
   const [activeMetricPopover, setActiveMetricPopover] = useState<string | null>(null);
@@ -1073,6 +1137,7 @@ export default function UserDashboardPage() {
                     }`}>
                       {hasScore ? <><CountUpText text={urgency.score} />/{urgency.max_score ?? 100}</> : NO_SIGNAL}
                     </span>
+                    <ScoreInfo topic="urgency" align="right" worked={urgencyWorked(urgency)} />
                   </div>
                 );
               })()}
@@ -1554,6 +1619,7 @@ export default function UserDashboardPage() {
                             <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700 flex items-center gap-2">
                               <Flame className="w-4 h-4 text-amber-500" />
                               <span>URGENCY SCORE & DRIVER BREAKDOWN</span>
+                              <ScoreInfo topic="urgency" worked={urgencyWorked(urgencyData)} />
                             </h3>
                             {/* The formula's provenance badge was removed at the
                                 client's request (refinements, 6 Oct). */}
@@ -1602,23 +1668,10 @@ export default function UserDashboardPage() {
                                   label: d.label,
                                   available: d.available,
                                   scoreText: `${d.value}/100`,
+                                  value: d.value,
+                                  terms: d.terms,
                                   progressPct: `${d.value}%`,
                                   barColor: 'bg-hp-navy',
-                                  // The whole working, so a seller who
-                                  // disagrees with the number can see which
-                                  // term to disagree with. Built in the
-                                  // backend (urgency.rationale_lines) and kept
-                                  // as lines rather than glued into one
-                                  // paragraph - the client asked for bullets,
-                                  // and there is now one version of this text
-                                  // rather than one here and one there.
-                                  rationale: (d.rationale_lines ?? [
-                                    `Weight ${Math.round(d.weight * 100)}% of the total.`,
-                                    ...(d.terms ?? []).map((t: any) =>
-                                      `${t.label}: ${t.points}/${t.max_points} - ${t.missing_input ? NO_SIGNAL : t.basis}`),
-                                    ...(d.notes ?? []),
-                                    ...(d.caveats ?? []).map((c: string) => `Caveat: ${c}`),
-                                  ]) as string[],
                                 };
                                 }).map((driver: any, driverIdx: number) => (
                                 <div key={driver.id} className="relative">
@@ -1626,27 +1679,7 @@ export default function UserDashboardPage() {
                                     <div className="flex items-center space-x-1.5">
                                       <span className={driver.available ? '' : 'text-slate-400'}>{driver.label}</span>
 
-                                      {/* Interactive Info Icon Button */}
-                                      <div className="relative inline-block">
-                                        <button
-                                          type="button"
-                                          onMouseEnter={() => setHoveredDriverTooltip(driver.id)}
-                                          onMouseLeave={() => setHoveredDriverTooltip(null)}
-                                          onClick={() => setActiveDriverPopover(activeDriverPopover === driver.id ? null : driver.id)}
-                                          className="text-slate-400 hover:text-slate-700 p-0.5 rounded transition"
-                                          title="Why this score"
-                                        >
-                                          <Info className="w-3.5 h-3.5" />
-                                        </button>
-
-                                        {/* Hover Tooltip Badge ("Why this score") */}
-                                        {hoveredDriverTooltip === driver.id && activeDriverPopover !== driver.id && (
-                                          <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 z-30 px-2 py-1 bg-slate-900 text-white text-[10px] font-bold rounded shadow-md whitespace-nowrap pointer-events-none">
-                                            Why this score
-                                            <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-900"></div>
-                                          </div>
-                                        )}
-                                      </div>
+                                      {DRIVER_INFO[driver.id] && <ScoreInfo topic={DRIVER_INFO[driver.id]} worked={termsWorked(driver.terms, driver.value)} />}
                                     </div>
 
                                     <span className="font-mono text-slate-500 font-bold"><CountUpText text={driver.scoreText} first delay={growDelay(driverIdx)} /></span>
@@ -1657,29 +1690,6 @@ export default function UserDashboardPage() {
                                     <div className={`as-grow ${driver.barColor} h-2 rounded-full transition-all duration-500`} style={{ width: driver.progressPct, ['--as-d' as string]: `${growDelay(driverIdx)}ms` }}></div>
                                   </div>
 
-                                  {/* Popover Card Modal */}
-                                  {activeDriverPopover === driver.id && (
-                                    <div className="absolute left-0 top-full mt-2 w-80 bg-white border border-slate-200 rounded-2xl shadow-2xl p-4 z-50 animate-fade-in text-xs font-medium">
-                                      <div className="flex justify-between items-center border-b border-slate-100 pb-2 mb-2">
-                                        <h4 className="font-extrabold text-slate-900 text-xs">{driver.label}</h4>
-                                        <button
-                                          type="button"
-                                          onClick={() => setActiveDriverPopover(null)}
-                                          className="text-slate-400 hover:text-slate-600 rounded p-0.5"
-                                        >
-                                          <X className="w-4 h-4" />
-                                        </button>
-                                      </div>
-                                      <ul className="space-y-1.5">
-                                        {driver.rationale.map((line: string, i: number) => (
-                                          <li key={i} className="text-slate-600 leading-relaxed text-[11px] flex gap-2">
-                                            <span className="text-hp-navy flex-shrink-0">&bull;</span>
-                                            <span>{line}</span>
-                                          </li>
-                                        ))}
-                                      </ul>
-                                    </div>
-                                  )}
                                 </div>
                               ))}
 
@@ -1713,15 +1723,9 @@ export default function UserDashboardPage() {
                             </p>
                           )}
 
-                          {urgencyData && (
-                            <p className="text-[10px] text-slate-400 leading-relaxed border-t border-slate-100 pt-3">
-                              {/* The authority sentence comes from the payload
-                                  rather than being written here: the backend
-                                  owns which document the formula is from, and
-                                  a copy in the UI would drift from it. */}
-                              {urgencyData.formula}{' '}{urgencyData.formula_authority}
-                            </p>
-                          )}
+                          {/* The formula and its source document used to be
+                              printed here. The ⓘ in the header explains the score
+                              in plain language instead (client, 6 Oct). */}
                         </div>
 
                       {/* Section 5: STRATEGIC PRIORITIES
@@ -1746,6 +1750,7 @@ export default function UserDashboardPage() {
                           <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700 flex items-center gap-2">
                             <Target className="w-4 h-4 text-hp-navy" />
                             <span>STRATEGIC PRIORITIES</span>
+                            <ScoreInfo topic="catalysts" />
                           </h3>
                           {priorityList.length > 0 && (
                             <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-hp-navy border border-blue-200 inline-flex items-center gap-1">
@@ -1805,11 +1810,11 @@ export default function UserDashboardPage() {
                                                   {NO_SIGNAL}
                                                 </span>
                                               ) : (
-                                                <span
-                                                  className="text-[10px] font-extrabold px-2 py-0.5 rounded-full border flex-shrink-0 whitespace-nowrap cursor-help bg-blue-50 text-hp-navy border-blue-200"
-                                                  title={p.evidence_strength.formula}
-                                                >
-                                                  {`${p.evidence_strength.score}/${p.evidence_strength.max_score}`}
+                                                <span className="inline-flex items-center gap-0.5 flex-shrink-0">
+                                                  <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full border whitespace-nowrap bg-blue-50 text-hp-navy border-blue-200">
+                                                    {`${p.evidence_strength.score}/${p.evidence_strength.max_score}`}
+                                                  </span>
+                                                  <ScoreInfo topic="evidenceStrength" align="right" worked={termsWorked(p.evidence_strength.terms, p.evidence_strength.score)} />
                                                 </span>
                                               )
                                             )}
@@ -1946,11 +1951,11 @@ export default function UserDashboardPage() {
                                                 {p.evidence_strength?.zero_reason ? (
                                                   <span className="text-[11px] text-slate-400">{NO_SIGNAL}</span>
                                                 ) : (
-                                                  <span
-                                                    className="text-[11px] font-extrabold text-slate-700 cursor-help"
-                                                    title={p.evidence_strength?.formula || prioritiesData?.evidence_strength_formula}
-                                                  >
-                                                    {`${p.evidence_strength?.score ?? 0}/${p.evidence_strength?.max_score ?? 100}`}
+                                                  <span className="inline-flex items-center gap-0.5">
+                                                    <span className="text-[11px] font-extrabold text-slate-700">
+                                                      {`${p.evidence_strength?.score ?? 0}/${p.evidence_strength?.max_score ?? 100}`}
+                                                    </span>
+                                                    <ScoreInfo topic="evidenceStrength" align="right" worked={termsWorked(p.evidence_strength?.terms, p.evidence_strength?.score)} />
                                                   </span>
                                                 )}
                                               </div>
@@ -2242,7 +2247,7 @@ export default function UserDashboardPage() {
                           </div>
 
                           <div>
-                            <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-2">Minimum Score</p>
+                            <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-1">Minimum Score <ScoreInfo topic="liveSignal" /></p>
                             <div className="flex flex-wrap gap-1.5">
                               {[0, 4, 6, 8].map(v => (
                                 <button
@@ -2345,7 +2350,7 @@ export default function UserDashboardPage() {
                                     )}
                                     <span className="ml-auto flex items-center gap-2 text-xs font-semibold text-slate-600">
                                       {s.confidence !== null && s.confidence !== undefined ? (
-                                        <>{s.confidence.toFixed(1)}<span className="text-slate-400 font-normal">/10</span></>
+                                        <>{s.confidence.toFixed(1)}<span className="text-slate-400 font-normal">/10</span><ScoreInfo topic="liveSignal" align="right" worked={signalWorked(sc?.scores, scoreWeights, s.confidence)} /></>
                                       ) : (
                                         <span className="text-slate-400 font-normal">{NO_SIGNAL}</span>
                                       )}
@@ -2463,7 +2468,7 @@ export default function UserDashboardPage() {
                                   {/* expanded score breakdown */}
                                   {isOpen && sc && (
                                     <div className="mt-3 bg-slate-50 rounded-lg p-3 border border-slate-200 space-y-2">
-                                      <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Score breakdown</p>
+                                      <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1">Score breakdown <ScoreInfo topic="liveSignal" worked={signalWorked(sc?.scores, scoreWeights, s.confidence)} /></p>
                                       {Object.entries(dimLabels).map(([dim, label]) => {
                                         const val = sc.scores?.[dim];
                                         if (val === undefined) return null;
@@ -2711,7 +2716,7 @@ export default function UserDashboardPage() {
                           </h2>
                           {/* Sahaj, 27 Sep: replace the counts line with the source. */}
                           <p className="text-xs text-slate-500 mt-0.5">
-                            Intent scores powered by Bombora and Predictleads
+                            Research activity across HP's business areas
                           </p>
                         </div>
                         <div className="flex flex-wrap items-center gap-2 text-xs font-bold">
@@ -2797,15 +2802,15 @@ export default function UserDashboardPage() {
                         const averaged = bu.score_source === 'Bombora';
                         const longTail: any[] = bu.long_tail || [];
                         const sourceNote = averaged
-                          ? 'Average of the HP-relevant Bombora topics in each category'
+                          ? 'Average strength of the research topics matched to each HP area'
                           : byBombora
-                            ? 'From the HP category intent file · no Bombora topic for this account is about an HP category'
-                            : 'From the HP category intent file';
+                            ? 'From buying-interest data · none of this account’s research topics relate to an HP area'
+                            : 'From buying-interest data for each HP area';
                         return (
                           <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm space-y-4">
                             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
                               <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700">
-                                Intent across HP business units
+                                Intent across HP business units <ScoreInfo topic="intentHpCategory" />
                               </h3>
                               <span className="text-[10px] text-slate-400">{sourceNote}</span>
                             </div>
@@ -2899,7 +2904,7 @@ export default function UserDashboardPage() {
                                           <p className="text-[10px] text-slate-400">{NO_SIGNAL}</p>
                                         )}
                                         <p className="text-[9px] text-slate-400">
-                                          {hovered.score_basis === 'category_file' ? 'Score as supplied in the HP category intent file.' : 'Composite scores as supplied by Bombora.'}
+                                          {hovered.score_basis === 'category_file' ? 'Score as received from the research provider.' : 'Topic scores as received from the research provider.'}
                                         </p>
                                       </div>
                                     );
@@ -2941,9 +2946,9 @@ export default function UserDashboardPage() {
 
                                       <p className="text-[11px] font-semibold text-slate-600">
                                         {u.score_basis === 'bombora_average'
-                                          ? <>Average of {u.bombora_topic_count} Bombora topic{u.bombora_topic_count === 1 ? '' : 's'}</>
+                                          ? <>Average of {u.bombora_topic_count} research topic{u.bombora_topic_count === 1 ? '' : 's'}</>
                                           : u.score_basis === 'category_file'
-                                            ? <>HP category intent file{u.category_file_stage ? ` · ${u.category_file_stage}` : ''}</>
+                                            ? <>Buying-interest data{u.category_file_stage ? ` · ${u.category_file_stage}` : ''}</>
                                             : scored
                                               ? <>{u.bombora_topic_count} researched topic{u.bombora_topic_count === 1 ? '' : 's'}</>
                                               : <span className="text-slate-400 font-normal">{NO_SIGNAL}</span>}
@@ -2993,7 +2998,7 @@ export default function UserDashboardPage() {
                             {byBombora && longTail.length > 0 && (
                               <details className="group rounded-xl border border-slate-200 bg-slate-50/50">
                                 <summary className="cursor-pointer list-none flex items-center justify-between px-3.5 py-2.5 text-xs font-bold text-slate-700">
-                                  <span>Other Bombora topics ({longTail.length})</span>
+                                  <span>Other researched topics ({longTail.length})</span>
                                   <ChevronDown className="w-3.5 h-3.5 transition-transform group-open:rotate-180" />
                                 </summary>
                                 <div className="px-3.5 pb-3 space-y-1 max-h-96 overflow-y-auto">
@@ -3039,6 +3044,7 @@ export default function UserDashboardPage() {
                               <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700 flex items-center gap-2">
                                 <Layers className="w-4 h-4 text-hp-navy" />
                                 <span>HP CATEGORY INTENT SCORES</span>
+                                <ScoreInfo topic="intentCategoryInterest" />
                               </h3>
                               {categoryFileMatched && (
                                 <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-50 text-slate-600 border border-slate-200">
@@ -3147,7 +3153,7 @@ export default function UserDashboardPage() {
                                                     : NO_SIGNAL}
                                                 </p>
                                                 <p className="text-[9px] text-slate-400 leading-snug pt-0.5 border-t border-slate-100">
-                                                  All values as supplied by the HP Category Intent file.
+                                                  All values as received from the research provider.
                                                 </p>
                                               </div>
                                     );
@@ -3158,7 +3164,7 @@ export default function UserDashboardPage() {
                               <p className="text-xs text-slate-400">{NO_SIGNAL}</p>
                             )}
                             <p className="text-[11px] text-slate-500">
-                              Scores as received from the HP Category Intent file, shown for every HP category, ordered by score. Hover a bar for that category&apos;s buying stage and the topics and keywords behind it. Supporting Bombora signals add context and never change these scores.
+                              Buying interest in each HP area, highest first. Hover a bar for that area&apos;s buying stage and the topics and keywords behind it. Other research signals add context and never change these scores.
                             </p>
                           </div>
 
@@ -3194,7 +3200,7 @@ export default function UserDashboardPage() {
                                     return u.bombora_topic_count > 0 ? (
                                       <div className="rounded-lg bg-blue-50/60 border border-blue-100 px-3 py-2 space-y-1">
                                         <p className="text-[11px] font-bold text-slate-800">
-                                          Bombora research &middot; {u.bombora_topic_count} topic{u.bombora_topic_count === 1 ? '' : 's'} &middot; max {u.bombora_max}
+                                          Research activity &middot; {u.bombora_topic_count} topic{u.bombora_topic_count === 1 ? '' : 's'} &middot; max {u.bombora_max}
                                         </p>
                                         {u.bombora_top_topics?.length > 0 && (
                                           <p className="text-[11px] text-slate-600 leading-relaxed">
@@ -3209,7 +3215,7 @@ export default function UserDashboardPage() {
 
                                   {/* Score bar */}
                                   {p && (
-                                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Predictleads score</span>
+                                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Buying-interest score</span>
                                   )}
                                   {p ? (
                                     <div className="flex items-center gap-3">
@@ -3290,9 +3296,10 @@ export default function UserDashboardPage() {
                               <h3 className="text-sm font-extrabold uppercase tracking-wider text-slate-800 flex items-center gap-2">
                                 <Database className="w-4 h-4 text-hp-navy" />
                                 <span>{hpGrouped ? 'INTENT DATA' : `BROADER INTENT TOPICS (${topicsList.length})`}</span>
+                                <ScoreInfo topic="intentTopic" />
                               </h3>
                               <p className="text-xs text-slate-500 mt-0.5">
-                                As received from the intent data · {provider?.scoring_definition} · Intent sources: Bombora and Predictleads
+                                The topics people at this company have been researching, each scored 0-100, as received
                               </p>
                             </div>
 
@@ -3488,7 +3495,7 @@ export default function UserDashboardPage() {
                                   )}
                                 </h2>
                                 <p className="text-xs text-slate-500 mt-0.5">
-                                  Job openings powered by Predictleads{summary.domain ? ` · ${summary.domain}` : ''}
+                                  Job openings{summary.domain ? ` · ${summary.domain}` : ''}
                                 </p>
                               </div>
                             </div>
@@ -3720,11 +3727,11 @@ export default function UserDashboardPage() {
                                       <div className="flex items-center space-x-2 min-w-0">
                                         <Compass className="w-4 h-4 text-slate-400 flex-shrink-0" />
                                         <h4 className="text-base font-bold text-slate-900">{play.title || 'HP Opportunity Play'}</h4>
-                                        <Info className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
                                       </div>
 
                                       <div className="flex flex-col items-start sm:items-end gap-0.5 flex-shrink-0">
                                         {play.priority && (
+                                          <span className="inline-flex items-center gap-0.5">
                                           <span className={`text-[11px] font-semibold px-2 py-0.5 rounded border ${
                                             play.priority === 'Critical' ? 'text-rose-700 bg-rose-50 border-rose-200'
                                               : play.priority === 'High' ? 'text-amber-700 bg-amber-50 border-amber-200'
@@ -3732,6 +3739,8 @@ export default function UserDashboardPage() {
                                               : 'text-slate-600 bg-slate-100 border-slate-200'
                                           }`}>
                                             {play.priority}
+                                          </span>
+                                          <ScoreInfo topic="opportunityPriority" align="right" />
                                           </span>
                                         )}
                                       </div>
@@ -4749,8 +4758,11 @@ export default function UserDashboardPage() {
                                           <div>
                                             <div className="flex items-center justify-between gap-2 border-b border-emerald-200/60 pb-2 mb-2">
                                               <h5 className="text-xs font-black text-slate-900">{vendor.vendor_name}</h5>
-                                              <span className="text-[10px] font-extrabold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-300">
-                                                {vendor.risk_level}
+                                              <span className="inline-flex items-center gap-0.5">
+                                                <span className="text-[10px] font-extrabold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-300">
+                                                  {vendor.risk_level}
+                                                </span>
+                                                <ScoreInfo topic="techRisk" align="right" />
                                               </span>
                                             </div>
                                             <p className="text-xs text-slate-600 font-medium">{vendor.description}</p>
@@ -4802,11 +4814,13 @@ export default function UserDashboardPage() {
                                                 )}
                                                 {vendor.hp_relationship_label && (
                                                   <span
-                                                    title={vendor.hp_relationship || ''}
                                                     className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200"
                                                   >
                                                     {vendor.hp_relationship_label}
                                                   </span>
+                                                )}
+                                                {(vendor.risk_level || vendor.hp_relationship_label) && (
+                                                  <ScoreInfo topic="techRisk" align="right" />
                                                 )}
                                               </div>
                                             </div>
@@ -5756,7 +5770,7 @@ export default function UserDashboardPage() {
                                           className="text-[10px] font-semibold text-rose-600"
                                           title={floored.detail}
                                         >
-                                          capped &mdash; {floored.gate}
+                                          capped
                                         </span>
                                       )}
                                       </div>
@@ -5792,12 +5806,9 @@ export default function UserDashboardPage() {
                                   )}
                                 </div>
                                 <div className="text-xs text-slate-500">
-                                  <p className="font-medium text-slate-600 mb-0.5">
-                                    Composite ({evaluation.objective_label}) &middot; V{evaluation.version}
-                                  </p>
-                                  <p className="font-mono text-[10px]">{evaluation.formula_used}</p>
-                                  <p className="text-[10px] text-slate-400">
-                                    Formula source: {evaluation.formula_source}
+                                  <p className="font-medium text-slate-600 mb-0.5 flex items-center gap-1">
+                                    Overall score ({evaluation.objective_label}) &middot; V{evaluation.version}
+                                    <ScoreInfo topic="messageScore" worked={messageWorked(evaluation)} />
                                   </p>
                                 </div>
                               </div>

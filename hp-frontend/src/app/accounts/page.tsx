@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ProtectedRoute } from '@/components/common/ProtectedRoute';
+import ScoreInfo from '@/components/common/ScoreInfo';
 import { CountUpText, ParallaxBand, SlidingSegments, growDelay } from '@/components/common/motion';
 import api from '@/services/api';
 import { NO_SIGNAL } from '@/lib/placeholders';
@@ -165,7 +166,7 @@ export default function AccountSelectionPage() {
           <div id="as-list" className="mt-5 bg-white rounded-2xl border border-slate-200/80 shadow-[0_1px_2px_rgba(11,19,43,0.05)] overflow-hidden scroll-mt-6">
             <div className="flex items-center justify-between px-4 sm:px-5 py-2.5 border-b border-slate-100 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
               <span>Account</span>
-              <span className="pr-7">Urgency Score</span>
+              <span className="pr-7 inline-flex items-center gap-1">Urgency Score <ScoreInfo topic="urgency" align="right" /></span>
             </div>
 
             {isLoading ? (
