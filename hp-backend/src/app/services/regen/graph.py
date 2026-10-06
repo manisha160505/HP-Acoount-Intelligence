@@ -160,6 +160,8 @@ NODES = (
                   "hiring_tech_tags", "hiring_theme_cards"),
          datasets=("job_openings",),
          logic_refs=("app.services.hp.hiring_themes:THEMES_VERSION",),
+         # 2: theme cards carry more_titles, behind "+ N more jobs" (6 Oct).
+         logic_version=2,
          run=f"{_P}:hiring"),
     Node("opp_core", "solution_narrative_opportunity_map",
          widgets=("opportunity_context_card", "opportunity_narrative_plays"),

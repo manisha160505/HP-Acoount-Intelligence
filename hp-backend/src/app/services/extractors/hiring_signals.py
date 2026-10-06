@@ -213,13 +213,17 @@ def theme_cards(jobs: list) -> dict:
         titles = Counter(str(j.get("title") or j.get("normalized_title") or "").strip()
                          for j in members)
         titles.pop("", None)
-        shown = [{"title": t, "posted": n} for t, n in titles.most_common(CARD_TITLES)]
+        ranked = [{"title": t, "posted": n} for t, n in titles.most_common()]
+        shown = ranked[:CARD_TITLES]
         cards.append({
             "theme_key": theme.key,
             "theme": theme.name,
             "job_count": len(members),
             "titles": shown,
             "more_jobs": len(members) - sum(s["posted"] for s in shown),
+            # Behind the card's "+ N more jobs" dropdown (refinements, 6 Oct).
+            # Jobs with no title are counted in more_jobs but have nothing to list.
+            "more_titles": ranked[CARD_TITLES:],
             "hp_product": theme.product,
             "hp_service": theme.service,
             "hp_solution": theme.solution,
