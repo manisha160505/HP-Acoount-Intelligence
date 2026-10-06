@@ -37,6 +37,7 @@ from app.services.hp import (
     evidence_tier,
     intent_topic_map as tm,
     rulebook as rb,
+    time_windows,
 )
 from app.services.hp.guardrails import tier_language_faults
 from app.services.regen import (
@@ -837,8 +838,9 @@ def generate_opportunity_map_plays_with_gpt4o(account_id: str) -> dict:  # noqa:
     firmo_records = _read_dataset_records(account_id, "firmographics")
     techno_records = _read_dataset_records(account_id, "technographics")
     intent_records = _read_dataset_records(account_id, "intent_score")
-    gnews_records = _read_dataset_records(account_id, "google_news")
-    events_records = _read_dataset_records(account_id, "news_events")
+    # Last 12 months only (client, 6 Oct) - the Live Signals window and rule.
+    gnews_records = time_windows.recent_news(_read_dataset_records(account_id, "google_news"))
+    events_records = time_windows.recent_news(_read_dataset_records(account_id, "news_events"))
 
     # Step 1 of the intent flow. Read here, not only in the intent widget,
     # because this feature decides which plays claim a buying moment and must

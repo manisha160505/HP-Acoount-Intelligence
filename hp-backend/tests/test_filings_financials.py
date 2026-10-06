@@ -11,10 +11,27 @@ Run: python -m pytest tests/test_filings_financials.py -v
 
 import os
 import sys
+from datetime import date
+
+import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from app.services.dashboard import filings_financials as ff
+
+# The fixtures span 2023 to 2026, more than the 24-month filings window
+# (client, 6 Oct) can hold at once. The tests of how a filing is chosen run
+# with the window off; the window's own tests (marked) run it against a
+# pinned "today" so they hold still as real time moves on.
+AS_OF = date(2025, 12, 31)
+_recent_filings = ff.recent_filings
+
+
+@pytest.fixture(autouse=True)
+def _window(request, monkeypatch):
+    monkeypatch.setattr(ff.time_windows, "today", lambda: AS_OF)
+    if request.node.get_closest_marker("window") is None:
+        monkeypatch.setattr(ff, "recent_filings", lambda rows, _as_of=None: list(rows or []))
 
 
 def _metric(name, value, **kw):
@@ -189,3 +206,26 @@ def test_one_company_spelled_two_ways_is_not_several():
     [card] = ff.reported_metrics([a, b])
     assert card["metric"] == "Revenue" and not card["entity_note"]
     assert card["change_text"] == "+10.0%"
+
+
+# -- 24-month filings window (client, 6 Oct) ---------------------------------
+
+@pytest.mark.window
+def test_a_filing_published_more_than_24_months_ago_is_not_shown():
+    old = _row(period_end="2023-06-30", file="ar2023.pdf", **_metric("revenue", 100.0))
+    assert ff.reported_metrics([old]) == []
+
+
+@pytest.mark.window
+def test_the_window_is_measured_on_the_publication_date():
+    row = _row(period_end="2023-06-30", file="ar2023.pdf", **_metric("revenue", 100.0))
+    row["publication_date"] = "2024-02-15"        # filed within 24 months of AS_OF
+    [card] = ff.reported_metrics([row])
+    assert card["metric"] == "Revenue"
+
+
+@pytest.mark.window
+def test_ceo_only_from_a_filing_in_the_window():
+    old = {**_row(period_end="2023-06-30", file="ar2023.pdf"),
+           "ceo_check": "verified", "ceo_name": "Old CEO", "ceo_title": "CEO", "ceo_page": "3"}
+    assert ff.ceo([old]) is None

@@ -18,6 +18,7 @@ from app.services.hp import (
     integration_routes as ir,
     rulebook as rb,
     tech_confidence as tconf,
+    time_windows,
 )
 from app.services.regen import store as widget_store
 
@@ -975,7 +976,9 @@ def extract_tech_landscape(account_id: str,  # noqa: PLR0912, PLR0915 - branch-h
             account_name = f_name
 
     techno_records = _read_dataset_records(account_id, "technographics")
-    detection_records = _read_dataset_records(account_id, "technology_detections")
+    # Detections seen in the last 12 months only (client, 6 Oct).
+    detection_records = time_windows.recent_detections(
+        _read_dataset_records(account_id, "technology_detections"))
     webstack_records = _read_dataset_records(account_id, "webstack")
 
     pipeline.step("datasets", "", firmographics=len(firmo_records or []),

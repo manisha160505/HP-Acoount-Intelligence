@@ -79,6 +79,10 @@ class Node:
 
 
 HIRING_RULES_REF = "app.services.hp.hiring_jobs:HIRING_RULES_VERSION"
+# How far back data is used (client, 6 Oct: signals 12 months, filings 24).
+# Referenced by every node that applies those windows, so changing a window
+# marks exactly those sections stale.
+TIME_WINDOWS_REF = "app.services.hp.time_windows:TIME_WINDOWS_VERSION"
 
 
 _P = "app.services.regen.producers"
@@ -123,7 +127,7 @@ NODES = (
          # naming a card that was removed is dropped. All of it is stored
          # inside the widget, so the bump is what rewrites it.
          logic_version=5,
-         logic_refs=("app.services.hp.map_narrative:MAP_NARRATIVE_PROMPT_VERSION",),
+         logic_refs=(TIME_WINDOWS_REF, "app.services.hp.map_narrative:MAP_NARRATIVE_PROMPT_VERSION",),
          run=f"{_P}:tech_core"),
     Node("objection", "objection_playbook",
          widgets=("objection_incumbent_context", "objection_reframe_cards"),
@@ -131,7 +135,7 @@ NODES = (
          datasets=tuple(sorted({"technographics", "tech_breakdown", "firmographics",
                                 "prospect_contacts", *RULEBOOK_EVIDENCE})),
          knowledge=("rulebook", "case_studies"), llm=True,
-         logic_refs=("app.services.extractors.objection_playbook:OBJECTION_PROMPT_VERSION",),
+         logic_refs=(TIME_WINDOWS_REF, "app.services.extractors.objection_playbook:OBJECTION_PROMPT_VERSION",),
          run=f"{_P}:objection"),
     Node("intent", "intent_demand_signals",
          widgets=("intent_topics_table", "intent_category_summary"),
@@ -170,7 +174,7 @@ NODES = (
                    "intent_topics"),
          upstream=("stakeholder_roster",),
          knowledge=("rulebook", "case_studies"), account_config=True, llm=True,
-         logic_refs=("app.services.extractors.solution_narrative_opportunity_map:"
+         logic_refs=(TIME_WINDOWS_REF, "app.services.extractors.solution_narrative_opportunity_map:"
                      "OPPORTUNITY_PROMPT_VERSION",),
          run=f"{_P}:opp_core"),
     Node("content_persona", "content_studio",
@@ -222,7 +226,7 @@ NODES = (
                    "technographics", "intent_score", "google_news", "news_events"),
          upstream=("stakeholder_roster", "opp_core"),
          llm=True,
-         logic_refs=("app.services.extractors.stakeholder_map:"
+         logic_refs=(TIME_WINDOWS_REF, "app.services.extractors.stakeholder_map:"
                      "TALKING_POINTS_PROMPT_VERSION",),
          run=f"{_P}:stakeholder_talking_points"),
     Node("opp_triggers", "solution_narrative_opportunity_map",
@@ -241,7 +245,7 @@ NODES = (
          # The company description is reorganised into bullets by one cached,
          # grounded model call (client feedback 1.a, 27 Sep).
          llm=True,
-         logic_refs=("app.services.extractors.executive_dashboard:SUMMARY_PROMPT_VERSION",),
+         logic_refs=(TIME_WINDOWS_REF, "app.services.extractors.executive_dashboard:SUMMARY_PROMPT_VERSION",),
          # 2: exec_key_metrics lists the filings on record (the filings list
          # CSV uploaded with the PDFs under compliance_filings); Quick Stats
          # counts and the contacts read dropped (client feedback 1.e).
@@ -276,7 +280,7 @@ NODES = (
          datasets=tuple(sorted({*RULEBOOK_EVIDENCE, "hp_category_intent"})),
          upstream=("tech_core", "exec_core", "intent", "opp_triggers"),
          knowledge=("rulebook", "product_knowledge", "lifecycle"), llm=True,
-         logic_refs=("app.services.hp.recommendations:RECOMMENDATION_PROMPT_VERSION",),
+         logic_refs=(TIME_WINDOWS_REF, "app.services.hp.recommendations:RECOMMENDATION_PROMPT_VERSION",),
          run=f"{_P}:tech_recs"),
     Node("idx_executive_dashboard", "executive_dashboard", kind=INDEX,
          datasets=("compliance_filings",),
@@ -293,7 +297,7 @@ NODES = (
          upstream=("idx_executive_dashboard", "exec_core", "tech_recs", "opp_core"),
          config=("evidence_strength",), knowledge=("case_studies",),
          account_record=False, llm=True,
-         logic_refs=("app.services.dashboard.priorities:PROMPT_VERSION",),
+         logic_refs=(TIME_WINDOWS_REF, "app.services.dashboard.priorities:PROMPT_VERSION",),
          run=f"{_P}:exec_priorities"),
     Node("strategy_snapshot", "strategy_chat",
          widgets=("strategy_snapshot_context", "strategy_chat_interface"),

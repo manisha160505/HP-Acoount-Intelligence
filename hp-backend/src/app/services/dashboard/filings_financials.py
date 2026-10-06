@@ -27,9 +27,10 @@ one basis), and only otherwise from two filings a year apart.
 """
 
 import re
-from datetime import date
+from datetime import date, timedelta
 
 from app.services.dashboard.priorities import _format_value
+from app.services.hp import time_windows
 
 SOURCE = "filings_financials"
 
@@ -299,9 +300,23 @@ def _choose(rows: list, metric: str, types: tuple):
     return _newest_first(pool)[0], _newest_first(of_type)[0], pool
 
 
-def reported_metrics(rows: list, company: str = "") -> list:
+def _filed_on(row: dict):
+    """When the filing was published, else the end of the period it covers."""
+    return _date(row.get("publication_date")) or _date(row.get("period_end"))
+
+
+def recent_filings(rows: list, as_of: date | None = None) -> list:
+    """Filings published in the last 24 months (client, 6 Oct: "Executive
+    Dashboard - SEC/financial filings: last 24 months"). Undated rows are left
+    out: the window cannot be shown to hold for them."""
+    end = as_of or time_windows.today()
+    start = end - timedelta(days=time_windows.FILINGS_WINDOW_DAYS)
+    return [r for r in rows or [] if (d := _filed_on(r)) is not None and start <= d <= end]
+
+
+def reported_metrics(rows: list, company: str = "", as_of: date | None = None) -> list:
     """The filing cards, in dashboard order. [] when nothing verified."""
-    rows = list(rows or [])
+    rows = recent_filings(rows, as_of)
     company = company or next((_text(r.get("company")) for r in rows if _text(r.get("company"))), "")
     named = [r for r in rows if _text(r.get("entity_match")) in ("same", "unknown")
              and _entity_key(r) and any(_usable(r, m) for m in LABELS)]
@@ -324,9 +339,10 @@ def reported_metrics(rows: list, company: str = "") -> list:
     return cards
 
 
-def ceo(rows: list) -> dict | None:
-    """The CEO named in the newest filing that names one, verified in its text."""
-    named = [r for r in rows or [] if _text(r.get("ceo_check")) == "verified"
+def ceo(rows: list, as_of: date | None = None) -> dict | None:
+    """The CEO named in the newest filing that names one, verified in its text,
+    among filings published in the last 24 months."""
+    named = [r for r in recent_filings(rows, as_of) if _text(r.get("ceo_check")) == "verified"
              and _text(r.get("entity_match")) == "same"]
     if not named:
         return None

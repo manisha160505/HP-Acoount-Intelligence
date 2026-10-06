@@ -48,7 +48,7 @@ then forbids computing an overall score from incomplete drivers.
 import copy
 import logging
 import re
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from app.core.llm import generate_gpt4o_json_completion
 from app.database.mongodb import get_db
@@ -479,6 +479,15 @@ def _recency(row: dict) -> str | None:
             or None)
 
 
+def _within_filings_window(row: dict) -> bool:
+    """False only when the evidence names a period older than 24 months."""
+    from app.services.hp import time_windows
+    when = evidence_strength.parse_period(_recency(row))
+    if when is None:
+        return True
+    return when >= time_windows.today() - timedelta(days=time_windows.FILINGS_WINDOW_DAYS)
+
+
 # ---------------------------------------------------------------------------
 # Step 3: candidates, then evidence validation
 # ---------------------------------------------------------------------------
@@ -549,6 +558,20 @@ def _resolve_priorities(account_id: str, candidates: list) -> tuple:
                             "invalid_ids": off_topic[:4]})
             continue
         resolved = relevant
+
+        # Filings older than 24 months are not catalyst evidence (client, 6 Oct:
+        # "Executive Dashboard - SEC/financial filings: last 24 months"). A row
+        # whose period names a date is held to the window; one with no
+        # readable period is kept - many narrative paragraphs carry none, and
+        # dropping them would empty catalysts that are current.
+        current = [r for r in resolved if _within_filings_window(r)]
+        if len(current) < MIN_EVIDENCE_PER_PRIORITY:
+            dropped.append({"title": title[:160],
+                            "reason": "evidence is older than 24 months",
+                            "invalid_ids": [r.get("evidence_id") for r in resolved
+                                            if r not in current][:4]})
+            continue
+        resolved = current
 
         sources = [_source(r, wanted) for r in resolved]
         sections = {_section(r) for r in resolved}
@@ -941,7 +964,9 @@ def _reported_metrics(account_id: str) -> list:
     # failure ABX's "correct company/business unit" check exists to prevent.
     rows = [r for r in rows
             if str(r.get("doc_id") or "").endswith(("_financial_highlights",
-                                                    "_market_position"))]
+                                                    "_market_position"))
+            # Filed figures from the last 24 months only (client, 6 Oct).
+            and _within_filings_window(r)]
 
     from app.services.retrieval.financials import period_key
 
