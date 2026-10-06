@@ -64,15 +64,25 @@ export const SCORE_EXPLANATIONS = {
       'How much research activity there is behind it.',
     ],
   },
+  catalysts: {
+    title: 'How catalysts are found and ranked',
+    intro: 'Catalysts are the company’s strategic priorities, taken from its own filings, reports and announcements.',
+    points: [
+      'Each catalyst must be backed by actual sentences from those documents; anything that can’t be traced to a source is left out.',
+      'At most six are shown, grouped by theme.',
+      'They are ranked by how much the documents say about each one: first the number of supporting sentences, then how many different document sections mention it, then how recent the latest mention is.',
+    ],
+    note: 'The score on each catalyst is separate: it shows how well that catalyst is backed by evidence, not where it ranks.',
+  },
   evidenceStrength: {
-    title: 'How evidence strength works',
-    intro: 'A score from 0 to 100 showing how well this priority is backed by evidence. It looks at three things:',
+    title: 'How the catalyst evidence score works',
+    intro: 'A score from 0 to 100 showing how well this catalyst is backed by evidence. It looks at three things:',
     points: [
       'Official filings: how many of the company’s own filings and reports mention it.',
       'Recency: how recent the newest supporting source is.',
       'Variety of sources: how many different kinds of sources support it, such as company filings, company announcements, investor material, government sources and independent media.',
     ],
-    note: 'It measures how well the priority is supported, not how important it is.',
+    note: 'It measures how well the catalyst is supported, not how important it is.',
   },
   liveSignal: {
     title: 'How the signal score works',
@@ -96,9 +106,9 @@ export const SCORE_EXPLANATIONS = {
   },
   intentCategoryInterest: {
     title: 'How these area scores work',
-    intro: 'Each HP area is scored from 0 to 100 for how much buying interest the company shows in it, based on its online research activity.',
+    intro: 'Each HP area is scored from 0 to 100 for how much buying interest the company shows in it.',
     points: [
-      'A higher score means more, and more focused, research in that area.',
+      'A higher score means stronger signs of interest in that area, such as research activity.',
       'Each area also shows a buying stage, from early awareness to a purchase decision.',
       'The scores are shown as received from a specialist research provider and are not adjusted.',
     ],

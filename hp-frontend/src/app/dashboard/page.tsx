@@ -1688,6 +1688,7 @@ export default function UserDashboardPage() {
                           <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700 flex items-center gap-2">
                             <Target className="w-4 h-4 text-hp-navy" />
                             <span>STRATEGIC PRIORITIES</span>
+                            <ScoreInfo topic="catalysts" />
                           </h3>
                           {priorityList.length > 0 && (
                             <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-hp-navy border border-blue-200 inline-flex items-center gap-1">
