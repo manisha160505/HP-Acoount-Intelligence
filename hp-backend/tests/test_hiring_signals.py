@@ -127,6 +127,16 @@ def test_card_titles_most_frequent_first_and_more_jobs():
     assert card["hp_product"] == "HP EliteBook 6 G2 Series"
 
 
+def test_more_titles_lists_every_title_behind_more_jobs():
+    jobs = ([job(title="Duty Manager")] * 2 + [job(title="Analyst A")] * 3
+            + [job(title=t) for t in ("B", "C", "D", "E", "F")] + [job(title="F")])
+    card = theme_cards(jobs)["cards"][0]
+    shown = {t["title"] for t in card["titles"]}
+    rest = card["more_titles"]
+    assert not shown & {t["title"] for t in rest}
+    assert sum(t["posted"] for t in rest) == card["more_jobs"]
+
+
 def test_cards_largest_first_ties_in_rule_set_order():
     jobs = ([job(code="41-3091.00")] * 4 + [job(code="15-1212.00")] * 4
             + [job(code="13-1111.00")] * 9 + [job(code="")])

@@ -1,5 +1,6 @@
 'use client';
 
+import { caseStudyUrl } from '@/lib/caseStudies';
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { ProtectedRoute } from '@/components/common/ProtectedRoute';
@@ -248,11 +249,11 @@ function ProofPoint({ proof }: { proof: any }) {
         <p className="text-[10px] text-amber-800">
           {proof.customer && <span className="font-semibold">{proof.customer}</span>}
           {proof.industry && <span className="text-amber-700"> &middot; {proof.industry}</span>}
-          {proof.source_url && (
+          {caseStudyUrl(proof.source_url) && (
             <>
               {' · '}
               <a
-                href={proof.source_url}
+                href={caseStudyUrl(proof.source_url) ?? undefined}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="underline hover:text-amber-950"
@@ -1554,17 +1555,8 @@ export default function UserDashboardPage() {
                               <Flame className="w-4 h-4 text-amber-500" />
                               <span>URGENCY SCORE & DRIVER BREAKDOWN</span>
                             </h3>
-                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
-                              urgencyData?.client_agreed
-                                ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                                : 'bg-amber-50 text-amber-800 border-amber-200'
-                            }`}>
-                              {!urgencyData
-                                ? 'Not yet computed'
-                                : urgencyData.client_agreed
-                                  ? 'Client-supplied formula'
-                                  : 'Delivery-authored · not client-agreed'}
-                            </span>
+                            {/* The formula's provenance badge was removed at the
+                                client's request (refinements, 6 Oct). */}
                           </div>
 
                           <div className="flex flex-col sm:flex-row items-center gap-6">
@@ -1870,11 +1862,11 @@ export default function UserDashboardPage() {
                                                   {p.hp_proof_point_detail.industry && (
                                                     <span className="text-amber-700"> &middot; {p.hp_proof_point_detail.industry}</span>
                                                   )}
-                                                  {p.hp_proof_point_detail.source_url && (
+                                                  {caseStudyUrl(p.hp_proof_point_detail.source_url) && (
                                                     <>
                                                       {' · '}
                                                       <a
-                                                        href={p.hp_proof_point_detail.source_url}
+                                                        href={caseStudyUrl(p.hp_proof_point_detail.source_url) ?? undefined}
                                                         target="_blank"
                                                         rel="noopener noreferrer"
                                                         className="underline hover:text-amber-950"
@@ -2610,7 +2602,6 @@ export default function UserDashboardPage() {
                     'Other / Low Relevance': { chip: 'bg-slate-100 text-slate-700 border-slate-200', bar: 'bg-slate-400', border: 'border-slate-200' }
                   };
                   const categoryLabel = (name: string) => (name === 'Poly/Collaboration' ? 'Poly' : name);
-                  const shortDate = (v?: string | null) => (v ? String(v).slice(0, 10) : null);
                   const hasSignal = (stage?: string | null) => !!stage && stage.toLowerCase() !== 'no signal';
 
                   const shortTopic = (name: string) => (name.includes(':') ? name.split(':').slice(1).join(':').trim() : name);
@@ -3344,26 +3335,9 @@ export default function UserDashboardPage() {
                             )}
                           </div>
 
-                          {/* Provenance for every row below */}
-                          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 text-[11px] bg-slate-50/60 p-4 rounded-xl border border-slate-200/80">
-                            {[
-                              { label: 'Intent sources', value: `${provider ? `${provider.name} ${provider.product}` : 'Bombora'} (topics) · Predictleads (HP category scores)` },
-                              // Gap notes (accountMatch.note, observation.note) live in the
-                              // backend; an absent value reads as NOT_DISCLOSED.
-                              { label: 'Account / domain match', value: accountMatch?.status === 'matched' ? `${accountMatch.provider_domain} = account domain` : null },
-                              { label: 'Observation date', value: observation?.as_of ? `${observation.as_of} (Date Stamp ${observation.date_stamp})` : null },
-                              { label: 'Refreshed', value: shortDate(observation?.refreshed_at) },
-                              { label: 'Mapping rules', value: dictionaryVersion || null }
-                            ].map((f) => (
-                              <div key={f.label} className="space-y-0.5 min-w-0">
-                                <span className="text-slate-400 font-bold uppercase text-[10px] block">{f.label}</span>
-                                {f.value
-                                  ? <span className="font-semibold text-slate-800 block break-words">{f.value}</span>
-                                  : <span className="text-slate-400 block">{NOT_DISCLOSED}</span>}
-                              </div>
-                            ))}
-                          </div>
-
+                          {/* The provenance strip (sources, domain match, observation
+                              date, refresh, mapping rules) was removed at the client's
+                              request (refinements, 6 Oct): it is backend detail. */}
 
                           {/* Topics grouped by dictionary theme. Group numbers come from the backend summary, so a filter never changes them. */}
                           <div className="space-y-4 pt-2">
@@ -3597,9 +3571,27 @@ export default function UserDashboardPage() {
                                             </li>
                                           ))}
                                         </ul>
-                                        {c.more_jobs > 0 && (
+                                        {/* The rest of the titles behind "+ N more jobs"
+                                            (refinements, 6 Oct). A card built before
+                                            more_titles existed keeps the plain count. */}
+                                        {c.more_jobs > 0 && ((c.more_titles || []).length > 0 ? (
+                                          <details className="group mt-1.5">
+                                            <summary className="as-summary cursor-pointer list-none text-[11px] font-semibold text-hp-navy pl-4 flex items-center gap-1">
+                                              + {c.more_jobs} more job{c.more_jobs === 1 ? '' : 's'}
+                                              <ChevronDown className="as-chevron w-3 h-3" />
+                                            </summary>
+                                            <ul className="space-y-1.5 mt-1.5 max-h-64 overflow-y-auto">
+                                              {c.more_titles.map((t: any) => (
+                                                <li key={t.title} className="text-xs text-slate-700 flex gap-2">
+                                                  <span className="text-slate-400">•</span>
+                                                  <span>{t.title}{t.posted > 1 ? ` (posted ${t.posted}×)` : ''}</span>
+                                                </li>
+                                              ))}
+                                            </ul>
+                                          </details>
+                                        ) : (
                                           <span className="text-[11px] text-slate-500 block mt-1.5 pl-4">+ {c.more_jobs} more job{c.more_jobs === 1 ? '' : 's'}</span>
-                                        )}
+                                        ))}
                                       </div>
                                       <div className="border-t border-slate-200 pt-3 space-y-3">
                                         {[['HP product', c.hp_product], ['HP service', c.hp_service], ['HP solution', c.hp_solution]]
@@ -3823,9 +3815,9 @@ export default function UserDashboardPage() {
                                             )}
                                             {/* `hp_product` is deliberately NOT shown - see the
                                                 objection card for why the tag contradicts the text. */}
-                                            {play.hp_proof_point_detail.source_url && (
+                                            {caseStudyUrl(play.hp_proof_point_detail.source_url) && (
                                               <a
-                                                href={play.hp_proof_point_detail.source_url}
+                                                href={caseStudyUrl(play.hp_proof_point_detail.source_url) ?? undefined}
                                                 target="_blank"
                                                 rel="noopener noreferrer"
                                                 className="underline hover:text-amber-900"
@@ -3912,17 +3904,14 @@ export default function UserDashboardPage() {
                         <div className="space-y-3 pt-2">
                           <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-600 flex items-center gap-2">
                             <BookOpen className="w-3.5 h-3.5 text-hp-navy" />
-                            <span>HP services matched by rulebook</span>
+                            <span>Recommended HP services</span>
                             {servicePlays.length > 0 && (
                               <span className="text-slate-400">({servicePlays.length})</span>
                             )}
                           </h3>
-                          <p className="text-[11px] text-slate-400 max-w-3xl leading-relaxed">
-                            Matched from the account&apos;s own evidence to the HP 220 Account
-                            Rulebook. The wording is HP&apos;s, quoted as written &mdash; nothing
-                            here is generated. One main recommendation is shown; a second
-                            appears only where separate evidence supports it.
-                          </p>
+                          {/* The rulebook wording (what HP says, how HP requires it to
+                              be put) moved to Admin -> Rules at the client's request
+                              (refinements, 6 Oct). The services the account earns stay. */}
 
                           {servicePlays.map((play: any, i: number) => (
                             <div key={i} className="bg-white border border-slate-200 rounded-2xl p-5 space-y-3">
@@ -3951,34 +3940,6 @@ export default function UserDashboardPage() {
                                 </div>
                               </div>
 
-                              {/* The rule's System action, verbatim. This is the point of
-                                  the whole feature: the plays above label their capability
-                                  line "general HP capability" because a model wrote it. */}
-                              {play.hp_capability && (
-                                <div className="space-y-1">
-                                  <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">
-                                    What HP says
-                                    <span className="normal-case font-normal text-slate-400"> &middot; quoted from the rulebook</span>
-                                  </span>
-                                  <p className="text-sm text-slate-700 leading-relaxed">{play.hp_capability}</p>
-                                </div>
-                              )}
-
-                              {(play.prohibitions || []).length > 0 && (
-                                /* Slate rather than red. This is HP telling a seller
-                                   how to phrase something, not an error or a risk
-                                   about the account - an alarm colour on a wording
-                                   note reads as though something is wrong. */
-                                <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-1">
-                                  <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider block">
-                                    How HP requires it to be put
-                                  </span>
-                                  {play.prohibitions.map((rule: string, j: number) => (
-                                    <p key={j} className="text-[12px] text-slate-700 leading-relaxed">{rule}</p>
-                                  ))}
-                                </div>
-                              )}
-
                               {/* C 07: "leave out the recommendation or label the missing
                                   condition clearly." This is the labelling branch. */}
                               {(play.unverified_conditions || []).length > 0 && (
@@ -3999,7 +3960,7 @@ export default function UserDashboardPage() {
                               {(play.named_in_rule || []).length > 0 && (
                                 <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
                                   <span className="text-[10px] font-semibold text-emerald-700 uppercase tracking-wider block mb-1">
-                                    Named by the rule, and this account runs it
+                                    Integration routes this account runs
                                   </span>
                                   <p className="text-[13px] text-emerald-900 font-semibold leading-relaxed">
                                     {play.named_in_rule.join(', ')}
@@ -4184,9 +4145,6 @@ export default function UserDashboardPage() {
                                         {c.contact_location && (
                                           <span className="text-[10px] font-medium text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">{c.contact_location}</span>
                                         )}
-                                        <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">
-                                          {c.source_label || 'Explorium + Contacts Waterfall Tools'}
-                                        </span>
                                       </div>
                                       {c.email_status && (
                                         <p className="text-[10px] text-slate-400 italic">Email status: {c.email_status}</p>
@@ -4242,16 +4200,16 @@ export default function UserDashboardPage() {
                   const handleExportCsv = () => {
                     // No influence, priority, HP relevance, composite score or
                     // priority flag: a sheet the client forwards must not carry
-                    // the numbers we agreed on 27 Sep not to stand behind.
+                    // the numbers we agreed on 27 Sep not to stand behind. Nor the
+                    // data tool a contact came from (refinements, 6 Oct).
                     const cols = ['full_name', 'title', 'normalized_department', 'seniority_band',
-                      'email', 'email_status', 'phone', 'linkedin_url', 'source_label'];
+                      'email', 'email_status', 'phone', 'linkedin_url'];
                     const esc = (v: any) => `"${String(v ?? '').replace(/"/g, '""')}"`;
                     const rows = filteredContacts.map((c: any) => {
                       const tp = talkingPoints[c.contact_id] || {};
                       return [...cols.map(k => esc(c[k])), esc(tp.how_to_open), esc(tp.hp_play_focus), esc(tp.decision_power)].join(',');
                     });
-                    const header = [...cols.map(k => k === 'source_label' ? 'source' : k),
-                      'how_to_open', 'hp_play_focus', 'decision_power'];
+                    const header = [...cols, 'how_to_open', 'hp_play_focus', 'decision_power'];
                     const csv = [header.join(','), ...rows].join('\n');
                     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
                     const url = URL.createObjectURL(blob);
@@ -4298,7 +4256,6 @@ export default function UserDashboardPage() {
                         {c.contact_location && (
                           <span className="text-[10px] font-medium text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">{c.contact_location}</span>
                         )}
-                        <span className="text-[10px] font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">{c.source_label || 'Explorium + Contacts Waterfall Tools'}</span>
                       </p>
                     </div>
                   );
@@ -5067,15 +5024,17 @@ export default function UserDashboardPage() {
                                   <span className="text-[10px] font-bold bg-white border border-blue-200 text-hp-navy px-1.5 rounded">{sv.opportunities.length}</span>
                                 </h5>
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                  {/* Not clickable (refinements, 6 Oct): the filter it
+                                      applied only showed technologies already on the
+                                      category cards above. */}
                                   {sv.opportunities.map((o: any) => (
-                                    <button key={o.hp_play} type="button"
-                                      onClick={() => { setStackHpOnly(true); setStackFamilyFilter('ALL'); setTechSearch(o.hp_play); }}
-                                      className="text-left bg-white border border-slate-200 rounded-lg px-3 py-2.5 hover:border-hp-navy transition">
+                                    <div key={o.hp_play}
+                                      className="text-left bg-white border border-slate-200 rounded-lg px-3 py-2.5">
                                       <span className="block text-sm font-bold text-hp-navy">{o.hp_play}</span>
                                       <span className="block text-[11px] text-slate-500">
                                         {o.technology_count} technolog{o.technology_count === 1 ? 'y' : 'ies'} &rarr; {o.hp_category}
                                       </span>
-                                    </button>
+                                    </div>
                                   ))}
                                 </div>
                               </div>
@@ -6457,9 +6416,9 @@ export default function UserDashboardPage() {
                                                 Managed Device Services. The headline above already
                                                 names the offering, from the study's own text, so
                                                 printing the tag beside it only contradicts it. */}
-                                            {card.hp_proof_point_detail.source_url && (
+                                            {caseStudyUrl(card.hp_proof_point_detail.source_url) && (
                                               <a
-                                                href={card.hp_proof_point_detail.source_url}
+                                                href={caseStudyUrl(card.hp_proof_point_detail.source_url) ?? undefined}
                                                 target="_blank"
                                                 rel="noopener noreferrer"
                                                 className="underline hover:text-amber-900"
@@ -6819,11 +6778,11 @@ export default function UserDashboardPage() {
                                               <p className="mt-1.5 text-[11px] text-slate-500">
                                                 {p.hp_proof_point_detail.customer}
                                                 {p.hp_proof_point_detail.industry && ` · ${p.hp_proof_point_detail.industry}`}
-                                                {p.hp_proof_point_detail.source_url && (
+                                                {caseStudyUrl(p.hp_proof_point_detail.source_url) && (
                                                   <>
                                                     {' · '}
                                                     <a
-                                                      href={p.hp_proof_point_detail.source_url}
+                                                      href={caseStudyUrl(p.hp_proof_point_detail.source_url) ?? undefined}
                                                       target="_blank"
                                                       rel="noopener noreferrer"
                                                       className="underline hover:text-hp-navy"
