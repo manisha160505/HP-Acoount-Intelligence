@@ -332,11 +332,6 @@ function HpRecommendationCard({ rec, xray }: { rec: any; xray?: boolean }) {
               {conf}
             </span>
           )}
-          {rec.quoted_verbatim && (
-            <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border bg-white text-slate-500 border-slate-200">
-              quoted from the rulebook
-            </span>
-          )}
           {/* How strongly this may be put. Not a score - the confidence band
               beside it is the score. This says what the prose is allowed to
               claim, and it is keyed on how many independent data pipelines saw
