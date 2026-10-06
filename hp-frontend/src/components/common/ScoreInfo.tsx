@@ -13,10 +13,12 @@ interface ScoreInfoProps {
   topic: ScoreTopic;
   /** Which edge of the icon the card lines up with. Use 'right' near the right of the page. */
   align?: 'left' | 'right';
+  /** This account's own sum, e.g. "95 × 20% + 70 × 25% + … = 69.35 → 69". */
+  worked?: string | null;
   className?: string;
 }
 
-export default function ScoreInfo({ topic, align = 'left', className = '' }: ScoreInfoProps) {
+export default function ScoreInfo({ topic, align = 'left', worked, className = '' }: ScoreInfoProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLSpanElement>(null);
   const info = SCORE_EXPLANATIONS[topic];
@@ -52,7 +54,7 @@ export default function ScoreInfo({ topic, align = 'left', className = '' }: Sco
           role="dialog"
           aria-label={info.title}
           onClick={(e) => e.stopPropagation()}
-          className={`absolute ${align === 'right' ? 'right-0' : 'left-0'} top-full mt-2 w-80 max-w-[calc(100vw-2rem)] bg-white border border-slate-200 rounded-2xl shadow-2xl p-4 z-50 animate-fade-in text-xs text-left font-normal text-slate-700 cursor-default block`}
+          className={`absolute ${align === 'right' ? 'right-0' : 'left-0'} top-full mt-2 w-[26rem] max-w-[calc(100vw-2rem)] max-h-[70vh] overflow-y-auto bg-white border border-slate-200 rounded-2xl shadow-2xl p-4 z-50 animate-fade-in text-xs text-left font-normal text-slate-700 cursor-default block`}
         >
           <span className="flex items-start justify-between gap-2 border-b border-slate-100 pb-2 mb-2">
             <span className="font-bold text-slate-900 text-[13px]">{info.title}</span>
@@ -70,6 +72,20 @@ export default function ScoreInfo({ topic, align = 'left', className = '' }: Sco
               </span>
             ))}
           </span>
+          <span className="block mt-3 rounded-xl bg-slate-50 border border-slate-200 px-3 py-2">
+            <span className="block text-[10px] font-extrabold uppercase tracking-wider text-hp-navy mb-1">The rule</span>
+            <span className="block space-y-1">
+              {info.rules.map((r) => (
+                <span key={r} className="block leading-relaxed text-slate-700">{r}</span>
+              ))}
+            </span>
+          </span>
+          {worked && (
+            <span className="block mt-2 rounded-xl bg-blue-50/70 border border-blue-100 px-3 py-2">
+              <span className="block text-[10px] font-extrabold uppercase tracking-wider text-hp-navy mb-1">For this account</span>
+              <span className="block font-mono text-[11px] text-slate-800 leading-relaxed">{worked}</span>
+            </span>
+          )}
           {'note' in info && info.note && (
             <span className="block mt-2 pt-2 border-t border-slate-100 text-slate-500 leading-relaxed">{info.note}</span>
           )}

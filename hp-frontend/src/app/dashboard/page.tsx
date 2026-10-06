@@ -162,6 +162,66 @@ const EVIDENCE_ID_RE = /[a-z][a-z0-9]*(?:_[a-z0-9]+)+/g;
 // Shown in plain words (client, 6 Oct: no internal terminology): the tier
 // codes (T0-T3) and labels like "long tail" are dropped from the screen; the
 // bands and scores are unchanged.
+// "For this account" in the score ⓘ: the account's own sum, from the numbers
+// the widget already carries, so a reader can see how the shown figure is
+// reached. Plain labels only - the backend's term names are mapped here.
+const fmtNum = (n: any): string =>
+  typeof n === 'number' ? String(Math.round(n * 100) / 100) : String(n ?? '');
+
+const TERM_LABELS: Record<string, string> = {
+  'Account scale': 'Company size',
+  'OS environment': 'Operating systems',
+  'Workplace technology footprint': 'Workplace tools',
+  'AI/ML breadth': 'AI breadth',
+  'AI/ML depth': 'AI depth',
+  'Workstation intent': 'Workstation interest',
+  'Recent AI initiatives': 'AI news',
+  'Workforce growth proxy': 'Workforce growth',
+  'Recent hiring volume': 'Hiring',
+  'Verified growth and expansion events': 'Expansion news',
+  'HP-category intent strength': 'Interest strength',
+  'Intent trend': 'Trend',
+  'Filing evidence': 'Filings',
+  'Source diversity': 'Variety of sources',
+};
+
+function urgencyWorked(u: any): string | null {
+  const drivers = u?.drivers;
+  if (!Array.isArray(drivers) || !drivers.length || u.score == null) return null;
+  const exact = u.exact_score ?? u.score;
+  const sum = drivers.map((d: any) => `${fmtNum(d.value)} × ${Math.round((d.weight ?? 0) * 100)}%`).join(' + ');
+  return `${sum} = ${fmtNum(exact)}${exact !== u.score ? ` → ${u.score}` : ''}`;
+}
+
+function termsWorked(terms: any, total: any): string | null {
+  if (!Array.isArray(terms) || !terms.length || total == null) return null;
+  return `${terms.map((t: any) => `${TERM_LABELS[t.label] ?? t.label} ${fmtNum(t.points ?? 0)}`).join(' + ')} = ${fmtNum(total)}`;
+}
+
+const SIGNAL_PARTS: [string, string][] = [
+  ['relevance_impact', 'Relevance'], ['recency', 'Recency'], ['source_reliability', 'Source'],
+];
+
+function signalWorked(scores: any, weights: any, total: any): string | null {
+  if (!scores || total == null || !SIGNAL_PARTS.every(([k]) => scores[k] != null && weights?.[k] != null)) return null;
+  const sum = SIGNAL_PARTS.map(([k, label]) => `${label} ${fmtNum(scores[k])} × ${Math.round(weights[k] * 100)}%`).join(' + ');
+  return `${sum} = ${fmtNum(total)}`;
+}
+
+const MESSAGE_LABELS: Record<string, string> = {
+  relevance: 'Relevance', impact: 'Impact', brand_recall: 'Brand recall', clarity: 'Clarity',
+  creativity: 'Creativity', emotional_connection: 'Emotional appeal', next_step_strength: 'Call to action',
+};
+
+function messageWorked(evaluation: any): string | null {
+  const dims = evaluation?.dimensions, weights = evaluation?.dimension_weights;
+  if (!dims || !weights || evaluation.composite == null) return null;
+  const used = Object.keys(weights).filter((k) => weights[k] && dims[k] != null);
+  if (!used.length) return null;
+  const sum = used.map((k) => `${MESSAGE_LABELS[k] ?? k} ${fmtNum(dims[k])} × ${Math.round(weights[k] * 100)}%`).join(' + ');
+  return `${sum} = ${fmtNum(evaluation.composite)}`;
+}
+
 // The ⓘ beside each urgency driver: what goes into it, in plain words.
 const DRIVER_INFO: Record<string, ScoreTopic> = {
   workplace_os: 'urgencyWorkplace',
@@ -1077,7 +1137,7 @@ export default function UserDashboardPage() {
                     }`}>
                       {hasScore ? <><CountUpText text={urgency.score} />/{urgency.max_score ?? 100}</> : NO_SIGNAL}
                     </span>
-                    <ScoreInfo topic="urgency" align="right" />
+                    <ScoreInfo topic="urgency" align="right" worked={urgencyWorked(urgency)} />
                   </div>
                 );
               })()}
@@ -1559,7 +1619,7 @@ export default function UserDashboardPage() {
                             <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700 flex items-center gap-2">
                               <Flame className="w-4 h-4 text-amber-500" />
                               <span>URGENCY SCORE & DRIVER BREAKDOWN</span>
-                              <ScoreInfo topic="urgency" />
+                              <ScoreInfo topic="urgency" worked={urgencyWorked(urgencyData)} />
                             </h3>
                             {/* The formula's provenance badge was removed at the
                                 client's request (refinements, 6 Oct). */}
@@ -1608,6 +1668,8 @@ export default function UserDashboardPage() {
                                   label: d.label,
                                   available: d.available,
                                   scoreText: `${d.value}/100`,
+                                  value: d.value,
+                                  terms: d.terms,
                                   progressPct: `${d.value}%`,
                                   barColor: 'bg-hp-navy',
                                 };
@@ -1617,7 +1679,7 @@ export default function UserDashboardPage() {
                                     <div className="flex items-center space-x-1.5">
                                       <span className={driver.available ? '' : 'text-slate-400'}>{driver.label}</span>
 
-                                      {DRIVER_INFO[driver.id] && <ScoreInfo topic={DRIVER_INFO[driver.id]} />}
+                                      {DRIVER_INFO[driver.id] && <ScoreInfo topic={DRIVER_INFO[driver.id]} worked={termsWorked(driver.terms, driver.value)} />}
                                     </div>
 
                                     <span className="font-mono text-slate-500 font-bold"><CountUpText text={driver.scoreText} first delay={growDelay(driverIdx)} /></span>
@@ -1752,7 +1814,7 @@ export default function UserDashboardPage() {
                                                   <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full border whitespace-nowrap bg-blue-50 text-hp-navy border-blue-200">
                                                     {`${p.evidence_strength.score}/${p.evidence_strength.max_score}`}
                                                   </span>
-                                                  <ScoreInfo topic="evidenceStrength" align="right" />
+                                                  <ScoreInfo topic="evidenceStrength" align="right" worked={termsWorked(p.evidence_strength.terms, p.evidence_strength.score)} />
                                                 </span>
                                               )
                                             )}
@@ -1893,7 +1955,7 @@ export default function UserDashboardPage() {
                                                     <span className="text-[11px] font-extrabold text-slate-700">
                                                       {`${p.evidence_strength?.score ?? 0}/${p.evidence_strength?.max_score ?? 100}`}
                                                     </span>
-                                                    <ScoreInfo topic="evidenceStrength" align="right" />
+                                                    <ScoreInfo topic="evidenceStrength" align="right" worked={termsWorked(p.evidence_strength?.terms, p.evidence_strength?.score)} />
                                                   </span>
                                                 )}
                                               </div>
@@ -2288,7 +2350,7 @@ export default function UserDashboardPage() {
                                     )}
                                     <span className="ml-auto flex items-center gap-2 text-xs font-semibold text-slate-600">
                                       {s.confidence !== null && s.confidence !== undefined ? (
-                                        <>{s.confidence.toFixed(1)}<span className="text-slate-400 font-normal">/10</span><ScoreInfo topic="liveSignal" align="right" /></>
+                                        <>{s.confidence.toFixed(1)}<span className="text-slate-400 font-normal">/10</span><ScoreInfo topic="liveSignal" align="right" worked={signalWorked(sc?.scores, scoreWeights, s.confidence)} /></>
                                       ) : (
                                         <span className="text-slate-400 font-normal">{NO_SIGNAL}</span>
                                       )}
@@ -2406,7 +2468,7 @@ export default function UserDashboardPage() {
                                   {/* expanded score breakdown */}
                                   {isOpen && sc && (
                                     <div className="mt-3 bg-slate-50 rounded-lg p-3 border border-slate-200 space-y-2">
-                                      <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1">Score breakdown <ScoreInfo topic="liveSignal" /></p>
+                                      <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1">Score breakdown <ScoreInfo topic="liveSignal" worked={signalWorked(sc?.scores, scoreWeights, s.confidence)} /></p>
                                       {Object.entries(dimLabels).map(([dim, label]) => {
                                         const val = sc.scores?.[dim];
                                         if (val === undefined) return null;
@@ -5746,7 +5808,7 @@ export default function UserDashboardPage() {
                                 <div className="text-xs text-slate-500">
                                   <p className="font-medium text-slate-600 mb-0.5 flex items-center gap-1">
                                     Overall score ({evaluation.objective_label}) &middot; V{evaluation.version}
-                                    <ScoreInfo topic="messageScore" />
+                                    <ScoreInfo topic="messageScore" worked={messageWorked(evaluation)} />
                                   </p>
                                 </div>
                               </div>
