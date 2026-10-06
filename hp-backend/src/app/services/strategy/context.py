@@ -84,6 +84,92 @@ MAX_PAYLOAD_CHARS = 900_000
 SECTION = "===== %s (feature: %s) ====="
 
 
+# What the model is sent is the dashboard's data without its bookkeeping (6 Oct:
+# Australia Post's payload was 1.56M chars, the answer overran its output limit
+# and took 7m46s). Nothing removed here carries a fact or a figure, so the claim
+# checker - which looks every figure up in this payload - is unaffected:
+#   * empty values (None, "", [], {}) anywhere;
+#   * per Bombora topic row, the fields that are the same on every row or only
+#     record how the row was mapped;
+#   * the intent summary's long tail, which lists topics the topics table
+#     already carries with the same scores.
+_TOPIC_ROW_DROP = frozenset({"source", "mapping_status", "matched_terms"})
+
+
+def _strip_empty(value):
+    if isinstance(value, dict):
+        out = {}
+        for k, v in value.items():
+            v = _strip_empty(v)
+            if v is None or v in ("", [], {}):
+                continue
+            out[k] = v
+        return out
+    if isinstance(value, list):
+        return [_strip_empty(v) for v in value]
+    return value
+
+
+def _topic_row(row: dict) -> dict:
+    out = {k: v for k, v in row.items() if k not in _TOPIC_ROW_DROP}
+    if out.get("included") is True:
+        out.pop("included")            # every row is, unless it says otherwise
+    if out.get("hiring_linked") is False:
+        out.pop("hiring_linked")
+    return out
+
+
+def _signal_row(row: dict) -> dict:
+    """A news signal without its repeats: `raw_headline` when it is the
+    headline, and a single supporting source that is the row's own URL."""
+    out = dict(row)
+    if out.get("raw_headline") == out.get("headline"):
+        out.pop("raw_headline", None)
+    sources = out.get("supporting_sources")
+    if (isinstance(sources, list) and len(sources) == 1 and isinstance(sources[0], dict)
+            and sources[0].get("url") == out.get("source_url")):
+        out.pop("supporting_sources")
+    return out
+
+
+# Lists of news signals, by widget: the same rows, published under two keys.
+_SIGNAL_LISTS = {"news_signals_feed": "signals", "opportunity_trigger_signals": "triggers"}
+
+
+def compact(widget_key: str, data: dict) -> dict:
+    """The widget as the model needs it: same facts and figures, less noise."""
+    field = _SIGNAL_LISTS.get(widget_key)
+    if field and isinstance(data.get(field), list):
+        data = {**data, field: [_signal_row(r) if isinstance(r, dict) else r
+                                for r in data[field]]}
+    if widget_key == "intent_topics_table" and isinstance(data.get("topics"), list):
+        rows = [_strip_empty(_topic_row(r)) for r in data["topics"] if isinstance(r, dict)]
+        if len(rows) == len(data["topics"]):
+            # One header, then values: the same table without its key names
+            # repeated on each of up to ~2,800 rows.
+            columns = list(dict.fromkeys(k for r in rows for k in r))
+            data = {**{k: v for k, v in data.items() if k != "topics"},
+                    "topics_columns": columns,
+                    "topics_rows": [[r.get(c) for c in columns] for r in rows]}
+    if widget_key == "intent_category_summary":
+        themes = data.get("themes")
+        if isinstance(themes, list):
+            # Each theme's topic names are the topics table's rows with that
+            # theme; its counts and scores stay.
+            data = {**data, "themes": [
+                {**{k: v for k, v in t.items() if k != "topics"},
+                 "topics_note": "listed in intent_topics_table under this theme"}
+                if isinstance(t, dict) and t.get("topics") else t for t in themes]}
+        bu = data.get("bu_summary")
+        if isinstance(bu, dict) and bu.get("long_tail"):
+            data = {**data, "bu_summary": {
+                **{k: v for k, v in bu.items() if k != "long_tail"},
+                "long_tail_count": len(bu["long_tail"]),
+                "long_tail_note": "the other topics, with their scores, are in "
+                                  "intent_topics_table"}}
+    return _strip_empty(data)
+
+
 def _sort_key(widget_key: str):
     try:
         return (0, PRIORITY_ORDER.index(widget_key))
@@ -110,12 +196,29 @@ def account_widgets(account_id: str, graph=None) -> list:
         # "pending" notice would read to the model as a fact about the account.
         if widget.get("status") != "available":
             continue
-        data = widget.get("data") or {}
+        data = compact(widget_key, widget.get("data") or {})
         if not data:
             continue
         found.append((widget_key, feature, data))
     found.sort(key=lambda row: _sort_key(row[0]))
-    return found
+    return _dedupe_triggers(found)
+
+
+def _dedupe_triggers(found: list) -> list:
+    """Opportunity triggers are published from the same news signals as the
+    feed; when the two lists are identical the second is not sent again. The
+    section stays, so a citation to it still resolves."""
+    by_key = {k: d for k, _, d in found}
+    feed = (by_key.get("news_signals_feed") or {}).get("signals")
+    out = []
+    for widget_key, feature, data in found:
+        if (widget_key == "opportunity_trigger_signals" and feed
+                and data.get("triggers") == feed):
+            data = {**{k: v for k, v in data.items() if k != "triggers"},
+                    "triggers_note": "the same %d signals as news_signals_feed.signals; "
+                                     "not repeated here" % len(feed)}
+        out.append((widget_key, feature, data))
+    return out
 
 
 def build(account_id: str, graph=None) -> tuple:

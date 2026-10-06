@@ -6,6 +6,7 @@ from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 
+from app.core.sse import with_keepalive
 from app.database.mongodb import get_db
 from app.errors import APIError, ErrorCode
 from app.services.dashboard import priorities
@@ -1343,7 +1344,7 @@ def strategy_chat_ask_stream(
 
     messages = [m.model_dump() for m in body.messages]
 
-    def events():
+    def answer_events():
         # ChatUnavailable is raised inside the generator, after the response has
         # begun, so it cannot become a 400 the way it does on `/ask`. It is sent
         # as a terminal event instead and the client renders it as the refusal
@@ -1363,7 +1364,7 @@ def strategy_chat_ask_stream(
                  "detail": "The strategy assistant could not complete that answer."})
 
     return StreamingResponse(
-        events(),
+        with_keepalive(answer_events),
         media_type="text/event-stream",
         # Proxies buffer text/event-stream by default, which would hold the
         # whole answer and deliver it at once - the exact behaviour this

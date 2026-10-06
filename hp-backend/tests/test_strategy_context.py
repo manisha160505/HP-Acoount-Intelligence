@@ -371,3 +371,82 @@ def test_every_contributing_feature_has_a_display_name():
     missing = sorted(f for f in _contributing_features()
                      if not (FEATURE_MAPPINGS.get(f) or {}).get("display_name"))
     assert not missing, "features with no display name: %s" % missing
+
+
+# --------------------------------------------------------------------------
+# Compaction: less noise, the same facts and figures (6 Oct)
+# --------------------------------------------------------------------------
+
+import json
+import re as _re
+
+from app.services.strategy.context import _dedupe_triggers, compact
+
+
+def _figures(obj) -> set:
+    return set(_re.findall(r"\d+(?:\.\d+)?", json.dumps(obj, default=str)))
+
+
+TOPICS = {"provider": "Bombora", "topics": [
+    {"topic_name": "printing: print quality", "composite_score": 100, "source": "Source A",
+     "intensity": "High", "included": True, "exclusion_reason": None, "hiring_linked": False,
+     "theme": "Print", "hp_category": "Print", "matched_terms": ["printing"],
+     "mapping_status": "mapped", "flag_reason": None},
+    {"topic_name": "hr: icims", "composite_score": 61, "source": "Source A",
+     "intensity": "Medium", "included": False, "exclusion_reason": "duplicate",
+     "hiring_linked": True, "theme": "Other / Low Relevance", "hp_category": None,
+     "matched_terms": [], "mapping_status": "unmapped", "flag_reason": None},
+]}
+
+
+def test_topics_table_keeps_every_topic_score_and_exception():
+    out = compact("intent_topics_table", TOPICS)
+    rows = [dict(zip(out["topics_columns"], r)) for r in out["topics_rows"]]
+    assert [r["topic_name"] for r in rows] == ["printing: print quality", "hr: icims"]
+    assert [r["composite_score"] for r in rows] == [100, 61]
+    # Only the unusual values are spelled out.
+    assert rows[1]["included"] is False and rows[1]["exclusion_reason"] == "duplicate"
+    assert rows[1]["hiring_linked"] is True
+    assert "source" not in out["topics_columns"] and "mapping_status" not in out["topics_columns"]
+    assert _figures(TOPICS) <= _figures(out)
+
+
+def test_intent_summary_drops_only_what_the_topics_table_repeats():
+    summary = {"themes": [{"theme": "Print", "topic_count": 1, "average": 100,
+                           "topics": ["printing: print quality"]}],
+               "bu_summary": {"lead_source": "Bombora", "units": [{"category": "Print", "score": 100}],
+                              "long_tail": [{"topic": "hr: icims", "score": 61}]}}
+    out = compact("intent_category_summary", summary)
+    assert "topics" not in out["themes"][0] and out["themes"][0]["average"] == 100
+    assert "long_tail" not in out["bu_summary"] and out["bu_summary"]["long_tail_count"] == 1
+    assert out["bu_summary"]["units"] == [{"category": "Print", "score": 100}]
+
+
+def test_empty_values_go_but_false_and_zero_stay():
+    out = compact("x", {"a": None, "b": "", "c": [], "d": {}, "e": False, "f": 0, "g": {"h": None}})
+    assert out == {"e": False, "f": 0}
+
+
+def test_signal_rows_drop_only_exact_repeats():
+    row = {"headline": "H", "raw_headline": "H", "source_url": "u",
+           "supporting_sources": [{"url": "u", "dataset": "google_news"}], "sales_angle": "S"}
+    out = compact("news_signals_feed", {"signals": [row, {**row, "raw_headline": "h2"}]})
+    assert out["signals"][0] == {"headline": "H", "source_url": "u", "sales_angle": "S"}
+    assert out["signals"][1]["raw_headline"] == "h2"
+
+
+def test_identical_triggers_are_not_sent_twice():
+    feed = [{"headline": "H", "event_date": "2026-09-01"}]
+    found = [("news_signals_feed", "recent_news_signals", {"signals": feed}),
+             ("opportunity_trigger_signals", "solution_narrative_opportunity_map",
+              {"total_trigger_count": 1, "triggers": list(feed)})]
+    out = {k: d for k, _, d in _dedupe_triggers(found)}
+    assert "triggers" not in out["opportunity_trigger_signals"]
+    assert out["opportunity_trigger_signals"]["total_trigger_count"] == 1
+
+
+def test_different_triggers_are_kept():
+    found = [("news_signals_feed", "f", {"signals": [{"headline": "A"}]}),
+             ("opportunity_trigger_signals", "o", {"triggers": [{"headline": "B"}]})]
+    out = {k: d for k, _, d in _dedupe_triggers(found)}
+    assert out["opportunity_trigger_signals"]["triggers"] == [{"headline": "B"}]
