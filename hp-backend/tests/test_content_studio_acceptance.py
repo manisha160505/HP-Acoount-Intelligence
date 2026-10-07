@@ -344,7 +344,13 @@ class TestT6TheOnePagerIsStructured:
         headline / opening / body_sections / cta. The structure is additive."""
         clean, faults, _soft = _judge(ONE_PAGER, _persona("it-security-manager"), "one_pager")
         assert clean is not None, faults
-        assert clean["opening"] == ONE_PAGER["why_now"]
+        # Against the cleaned `why_now`, not the raw fixture: the validator
+        # strips evidence tags out of prose now (client, 6 Oct), so the fixture
+        # string and the published string differ by design. What this test is
+        # about is that the two fields carry the SAME text - the projection -
+        # which holds whatever is done to both.
+        assert clean["opening"] == clean["why_now"]
+        assert "[A1]" not in clean["opening"]
         headings = [s["heading"] for s in clean["body_sections"]]
         assert headings == ["An estate past its refresh date",
                             "Standards drift during a refresh",

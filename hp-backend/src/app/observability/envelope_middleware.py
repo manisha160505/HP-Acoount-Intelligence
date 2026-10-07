@@ -43,15 +43,23 @@ class ResponseEnvelopeMiddleware(BaseHTTPMiddleware):
 
         # No JSON response from this API may be cached by a browser.
         #
-        # Nothing here sets a Cache-Control header, and with none set a browser
-        # applies HEURISTIC caching: it may reuse a response for a while without
-        # asking again. Every payload here is per-account, authenticated, and
-        # changes the moment a widget is regenerated - so a seller who reloads
-        # after a rebuild can be served the version they already had, with
-        # nothing on screen to say so. That happened: a regenerated
-        # Technographic Map kept showing its previous recommendations after a
-        # reload, and the data behind it was correct the whole time.
-        if request.url.path.startswith("/api/"):
+        # With no Cache-Control set a browser applies HEURISTIC caching: it may
+        # reuse a response for a while without asking again. Every payload here
+        # is per-account, authenticated, and changes the moment a widget is
+        # regenerated - so a seller who reloads after a rebuild can be served
+        # the version they already had, with nothing on screen to say so. That
+        # happened: a regenerated Technographic Map kept showing its previous
+        # recommendations after a reload, and the data behind it was correct the
+        # whole time.
+        #
+        # This is the DEFAULT, not an override. It used to assign
+        # unconditionally, which silently discarded whatever the handler had
+        # decided - the filing-document route sets its own policy because a
+        # stored PDF is immutable by construction and re-fetching a 20MB annual
+        # report on every click is not free. A route that says nothing still
+        # gets `no-store`, so the behaviour above is unchanged.
+        if (request.url.path.startswith("/api/")
+                and "cache-control" not in response.headers):
             response.headers["Cache-Control"] = "no-store, must-revalidate"
 
         if request.url.path in _UNWRAPPED_PATHS:

@@ -14,9 +14,15 @@ from fastapi.responses import FileResponse
 
 from app.api.v1.feature_mapping import FEATURE_MAPPINGS
 from app.config.settings import settings
-from app.core.deps import get_current_user_flexible, require_admin_role
+from app.core.deps import (
+    get_current_user_flexible,
+    require_admin_role,
+    require_user_role,
+    require_user_role_flexible,
+)
 from app.database.mongodb import get_db
 from app.schemas.account_data import DATASET_REGISTRY, AccountDataFileResponse
+from app.services.extractors.datasets import find_file_path
 
 logger = logging.getLogger(__name__)
 from app.services.extractors.content_studio import extract_content_studio
@@ -71,18 +77,17 @@ def sanitize_filename(filename: str) -> str:
     return cleaned if cleaned else "dataset_file"
 
 def _find_file_path(rel_path: str) -> str | None:
-    if not rel_path:
-        return None
-    candidate_paths = [
-        os.path.join(os.getcwd(), rel_path),
-        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", rel_path)),
-        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", rel_path)),
-        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", rel_path)),
-    ]
-    for cp in candidate_paths:
-        if os.path.exists(cp):
-            return cp
-    return None
+    """Kept as a name; the resolution itself belongs to `datasets`.
+
+    This was a second, older copy of the same walk, and it was missing the
+    four-level candidate that reaches the backend root where the datasets
+    actually live - its walks stop at `src/`, so the only candidate that ever
+    resolved was the working-directory one. `datasets.find_file_path` carries the
+    fix and the `/app` candidate the container needs, and is the one every
+    extractor already goes through. Two copies of this is how they drifted apart
+    in the first place.
+    """
+    return find_file_path(rel_path)
 
 # feature_key -> extractor. Which datasets each one depends on is read from
 # FEATURE_MAPPINGS rather than repeated here.
@@ -431,10 +436,179 @@ def download_account_data_file(
     media_type = "text/csv"
     if ext in [".xlsx", ".xls"]:
         media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    elif ext == ".pdf":
+        # A filing served as text/csv downloads as garbage. compliance_filings
+        # is mostly PDFs, so this route could never open one.
+        media_type = "application/pdf"
 
     return FileResponse(
         path=full_path,
         media_type=media_type,
         filename=filename,
         headers={"Content-Disposition": f"inline; filename=\"{filename}\""}
+    )
+
+
+# The one dataset whose individual files may be opened in a browser, and the one
+# extension allowed out of it.
+#
+# Deliberately a pinned constant rather than a parameter. The other datasets hold
+# the client's own records - prospect_contacts carries names, emails and phone
+# numbers - and this route's whole purpose is to be reachable from a plain link,
+# so widening it would turn an evidence chip into a way to pull contact data.
+# Filings are public company documents; a seller opening one is reading what the
+# company itself published.
+VIEWABLE_DATASET = "compliance_filings"
+VIEWABLE_EXTENSION = ".pdf"
+
+
+def _viewable_filings(db, account_id: str) -> dict:
+    """{original_filename: row}, the filings of this account that can be opened.
+
+    One query, one ordering rule, used by both routes below - so the manifest can
+    never advertise a filing the document route would refuse, and the two can
+    never disagree about which of two same-named rows is current.
+
+    `compliance_filings` is a multi-file dataset, so two active rows can share an
+    `original_filename`. `dataset_file_paths` returns them `sorted()`, so the
+    corpus read the lexicographically first path and the evidence quotes come
+    from that file; ascending `file_path` reproduces that, and `setdefault` keeps
+    the first.
+    """
+    # `.sort()` on the cursor rather than a `sort=` kwarg: that is the pymongo
+    # cursor API and it is what the test double implements too.
+    rows = db["account_data_files"].find(
+        {"account_id": account_id,
+         "dataset_key": VIEWABLE_DATASET,
+         "status": "active"},
+    ).sort([("file_path", 1)])
+    out: dict = {}
+    for row in rows:
+        name = str(row.get("original_filename") or "")
+        if name.lower().endswith(VIEWABLE_EXTENSION):
+            out.setdefault(name, row)
+    return out
+
+
+@router.get("/filings")
+def list_account_filings(
+    account_id: str,
+    current_user: dict = Depends(require_user_role),
+):
+    """Which filings this account has an openable copy of.
+
+    The frontend links evidence to a filing by its `filing_label`, and that label
+    is true of the corpus at the time the widget was built - not necessarily now.
+    A filing that has since been re-uploaded leaves its old row `replaced`, and a
+    filing can be registered on an account whose PDF is not on this machine; in
+    both cases the document route correctly refuses, and a chip that had linked
+    optimistically would open a tab containing a 404.
+
+    A dead link is worse than plain text, which is the rule `caseStudies.ts`
+    already applies to HP's retired case studies. So the UI is told the set it may
+    link, and anything outside it falls back to the filing's public URL, or to
+    plain text. That is what keeps "where we have it we show it, where we do not
+    we say nothing" true for this feature.
+
+    Filenames and page counts only - no paths, no URLs, no bytes. Read with the
+    ordinary Bearer header, so unlike the document route no token appears in a
+    URL.
+    """
+    if not ObjectId.is_valid(account_id):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Invalid account ID format")
+
+    db = get_db()
+    if not db["accounts"].find_one({"_id": ObjectId(account_id)}):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="Company account not found")
+
+    filings = []
+    for name, row in _viewable_filings(db, account_id).items():
+        if not find_file_path(row.get("file_path", "")):
+            # Registered but not on this machine. Advertising it would promise a
+            # link that 404s, which is the whole thing this route prevents.
+            continue
+        # `row_count` is the page count for a PDF, so the UI can tell whether a
+        # cited page is really in the document.
+        pages = row.get("row_count")
+        filings.append({"filename": name,
+                        "pages": int(pages) if isinstance(pages, int) else None})
+
+    # An account with no filings answers with an empty list. That is an answer,
+    # not an error - most accounts have none.
+    return {"filings": sorted(filings, key=lambda f: f["filename"])}
+
+
+@router.get("/filing")
+def view_account_filing(
+    account_id: str,
+    name: str,
+    current_user: dict = Depends(require_user_role_flexible),
+):
+    """One of this account's filing PDFs, inline, addressed by its own filename.
+
+    The client, 6 Oct: evidence sources must be clickable. A catalyst's evidence
+    reads "australia_post_2024-FY_annual_report.pdf p.11", and the public URL for
+    that document is unreliable - of 481 filing URLs the crawl attempted, 116
+    failed or returned something that was not a document. The copy we hold always
+    opens, and a browser will jump straight to the cited page from the `#page=`
+    fragment the link carries.
+
+    `name` is the registered `original_filename`, which is exactly the
+    `filing_label` already on every evidence row - so a link can be built from a
+    stored widget with no rebuild.
+
+    **`name` never becomes part of a path.** It is used only as an equality match
+    against `account_data_files`, and the file served is the matched row's own
+    `file_path`. So "../../etc/passwd" matches no row and 404s; there is no
+    traversal to defend against because no path is ever assembled from input.
+    This is why the lookup is by name rather than by a sanitised path.
+
+    `download/{dataset_key}` cannot do this job: compliance_filings is a
+    multi-file dataset, so its `find_one` returns an arbitrary one of several
+    active rows.
+    """
+    if not ObjectId.is_valid(account_id):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Invalid account ID format")
+
+    wanted = (name or "").strip()
+    if not wanted or not wanted.lower().endswith(VIEWABLE_EXTENSION):
+        # Covers `_filings_index.csv`, which is uploaded into this same dataset.
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="No such filing for this account.")
+
+    db = get_db()
+    if not db["accounts"].find_one({"_id": ObjectId(account_id)}):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="Company account not found")
+
+    # The same resolver the manifest uses, so the two can never disagree about
+    # which filing is openable or about which of two same-named rows is current.
+    file_doc = _viewable_filings(db, account_id).get(wanted)
+    if not file_doc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="No such filing for this account.")
+
+    full_path = find_file_path(file_doc.get("file_path", ""))
+    if not full_path or not os.path.exists(full_path):
+        # Registered but not on this machine - the ordinary state of a developer
+        # checkout. Says nothing about where it was expected.
+        logger.info("filing view: %s is registered for %s but not on this machine",
+                    wanted, account_id)
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="That filing is not available on this server.")
+
+    return FileResponse(
+        path=full_path,
+        media_type="application/pdf",
+        filename=file_doc.get("original_filename") or wanted,
+        # Inline, so the browser renders it and honours `#page=`. Set through
+        # Starlette's own parameter rather than a hand-written header, which
+        # would be emitted alongside the one `filename=` already produces.
+        content_disposition_type="inline",
+        # The stored bytes are immutable - a new upload writes a new row and a
+        # new file, never over these. `private` because the link carries a token.
+        headers={"Cache-Control": "private, max-age=3600"},
     )

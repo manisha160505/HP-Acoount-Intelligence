@@ -3,7 +3,7 @@
 import ScoreInfo from '@/components/common/ScoreInfo';
 import type { ScoreTopic } from '@/lib/scoreExplanations';
 import { caseStudyUrl } from '@/lib/caseStudies';
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { ProtectedRoute } from '@/components/common/ProtectedRoute';
 import { useAuth } from '@/providers/AuthProvider';
@@ -332,6 +332,137 @@ function PendingNotice({ widget, title }: { widget: any; title: string }) {
   );
 }
 
+// Which account's files a source chip may open, and which of its filings can
+// actually be opened. Supplied once around the dashboard rather than threaded
+// through every evidence list, because the chip is rendered from six different
+// places and none of them is near the account state.
+//
+// The default is empty on purpose: a chip rendered outside the provider, or
+// before the manifest answers, is plain text rather than a link that might not
+// work. It fails in the safe direction.
+interface SourceLinkContext { accountId: string; filings: Set<string> }
+const AccountIdContext = React.createContext<SourceLinkContext>(
+  { accountId: '', filings: new Set<string>() });
+
+// Two evidence rows from the same unlinked source are one chip. A row that
+// links somewhere keeps its own, since the links genuinely go to different
+// places. The count is shown so collapsing never hides how much evidence
+// there was.
+//
+// Keyed on what identifies the source rather than on the built link, so this
+// needs no account id. Two pages of one filing have different labels
+// ("…annual_report.pdf p.11" / "p.14") and stay separate chips, which is right:
+// they open at different places.
+function dedupeSources(sources: any[]) {
+  const byKey = new Map<string, any>();
+  (sources || []).forEach((s: any) => {
+    const ident = s.filing_label || s.resolved_source_url || s.resolved_url
+      || s.source_url || s.url || '';
+    const key = `${s.label}::${ident}`;
+    const seen = byKey.get(key);
+    if (seen) { seen.count = (seen.count || 1) + 1; }
+    else { byKey.set(key, { ...s, count: 1 }); }
+  });
+  return Array.from(byKey.values());
+}
+
+// Our own copy of a filing, opened at the page the evidence cites.
+//
+// `filing_label` is the registered upload filename, which is what the backend
+// matches on - so a link built here needs nothing added to any stored widget.
+// `#page=` is honoured by every browser's built-in PDF viewer.
+function filingHref(ctx: SourceLinkContext, s: any): string {
+  const name = String(s?.filing_label || '').trim();
+  // Only a filing the backend confirms it can serve. `filing_label` was true of
+  // the corpus when the widget was built, not necessarily now - a re-uploaded
+  // filing leaves its old row replaced, and a filing can be registered on an
+  // account whose PDF is not on this machine. Linking from the label alone
+  // opened a tab containing a 404 in both cases.
+  if (!ctx.accountId || !name || !ctx.filings.has(name)) return '';
+  const accountId = ctx.accountId;
+  const base = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+  const token = typeof window !== 'undefined'
+    ? (localStorage.getItem('hp_token') || '') : '';
+  const url = `${base}/api/v1/accounts/${accountId}/data/filing`
+    + `?name=${encodeURIComponent(name)}&token=${encodeURIComponent(token)}`;
+  const page = Number(s?.page);
+  return Number.isFinite(page) && page > 0 ? `${url}#page=${page}` : url;
+}
+
+// The link for a source row, or '' when it has none.
+//
+// Order: our own copy of the filing, then the company's public URL, then plain
+// text. Our copy wins because of the filing URLs the crawl attempted, 24% failed
+// or returned something that was not a document, and a public URL cannot open at
+// page 11. But when we have no openable copy, the public `source_url` part one
+// put on these rows is still something we HAVE, so it is offered rather than
+// dropped - and only when there is neither does the chip go plain.
+//
+// For everything else, `resolved_source_url` is preferred where it exists - a
+// Live Signal's raw `source_url` is often a news.google.com redirect. An HP
+// case-study link goes through `caseStudyUrl`, which drops the document ids HP
+// has retired; a dead link is worse than plain text.
+function sourceHref(s: any, ctx?: SourceLinkContext): string {
+  const filing = filingHref(ctx || { accountId: '', filings: new Set() }, s);
+  if (filing) return filing;
+  const raw = String(s?.resolved_source_url || s?.resolved_url
+                     || s?.source_url || s?.url || '').trim();
+  if (!raw) return '';
+  return raw.includes('h20195.www2.hp.com') ? (caseStudyUrl(raw) || '') : raw;
+}
+
+// What a chip reads when the row names no source of its own. The link's host is
+// real - it is where the click goes - where the word "Source" was a placeholder
+// standing in for information we actually hold.
+function hostLabel(href: string): string {
+  try {
+    return new URL(href).hostname.replace(/^www\./, '');
+  } catch {
+    return '';
+  }
+}
+
+// A source, as provenance rather than a bare identifier: the exact evidence_id
+// stays in the tooltip so a claim is still traceable to the registry row
+// behind it.
+//
+// Client, 6 Oct: wherever evidence is shown the source should be clickable, so
+// a seller can verify the claim before sending it. Much of this evidence is a
+// cell in an uploaded CSV with no web page to open, so an unlinkable source is
+// flat and carries no external-link mark - what can be opened is obvious before
+// anyone clicks, and nothing is dressed up as a link that goes nowhere.
+function SourceChip({ s, tone = 'emerald' }: { s: any; tone?: 'emerald' | 'slate' }) {
+  const ctx = React.useContext(AccountIdContext);
+  const href = sourceHref(s, ctx);
+  const detail = s.quote
+    ? `${s.field ? s.field + ' — ' : ''}"${s.quote}"`
+    : String(s.source_text || '').slice(0, 180);
+  // Named by the source, else by where the link goes. Nothing stands in when
+  // there is neither - the chip is dropped by the caller instead.
+  const name = s.label || s.publisher || hostLabel(href);
+  if (!name) return null;
+  const label = `${name}${s.count > 1 ? ` (${s.count})` : ''}`;
+  const linkedClass = tone === 'slate'
+    ? 'border-blue-200 bg-blue-50 text-hp-navy hover:bg-blue-100'
+    : 'border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100';
+  return (
+    <span
+      title={[s.evidence_id, detail].filter(Boolean).join(' — ') || undefined}
+      className={`inline-flex max-w-full items-center gap-1 rounded-full border px-2 py-[3px] text-[10px] font-semibold align-middle ${
+        href ? linkedClass : 'border-slate-200 bg-slate-50 text-slate-500'}`}
+    >
+      <FileText className="w-2.5 h-2.5 flex-shrink-0" />
+      {href ? (
+        <a href={href} target="_blank" rel="noopener noreferrer"
+           className="truncate hover:underline">{label}</a>
+      ) : (
+        <span className="truncate">{label}</span>
+      )}
+      {href && <ExternalLink className="w-2.5 h-2.5 flex-shrink-0" />}
+    </span>
+  );
+}
+
 // One HP recommendation, rendered to match the vendor cards it sits beneath.
 // The product, the confidence and the approved facts are all decided in Python;
 // this only lays them out.
@@ -505,6 +636,19 @@ export default function UserDashboardPage() {
   const [minSignalScore, setMinSignalScore] = useState(0);
   const [expandedSignalId, setExpandedSignalId] = useState<string | null>(null);
   const [expandedSignalDetailId, setExpandedSignalDetailId] = useState<string | null>(null);
+  // Which signal is listing the other articles it was merged from. Collapsed by
+  // default: a signal merged from five reports should not print five chips
+  // unprompted.
+  const [expandedSignalSourcesId, setExpandedSignalSourcesId] = useState<string | null>(null);
+  // The filings this account has an openable copy of, by registered filename.
+  // Empty until the manifest answers, so a chip starts plain and becomes a link
+  // rather than starting as a link that might not work.
+  const [filingsAvailable, setFilingsAvailable] = useState<Set<string>>(new Set());
+  // Memoised: a fresh object on every render would re-render every source chip
+  // on the screen, and this component renders a lot.
+  const sourceLinkCtx = useMemo(
+    () => ({ accountId: selectedAccount?.id || '', filings: filingsAvailable }),
+    [selectedAccount?.id, filingsAvailable]);
   const [expandedObjectionId, setExpandedObjectionId] = useState<string | null>(null);
 
   // Intent Topics Filter State
@@ -627,6 +771,33 @@ export default function UserDashboardPage() {
     })();
     return () => { cancelled = true; };
   }, [activeFeatureKey, selectedAccountId]);
+
+  // Which filings this account actually has an openable copy of.
+  //
+  // An evidence row's `filing_label` was true of the corpus when the widget was
+  // built, not necessarily now: a re-uploaded filing leaves its old row
+  // `replaced`, and a filing can be registered on an account whose PDF is not on
+  // this machine. Linking optimistically from the label alone opened a tab
+  // containing a 404 in both cases, and a dead link is worse than plain text.
+  //
+  // Fails soft to an empty set, like the two fetches above: no filings known
+  // means no filing links, which degrades to the public URL or to plain text -
+  // never to a broken one.
+  useEffect(() => {
+    if (!selectedAccountId) { setFilingsAvailable(new Set()); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await api.get<any>(`/accounts/${selectedAccountId}/data/filings`);
+        if (cancelled) return;
+        setFilingsAvailable(new Set<string>(
+          (res.data?.filings || []).map((f: any) => String(f.filename))));
+      } catch {
+        if (!cancelled) setFilingsAvailable(new Set());
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [selectedAccountId]);
 
   // Objectives, formats and personas come from the evaluator endpoints so the
   // dropdowns cannot drift from the scoring formulas that consume them.
@@ -827,6 +998,10 @@ export default function UserDashboardPage() {
 
   return (
     <ProtectedRoute allowedRoles={['user', 'admin']}>
+      {/* Which account's filings an evidence chip may open. Empty while no
+          account is selected, which makes filingHref return '' and the chip
+          render flat - the correct behaviour, not a broken link. */}
+      <AccountIdContext.Provider value={sourceLinkCtx}>
       <div className="flex h-screen bg-[#F8FAFC] overflow-hidden text-slate-800 font-sans">
         
         {/* ============================================================================== */}
@@ -1078,8 +1253,18 @@ export default function UserDashboardPage() {
             {/* When the ACCOUNT DATA was loaded - not when this page was opened,
                 and not when the widget was last generated. Recommendation
                 Tuning Logic section E: a dashboard opened months after
-                ingestion must still name the snapshot it is reasoning from. */}
-            {(() => {
+                ingestion must still name the snapshot it is reasoning from.
+
+                Executive Dashboard only (client, 6 Oct). This header is shared
+                by every feature, so the tag used to sit beside each feature's
+                own dating - next to Intent's "as of", which is Bombora's
+                observation date, not an ingestion date - and the two read as a
+                contradiction. One tag, in one place, measuring one thing.
+
+                The value itself never varied by feature: the API attaches the
+                same account-wide map to every widget. This changes where it is
+                shown, not what it says. */}
+            {activeFeatureKey === 'executive_dashboard' && (() => {
               // Client ruling, 24 Sep: show the retrieval date of the data
               // itself, not one rolled-up date for the account. Each dataset
               // is named with the day it was loaded; where every pipeline
@@ -1683,12 +1868,20 @@ export default function UserDashboardPage() {
                             <span>STRATEGIC PRIORITIES</span>
                             <ScoreInfo topic="catalysts" />
                           </h3>
-                          {priorityList.length > 0 && (
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-hp-navy border border-blue-200 inline-flex items-center gap-1">
-                              <FileText className="w-3 h-3" />
-                              {priorityList.reduce((n: number, p: any) => n + (p.sources?.length || 0), 0)} primary sources
-                            </span>
-                          )}
+{/* Guarded on the COUNT, not on the list: catalysts with no
+                              sources rendered "0 primary sources", which is a
+                              statement about something we do not have. */}
+                          {(() => {
+                            const n = priorityList.reduce(
+                              (t: number, p: any) => t + (p.sources?.length || 0), 0);
+                            if (!n) return null;
+                            return (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-hp-navy border border-blue-200 inline-flex items-center gap-1">
+                                <FileText className="w-3 h-3" />
+                                {n} primary source{n === 1 ? '' : 's'}
+                              </span>
+                            );
+                          })()}
                         </div>
 
                         {/* The executive summary is no longer rendered here - it
@@ -1816,12 +2009,20 @@ export default function UserDashboardPage() {
                                             </div>
                                           )}
 
-                                          <p className="text-[10px] text-slate-500">
-                                            <span className="font-bold text-slate-600">Evidence: </span>
-                                            {m.support_count} source sentence{m.support_count === 1 ? '' : 's'}
-                                            {' · '}{m.distinct_sections} document section{m.distinct_sections === 1 ? '' : 's'}
-                                            {' · '}{m.independent_source_count} independent source{m.independent_source_count === 1 ? '' : 's'}
-                                          </p>
+{/* Only the counts we have. With nothing measured this read
+                                              "Evidence: 0 source sentences - 0 document sections",
+                                              which announces an absence. */}
+                                          {(m.support_count || m.distinct_sections
+                                            || m.independent_source_count) ? (
+                                            <p className="text-[10px] text-slate-500">
+                                              <span className="font-bold text-slate-600">Evidence: </span>
+                                              {[
+                                                m.support_count && `${m.support_count} source sentence${m.support_count === 1 ? '' : 's'}`,
+                                                m.distinct_sections && `${m.distinct_sections} document section${m.distinct_sections === 1 ? '' : 's'}`,
+                                                m.independent_source_count && `${m.independent_source_count} independent source${m.independent_source_count === 1 ? '' : 's'}`,
+                                              ].filter(Boolean).join(' · ')}
+                                            </p>
+                                          ) : null}
 
                                           <div className="flex flex-wrap items-center gap-1.5">
                                             {(p.sources || []).slice(0, 4).map((s: any, si: number) => (
@@ -1891,6 +2092,9 @@ export default function UserDashboardPage() {
                                                 )}
                                               </div>
 
+{/* The heading goes with its content: it used to stand over
+                                                  an empty list reading "Supporting claims (0)". */}
+                                              {(p.sources || []).length > 0 && (
                                               <div className="space-y-1.5 pt-1 border-t border-slate-200">
                                                 <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 block">
                                                   Supporting claims ({(p.sources || []).length})
@@ -1916,14 +2120,21 @@ export default function UserDashboardPage() {
                                                             </li>
                                                           ))}
                                                         </ul>
-                                                        <span className="block text-[10px] text-slate-400 truncate mt-0.5 pl-4">
-                                                          {s.label}
+                                                        {/* The source, clickable where there is
+                                                            something to open (client, 6 Oct). This
+                                                            read as a plain grey line while the row
+                                                            next to it already carried source_url -
+                                                            the chip on the card face above has been
+                                                            linking the same field all along. */}
+                                                        <span className="block mt-1 pl-4">
+                                                          <SourceChip s={s} tone="slate" />
                                                         </span>
                                                       </div>
                                                     );
                                                   })}
                                                 </div>
                                               </div>
+                                              )}
                                             </div>
                                           )}
                                         </div>
@@ -2362,26 +2573,70 @@ export default function UserDashboardPage() {
                                     );
                                   })()}
 
-                                  {/* Source chip, directly below the implication block */}
-                                  <div className="mt-2.5 flex flex-wrap items-center gap-2">
-                                    {s.source_url && (
-                                      <a
-                                        href={s.source_url}
-                                        target="_blank"
-                                        rel="noreferrer"
-                                        className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full hover:bg-emerald-100 transition"
-                                      >
-                                        <FileText className="w-3 h-3" />
-                                        <span>{s.source_publisher || 'Source'}</span>
-                                        <ExternalLink className="w-3 h-3" />
-                                      </a>
-                                    )}
-                                    {s.supporting_source_count > 1 && (
-                                      <span className="text-[10px] font-medium text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">
-                                        {s.supporting_source_count} supporting sources
-                                      </span>
-                                    )}
-                                  </div>
+                                  {/* Source chip, directly below the implication block.
+                                      The link prefers resolved_source_url: a google_news
+                                      row's own URL is a news.google.com redirect, and the
+                                      backend unwraps it to the publisher. A news_events
+                                      signal carries no URL by design and stays unlinked. */}
+                                  {(() => {
+                                    const acctId = sourceLinkCtx;
+                                    const primaryHref = sourceHref(s, acctId);
+                                    // The merge keeps the primary's own entry in this list,
+                                    // so the article already linked above is dropped rather
+                                    // than shown twice.
+                                    const others = (s.supporting_sources || []).filter(
+                                      (x: any) => sourceHref(x, acctId)
+                                        && sourceHref(x, acctId) !== primaryHref);
+                                    const sourcesOpen = expandedSignalSourcesId === s.signal_id;
+                                    return (
+                                      <div className="mt-2.5 space-y-1.5">
+                                        <div className="flex flex-wrap items-center gap-2">
+                                          {primaryHref && (
+                                            <a
+                                              href={primaryHref}
+                                              target="_blank"
+                                              rel="noopener noreferrer"
+                                              className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full hover:bg-emerald-100 transition"
+                                            >
+                                              <FileText className="w-3 h-3" />
+                                              <span>{s.source_publisher || hostLabel(primaryHref) || 'Source'}</span>
+                                              <ExternalLink className="w-3 h-3" />
+                                            </a>
+                                          )}
+                                          {/* The count was the whole of this before: the
+                                              payload has carried every merged article with
+                                              its own URL all along, and none of them were
+                                              reachable (client, 6 Oct).
+
+                                              When none of them IS reachable, nothing is said.
+                                              "2 supporting sources" appeared in exactly the
+                                              case where there was nothing to open, which is
+                                              the opposite of useful. */}
+                                          {others.length > 0 && (
+                                            <button
+                                              type="button"
+                                              onClick={() => setExpandedSignalSourcesId(sourcesOpen ? null : s.signal_id)}
+                                              className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded hover:bg-slate-200 transition"
+                                            >
+                                              {sourcesOpen ? <ChevronUp className="w-2.5 h-2.5" /> : <ChevronDown className="w-2.5 h-2.5" />}
+                                              {others.length} more source{others.length === 1 ? '' : 's'}
+                                            </button>
+                                          )}
+                                        </div>
+                                        {sourcesOpen && others.length > 0 && (
+                                          <div className="flex flex-wrap items-center gap-1.5 pl-0.5">
+                                            {others.map((x: any, xi: number) => (
+                                              <SourceChip
+                                                key={xi}
+                                                s={{ ...x, label: x.publisher || x.dataset
+                                                      || hostLabel(sourceHref(x, acctId)) }}
+                                              />
+                                            ))}
+                                          </div>
+                                        )}
+                                      </div>
+                                    );
+                                  })()}
 
                                   {sc && (
                                     <div className="mt-2 flex justify-end">
@@ -2466,7 +2721,9 @@ export default function UserDashboardPage() {
                   const topicsList: IntentTopic[] = topicsData?.topics || [];
                   const provider = topicsData?.provider || summaryData?.provider;
                   const accountMatch = topicsData?.account_match || summaryData?.account_match;
-                  const observation = topicsData?.observation || summaryData?.observation;
+                  // `observation` (Bombora's own Date Stamp) is no longer read:
+                  // its only reader was the "Intent · as of" chip, removed on
+                  // 6 Oct. It stays in the widget payload.
                   const dictionaryVersion: string = topicsData?.dictionary_version || summaryData?.dictionary_version || '';
                   const categoryFile = summaryData?.category_file || summaryWidget?.data?.category_file;
                   const categoryFileMatched = categoryFile?.status === 'matched';
@@ -2650,11 +2907,13 @@ export default function UserDashboardPage() {
                           </p>
                         </div>
                         <div className="flex flex-wrap items-center gap-2 text-xs font-bold">
-                          {observation?.as_of && (
-                            <span className="px-3 py-1 bg-slate-100 text-slate-600 border border-slate-200 rounded-full text-[11px]">
-                              Intent · as of {observation.as_of}
-                            </span>
-                          )}
+                          {/* The "Intent · as of" chip was removed (client, 6 Oct).
+                              It carried Bombora's own Date Stamp - when Bombora
+                              OBSERVED the research - while the account header
+                              carries the ingestion date. Two different dates on
+                              one screen read as a contradiction, so only the
+                              header's remains. The observation date is still in
+                              the payload; nothing renders it. */}
                           {/* Only a verified match is shown; a mismatch or an unverified
                               domain is a backend review item, not a client-facing chip. */}
                           {accountMatch?.status === 'matched' && (
@@ -6414,57 +6673,6 @@ export default function UserDashboardPage() {
                     .find((i: any) => i.index === 'content_messaging');
 
 
-
-                  // Two evidence rows from the same unlinked source are one chip.
-                  // A row that links somewhere keeps its own, since the links
-                  // genuinely go to different places. The count is shown so
-                  // collapsing never hides how much evidence there was.
-                  const dedupeSources = (sources: any[]) => {
-                    const byKey = new Map<string, any>();
-                    (sources || []).forEach((s: any) => {
-                      const key = `${s.label}::${s.source_url || ''}`;
-                      const seen = byKey.get(key);
-                      if (seen) { seen.count = (seen.count || 1) + 1; }
-                      else { byKey.set(key, { ...s, count: 1 }); }
-                    });
-                    return Array.from(byKey.values());
-                  };
-
-                  // The chip reads as provenance, never as a bare identifier; the
-                  // exact evidence_id stays in the tooltip so a claim is still
-                  // traceable to the registry row behind it.
-                  const SourceChip = ({ s }: { s: any }) => {
-                    // Much of this evidence is a cell in an uploaded CSV, which
-                    // has no web page to open. Rather than render every chip as
-                    // though it were clickable, an unlinkable one is flat and
-                    // carries no external-link mark, so what can be opened is
-                    // obvious before anyone clicks.
-                    const linked = !!s.source_url;
-                    const detail = s.quote
-                      ? `${s.field ? s.field + ' — ' : ''}"${s.quote}"`
-                      : String(s.source_text || '').slice(0, 180);
-                    return (
-                      <span
-                        title={`${s.evidence_id}${detail ? ` — ${detail}` : ''}`}
-                        className={`inline-flex items-center gap-1 rounded-full border px-2 py-[3px] text-[10px] font-semibold whitespace-nowrap align-middle ${
-                          linked
-                            ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
-                            : 'border-slate-200 bg-slate-50 text-slate-500'}`}
-                      >
-                        <FileText className="w-2.5 h-2.5" />
-                        {linked ? (
-                          <a href={s.source_url} target="_blank" rel="noopener noreferrer"
-                             className="hover:underline">
-                            {s.label}{s.count > 1 ? ' (' + s.count + ')' : ''}
-                          </a>
-                        ) : (
-                          <>{s.label}{s.count > 1 ? ' (' + s.count + ')' : ''}</>
-                        )}
-                        {linked && <ExternalLink className="w-2.5 h-2.5" />}
-                      </span>
-                    );
-                  };
-
                   return (
                     <div className="space-y-6">
 
@@ -7423,9 +7631,12 @@ export default function UserDashboardPage() {
 
                               {/* Provenance */}
                               <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-[11px]">
+{/* Heading and panel only when something was cited. This
+                                    printed "None cited." under an "Evidence used"
+                                    heading, which is a note about an absence. */}
+                                {labels.length > 0 && (
                                 <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-1">
                                   <span className="font-mono font-extrabold text-[10px] text-slate-500 uppercase block">Evidence used</span>
-                                  {labels.length === 0 && <div className="text-slate-500">None cited.</div>}
                                   {labels.map(([k, v]) => (
                                     <div key={k}>
                                       <span className="font-mono font-bold text-hp-navy">[{k}]</span>{' '}
@@ -7433,6 +7644,7 @@ export default function UserDashboardPage() {
                                     </div>
                                   ))}
                                 </div>
+                                )}
                                 <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-1">
                                   <span className="font-mono font-extrabold text-[10px] text-slate-500 uppercase block">HP lines &amp; framing</span>
                                   {generatedAsset.topic && <div className="text-slate-500">Topic: {generatedAsset.topic}</div>}
@@ -7451,11 +7663,15 @@ export default function UserDashboardPage() {
                                     <div className="text-slate-600">
                                       Proof point:{' '}
                                       <span className="font-semibold text-slate-800">{g.hp_proof_point_detail.customer}</span>
-                                      {g.hp_proof_point_detail.source_url && (
+                                      {/* Guarded like every other proof-point link. This one
+                                          rendered the raw URL, so the three case-study
+                                          documents HP has retired were offered here as links
+                                          while the rest of the app already suppressed them. */}
+                                      {caseStudyUrl(g.hp_proof_point_detail.source_url) && (
                                         <>
                                           {' · '}
                                           <a
-                                            href={g.hp_proof_point_detail.source_url}
+                                            href={caseStudyUrl(g.hp_proof_point_detail.source_url) ?? undefined}
                                             target="_blank"
                                             rel="noopener noreferrer"
                                             className="underline hover:text-hp-navy"
@@ -8063,6 +8279,7 @@ export default function UserDashboardPage() {
 
       </div>
       <MyActivityPanel open={isMyActivityOpen} onClose={closeMyActivity} userName={user?.full_name} />
+      </AccountIdContext.Provider>
     </ProtectedRoute>
   );
 }

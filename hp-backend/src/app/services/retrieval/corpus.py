@@ -22,6 +22,7 @@ a widget structure in which all things are properly labeled."* Every checkable
 line carries its evidence id inline, so a citation can be resolved afterwards.
 """
 
+import csv
 import hashlib
 import json
 import logging
@@ -509,6 +510,89 @@ def _sentence_share(text) -> float:
     return inside / float(total)
 
 
+def _clean_filing_name(value: str) -> str:
+    """`fetch_filings._clean_name`, which named the PDFs on disk.
+
+    Duplicated rather than imported: that module lives in `scripts/`, outside
+    the application package, and is a crawler run by hand. Both copies are
+    pinned by test_filing_evidence_links.py, so a change to one that is not
+    mirrored here fails rather than silently unlinking every filing.
+    """
+    value = re.sub(r"[^\w.\-]+", "_", value, flags=re.ASCII).strip("._")
+    return re.sub(r"_+", "_", value)[:150]
+
+
+def _filing_urls(files: list) -> dict:
+    """{registered PDF name: that filing's public URL}, from the filings list.
+
+    The evidence under a catalyst reads "australia_post_2024-FY_annual_report
+    .pdf p.11" and, until now, stopped there - the filing's own URL sits in
+    `_filings_index.csv` and never reached the evidence row, so a seller could
+    read the claim and not open the document behind it (client, 6 Oct: evidence
+    sources must be clickable).
+
+    The join is by filename, because that is the only thing a PDF on disk and
+    its index row share. `fetch_filings.base_filename` names each downloaded
+    file after the basename of the row's `local_path`, sanitised, and `place`
+    appends `__row<n>` when two different documents would collide; both forms
+    are recognised.
+
+    `local_path` is a join key here and nothing else. It is never the link - it
+    names a folder on the crawler's machine (client, 18 Sep). The link is
+    `document_url`, else `source_page_url`, the same rule
+    `filings_register._entry` applies; a row carrying neither contributes
+    nothing, so that filing's evidence stays plain text rather than gaining an
+    invented URL.
+
+    Where `local_path` is blank the crawler fell back to
+    `{company}_{period}_row{src_row}`, and the index does not carry `src_row`,
+    so the exact name cannot be rebuilt. Those are matched on the
+    company-and-period prefix instead, and only when it identifies exactly one
+    URL: two filings of one company for one period are ambiguous, and a guessed
+    link is worse than none. Measured over the 220 accounts, this maps 335 of
+    337 filings and leaves 2 unlinked - the two documents one bank filed for the
+    same year.
+    """
+    from app.services.dashboard import filings_register
+
+    try:
+        rows = filings_register.index_rows_from_files(files)
+    except (OSError, UnicodeDecodeError, csv.Error):
+        logger.exception("retrieval: cannot read the filings list for links")
+        return {}
+
+    exact: dict = {}
+    by_period: dict = {}
+    for row in rows or []:
+        url = (str(row.get("document_url") or "").strip()
+               or str(row.get("source_page_url") or "").strip())
+        if not url.startswith(("http://", "https://")):
+            continue
+        name = str(row.get("local_path") or "").replace("\\", "/").rsplit("/", 1)[-1]
+        if name.lower().endswith(".pdf"):
+            exact.setdefault((_clean_filing_name(name[:-4]) + ".pdf").lower(), url)
+        stem = _clean_filing_name(("%s_%s" % (
+            row.get("company") or "",
+            row.get("reporting_period") or row.get("fiscal_year") or "")).lower())
+        if stem:
+            by_period.setdefault(stem, set()).add(url)
+
+    urls = {}
+    for original_name, _path in files:
+        name = str(original_name)
+        if not name.lower().endswith(".pdf"):
+            continue
+        base = name[:-4]
+        hit = (exact.get(name.lower())
+               or exact.get(re.sub(r"__row\d+$", "", base).lower() + ".pdf"))
+        if not hit:
+            candidates = by_period.get(re.sub(r"_row\d+$", "", base).lower()) or set()
+            hit = next(iter(candidates)) if len(candidates) == 1 else None
+        if hit:
+            urls[name] = hit
+    return urls
+
+
 def _filing_documents(account_id, index, company) -> list:
     """Documents read from the account's filed PDFs.
 
@@ -536,13 +620,18 @@ def _filing_documents(account_id, index, company) -> list:
     from app.services.retrieval import financials, pdf
 
     try:
-        files = dataset_file_paths(account_id, "compliance_filings", strict=False)
+        all_files = dataset_file_paths(account_id, "compliance_filings", strict=False)
     except DatasetFileMissing:
         return []
-    files = [(name, path) for name, path in files
+    files = [(name, path) for name, path in all_files
              if str(name).lower().endswith(".pdf")]
     if not files:
         return []
+
+    # Built from the whole file set, because the links live in the one CSV the
+    # PDF filter above drops. A filing with no URL on record is simply absent
+    # from the map and its evidence stays unlinked.
+    filing_urls = _filing_urls(all_files)
 
     docs, all_claims, extractions = [], [], []
     for original_name, path in files:
@@ -563,9 +652,10 @@ def _filing_documents(account_id, index, company) -> list:
                     "excluded", original_name, len(extracted["pages"]),
                     stats["claims"], len(extracted["excluded"]))
 
-    docs.extend(_financial_documents(account_id, index, company, all_claims))
+    docs.extend(_financial_documents(account_id, index, company, all_claims,
+                                     filing_urls))
     docs.extend(_narrative_documents(account_id, index, company, extractions,
-                                     _reporting_periods(all_claims)))
+                                     _reporting_periods(all_claims), filing_urls))
     return docs
 
 
@@ -616,12 +706,16 @@ def _metric_name(metric, section) -> str:
     return "%s - %s" % (section, metric)
 
 
-def _claim_line(builder, claim, prefix=""):
+def _claim_line(builder, claim, prefix="", filing_urls=None):
     """One reported figure, written so the number and its period are inseparable.
 
     The evidence row carries the value, period and unit as fields as well as
     text, so whatever is published later is read back from the row rather than
     re-parsed out of this sentence.
+
+    `filing_urls` carries the link to the filing this figure was read from, when
+    the filings list holds one, so the number on a card can be checked against
+    the document that printed it.
     """
     # A percentage already carries its unit in the digits; appending it again
     # reads as "51% %".
@@ -634,10 +728,11 @@ def _claim_line(builder, claim, prefix=""):
         sentence, field=name, record_id=claim["table_id"],
         dataset="compliance_filings", quote=claim["quote"],
         period=claim["period"], value=claim["value"], unit=claim["unit"],
-        page=claim["page"], filing_label=claim["file"])
+        page=claim["page"], filing_label=claim["file"],
+        source_url=(filing_urls or {}).get(claim["file"]) or None)
 
 
-def _financial_documents(account_id, index, company, claims) -> list:
+def _financial_documents(account_id, index, company, claims, filing_urls=None) -> list:
     """Reported figures, split into the multi-year summary and the rest.
 
     The summary table is its own document because it is the one a dashboard
@@ -678,7 +773,8 @@ def _financial_documents(account_id, index, company, claims) -> list:
                 out.append("%s by reporting period: %s (%s)."
                            % (_metric_name(metric, section), trend, unit))
                 for row in rows:
-                    out.append("  %s" % _claim_line(b, row))
+                    out.append("  %s" % _claim_line(b, row,
+                                                    filing_urls=filing_urls))
             return out
 
         docs.append(_build(account_id, index, "executive_dashboard",
@@ -694,7 +790,7 @@ def _financial_documents(account_id, index, company, claims) -> list:
             out = ["Further reported figures for %s, each carrying the table and "
                    "page it was read from." % company]
             for claim in rest:
-                out.append(_claim_line(b, claim))
+                out.append(_claim_line(b, claim, filing_urls=filing_urls))
             return out
         docs.append(_build(account_id, index, "executive_dashboard",
                            "financial_detail",
@@ -703,7 +799,8 @@ def _financial_documents(account_id, index, company, claims) -> list:
 
     market = [c for c in claims if c["file"] in monthly_files]
     if market:
-        docs.extend(_market_documents(account_id, index, company, market))
+        docs.extend(_market_documents(account_id, index, company, market,
+                                      filing_urls))
     return docs
 
 
@@ -719,7 +816,7 @@ def _monthly_files(claims) -> set:
             if re.match(r"^\d{4}-[A-Za-z]{3}$", str(c["period"]))}
 
 
-def _market_documents(account_id, index, company, claims) -> list:
+def _market_documents(account_id, index, company, claims, filing_urls=None) -> list:
     """Market position, from the periodic market reports.
 
     One document, because these files are one series reported repeatedly rather
@@ -762,12 +859,13 @@ def _market_documents(account_id, index, company, claims) -> list:
                     _metric_name(metric, section),
                     ", ".join("%s %s" % (r["period"], r["value_text"])
                               for r in rows)))
-                out.append("  %s" % _claim_line(b, rows[-1], prefix="Most recent "))
+                out.append("  %s" % _claim_line(b, rows[-1], prefix="Most recent ",
+                                                filing_urls=filing_urls))
         for metric, section in financials.metrics_in_table(volumes, table_id):
             rows = financials.series(volumes, metric, table_id, section)
             totals = [r for r in rows if str(r["period"]).lower().endswith("total")]
             if totals:
-                out.append(_claim_line(b, totals[-1]))
+                out.append(_claim_line(b, totals[-1], filing_urls=filing_urls))
         return out
 
     return [_build(account_id, index, "executive_dashboard", "market_position",
@@ -775,7 +873,7 @@ def _market_documents(account_id, index, company, claims) -> list:
 
 
 def _narrative_documents(account_id, index, company, extractions,
-                         reporting_periods=None) -> list:
+                         reporting_periods=None, filing_urls=None) -> list:
     """Strategy narrative, selected by theme density and chunked into documents.
 
     Pages are scored by how many of ABX's named priority themes they discuss and
@@ -848,7 +946,9 @@ def _narrative_documents(account_id, index, company, extractions,
                                       record_id="%s#p%s" % (file_name, page["page"]),
                                       dataset="compliance_filings",
                                       page=page["page"], filing_label=file_name,
-                                      filing_period=period)
+                                      filing_period=period,
+                                      source_url=(filing_urls or {}).get(file_name)
+                                      or None)
                         if line:
                             out.append(line)
             return out
