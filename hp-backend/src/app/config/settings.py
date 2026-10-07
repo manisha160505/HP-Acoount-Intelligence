@@ -76,6 +76,23 @@ class Settings(BaseSettings):
     # one region moves the call to the next instead of waiting. Empty = only
     # VERTEX_LOCATION. Same model everywhere (checked 2 Oct).
     VERTEX_LOCATIONS: str = ""
+    # Regions that serve gemini-2.5-flash with a 131,072-token input window
+    # instead of its full 1,048,576.
+    #
+    # MEASURED, 7 Oct, from the VM against all 24 configured regions with one
+    # 232,986-token prompt: 22 accepted it, and these two answered
+    # `400 INVALID_ARGUMENT ... maximum number of tokens allowed (131072)`.
+    # `global` and `asia-south1` went on to accept 963,786 tokens, so the window
+    # really is ~1M everywhere else. Same prompt, same seconds, same key - this is
+    # a property of the region, not load and not the model name.
+    #
+    # Why it matters: the chat corpus is ~300k tokens on the largest accounts, so
+    # a request that lands here fails outright. Rotating over 24 regions put ~8% of
+    # calls on one, which is what made Strategy Chat fail on some turns and not
+    # others. Listed rather than hardcoded so a region that gains the full window
+    # can simply be removed.
+    VERTEX_SMALL_WINDOW_LOCATIONS: str = "asia-northeast3,europe-west9"
+    VERTEX_SMALL_WINDOW_TOKENS: int = 131_072
     # Embeddings go to a regional host: on the global one every request waited
     # ~12 s before its first byte (28 Sep, 1 or 16 texts alike), regional hosts
     # answer in under a second. asia-south1 is where the GCP VM runs.
@@ -139,6 +156,28 @@ class Settings(BaseSettings):
     # truncated attempt is retried shorter - not to widen the door.
     GEMINI_MAX_OUTPUT_TOKENS: int = 16384
     GEMINI_TEMPERATURE: float = 0.3
+
+    # The INPUT window this platform works to: gemini-2.5-flash's own, 1,048,576
+    # tokens. Stated here because it was not stated anywhere, and the gap cost
+    # real debugging time.
+    #
+    # Measured, 7 Oct: the largest account's Strategy Chat payload is 1,226,071
+    # characters, which is ~333,000 tokens at the 3.68 chars/token this corpus
+    # actually tokenises at - a third of the window, not over it. A provider 400
+    # naming "maximum number of tokens allowed (131072)" was read as the model's
+    # limit; it is not. The same shape accepts 316,794 tokens when the project is
+    # quiet, so that number was transient capacity (see llm._is_capacity_refusal).
+    #
+    # Checked before the call so an oversized prompt is named as what it is
+    # rather than surfacing as a provider error that means something else.
+    GEMINI_MAX_INPUT_TOKENS: int = 1_048_576
+
+    # Chars per token to assume when estimating a prompt's size without calling
+    # the tokenizer. Deliberately LOWER than the 3.68 measured on this corpus:
+    # fewer chars per token means more tokens per char, so the estimate errs
+    # high and the guard trips early rather than late. An estimate that lets an
+    # oversized prompt through is the one failure mode worth avoiding.
+    TOKEN_ESTIMATE_CHARS: float = 3.0
 
     # How long ONE model request may take before it is abandoned.
     #
@@ -217,6 +256,27 @@ class Settings(BaseSettings):
         """The regions chat calls rotate over, in order, never empty."""
         listed = [loc.strip() for loc in self.VERTEX_LOCATIONS.split(",") if loc.strip()]
         return listed or [(self.VERTEX_LOCATION or "global").strip()]
+
+    @property
+    def vertex_small_window_locations(self) -> set:
+        """Regions whose input window is only `VERTEX_SMALL_WINDOW_TOKENS`."""
+        return {loc.strip() for loc in
+                self.VERTEX_SMALL_WINDOW_LOCATIONS.split(",") if loc.strip()}
+
+    def vertex_chat_locations_for(self, estimated_tokens: int) -> list:
+        """The regions a prompt this size may be sent to, in configured order.
+
+        A prompt that fits the small window may go anywhere. One that does not has
+        the small-window regions removed, because they would refuse it - and the
+        refusal is a 400, which used to end the turn. Never returns an empty list:
+        if every region were excluded the prompt is going nowhere useful, so the
+        full list is returned and the provider's own answer stands.
+        """
+        locations = self.vertex_chat_locations
+        if estimated_tokens <= self.VERTEX_SMALL_WINDOW_TOKENS:
+            return locations
+        small = self.vertex_small_window_locations
+        return [loc for loc in locations if loc not in small] or locations
 
     def vertex_chat_endpoint(self, location: str) -> str:
         """Vertex's OpenAI-compatible endpoint in one region. Regional hosts

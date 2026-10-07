@@ -1,9 +1,16 @@
 """The whole-account call Strategy Chat makes.
 
-Strategy Chat answers over the finished output of eight features at once -
-about 113,000 tokens of widget JSON - in one pass, rather than retrieving
-fragments of it. That needs a 1M context window, which the Gemini models this
-platform runs on have.
+Strategy Chat answers over the finished output of eight features at once, in one
+pass, rather than retrieving fragments of it. That needs a large context window,
+which the Gemini models this platform runs on have: gemini-2.5-flash takes
+1,048,576 input tokens.
+
+**Measured, 7 Oct, because the figure that used to be here was wrong.** This said
+"about 113,000 tokens", which is roughly the MEDIAN account. The largest is
+1,226,071 characters - about 333,000 tokens, since this corpus tokenises at 3.68
+chars/token. A third of the window rather than a tenth, and the understatement is
+part of why a provider 400 about tokens was read as a context overflow when it was
+transient capacity (see `llm._is_capacity_refusal`).
 
 It goes through the same client as every other model call (`core.llm`): the
 same provider, key and endpoint (the Vertex express key travels in its header),
@@ -59,6 +66,28 @@ def _turns(system_prompt: str, messages: list) -> list:
     return turns
 
 
+class GeminiPromptTooLarge(GeminiUnavailable):
+    """The prompt is over the model's input window before it is even sent.
+
+    Its own exception so this never again gets confused with a capacity refusal,
+    which carries a similar-sounding provider message and means the opposite:
+    that one is worth retrying, this one is not.
+    """
+
+
+def _estimated_tokens(turns: list) -> int:
+    """Roughly how many input tokens these turns are.
+
+    Chars over `TOKEN_ESTIMATE_CHARS`, which is set below the ratio this corpus
+    measures at so the estimate runs high. No tokenizer call: there is no local
+    tokenizer for this model on this path, and `count_tokens` would be a second
+    network round trip on every turn to answer a question a division answers well
+    enough for a guard.
+    """
+    return int(sum(len(str(t.get("content") or "")) for t in turns)
+               / max(settings.TOKEN_ESTIMATE_CHARS, 1.0))
+
+
 def _request(system_prompt, messages, max_output_tokens, temperature) -> tuple:
     client = llm.get_openai_client()
     if client is None:
@@ -66,6 +95,15 @@ def _request(system_prompt, messages, max_output_tokens, temperature) -> tuple:
     turns = _turns(system_prompt, messages)
     if len(turns) == 1:
         raise GeminiUnavailable("no question was asked")
+
+    # Checked here, not discovered from the provider. Nothing measured is close -
+    # the largest account is about a third of this - so a trip means a widget has
+    # run away, and saying that is more use than a 400 about token counts.
+    estimate = _estimated_tokens(turns)
+    if estimate > settings.GEMINI_MAX_INPUT_TOKENS:
+        raise GeminiPromptTooLarge(
+            f"this account's data is about {estimate:,} tokens, over the model's "
+            f"{settings.GEMINI_MAX_INPUT_TOKENS:,}-token input window")
     return client, {
         "model": settings.chat_model,
         "messages": turns,

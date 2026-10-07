@@ -92,6 +92,14 @@ PROMPT_VERSION = 8
 MAX_HISTORY_TURNS = 12
 MAX_VALIDATION_ATTEMPTS = 3
 
+# When an attempt fails on only a few segments, publish what held instead of
+# asking for the whole answer again. Each retry resends the full account (~300k
+# tokens on the largest) and costs another full generation, while the failed
+# segments are dropped either way - with their dependents, by the same
+# `claim_model.surviving` the end of the retry budget uses. A retry is still
+# spent when the loss is bigger than this share of the answer.
+PUBLISH_IF_KEPT_SHARE = 0.75
+
 # LightRAG refuses a query under three characters, and a seller opening with
 # "hi" is not a malformed request - it is how a conversation starts. Greetings
 # and small talk are answered directly, without retrieval, because there is
@@ -1174,6 +1182,9 @@ def _answer_advisor(timer, turn, messages) -> dict:
             return _published(turn, claim_model.render(segments), cited,
                               attempts, timer, segments=segments)
         last_failures, last_segments = failures, segments
+        partial = _publish_partial(turn, segments, failures, attempts, timer)
+        if partial:
+            return partial
         correction = claim_model.repair_notes(failures)
         logger.info("strategy chat: attempt %d rejected - %s", attempt + 1, reason)
 
@@ -1192,6 +1203,27 @@ def _answer_advisor(timer, turn, messages) -> dict:
     _log_timings(timer, turn["question"], accepted=False)
     return _unavailable_for(turn, _reason_for(last_failures), attempts, timer,
                             cause=CAUSE_UNEVIDENCED)
+
+
+def _publish_partial(turn, segments, failures, attempts, timer) -> dict | None:
+    """The answer minus what failed, when that is most of it; else None.
+
+    Same pruning and same re-check as the end of the retry budget - only
+    earlier, so a 20-segment answer with one bad quote is published now rather
+    than after two more full generations.
+    """
+    kept = claim_model.surviving(segments, failures)
+    if not kept or len(kept) < PUBLISH_IF_KEPT_SHARE * len(segments):
+        return None
+    ok, _, cited, _ = _revalidate(turn, kept)
+    if not ok:
+        return None
+    dropped = len(segments) - len(kept)
+    logger.info("strategy chat: published %d of %d segments without a retry, "
+                "%d dropped", len(kept), len(segments), dropped)
+    _log_timings(timer, turn["question"], accepted=True)
+    return _published(turn, claim_model.render(kept), cited, attempts, timer,
+                      segments=kept, dropped=dropped)
 
 
 def _revalidate(turn: dict, segments: list) -> tuple:
