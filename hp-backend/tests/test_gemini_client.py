@@ -184,6 +184,29 @@ def test_a_turn_with_no_timer_anywhere_still_answers(api):
     assert gemini.generate("S", QUESTION) == "an answer"
 
 
+def test_a_streamed_advisor_turn_counts_its_tokens(api, monkeypatch):
+    """The advisor answers through `gemini.generate` from inside a generator,
+    where `answer_stream` keeps no timer in scope. Its usage used to be dropped,
+    so every advisor turn on the VM logged `cache n/a` (7 Oct)."""
+    from app.services.strategy import chat
+
+    api.script.append(_response(usage=_usage(prompt=320_000, cached=300_000)))
+
+    def advisor(timer, turn, messages):
+        gemini.generate("S", messages)
+        return {"available": True, "answer": "an answer"}
+
+    monkeypatch.setattr(chat, "_answer_advisor", advisor)
+    timer = steps.StepTimer()
+    assert steps.current() is None
+    events = list(chat._stream_advisor(timer, {}, QUESTION))
+
+    assert events[-1]["type"] == "done"
+    assert timer.counters["input_tokens"] == 320_000
+    assert timer.counters["cached_tokens"] == 300_000
+    assert steps.current() is None
+
+
 # --- streaming -------------------------------------------------------------
 
 def test_streaming_yields_deltas_and_records_usage_on_the_given_timer(api):

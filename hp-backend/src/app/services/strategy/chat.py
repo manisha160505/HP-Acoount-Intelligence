@@ -1113,7 +1113,11 @@ def _stream_advisor(timer, turn, messages):
     delta once the gate has passed it, which is the point of the change.
     """
     yield {"type": "stage", "stage": "writing"}
-    result = _answer_advisor(timer, turn, messages)
+    # In scope for the call and released before the next `yield` (see
+    # `answer_stream`): `gemini.generate` records token usage against
+    # `steps.current()`, and without this every advisor turn logged no tokens.
+    with steps.use(timer):
+        result = _answer_advisor(timer, turn, messages)
     yield {"type": "stage", "stage": "checking"}
     if result.get("available") and result.get("answer"):
         yield {"type": "delta", "text": result["answer"]}

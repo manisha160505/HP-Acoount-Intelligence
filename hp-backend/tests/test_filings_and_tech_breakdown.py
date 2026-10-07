@@ -67,12 +67,20 @@ def test_both_urls_blank_excludes_the_record():
     assert out["excluded"]["no_url"] == 1
 
 
-def test_twelve_month_window_and_counts():
+def test_24_month_window_and_counts():
     rows = [_reg(), _reg(publication_date="2024-06-30", document_url="https://e.com/old.pdf")]
     out = fr.register(rows, as_of=AS_OF)
     assert out["in_window"] == 1
     assert out["excluded"]["outside_window"] == 1
     assert out["total_on_record"] == 2
+
+
+def test_a_filing_13_to_24_months_old_is_now_listed():
+    """Client, 6 Oct: filings 24 months (was 12)."""
+    older_than_a_year = AS_OF.replace(year=AS_OF.year - 1) - __import__("datetime").timedelta(days=60)
+    rows = [_reg(publication_date=older_than_a_year.isoformat(), document_url="https://e.com/fy.pdf")]
+    out = fr.register(rows, as_of=AS_OF)
+    assert out["in_window"] == 1 and out["window"]["rule"] == "last 24 months (client, 6 Oct)"
 
 
 def test_undated_is_left_out_and_counted():

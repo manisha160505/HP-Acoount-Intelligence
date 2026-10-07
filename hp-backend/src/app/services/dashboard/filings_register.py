@@ -20,7 +20,11 @@ import csv
 import re
 from datetime import UTC, date, datetime, timedelta
 
-WINDOW_DAYS = 365
+from app.services.hp.time_windows import FILINGS_WINDOW_DAYS
+
+# 24 months (client, 6 Oct: "Executive Dashboard - SEC/financial filings: last
+# 24 months"); was 12 months (client item 13).
+WINDOW_DAYS = FILINGS_WINDOW_DAYS
 
 SOURCE_REGISTER = "filings.csv"
 SOURCE_PREDICTLEADS = "PredictLeads sec_filings"
@@ -98,7 +102,7 @@ def register(index_rows: list, as_of: date | None = None) -> dict:
     """Every filing on record for the account, newest first, inside the window.
 
     Returns the listed filings plus the count of everything left out and why, so
-    the card can say "12 of 18 filings are in the last 12 months" rather than
+    the card can say "12 of 18 filings are in the last 24 months" rather than
     silently showing fewer.
     """
     as_of = as_of or datetime.now(UTC).date()
@@ -135,7 +139,7 @@ def register(index_rows: list, as_of: date | None = None) -> dict:
         "in_window": len(listed),
         "excluded": excluded,
         "window": {"from": start.isoformat(), "to": as_of.isoformat(),
-                   "rule": "last 12 months (client, item 13)"},
+                   "rule": "last 24 months (client, 6 Oct)"},
         "sources": sorted({f["source"] for f in listed}),
     }
 

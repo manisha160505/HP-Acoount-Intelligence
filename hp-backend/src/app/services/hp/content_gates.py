@@ -92,6 +92,67 @@ def asset_texts(asset: dict) -> list:
     return [t for t in out if t.strip()]
 
 
+# An evidence label as the prompt issues them: one capital letter and one or
+# two digits, in square brackets. `[A1]`, `[P12]`, runs like `[A1, A2]` and
+# adjacent pairs like `[P1][P4]`.
+#
+# Deliberately NOT `\[[^\]]+\]`. A seller-facing email opens "Dear [VP Name],"
+# - a placeholder they fill in - and a loose pattern would leave "Dear ,".
+# Eating the placeholder would be a worse bug than the one this fixes, so the
+# shape is anchored and `test_content_labels.py` pins the placeholder.
+#
+# Named for the bracketed TAG, not the label. `_LABEL_RE` further down belongs
+# to G2 and matches a bare "A1" in an `evidence_used` list - a different thing.
+# The first version of this was also called `_LABEL_RE`, so the later
+# definition won at module level and stripping left the brackets behind: the
+# body read "[]" instead of nothing.
+_EVIDENCE_TAG_RE = re.compile(r"\[\s*[A-Z]\d{1,2}(?:\s*,\s*[A-Z]\d{1,2})*\s*\]")
+# What the removal leaves behind: a doubled space, or a space pushed up against
+# the punctuation that followed the tag.
+_TAG_GAP_RE = re.compile(r"[ \t]{2,}")
+_TAG_PUNCT_RE = re.compile(r"\s+([,.;:!?])")
+
+
+def strip_evidence_tags(text) -> str:
+    """`text` with bracketed evidence tags removed and the gap closed."""
+    out = _EVIDENCE_TAG_RE.sub("", str(text or ""))
+    out = _TAG_PUNCT_RE.sub(r"\1", out)
+    out = _TAG_GAP_RE.sub(" ", out)
+    return out.strip()
+
+
+def strip_evidence_labels(asset: dict) -> dict:
+    """Every prose field of `asset`, with evidence labels removed. In place.
+
+    The writing counterpart to `asset_texts`, over the SAME `_TEXT_KEYS` plus
+    the same `body_sections` and `pillars` walk - so a prose field added to
+    one is covered by the other, and they cannot drift apart.
+
+    `evidence_used` (top level and per pillar), `evidence_labels` and
+    `hp_products` are untouched: they are the machine fields that make the
+    Evidence section, which the client explicitly wants kept.
+    """
+    asset = asset or {}
+    for key in _TEXT_KEYS:
+        if asset.get(key) is not None:
+            asset[key] = strip_evidence_tags(asset[key])
+    sections = asset.get("body_sections")
+    if isinstance(sections, list):
+        for i, section in enumerate(sections):
+            if isinstance(section, dict):
+                for k in ("heading", "text"):
+                    if section.get(k) is not None:
+                        section[k] = strip_evidence_tags(section[k])
+            else:
+                sections[i] = strip_evidence_tags(section)
+    for pillar in asset.get("pillars") or []:
+        if isinstance(pillar, dict):
+            for k in ("heading", "challenge", "hp_response"):
+                if pillar.get(k) is not None:
+                    pillar[k] = strip_evidence_tags(pillar[k])
+    return asset
+
+
 def asset_blob(asset: dict) -> str:
     return "\n".join(asset_texts(asset))
 

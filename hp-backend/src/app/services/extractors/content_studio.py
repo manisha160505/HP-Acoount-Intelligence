@@ -1289,6 +1289,16 @@ def _validate_asset(raw, contract: dict, persona: dict, labels: dict[str, str], 
         if hp_play:
             clean["hp_play"] = hp_play
 
+    # Evidence labels come off the prose before anything else looks at it.
+    # The seller copies this text into an email client, so a surviving "[A3]"
+    # is pasted in front of a customer (client, 6 Oct). The labels stay in
+    # `evidence_used`, which is what builds the Evidence section underneath.
+    #
+    # Before the gates rather than after: the gates then judge exactly the text
+    # that will be published, and the word budgets - 120-180 for an email,
+    # 60-110 for a LinkedIn message - count words instead of tags.
+    content_gates.strip_evidence_labels(clean)
+
     # Spec Section 6 (C8): the gate suite runs on every generation before the
     # seller sees it. It runs LAST, on the cleaned asset, so it judges what
     # would actually be published rather than what the model first returned.
@@ -1487,28 +1497,44 @@ def _attach_proof_point(asset: dict, proof: dict, contract: dict) -> None:
     The swap is skipped if it would push the copy past the format's word limit,
     because that limit is a spec rule rather than a preference.
     """
-    asset["hp_proof_point"] = proof["text"]
-    asset["hp_proof_point_detail"] = proof
+    # Stripped ONCE, here, and every field below is written from the stripped
+    # text. This runs AFTER `_validate_asset` has stripped the model's prose and
+    # AFTER the gates, so nothing downstream re-checks what it writes and no gate
+    # in `run()` looks for a bracketed tag - this call is the only enforcement on
+    # this path.
+    #
+    # It used to strip only `hp_proof_point`, which `asset_texts` does not read,
+    # while `proof_point` and the appended Proof Points section - both of which
+    # the seller copies, via `_compose_plain_text` - were written raw. So the one
+    # field that was protected was the one nobody reads. The text is
+    # Python-built from the case-study corpus and cannot carry a tag today, which
+    # is why this went unnoticed; the client asked for "always", and an ordering
+    # gap is how "always" stops being true later.
+    text = content_gates.strip_evidence_tags(proof["text"])
+    asset["hp_proof_point"] = text
+    # A copy, not `proof` itself: the caller keeps using that dict for
+    # allocation bookkeeping, and the UI reads `.text` off this one.
+    asset["hp_proof_point_detail"] = {**proof, "text": text}
 
     if contract.get("structured"):
         # The structured 1-Pager has no mandated headings, so there is nothing
         # to replace: the Proof Points section is appended. `proof_point` is
         # the specification's key for it (Section 3.4) and Python fills it, for
         # the reason in the docstring above.
-        asset["proof_point"] = proof["text"]
+        asset["proof_point"] = text
         sections = asset.get("body_sections") or []
         if any(str(sec.get("heading") or "").strip() == PROOF_POINTS_HEADING
                for sec in sections):
             return
         _lo, wmax = content_gates.WORD_BUDGETS.get(contract_key(contract), (None, None))
-        if wmax and content_gates.asset_word_count(asset) + len(proof["text"].split()) > wmax:
+        if wmax and content_gates.asset_word_count(asset) + len(text.split()) > wmax:
             # Past the budget is past one page, and Section 3.5 says an
             # overflowing 1-Pager is out of budget rather than something to
             # shrink. The study stays on `hp_proof_point`, which the UI shows
             # beside the copy, so nothing is lost - it just is not in the page.
             return
         asset["body_sections"] = [*sections, {"heading": PROOF_POINTS_HEADING,
-                                              "text": proof["text"]}]
+                                              "text": text}]
         return
 
     headings = contract.get("required_headings") or []
@@ -1525,13 +1551,13 @@ def _attach_proof_point(asset: dict, proof: dict, contract: dict) -> None:
     if wmax:
         counted = [asset.get("headline") or "", asset.get("opening") or "",
                    asset.get("cta") or ""]
-        counted += [proof["text"] if sec is target else (sec.get("text") or "")
+        counted += [text if sec is target else (sec.get("text") or "")
                     for sec in sections]
         counted += [sec.get("heading") or "" for sec in sections]
         if len(" ".join(t for t in counted if t).split()) > wmax:
             return
 
-    target["text"] = proof["text"]
+    target["text"] = text
 
 
 def _compose_greeting(persona: dict, contract: dict) -> str:

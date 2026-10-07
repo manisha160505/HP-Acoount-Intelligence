@@ -21,6 +21,7 @@ from app.services.extractors.grounding import (
     build_corpus,
     check_text,
 )
+from app.services.hp import time_windows
 from app.services.regen import (
     context as run_context,
     manifest as regen_manifest,
@@ -639,8 +640,9 @@ def _build_account_context(account_id: str) -> tuple[str, set[str]]:
     firmo = _read_dataset_records(account_id, "firmographics")
     techno = _read_dataset_records(account_id, "technographics")
     intent = _read_dataset_records(account_id, "intent_score")
-    gnews = _read_dataset_records(account_id, "google_news")
-    events = _read_dataset_records(account_id, "news_events")
+    # Last 12 months only (client, 6 Oct) - the Live Signals window and rule.
+    gnews = time_windows.recent_news(_read_dataset_records(account_id, "google_news"))
+    events = time_windows.recent_news(_read_dataset_records(account_id, "news_events"))
 
     lines = []
     if firmo:
@@ -693,7 +695,6 @@ def _build_account_context(account_id: str) -> tuple[str, set[str]]:
         triggers.append((dt, f"- {h} ({d})" if d else f"- {h}"))
         labels.add(h.lower())
 
-    # Undated rows sort last rather than being dropped - they are still evidence.
     triggers.sort(key=lambda t: t[0] or datetime.min, reverse=True)  # noqa: DTZ901 - sentinel bound, not a real instant
     if triggers:
         lines.append("Recent news and trigger events:\n"
