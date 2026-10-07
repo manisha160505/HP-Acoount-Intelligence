@@ -440,14 +440,20 @@ def account_evidence(account_id: str) -> list:
     from app.services.extractors.datasets import read_dataset_records
 
     evidence = []
-    from app.services.hp import hiring_jobs
+    from app.services.hp import hiring_jobs, time_windows
 
     for dataset in EVIDENCE_DATASETS:
         try:
-            # Jobs come through the one selection every feature reads.
-            records = (hiring_jobs.account_jobs(account_id).jobs
-                       if dataset == "job_openings"
-                       else read_dataset_records(account_id, dataset))
+            # Jobs come through the one selection every feature reads; news
+            # and detections are held to the last 12 months (client, 6 Oct).
+            if dataset == "job_openings":
+                records = hiring_jobs.account_jobs(account_id).jobs
+            else:
+                records = read_dataset_records(account_id, dataset)
+                if dataset in ("news_events", "google_news"):
+                    records = time_windows.recent_news(records)
+                elif dataset == "technology_detections":
+                    records = time_windows.recent_detections(records)
         except Exception:
             logger.debug("rulebook: %s unavailable for %s", dataset, account_id)
             continue

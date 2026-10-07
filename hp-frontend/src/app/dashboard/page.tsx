@@ -1,7 +1,9 @@
 'use client';
 
+import ScoreInfo from '@/components/common/ScoreInfo';
+import type { ScoreTopic } from '@/lib/scoreExplanations';
 import { caseStudyUrl } from '@/lib/caseStudies';
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { ProtectedRoute } from '@/components/common/ProtectedRoute';
 import { useAuth } from '@/providers/AuthProvider';
@@ -156,19 +158,57 @@ const EVIDENCE_ID_RE = /[a-z][a-z0-9]*(?:_[a-z0-9]+)+/g;
 // established news channels, T2 paid licensed tools, T3 long tail. Unverifiable
 // carries no tier - their list defines four - so it falls back to the scoring
 // document's own word.
-const SOURCE_TIERS: Record<number, [string, string]> = {
-  10: ['T0', 'First-party'],
-  8: ['T1', 'Established news'],
-  6: ['T2', 'Licensed data tool'],
-  3: ['T3', 'Long tail'],
-  0: ['', 'Unverifiable'],
+//
+// Shown in plain words (client, 6 Oct: no internal terminology): the tier
+// codes (T0-T3) and labels like "long tail" are dropped from the screen; the
+// bands and scores are unchanged.
+// "For this account" in the score ⓘ: the account's own sum, from the numbers
+// the widget already carries, so a reader can see how the shown figure is
+// reached. Plain labels only - the backend's term names are mapped here.
+const fmtNum = (n: any): string =>
+  typeof n === 'number' ? String(Math.round(n * 100) / 100) : String(n ?? '');
+
+function urgencyWorked(u: any): string | null {
+  const drivers = u?.drivers;
+  if (!Array.isArray(drivers) || !drivers.length || u.score == null) return null;
+  const exact = u.exact_score ?? u.score;
+  const sum = drivers.map((d: any) => `${fmtNum(d.value)} × ${Math.round((d.weight ?? 0) * 100)}%`).join(' + ');
+  return `${sum} = ${fmtNum(exact)}${exact !== u.score ? ` → ${u.score}` : ''}`;
+}
+
+const MESSAGE_LABELS: Record<string, string> = {
+  relevance: 'Relevance', impact: 'Impact', brand_recall: 'Brand recall', clarity: 'Clarity',
+  creativity: 'Creativity', emotional_connection: 'Emotional appeal', next_step_strength: 'Call to action',
+};
+
+function messageWorked(evaluation: any): string | null {
+  const dims = evaluation?.dimensions, weights = evaluation?.dimension_weights;
+  if (!dims || !weights || evaluation.composite == null) return null;
+  const used = Object.keys(weights).filter((k) => weights[k] && dims[k] != null);
+  if (!used.length) return null;
+  const sum = used.map((k) => `${MESSAGE_LABELS[k] ?? k} ${fmtNum(dims[k])} × ${Math.round(weights[k] * 100)}%`).join(' + ');
+  return `${sum} = ${fmtNum(evaluation.composite)}`;
+}
+
+// The ⓘ beside each urgency driver: what goes into it, in plain words.
+const DRIVER_INFO: Record<string, ScoreTopic> = {
+  workplace_os: 'urgencyWorkplace',
+  ai_workstation: 'urgencyAi',
+  growth_expansion: 'urgencyGrowth',
+  hp_solution_intent: 'urgencyHpIntent',
+};
+
+const SOURCE_TIERS: Record<number, string> = {
+  10: 'The company’s own announcement or filing',
+  8: 'Established news outlet',
+  6: 'Business data provider',
+  3: 'Smaller or less established site',
+  0: 'Source could not be verified',
 };
 
 function sourceReliabilityLine(points: unknown, publisher: unknown): string {
-  const entry = SOURCE_TIERS[Number(points)];
-  if (!entry) return '';
-  const [tier, label] = entry;
-  const head = tier ? `${tier} - ${label}` : label;
+  const head = SOURCE_TIERS[Number(points)];
+  if (!head) return '';
   const name = String(publisher ?? '').trim();
   return name ? `${head}: ${name}` : head;
 }
@@ -292,16 +332,141 @@ function PendingNotice({ widget, title }: { widget: any; title: string }) {
   );
 }
 
+// Which account's files a source chip may open, and which of its filings can
+// actually be opened. Supplied once around the dashboard rather than threaded
+// through every evidence list, because the chip is rendered from six different
+// places and none of them is near the account state.
+//
+// The default is empty on purpose: a chip rendered outside the provider, or
+// before the manifest answers, is plain text rather than a link that might not
+// work. It fails in the safe direction.
+interface SourceLinkContext { accountId: string; filings: Set<string> }
+const AccountIdContext = React.createContext<SourceLinkContext>(
+  { accountId: '', filings: new Set<string>() });
+
+// Two evidence rows from the same unlinked source are one chip. A row that
+// links somewhere keeps its own, since the links genuinely go to different
+// places. The count is shown so collapsing never hides how much evidence
+// there was.
+//
+// Keyed on what identifies the source rather than on the built link, so this
+// needs no account id. Two pages of one filing have different labels
+// ("…annual_report.pdf p.11" / "p.14") and stay separate chips, which is right:
+// they open at different places.
+function dedupeSources(sources: any[]) {
+  const byKey = new Map<string, any>();
+  (sources || []).forEach((s: any) => {
+    const ident = s.filing_label || s.resolved_source_url || s.resolved_url
+      || s.source_url || s.url || '';
+    const key = `${s.label}::${ident}`;
+    const seen = byKey.get(key);
+    if (seen) { seen.count = (seen.count || 1) + 1; }
+    else { byKey.set(key, { ...s, count: 1 }); }
+  });
+  return Array.from(byKey.values());
+}
+
+// Our own copy of a filing, opened at the page the evidence cites.
+//
+// `filing_label` is the registered upload filename, which is what the backend
+// matches on - so a link built here needs nothing added to any stored widget.
+// `#page=` is honoured by every browser's built-in PDF viewer.
+function filingHref(ctx: SourceLinkContext, s: any): string {
+  const name = String(s?.filing_label || '').trim();
+  // Only a filing the backend confirms it can serve. `filing_label` was true of
+  // the corpus when the widget was built, not necessarily now - a re-uploaded
+  // filing leaves its old row replaced, and a filing can be registered on an
+  // account whose PDF is not on this machine. Linking from the label alone
+  // opened a tab containing a 404 in both cases.
+  if (!ctx.accountId || !name || !ctx.filings.has(name)) return '';
+  const accountId = ctx.accountId;
+  const base = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+  const token = typeof window !== 'undefined'
+    ? (localStorage.getItem('hp_token') || '') : '';
+  const url = `${base}/api/v1/accounts/${accountId}/data/filing`
+    + `?name=${encodeURIComponent(name)}&token=${encodeURIComponent(token)}`;
+  const page = Number(s?.page);
+  return Number.isFinite(page) && page > 0 ? `${url}#page=${page}` : url;
+}
+
+// The link for a source row, or '' when it has none.
+//
+// Order: our own copy of the filing, then the company's public URL, then plain
+// text. Our copy wins because of the filing URLs the crawl attempted, 24% failed
+// or returned something that was not a document, and a public URL cannot open at
+// page 11. But when we have no openable copy, the public `source_url` part one
+// put on these rows is still something we HAVE, so it is offered rather than
+// dropped - and only when there is neither does the chip go plain.
+//
+// For everything else, `resolved_source_url` is preferred where it exists - a
+// Live Signal's raw `source_url` is often a news.google.com redirect. An HP
+// case-study link goes through `caseStudyUrl`, which drops the document ids HP
+// has retired; a dead link is worse than plain text.
+function sourceHref(s: any, ctx?: SourceLinkContext): string {
+  const filing = filingHref(ctx || { accountId: '', filings: new Set() }, s);
+  if (filing) return filing;
+  const raw = String(s?.resolved_source_url || s?.resolved_url
+                     || s?.source_url || s?.url || '').trim();
+  if (!raw) return '';
+  return raw.includes('h20195.www2.hp.com') ? (caseStudyUrl(raw) || '') : raw;
+}
+
+// What a chip reads when the row names no source of its own. The link's host is
+// real - it is where the click goes - where the word "Source" was a placeholder
+// standing in for information we actually hold.
+function hostLabel(href: string): string {
+  try {
+    return new URL(href).hostname.replace(/^www\./, '');
+  } catch {
+    return '';
+  }
+}
+
+// A source, as provenance rather than a bare identifier: the exact evidence_id
+// stays in the tooltip so a claim is still traceable to the registry row
+// behind it.
+//
+// Client, 6 Oct: wherever evidence is shown the source should be clickable, so
+// a seller can verify the claim before sending it. Much of this evidence is a
+// cell in an uploaded CSV with no web page to open, so an unlinkable source is
+// flat and carries no external-link mark - what can be opened is obvious before
+// anyone clicks, and nothing is dressed up as a link that goes nowhere.
+function SourceChip({ s, tone = 'emerald' }: { s: any; tone?: 'emerald' | 'slate' }) {
+  const ctx = React.useContext(AccountIdContext);
+  const href = sourceHref(s, ctx);
+  const detail = s.quote
+    ? `${s.field ? s.field + ' — ' : ''}"${s.quote}"`
+    : String(s.source_text || '').slice(0, 180);
+  // Named by the source, else by where the link goes. Nothing stands in when
+  // there is neither - the chip is dropped by the caller instead.
+  const name = s.label || s.publisher || hostLabel(href);
+  if (!name) return null;
+  const label = `${name}${s.count > 1 ? ` (${s.count})` : ''}`;
+  const linkedClass = tone === 'slate'
+    ? 'border-blue-200 bg-blue-50 text-hp-navy hover:bg-blue-100'
+    : 'border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100';
+  return (
+    <span
+      title={[s.evidence_id, detail].filter(Boolean).join(' — ') || undefined}
+      className={`inline-flex max-w-full items-center gap-1 rounded-full border px-2 py-[3px] text-[10px] font-semibold align-middle ${
+        href ? linkedClass : 'border-slate-200 bg-slate-50 text-slate-500'}`}
+    >
+      <FileText className="w-2.5 h-2.5 flex-shrink-0" />
+      {href ? (
+        <a href={href} target="_blank" rel="noopener noreferrer"
+           className="truncate hover:underline">{label}</a>
+      ) : (
+        <span className="truncate">{label}</span>
+      )}
+      {href && <ExternalLink className="w-2.5 h-2.5 flex-shrink-0" />}
+    </span>
+  );
+}
+
 // One HP recommendation, rendered to match the vendor cards it sits beneath.
 // The product, the confidence and the approved facts are all decided in Python;
 // this only lays them out.
 function HpRecommendationCard({ rec, xray }: { rec: any; xray?: boolean }) {
-  const conf = String(rec.confidence || '');
-  const confClass =
-    conf === 'Confirmed' ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-    : conf === 'Likely' ? 'bg-amber-50 text-amber-700 border-amber-200'
-    : 'bg-slate-100 text-slate-600 border-slate-200';
-
   return (
     <div className="bg-indigo-50/40 border border-indigo-100 rounded-2xl p-4 space-y-3">
       <div className="flex flex-wrap items-start justify-between gap-2 border-b border-indigo-100 pb-2">
@@ -323,39 +488,9 @@ function HpRecommendationCard({ rec, xray }: { rec: any; xray?: boolean }) {
               {rec.device_type}
             </span>
           )}
-          {/* Part A only. Its bands are computed from whether the DEVICE's
-              category is confirmed in the estate, and a service rule has no
-              device to check - an invented band would look like the same
-              measurement. */}
-          {conf && (
-            <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border ${confClass}`}>
-              {conf}
-            </span>
-          )}
-          {rec.quoted_verbatim && (
-            <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border bg-white text-slate-500 border-slate-200">
-              quoted from the rulebook
-            </span>
-          )}
-          {/* How strongly this may be put. Not a score - the confidence band
-              beside it is the score. This says what the prose is allowed to
-              claim, and it is keyed on how many independent data pipelines saw
-              the evidence, not on how many rows did. */}
-          {rec.confidence_tier && (
-            <span
-              className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border ${
-                rec.confidence_tier === 'Opportunity'
-                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                  : rec.confidence_tier === 'Conversation Starter'
-                  ? 'bg-sky-50 text-sky-700 border-sky-200'
-                  : 'bg-slate-100 text-slate-600 border-slate-200'
-              }`}
-              title={[rec.evidence_tier?.basis, rec.evidence_tier?.permitted_language]
-                .filter(Boolean).join(' — ')}
-            >
-              {rec.confidence_tier}
-            </span>
-          )}
+          {/* The fit band (Confirmed / Likely / Discovery) and evidence label
+              (Opportunity / Conversation Starter / Context Only) were removed
+              from the card at the client's request (6 Oct). */}
         </div>
         {/* Section 3: "Do not expose internal rule IDs ... Seller-facing
             output should contain the conclusion, not the backend logic." The
@@ -447,12 +582,6 @@ function HpRecommendationCard({ rec, xray }: { rec: any; xray?: boolean }) {
             </span>
           </p>
 
-          {!rec.confidence && rec.confidence_basis?.no_band_because && (
-            <p className="text-[10px] text-slate-500 italic">
-              No confidence band: {rec.confidence_basis.no_band_because}.
-            </p>
-          )}
-
           {xray && (rec.account_evidence || []).length > 0 && (
             <div className="space-y-1 pt-1">
               {rec.account_evidence.map((e: any, i: number) => (
@@ -495,8 +624,6 @@ export default function UserDashboardPage() {
   const [provenanceSourceFilter, setProvenanceSourceFilter] = useState('ALL');
 
   // Urgency Score Driver Popover & Tooltip State
-  const [activeDriverPopover, setActiveDriverPopover] = useState<string | null>(null);
-  const [hoveredDriverTooltip, setHoveredDriverTooltip] = useState<string | null>(null);
 
   // Key Metrics Source Citation Popover State
   const [activeMetricPopover, setActiveMetricPopover] = useState<string | null>(null);
@@ -509,6 +636,19 @@ export default function UserDashboardPage() {
   const [minSignalScore, setMinSignalScore] = useState(0);
   const [expandedSignalId, setExpandedSignalId] = useState<string | null>(null);
   const [expandedSignalDetailId, setExpandedSignalDetailId] = useState<string | null>(null);
+  // Which signal is listing the other articles it was merged from. Collapsed by
+  // default: a signal merged from five reports should not print five chips
+  // unprompted.
+  const [expandedSignalSourcesId, setExpandedSignalSourcesId] = useState<string | null>(null);
+  // The filings this account has an openable copy of, by registered filename.
+  // Empty until the manifest answers, so a chip starts plain and becomes a link
+  // rather than starting as a link that might not work.
+  const [filingsAvailable, setFilingsAvailable] = useState<Set<string>>(new Set());
+  // Memoised: a fresh object on every render would re-render every source chip
+  // on the screen, and this component renders a lot.
+  const sourceLinkCtx = useMemo(
+    () => ({ accountId: selectedAccount?.id || '', filings: filingsAvailable }),
+    [selectedAccount?.id, filingsAvailable]);
   const [expandedObjectionId, setExpandedObjectionId] = useState<string | null>(null);
 
   // Intent Topics Filter State
@@ -631,6 +771,33 @@ export default function UserDashboardPage() {
     })();
     return () => { cancelled = true; };
   }, [activeFeatureKey, selectedAccountId]);
+
+  // Which filings this account actually has an openable copy of.
+  //
+  // An evidence row's `filing_label` was true of the corpus when the widget was
+  // built, not necessarily now: a re-uploaded filing leaves its old row
+  // `replaced`, and a filing can be registered on an account whose PDF is not on
+  // this machine. Linking optimistically from the label alone opened a tab
+  // containing a 404 in both cases, and a dead link is worse than plain text.
+  //
+  // Fails soft to an empty set, like the two fetches above: no filings known
+  // means no filing links, which degrades to the public URL or to plain text -
+  // never to a broken one.
+  useEffect(() => {
+    if (!selectedAccountId) { setFilingsAvailable(new Set()); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await api.get<any>(`/accounts/${selectedAccountId}/data/filings`);
+        if (cancelled) return;
+        setFilingsAvailable(new Set<string>(
+          (res.data?.filings || []).map((f: any) => String(f.filename))));
+      } catch {
+        if (!cancelled) setFilingsAvailable(new Set());
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [selectedAccountId]);
 
   // Objectives, formats and personas come from the evaluator endpoints so the
   // dropdowns cannot drift from the scoring formulas that consume them.
@@ -831,6 +998,10 @@ export default function UserDashboardPage() {
 
   return (
     <ProtectedRoute allowedRoles={['user', 'admin']}>
+      {/* Which account's filings an evidence chip may open. Empty while no
+          account is selected, which makes filingHref return '' and the chip
+          render flat - the correct behaviour, not a broken link. */}
+      <AccountIdContext.Provider value={sourceLinkCtx}>
       <div className="flex h-screen bg-[#F8FAFC] overflow-hidden text-slate-800 font-sans">
         
         {/* ============================================================================== */}
@@ -1073,6 +1244,7 @@ export default function UserDashboardPage() {
                     }`}>
                       {hasScore ? <><CountUpText text={urgency.score} />/{urgency.max_score ?? 100}</> : NO_SIGNAL}
                     </span>
+                    <ScoreInfo topic="urgency" align="right" worked={urgencyWorked(urgency)} />
                   </div>
                 );
               })()}
@@ -1081,8 +1253,18 @@ export default function UserDashboardPage() {
             {/* When the ACCOUNT DATA was loaded - not when this page was opened,
                 and not when the widget was last generated. Recommendation
                 Tuning Logic section E: a dashboard opened months after
-                ingestion must still name the snapshot it is reasoning from. */}
-            {(() => {
+                ingestion must still name the snapshot it is reasoning from.
+
+                Executive Dashboard only (client, 6 Oct). This header is shared
+                by every feature, so the tag used to sit beside each feature's
+                own dating - next to Intent's "as of", which is Bombora's
+                observation date, not an ingestion date - and the two read as a
+                contradiction. One tag, in one place, measuring one thing.
+
+                The value itself never varied by feature: the API attaches the
+                same account-wide map to every widget. This changes where it is
+                shown, not what it says. */}
+            {activeFeatureKey === 'executive_dashboard' && (() => {
               // Client ruling, 24 Sep: show the retrieval date of the data
               // itself, not one rolled-up date for the account. Each dataset
               // is named with the day it was loaded; where every pipeline
@@ -1602,23 +1784,10 @@ export default function UserDashboardPage() {
                                   label: d.label,
                                   available: d.available,
                                   scoreText: `${d.value}/100`,
+                                  value: d.value,
+                                  terms: d.terms,
                                   progressPct: `${d.value}%`,
                                   barColor: 'bg-hp-navy',
-                                  // The whole working, so a seller who
-                                  // disagrees with the number can see which
-                                  // term to disagree with. Built in the
-                                  // backend (urgency.rationale_lines) and kept
-                                  // as lines rather than glued into one
-                                  // paragraph - the client asked for bullets,
-                                  // and there is now one version of this text
-                                  // rather than one here and one there.
-                                  rationale: (d.rationale_lines ?? [
-                                    `Weight ${Math.round(d.weight * 100)}% of the total.`,
-                                    ...(d.terms ?? []).map((t: any) =>
-                                      `${t.label}: ${t.points}/${t.max_points} - ${t.missing_input ? NO_SIGNAL : t.basis}`),
-                                    ...(d.notes ?? []),
-                                    ...(d.caveats ?? []).map((c: string) => `Caveat: ${c}`),
-                                  ]) as string[],
                                 };
                                 }).map((driver: any, driverIdx: number) => (
                                 <div key={driver.id} className="relative">
@@ -1626,27 +1795,7 @@ export default function UserDashboardPage() {
                                     <div className="flex items-center space-x-1.5">
                                       <span className={driver.available ? '' : 'text-slate-400'}>{driver.label}</span>
 
-                                      {/* Interactive Info Icon Button */}
-                                      <div className="relative inline-block">
-                                        <button
-                                          type="button"
-                                          onMouseEnter={() => setHoveredDriverTooltip(driver.id)}
-                                          onMouseLeave={() => setHoveredDriverTooltip(null)}
-                                          onClick={() => setActiveDriverPopover(activeDriverPopover === driver.id ? null : driver.id)}
-                                          className="text-slate-400 hover:text-slate-700 p-0.5 rounded transition"
-                                          title="Why this score"
-                                        >
-                                          <Info className="w-3.5 h-3.5" />
-                                        </button>
-
-                                        {/* Hover Tooltip Badge ("Why this score") */}
-                                        {hoveredDriverTooltip === driver.id && activeDriverPopover !== driver.id && (
-                                          <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 z-30 px-2 py-1 bg-slate-900 text-white text-[10px] font-bold rounded shadow-md whitespace-nowrap pointer-events-none">
-                                            Why this score
-                                            <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-900"></div>
-                                          </div>
-                                        )}
-                                      </div>
+                                      {DRIVER_INFO[driver.id] && <ScoreInfo topic={DRIVER_INFO[driver.id]} />}
                                     </div>
 
                                     <span className="font-mono text-slate-500 font-bold"><CountUpText text={driver.scoreText} first delay={growDelay(driverIdx)} /></span>
@@ -1657,29 +1806,6 @@ export default function UserDashboardPage() {
                                     <div className={`as-grow ${driver.barColor} h-2 rounded-full transition-all duration-500`} style={{ width: driver.progressPct, ['--as-d' as string]: `${growDelay(driverIdx)}ms` }}></div>
                                   </div>
 
-                                  {/* Popover Card Modal */}
-                                  {activeDriverPopover === driver.id && (
-                                    <div className="absolute left-0 top-full mt-2 w-80 bg-white border border-slate-200 rounded-2xl shadow-2xl p-4 z-50 animate-fade-in text-xs font-medium">
-                                      <div className="flex justify-between items-center border-b border-slate-100 pb-2 mb-2">
-                                        <h4 className="font-extrabold text-slate-900 text-xs">{driver.label}</h4>
-                                        <button
-                                          type="button"
-                                          onClick={() => setActiveDriverPopover(null)}
-                                          className="text-slate-400 hover:text-slate-600 rounded p-0.5"
-                                        >
-                                          <X className="w-4 h-4" />
-                                        </button>
-                                      </div>
-                                      <ul className="space-y-1.5">
-                                        {driver.rationale.map((line: string, i: number) => (
-                                          <li key={i} className="text-slate-600 leading-relaxed text-[11px] flex gap-2">
-                                            <span className="text-hp-navy flex-shrink-0">&bull;</span>
-                                            <span>{line}</span>
-                                          </li>
-                                        ))}
-                                      </ul>
-                                    </div>
-                                  )}
                                 </div>
                               ))}
 
@@ -1713,15 +1839,9 @@ export default function UserDashboardPage() {
                             </p>
                           )}
 
-                          {urgencyData && (
-                            <p className="text-[10px] text-slate-400 leading-relaxed border-t border-slate-100 pt-3">
-                              {/* The authority sentence comes from the payload
-                                  rather than being written here: the backend
-                                  owns which document the formula is from, and
-                                  a copy in the UI would drift from it. */}
-                              {urgencyData.formula}{' '}{urgencyData.formula_authority}
-                            </p>
-                          )}
+                          {/* The formula and its source document used to be
+                              printed here. The ⓘ in the header explains the score
+                              in plain language instead (client, 6 Oct). */}
                         </div>
 
                       {/* Section 5: STRATEGIC PRIORITIES
@@ -1746,13 +1866,22 @@ export default function UserDashboardPage() {
                           <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700 flex items-center gap-2">
                             <Target className="w-4 h-4 text-hp-navy" />
                             <span>STRATEGIC PRIORITIES</span>
+                            <ScoreInfo topic="catalysts" />
                           </h3>
-                          {priorityList.length > 0 && (
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-hp-navy border border-blue-200 inline-flex items-center gap-1">
-                              <FileText className="w-3 h-3" />
-                              {priorityList.reduce((n: number, p: any) => n + (p.sources?.length || 0), 0)} primary sources
-                            </span>
-                          )}
+{/* Guarded on the COUNT, not on the list: catalysts with no
+                              sources rendered "0 primary sources", which is a
+                              statement about something we do not have. */}
+                          {(() => {
+                            const n = priorityList.reduce(
+                              (t: number, p: any) => t + (p.sources?.length || 0), 0);
+                            if (!n) return null;
+                            return (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-hp-navy border border-blue-200 inline-flex items-center gap-1">
+                                <FileText className="w-3 h-3" />
+                                {n} primary source{n === 1 ? '' : 's'}
+                              </span>
+                            );
+                          })()}
                         </div>
 
                         {/* The executive summary is no longer rendered here - it
@@ -1805,11 +1934,11 @@ export default function UserDashboardPage() {
                                                   {NO_SIGNAL}
                                                 </span>
                                               ) : (
-                                                <span
-                                                  className="text-[10px] font-extrabold px-2 py-0.5 rounded-full border flex-shrink-0 whitespace-nowrap cursor-help bg-blue-50 text-hp-navy border-blue-200"
-                                                  title={p.evidence_strength.formula}
-                                                >
-                                                  {`${p.evidence_strength.score}/${p.evidence_strength.max_score}`}
+                                                <span className="inline-flex items-center gap-0.5 flex-shrink-0">
+                                                  <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full border whitespace-nowrap bg-blue-50 text-hp-navy border-blue-200">
+                                                    {`${p.evidence_strength.score}/${p.evidence_strength.max_score}`}
+                                                  </span>
+                                                  <ScoreInfo topic="evidenceStrength" align="right" />
                                                 </span>
                                               )
                                             )}
@@ -1880,12 +2009,20 @@ export default function UserDashboardPage() {
                                             </div>
                                           )}
 
-                                          <p className="text-[10px] text-slate-500">
-                                            <span className="font-bold text-slate-600">Evidence: </span>
-                                            {m.support_count} source sentence{m.support_count === 1 ? '' : 's'}
-                                            {' · '}{m.distinct_sections} document section{m.distinct_sections === 1 ? '' : 's'}
-                                            {' · '}{m.independent_source_count} independent source{m.independent_source_count === 1 ? '' : 's'}
-                                          </p>
+{/* Only the counts we have. With nothing measured this read
+                                              "Evidence: 0 source sentences - 0 document sections",
+                                              which announces an absence. */}
+                                          {(m.support_count || m.distinct_sections
+                                            || m.independent_source_count) ? (
+                                            <p className="text-[10px] text-slate-500">
+                                              <span className="font-bold text-slate-600">Evidence: </span>
+                                              {[
+                                                m.support_count && `${m.support_count} source sentence${m.support_count === 1 ? '' : 's'}`,
+                                                m.distinct_sections && `${m.distinct_sections} document section${m.distinct_sections === 1 ? '' : 's'}`,
+                                                m.independent_source_count && `${m.independent_source_count} independent source${m.independent_source_count === 1 ? '' : 's'}`,
+                                              ].filter(Boolean).join(' · ')}
+                                            </p>
+                                          ) : null}
 
                                           <div className="flex flex-wrap items-center gap-1.5">
                                             {(p.sources || []).slice(0, 4).map((s: any, si: number) => (
@@ -1946,15 +2083,18 @@ export default function UserDashboardPage() {
                                                 {p.evidence_strength?.zero_reason ? (
                                                   <span className="text-[11px] text-slate-400">{NO_SIGNAL}</span>
                                                 ) : (
-                                                  <span
-                                                    className="text-[11px] font-extrabold text-slate-700 cursor-help"
-                                                    title={p.evidence_strength?.formula || prioritiesData?.evidence_strength_formula}
-                                                  >
-                                                    {`${p.evidence_strength?.score ?? 0}/${p.evidence_strength?.max_score ?? 100}`}
+                                                  <span className="inline-flex items-center gap-0.5">
+                                                    <span className="text-[11px] font-extrabold text-slate-700">
+                                                      {`${p.evidence_strength?.score ?? 0}/${p.evidence_strength?.max_score ?? 100}`}
+                                                    </span>
+                                                    <ScoreInfo topic="evidenceStrength" align="right" />
                                                   </span>
                                                 )}
                                               </div>
 
+{/* The heading goes with its content: it used to stand over
+                                                  an empty list reading "Supporting claims (0)". */}
+                                              {(p.sources || []).length > 0 && (
                                               <div className="space-y-1.5 pt-1 border-t border-slate-200">
                                                 <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 block">
                                                   Supporting claims ({(p.sources || []).length})
@@ -1980,14 +2120,21 @@ export default function UserDashboardPage() {
                                                             </li>
                                                           ))}
                                                         </ul>
-                                                        <span className="block text-[10px] text-slate-400 truncate mt-0.5 pl-4">
-                                                          {s.label}
+                                                        {/* The source, clickable where there is
+                                                            something to open (client, 6 Oct). This
+                                                            read as a plain grey line while the row
+                                                            next to it already carried source_url -
+                                                            the chip on the card face above has been
+                                                            linking the same field all along. */}
+                                                        <span className="block mt-1 pl-4">
+                                                          <SourceChip s={s} tone="slate" />
                                                         </span>
                                                       </div>
                                                     );
                                                   })}
                                                 </div>
                                               </div>
+                                              )}
                                             </div>
                                           )}
                                         </div>
@@ -2242,7 +2389,7 @@ export default function UserDashboardPage() {
                           </div>
 
                           <div>
-                            <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-2">Minimum Score</p>
+                            <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-1">Minimum Score <ScoreInfo topic="liveSignal" /></p>
                             <div className="flex flex-wrap gap-1.5">
                               {[0, 4, 6, 8].map(v => (
                                 <button
@@ -2345,7 +2492,7 @@ export default function UserDashboardPage() {
                                     )}
                                     <span className="ml-auto flex items-center gap-2 text-xs font-semibold text-slate-600">
                                       {s.confidence !== null && s.confidence !== undefined ? (
-                                        <>{s.confidence.toFixed(1)}<span className="text-slate-400 font-normal">/10</span></>
+                                        <>{s.confidence.toFixed(1)}<span className="text-slate-400 font-normal">/10</span><ScoreInfo topic="liveSignal" align="right" /></>
                                       ) : (
                                         <span className="text-slate-400 font-normal">{NO_SIGNAL}</span>
                                       )}
@@ -2426,26 +2573,70 @@ export default function UserDashboardPage() {
                                     );
                                   })()}
 
-                                  {/* Source chip, directly below the implication block */}
-                                  <div className="mt-2.5 flex flex-wrap items-center gap-2">
-                                    {s.source_url && (
-                                      <a
-                                        href={s.source_url}
-                                        target="_blank"
-                                        rel="noreferrer"
-                                        className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full hover:bg-emerald-100 transition"
-                                      >
-                                        <FileText className="w-3 h-3" />
-                                        <span>{s.source_publisher || 'Source'}</span>
-                                        <ExternalLink className="w-3 h-3" />
-                                      </a>
-                                    )}
-                                    {s.supporting_source_count > 1 && (
-                                      <span className="text-[10px] font-medium text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">
-                                        {s.supporting_source_count} supporting sources
-                                      </span>
-                                    )}
-                                  </div>
+                                  {/* Source chip, directly below the implication block.
+                                      The link prefers resolved_source_url: a google_news
+                                      row's own URL is a news.google.com redirect, and the
+                                      backend unwraps it to the publisher. A news_events
+                                      signal carries no URL by design and stays unlinked. */}
+                                  {(() => {
+                                    const acctId = sourceLinkCtx;
+                                    const primaryHref = sourceHref(s, acctId);
+                                    // The merge keeps the primary's own entry in this list,
+                                    // so the article already linked above is dropped rather
+                                    // than shown twice.
+                                    const others = (s.supporting_sources || []).filter(
+                                      (x: any) => sourceHref(x, acctId)
+                                        && sourceHref(x, acctId) !== primaryHref);
+                                    const sourcesOpen = expandedSignalSourcesId === s.signal_id;
+                                    return (
+                                      <div className="mt-2.5 space-y-1.5">
+                                        <div className="flex flex-wrap items-center gap-2">
+                                          {primaryHref && (
+                                            <a
+                                              href={primaryHref}
+                                              target="_blank"
+                                              rel="noopener noreferrer"
+                                              className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full hover:bg-emerald-100 transition"
+                                            >
+                                              <FileText className="w-3 h-3" />
+                                              <span>{s.source_publisher || hostLabel(primaryHref) || 'Source'}</span>
+                                              <ExternalLink className="w-3 h-3" />
+                                            </a>
+                                          )}
+                                          {/* The count was the whole of this before: the
+                                              payload has carried every merged article with
+                                              its own URL all along, and none of them were
+                                              reachable (client, 6 Oct).
+
+                                              When none of them IS reachable, nothing is said.
+                                              "2 supporting sources" appeared in exactly the
+                                              case where there was nothing to open, which is
+                                              the opposite of useful. */}
+                                          {others.length > 0 && (
+                                            <button
+                                              type="button"
+                                              onClick={() => setExpandedSignalSourcesId(sourcesOpen ? null : s.signal_id)}
+                                              className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded hover:bg-slate-200 transition"
+                                            >
+                                              {sourcesOpen ? <ChevronUp className="w-2.5 h-2.5" /> : <ChevronDown className="w-2.5 h-2.5" />}
+                                              {others.length} more source{others.length === 1 ? '' : 's'}
+                                            </button>
+                                          )}
+                                        </div>
+                                        {sourcesOpen && others.length > 0 && (
+                                          <div className="flex flex-wrap items-center gap-1.5 pl-0.5">
+                                            {others.map((x: any, xi: number) => (
+                                              <SourceChip
+                                                key={xi}
+                                                s={{ ...x, label: x.publisher || x.dataset
+                                                      || hostLabel(sourceHref(x, acctId)) }}
+                                              />
+                                            ))}
+                                          </div>
+                                        )}
+                                      </div>
+                                    );
+                                  })()}
 
                                   {sc && (
                                     <div className="mt-2 flex justify-end">
@@ -2463,7 +2654,7 @@ export default function UserDashboardPage() {
                                   {/* expanded score breakdown */}
                                   {isOpen && sc && (
                                     <div className="mt-3 bg-slate-50 rounded-lg p-3 border border-slate-200 space-y-2">
-                                      <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Score breakdown</p>
+                                      <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1">Score breakdown <ScoreInfo topic="liveSignal" /></p>
                                       {Object.entries(dimLabels).map(([dim, label]) => {
                                         const val = sc.scores?.[dim];
                                         if (val === undefined) return null;
@@ -2530,7 +2721,9 @@ export default function UserDashboardPage() {
                   const topicsList: IntentTopic[] = topicsData?.topics || [];
                   const provider = topicsData?.provider || summaryData?.provider;
                   const accountMatch = topicsData?.account_match || summaryData?.account_match;
-                  const observation = topicsData?.observation || summaryData?.observation;
+                  // `observation` (Bombora's own Date Stamp) is no longer read:
+                  // its only reader was the "Intent · as of" chip, removed on
+                  // 6 Oct. It stays in the widget payload.
                   const dictionaryVersion: string = topicsData?.dictionary_version || summaryData?.dictionary_version || '';
                   const categoryFile = summaryData?.category_file || summaryWidget?.data?.category_file;
                   const categoryFileMatched = categoryFile?.status === 'matched';
@@ -2602,7 +2795,6 @@ export default function UserDashboardPage() {
                     'Other / Low Relevance': { chip: 'bg-slate-100 text-slate-700 border-slate-200', bar: 'bg-slate-400', border: 'border-slate-200' }
                   };
                   const categoryLabel = (name: string) => (name === 'Poly/Collaboration' ? 'Poly' : name);
-                  const hasSignal = (stage?: string | null) => !!stage && stage.toLowerCase() !== 'no signal';
 
                   const shortTopic = (name: string) => (name.includes(':') ? name.split(':').slice(1).join(':').trim() : name);
 
@@ -2711,15 +2903,17 @@ export default function UserDashboardPage() {
                           </h2>
                           {/* Sahaj, 27 Sep: replace the counts line with the source. */}
                           <p className="text-xs text-slate-500 mt-0.5">
-                            Intent scores powered by Bombora and Predictleads
+                            Research activity across HP's business areas
                           </p>
                         </div>
                         <div className="flex flex-wrap items-center gap-2 text-xs font-bold">
-                          {observation?.as_of && (
-                            <span className="px-3 py-1 bg-slate-100 text-slate-600 border border-slate-200 rounded-full text-[11px]">
-                              Intent · as of {observation.as_of}
-                            </span>
-                          )}
+                          {/* The "Intent · as of" chip was removed (client, 6 Oct).
+                              It carried Bombora's own Date Stamp - when Bombora
+                              OBSERVED the research - while the account header
+                              carries the ingestion date. Two different dates on
+                              one screen read as a contradiction, so only the
+                              header's remains. The observation date is still in
+                              the payload; nothing renders it. */}
                           {/* Only a verified match is shown; a mismatch or an unverified
                               domain is a backend review item, not a client-facing chip. */}
                           {accountMatch?.status === 'matched' && (
@@ -2797,15 +2991,15 @@ export default function UserDashboardPage() {
                         const averaged = bu.score_source === 'Bombora';
                         const longTail: any[] = bu.long_tail || [];
                         const sourceNote = averaged
-                          ? 'Average of the HP-relevant Bombora topics in each category'
+                          ? 'Average strength of the research topics matched to each HP area'
                           : byBombora
-                            ? 'From the HP category intent file · no Bombora topic for this account is about an HP category'
-                            : 'From the HP category intent file';
+                            ? 'From buying-interest data · none of this account’s research topics relate to an HP area'
+                            : 'From buying-interest data for each HP area';
                         return (
                           <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm space-y-4">
                             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
                               <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700">
-                                Intent across HP business units
+                                Intent across HP business units <ScoreInfo topic="intentHpCategory" />
                               </h3>
                               <span className="text-[10px] text-slate-400">{sourceNote}</span>
                             </div>
@@ -2899,7 +3093,7 @@ export default function UserDashboardPage() {
                                           <p className="text-[10px] text-slate-400">{NO_SIGNAL}</p>
                                         )}
                                         <p className="text-[9px] text-slate-400">
-                                          {hovered.score_basis === 'category_file' ? 'Score as supplied in the HP category intent file.' : 'Composite scores as supplied by Bombora.'}
+                                          {hovered.score_basis === 'category_file' ? 'Score as received from the research provider.' : 'Topic scores as received from the research provider.'}
                                         </p>
                                       </div>
                                     );
@@ -2941,9 +3135,9 @@ export default function UserDashboardPage() {
 
                                       <p className="text-[11px] font-semibold text-slate-600">
                                         {u.score_basis === 'bombora_average'
-                                          ? <>Average of {u.bombora_topic_count} Bombora topic{u.bombora_topic_count === 1 ? '' : 's'}</>
+                                          ? <>Average of {u.bombora_topic_count} research topic{u.bombora_topic_count === 1 ? '' : 's'}</>
                                           : u.score_basis === 'category_file'
-                                            ? <>HP category intent file{u.category_file_stage ? ` · ${u.category_file_stage}` : ''}</>
+                                            ? <>Buying-interest data{u.category_file_stage ? ` · ${u.category_file_stage}` : ''}</>
                                             : scored
                                               ? <>{u.bombora_topic_count} researched topic{u.bombora_topic_count === 1 ? '' : 's'}</>
                                               : <span className="text-slate-400 font-normal">{NO_SIGNAL}</span>}
@@ -2993,7 +3187,7 @@ export default function UserDashboardPage() {
                             {byBombora && longTail.length > 0 && (
                               <details className="group rounded-xl border border-slate-200 bg-slate-50/50">
                                 <summary className="cursor-pointer list-none flex items-center justify-between px-3.5 py-2.5 text-xs font-bold text-slate-700">
-                                  <span>Other Bombora topics ({longTail.length})</span>
+                                  <span>Other researched topics ({longTail.length})</span>
                                   <ChevronDown className="w-3.5 h-3.5 transition-transform group-open:rotate-180" />
                                 </summary>
                                 <div className="px-3.5 pb-3 space-y-1 max-h-96 overflow-y-auto">
@@ -3147,7 +3341,7 @@ export default function UserDashboardPage() {
                                                     : NO_SIGNAL}
                                                 </p>
                                                 <p className="text-[9px] text-slate-400 leading-snug pt-0.5 border-t border-slate-100">
-                                                  All values as supplied by the HP Category Intent file.
+                                                  All values as received from the research provider.
                                                 </p>
                                               </div>
                                     );
@@ -3158,7 +3352,7 @@ export default function UserDashboardPage() {
                               <p className="text-xs text-slate-400">{NO_SIGNAL}</p>
                             )}
                             <p className="text-[11px] text-slate-500">
-                              Scores as received from the HP Category Intent file, shown for every HP category, ordered by score. Hover a bar for that category&apos;s buying stage and the topics and keywords behind it. Supporting Bombora signals add context and never change these scores.
+                              Buying interest in each HP area, highest first. Hover a bar for that area&apos;s buying stage and the topics and keywords behind it. Other research signals add context and never change these scores.
                             </p>
                           </div>
 
@@ -3180,11 +3374,8 @@ export default function UserDashboardPage() {
                                     <div className="flex items-center gap-2.5 min-w-0">
                                       <span className={`px-3 py-0.5 rounded-full text-sm font-extrabold border ${style.chip}`}>{categoryLabel(cat.category)}</span>
                                     </div>
-                                    {p && (
-                                      <span title="Buying Stage, as supplied by the category file" className={`text-[11px] font-bold px-2.5 py-1 rounded-md border flex-shrink-0 ${hasSignal(p.stage) ? 'bg-blue-50 text-hp-navy border-blue-200' : 'bg-slate-50 text-slate-500 border-slate-200'}`}>
-                                        {p.stage || NO_SIGNAL}
-                                      </span>
-                                    )}
+                                    {/* The buying-stage badge was removed at the client's
+                                        request (6 Oct): the cards show the score only. */}
                                   </div>
 
                                   {/* Bombora research for this unit, first (Sahaj 3.6) */}
@@ -3194,7 +3385,7 @@ export default function UserDashboardPage() {
                                     return u.bombora_topic_count > 0 ? (
                                       <div className="rounded-lg bg-blue-50/60 border border-blue-100 px-3 py-2 space-y-1">
                                         <p className="text-[11px] font-bold text-slate-800">
-                                          Bombora research &middot; {u.bombora_topic_count} topic{u.bombora_topic_count === 1 ? '' : 's'} &middot; max {u.bombora_max}
+                                          Research activity &middot; {u.bombora_topic_count} topic{u.bombora_topic_count === 1 ? '' : 's'} &middot; max {u.bombora_max}
                                         </p>
                                         {u.bombora_top_topics?.length > 0 && (
                                           <p className="text-[11px] text-slate-600 leading-relaxed">
@@ -3209,7 +3400,7 @@ export default function UserDashboardPage() {
 
                                   {/* Score bar */}
                                   {p && (
-                                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Predictleads score</span>
+                                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Buying-interest score</span>
                                   )}
                                   {p ? (
                                     <div className="flex items-center gap-3">
@@ -3292,7 +3483,7 @@ export default function UserDashboardPage() {
                                 <span>{hpGrouped ? 'INTENT DATA' : `BROADER INTENT TOPICS (${topicsList.length})`}</span>
                               </h3>
                               <p className="text-xs text-slate-500 mt-0.5">
-                                As received from the intent data · {provider?.scoring_definition} · Intent sources: Bombora and Predictleads
+                                The topics people at this company have been researching, each scored 0-100, as received
                               </p>
                             </div>
 
@@ -3488,7 +3679,7 @@ export default function UserDashboardPage() {
                                   )}
                                 </h2>
                                 <p className="text-xs text-slate-500 mt-0.5">
-                                  Job openings powered by Predictleads{summary.domain ? ` · ${summary.domain}` : ''}
+                                  Job openings{summary.domain ? ` · ${summary.domain}` : ''}
                                 </p>
                               </div>
                             </div>
@@ -3720,11 +3911,11 @@ export default function UserDashboardPage() {
                                       <div className="flex items-center space-x-2 min-w-0">
                                         <Compass className="w-4 h-4 text-slate-400 flex-shrink-0" />
                                         <h4 className="text-base font-bold text-slate-900">{play.title || 'HP Opportunity Play'}</h4>
-                                        <Info className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
                                       </div>
 
                                       <div className="flex flex-col items-start sm:items-end gap-0.5 flex-shrink-0">
                                         {play.priority && (
+                                          <span className="inline-flex items-center gap-0.5">
                                           <span className={`text-[11px] font-semibold px-2 py-0.5 rounded border ${
                                             play.priority === 'Critical' ? 'text-rose-700 bg-rose-50 border-rose-200'
                                               : play.priority === 'High' ? 'text-amber-700 bg-amber-50 border-amber-200'
@@ -3732,6 +3923,8 @@ export default function UserDashboardPage() {
                                               : 'text-slate-600 bg-slate-100 border-slate-200'
                                           }`}>
                                             {play.priority}
+                                          </span>
+                                          <ScoreInfo topic="opportunityPriority" align="right" />
                                           </span>
                                         )}
                                       </div>
@@ -4749,8 +4942,11 @@ export default function UserDashboardPage() {
                                           <div>
                                             <div className="flex items-center justify-between gap-2 border-b border-emerald-200/60 pb-2 mb-2">
                                               <h5 className="text-xs font-black text-slate-900">{vendor.vendor_name}</h5>
-                                              <span className="text-[10px] font-extrabold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-300">
-                                                {vendor.risk_level}
+                                              <span className="inline-flex items-center gap-0.5">
+                                                <span className="text-[10px] font-extrabold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-300">
+                                                  {vendor.risk_level}
+                                                </span>
+                                                <ScoreInfo topic="techRisk" align="right" />
                                               </span>
                                             </div>
                                             <p className="text-xs text-slate-600 font-medium">{vendor.description}</p>
@@ -4802,11 +4998,13 @@ export default function UserDashboardPage() {
                                                 )}
                                                 {vendor.hp_relationship_label && (
                                                   <span
-                                                    title={vendor.hp_relationship || ''}
                                                     className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200"
                                                   >
                                                     {vendor.hp_relationship_label}
                                                   </span>
+                                                )}
+                                                {(vendor.risk_level || vendor.hp_relationship_label) && (
+                                                  <ScoreInfo topic="techRisk" align="right" />
                                                 )}
                                               </div>
                                             </div>
@@ -5756,7 +5954,7 @@ export default function UserDashboardPage() {
                                           className="text-[10px] font-semibold text-rose-600"
                                           title={floored.detail}
                                         >
-                                          capped &mdash; {floored.gate}
+                                          capped
                                         </span>
                                       )}
                                       </div>
@@ -5792,12 +5990,9 @@ export default function UserDashboardPage() {
                                   )}
                                 </div>
                                 <div className="text-xs text-slate-500">
-                                  <p className="font-medium text-slate-600 mb-0.5">
-                                    Composite ({evaluation.objective_label}) &middot; V{evaluation.version}
-                                  </p>
-                                  <p className="font-mono text-[10px]">{evaluation.formula_used}</p>
-                                  <p className="text-[10px] text-slate-400">
-                                    Formula source: {evaluation.formula_source}
+                                  <p className="font-medium text-slate-600 mb-0.5 flex items-center gap-1">
+                                    Overall score ({evaluation.objective_label}) &middot; V{evaluation.version}
+                                    <ScoreInfo topic="messageScore" worked={messageWorked(evaluation)} />
                                   </p>
                                 </div>
                               </div>
@@ -6477,57 +6672,6 @@ export default function UserDashboardPage() {
                   const cmIndex = (retrievalStatus?.indexes || [])
                     .find((i: any) => i.index === 'content_messaging');
 
-
-
-                  // Two evidence rows from the same unlinked source are one chip.
-                  // A row that links somewhere keeps its own, since the links
-                  // genuinely go to different places. The count is shown so
-                  // collapsing never hides how much evidence there was.
-                  const dedupeSources = (sources: any[]) => {
-                    const byKey = new Map<string, any>();
-                    (sources || []).forEach((s: any) => {
-                      const key = `${s.label}::${s.source_url || ''}`;
-                      const seen = byKey.get(key);
-                      if (seen) { seen.count = (seen.count || 1) + 1; }
-                      else { byKey.set(key, { ...s, count: 1 }); }
-                    });
-                    return Array.from(byKey.values());
-                  };
-
-                  // The chip reads as provenance, never as a bare identifier; the
-                  // exact evidence_id stays in the tooltip so a claim is still
-                  // traceable to the registry row behind it.
-                  const SourceChip = ({ s }: { s: any }) => {
-                    // Much of this evidence is a cell in an uploaded CSV, which
-                    // has no web page to open. Rather than render every chip as
-                    // though it were clickable, an unlinkable one is flat and
-                    // carries no external-link mark, so what can be opened is
-                    // obvious before anyone clicks.
-                    const linked = !!s.source_url;
-                    const detail = s.quote
-                      ? `${s.field ? s.field + ' — ' : ''}"${s.quote}"`
-                      : String(s.source_text || '').slice(0, 180);
-                    return (
-                      <span
-                        title={`${s.evidence_id}${detail ? ` — ${detail}` : ''}`}
-                        className={`inline-flex items-center gap-1 rounded-full border px-2 py-[3px] text-[10px] font-semibold whitespace-nowrap align-middle ${
-                          linked
-                            ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
-                            : 'border-slate-200 bg-slate-50 text-slate-500'}`}
-                      >
-                        <FileText className="w-2.5 h-2.5" />
-                        {linked ? (
-                          <a href={s.source_url} target="_blank" rel="noopener noreferrer"
-                             className="hover:underline">
-                            {s.label}{s.count > 1 ? ' (' + s.count + ')' : ''}
-                          </a>
-                        ) : (
-                          <>{s.label}{s.count > 1 ? ' (' + s.count + ')' : ''}</>
-                        )}
-                        {linked && <ExternalLink className="w-2.5 h-2.5" />}
-                      </span>
-                    );
-                  };
 
                   return (
                     <div className="space-y-6">
@@ -7487,9 +7631,12 @@ export default function UserDashboardPage() {
 
                               {/* Provenance */}
                               <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-[11px]">
+{/* Heading and panel only when something was cited. This
+                                    printed "None cited." under an "Evidence used"
+                                    heading, which is a note about an absence. */}
+                                {labels.length > 0 && (
                                 <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-1">
                                   <span className="font-mono font-extrabold text-[10px] text-slate-500 uppercase block">Evidence used</span>
-                                  {labels.length === 0 && <div className="text-slate-500">None cited.</div>}
                                   {labels.map(([k, v]) => (
                                     <div key={k}>
                                       <span className="font-mono font-bold text-hp-navy">[{k}]</span>{' '}
@@ -7497,6 +7644,7 @@ export default function UserDashboardPage() {
                                     </div>
                                   ))}
                                 </div>
+                                )}
                                 <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-1">
                                   <span className="font-mono font-extrabold text-[10px] text-slate-500 uppercase block">HP lines &amp; framing</span>
                                   {generatedAsset.topic && <div className="text-slate-500">Topic: {generatedAsset.topic}</div>}
@@ -7515,11 +7663,15 @@ export default function UserDashboardPage() {
                                     <div className="text-slate-600">
                                       Proof point:{' '}
                                       <span className="font-semibold text-slate-800">{g.hp_proof_point_detail.customer}</span>
-                                      {g.hp_proof_point_detail.source_url && (
+                                      {/* Guarded like every other proof-point link. This one
+                                          rendered the raw URL, so the three case-study
+                                          documents HP has retired were offered here as links
+                                          while the rest of the app already suppressed them. */}
+                                      {caseStudyUrl(g.hp_proof_point_detail.source_url) && (
                                         <>
                                           {' · '}
                                           <a
-                                            href={g.hp_proof_point_detail.source_url}
+                                            href={caseStudyUrl(g.hp_proof_point_detail.source_url) ?? undefined}
                                             target="_blank"
                                             rel="noopener noreferrer"
                                             className="underline hover:text-hp-navy"
@@ -8127,6 +8279,7 @@ export default function UserDashboardPage() {
 
       </div>
       <MyActivityPanel open={isMyActivityOpen} onClose={closeMyActivity} userName={user?.full_name} />
+      </AccountIdContext.Provider>
     </ProtectedRoute>
   );
 }

@@ -107,6 +107,23 @@ def require_user_role(current_user: dict = Depends(get_current_user)):
         )
     return current_user
 
+def require_user_role_flexible(
+    current_user: dict = Depends(get_current_user_flexible),
+):
+    """`require_user_role`, for a route reached by a plain link.
+
+    `get_current_user_flexible` accepts the token in the query string, which is
+    what lets an `<a href>` work at all - but it carries no role check, so on its
+    own it admits any authenticated principal whatever their role. A route that
+    serves a document needs both.
+    """
+    if current_user["role"] not in ["user", "admin"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access forbidden: Invalid role",
+        )
+    return current_user
+
 def require_admin_role(current_user: dict = Depends(get_current_user)):
     if current_user["role"] != "admin":
         raise HTTPException(

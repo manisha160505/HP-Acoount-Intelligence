@@ -1167,6 +1167,39 @@ def extract_recent_news_signals(account_id: str) -> list[dict]:
         s["sales_angle"] = (sc or {}).get("sales_angle")
         s["hp_play"] = (sc or {}).get("hp_play")
         s["rationales"] = (sc or {}).get("rationales")
+
+        # The link the seller clicks, unwrapped to the publisher where that can
+        # be done offline.
+        #
+        # `source_reliability_points` has always resolved the aggregator link
+        # before scoring it - the specification requires the underlying source to
+        # be scored, not the pipe that carried it - and `_deterministic_dims`
+        # returns it as `resolved_source_url`. Nothing ever stored it, so the
+        # card went on linking the raw `event_url`.
+        #
+        # Measured against the current export, this recovers nothing and is kept
+        # for the cases it does cover. 2,859 of the 5,756 google_news rows across
+        # the 220 accounts are news.google.com links, and every one of them is
+        # the post-2024 RSS form - `/rss/articles/CBMi...`, a base64 protobuf
+        # holding an opaque `AU_yqL...` token and no destination URL at all.
+        # There is nothing in the string to unwrap; Google resolves it server
+        # side. `resolve_source_url` is offline by contract, so it correctly
+        # leaves these alone and the card links the Google interstitial, as
+        # before. What it does unwrap is a redirector that names its destination
+        # in the query string and the older Google form that embedded the URL.
+        #
+        # Published here rather than copied out of the score document so an
+        # unscored signal gets it too; the call is pure and decides nothing
+        # about the score.
+        resolved, unwrapped = signal_scoring.resolve_source_url(
+            s.get("source_url") or "")
+        s["resolved_source_url"] = resolved if unwrapped else None
+        for sub in s.get("supporting_sources") or []:
+            sub_resolved, sub_unwrapped = signal_scoring.resolve_source_url(
+                sub.get("url") or "")
+            if sub_unwrapped:
+                sub["resolved_url"] = sub_resolved
+
         s.pop("_canon", None)
         s.pop("_event_dt", None)
 

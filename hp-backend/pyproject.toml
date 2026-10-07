@@ -184,3 +184,6 @@ filterwarnings = [
     "ignore::DeprecationWarning",
     "ignore::PendingDeprecationWarning",
 ]
+markers = [
+    "window: runs the 24-month filings window against a pinned date (test_filings_financials)",
+]

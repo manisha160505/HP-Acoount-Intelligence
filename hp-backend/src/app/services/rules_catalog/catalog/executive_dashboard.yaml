@@ -317,7 +317,7 @@ rules:
   confidence: high
 - id: filings_on_record
   parent: exec_key_metrics
-  name: Filings on record (last 12 months)
+  name: Filings on record (last 24 months)
   kind: selection
   summary: Lists the account's filed documents from the agreed filings list.
   purpose: Lists the account's filed documents from the agreed filings list.
@@ -325,13 +325,13 @@ rules:
   - The company's list of filings (annual reports and regulatory filings), uploaded with the documents
   logic: 'Each filing is shown with a link: the document link if present, otherwise the link to the page
     it was found on (never a local file). Its date is the publication date, otherwise the period-end date.
-    A filing is left out (and counted) if it has no link, no readable date, a date outside the last 365
-    days up to tomorrow, or the same link as one already listed (ignoring http/https, www and a trailing
+    A filing is left out (and counted) if it has no link, no readable date, a date outside the last 730
+    days (24 months) up to tomorrow, or the same link as one already listed (ignoring http/https, www and a trailing
     slash). The rest are listed newest first.'
   conditions:
   - 'No link: left out (''no link'')'
   - 'No date: left out (''undated'')'
-  - 'Filed more than 365 days ago or more than 1 day ahead: left out (''outside the window'')'
+  - 'Filed more than 730 days (24 months) ago or more than 1 day ahead: left out (''outside the window'')'
   - 'Same link as one already listed: left out (''duplicate'')'
   - The window is measured from the day the card is generated
   - '''Document on file'' is true when the document has been downloaded successfully or generated from
@@ -341,7 +341,7 @@ rules:
   constants:
   - label: Window (days)
     ref: py:app.services.dashboard.filings_register:WINDOW_DAYS
-    stated: 365
+    stated: 730
   example:
     scenario: 'Six rows, generated on 5 Oct 2026: Annual Report 2025 (20 Mar 2026, document link), a copy
       of it (21 Mar 2026, same link via the source page with www), Annual Report 2023 (Mar 2024), a notice
@@ -349,27 +349,28 @@ rules:
       timestamp).'
     steps:
     - 'Copy: same link after tidying, so a duplicate.'
-    - 'The 2023 report and the 8-K (1 Sep 2025) fall before 5 Oct 2025: outside the window.'
+    - 'The 2023 report (Mar 2024) falls before 5 Oct 2024: outside the window. The 8-K (1 Sep 2025) is inside.'
     - 'Notice: undated.'
     - 'Half-year report: no link.'
-    result: '1 of 6 listed (Annual Report 2025); left out: no link 1, outside the window 2, undated 1,
-      duplicate 1.'
+    result: '2 of 6 listed (Annual Report 2025, then the 8-K); left out: no link 1, outside the window 1,
+      undated 1, duplicate 1.'
     verified: true
     expect:
-    - 1
+    - 2
     - 6
     - no_url: 1
-      outside_window: 2
+      outside_window: 1
       undated: 1
       duplicate: 1
     - - Annual Report 2025
+      - 8-K
   output: The list of filings on record (stored with the card; not shown as a tile on the dashboard page,
     but used by other parts of the app)
   sources:
   - hp-backend/src/app/services/dashboard/filings_register.py:register
   - hp-backend/src/app/services/dashboard/filings_register.py:_entry
   - hp-backend/src/app/services/dashboard/filings_register.py:_date
-  doc_source: 'Client answers opens_1 #10, opens_2 #11/#13, 18 Sep link rule (quoted in code)'
+  doc_source: 'Client answers opens_1 #10, opens_2 #11/#13, 18 Sep link rule; 24-month window, client 6 Oct'
   confidence: high
 - id: reported_financials
   parent: exec_key_metrics
