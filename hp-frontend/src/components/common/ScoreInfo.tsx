@@ -121,14 +121,16 @@ export default function ScoreInfo({ topic, align = 'left', worked, className = '
           </li>
         ))}
       </ul>
-      <div className="mt-3 rounded-xl bg-slate-50 border border-slate-200 px-3 py-2">
-        <p className="text-[10px] font-extrabold uppercase tracking-wider text-hp-navy mb-1">The rule</p>
-        <div className="space-y-1">
-          {info.rules.map((r) => (
-            <p key={r} className="leading-relaxed text-slate-700">{r}</p>
-          ))}
+      {'rules' in info && info.rules && info.rules.length > 0 && (
+        <div className="mt-3 rounded-xl bg-slate-50 border border-slate-200 px-3 py-2">
+          <p className="text-[10px] font-extrabold uppercase tracking-wider text-hp-navy mb-1">The rule</p>
+          <div className="space-y-1">
+            {info.rules.map((r) => (
+              <p key={r} className="leading-relaxed text-slate-700">{r}</p>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
       {worked && (
         <div className="mt-2 rounded-xl bg-blue-50/70 border border-blue-100 px-3 py-2">
           <p className="text-[10px] font-extrabold uppercase tracking-wider text-hp-navy mb-1">For this account</p>

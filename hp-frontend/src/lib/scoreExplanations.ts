@@ -4,7 +4,7 @@
 //
 // Each entry has two parts, shown in this order:
 //   points - what goes into the score, in plain words
-//   rules  - the formula and the point rules, written simply
+//   rules  - the formula, where the client wants it shown (optional)
 // The card can also show the account's own sum ("For this account"), built
 // on the page from the live numbers.
 //
@@ -17,7 +17,7 @@ export interface ScoreExplanation {
   title: string;
   intro: string;
   points: string[];
-  rules: string[];
+  rules?: string[];
   note?: string;
 }
 
@@ -38,67 +38,41 @@ export const SCORE_EXPLANATIONS = {
     ],
   },
   urgencyWorkplace: {
-    title: 'Workplace technology and OS opportunity',
-    intro: 'Scored from 0 to 100 from the size of the organisation, the operating systems it runs and the workplace tools it uses.',
+    title: 'Workplace Technology and OS Opportunity',
+    intro: 'Wherein:',
     points: [
-      'Larger organisations score higher.',
-      'A mix of operating systems scores higher than a single one.',
-      'More workplace tools, such as collaboration and productivity software, score higher.',
-    ],
-    rules: [
-      'Score = Company size (up to 30) + Operating systems (up to 40) + Workplace tools (up to 30)',
-      'Company size (staff): 50,000+ = 30 · 10,001–49,999 = 25 · 5,001–10,000 = 20 · 1,001–5,000 = 15 · 251–1,000 = 10 · smaller = 5',
-      'Operating systems: Linux + Windows = 40 · Linux + Apple or other = 35 · Windows + Apple or other = 30 · Apple + other = 20 · Linux only = 30 · Windows only = 25 · Apple only = 15 · other only = 10',
-      'Workplace tools: 5 or more = 30 · 3–4 = 20 · 1–2 = 10',
+      'Account scale, i.e. the employee range.',
+      'Detected OS environment, for example Linux, Windows.',
+      'Number of workplace technologies found (workplace technology footprint). A detected technology qualifies only where there is a documented connection to an HP workplace solution, such as HP Workforce Experience Platform (WXP) or HP Anyware.',
     ],
   },
   urgencyAi: {
-    title: 'AI and workstation opportunity',
-    intro: 'Scored from 0 to 100 from the company’s AI activity and its interest in workstations.',
+    title: 'AI and Workstation Opportunity',
+    intro: 'Wherein:',
     points: [
-      'How many areas of AI the company is researching or using.',
-      'How much AI-related research and technology there is in total.',
-      'How much interest the company shows in workstations.',
-      'Recent news about the company’s AI activity.',
-    ],
-    rules: [
-      'Score = AI breadth (up to 35) + AI depth (up to 35) + Workstation interest (up to 15) + AI news (up to 15)',
-      'AI breadth (of 4 AI areas): 1 area = 14 · 2 = 21 · 3 = 28 · all 4 = 35',
-      'AI depth (AI topics and technologies found): 20+ = 35 · 15+ = 28 · 10+ = 21 · 5+ = 14 · 1+ = 7',
-      'Workstation interest: the workstation interest score (0–100) scaled down to 15',
-      'AI news: 5 points per AI news story in the last year, up to 15',
+      'Breadth: the core AI/ML topic families detected, namely (1) AI / Artificial Intelligence, (2) ML / Machine Learning, (3) Generative AI / GenAI and (4) LLM / Large Language Models / VLLM.',
+      'Depth: detailed AI/ML evidence items, such as OpenAI, AI strategy, AI data analytics, AI automation, AI/ML operationalisation, vector database, Azure for ML, AI data management and in-database machine learning.',
+      'Workstation intent score, taken directly from the research intent data.',
+      'Recent AI initiatives.',
     ],
   },
   urgencyGrowth: {
-    title: 'Growth and expansion signals',
-    intro: 'Scored from 0 to 100 from workforce growth, hiring and expansion news.',
+    title: 'Growth and Expansion Signals',
+    intro: 'Wherein:',
     points: [
-      'How fast the company’s workforce has been growing.',
-      'How many jobs it has advertised over the last year.',
-      'Recent news about growth or expansion, such as new sites or acquisitions.',
-    ],
-    rules: [
-      'Score = Workforce growth (up to 25) + Hiring (up to 50) + Expansion news (up to 25)',
-      'Workforce growth: 20%+ = 25 · 10%+ = 20 · 5%+ = 15 · 1%+ = 7.5',
-      'Hiring (jobs advertised in the last year): 200+ = 50 · 100+ = 40 · 50+ = 30 · 20+ = 20 · 5+ = 10',
-      'Expansion news: 10 points per story in the last year, up to 25',
+      'Workforce growth %. This is a LinkedIn workforce proxy, not employee headcount.',
+      'Recent hiring volume, i.e. job opening records.',
+      'Verified growth and expansion events, such as a new office, headquarters, facility, plant or data centre.',
     ],
   },
   urgencyHpIntent: {
-    title: 'HP solution intent',
-    intro: 'Scored from 0 to 100 from the company’s strongest interest in an HP product area.',
+    title: 'HP Solution Intent',
+    intro: 'Wherein:',
     points: [
-      'How strong that interest is.',
-      'Whether it is rising or falling.',
-      'How close the company is to a buying decision.',
-      'How much research activity there is behind it.',
-    ],
-    rules: [
-      'Score = Interest strength (up to 60) + Trend (up to 10) + Buying stage (up to 15) + Research volume (up to 15)',
-      'Interest strength: the strongest HP area’s interest score (0–100) scaled down to 60',
-      'Trend: rising = 10 · steady = 5 · falling = 0',
-      'Buying stage: decision or purchase = 15 · consideration = 10 · awareness = 5',
-      'Research volume: high = 15 · medium = 10 · low = 5',
+      'HP-category intent score for an HP business area: 3D, Poly, PCs, Workstation, Printers and so on.',
+      'Intent trend, i.e. whether the trend for that HP business area is increasing, stable or decreasing.',
+      'Buying stage, i.e. whether it shows Decision or Purchase, Consideration, or Awareness.',
+      'Research volume, i.e. high, medium or low.',
     ],
   },
   catalysts: {
@@ -125,11 +99,7 @@ export const SCORE_EXPLANATIONS = {
     ],
     rules: [
       'Score = Filings (up to 25) + Recency (up to 25) + Variety of sources (up to 50)',
-      'Filings: 5 points for each filing that mentions it, up to 25',
-      'Recency of the newest source: within 1 year = 25 · 2 years = 20 · 3 years = 15 · 5 years = 10 · older = 5',
-      'Variety: 10 points for each kind of source (company filings, company announcements, investor material, government sources, independent media), up to 50',
     ],
-    note: 'It measures how well the catalyst is supported, not how important it is.',
   },
   liveSignal: {
     title: 'How the signal score works',
@@ -140,11 +110,9 @@ export const SCORE_EXPLANATIONS = {
       'Source reliability: news from the company itself or an established publication scores higher.',
     ],
     rules: [
-      'Score = Relevance × 50% + Recency × 30% + Source reliability × 20% (each out of 10)',
-      'Relevance: a stated need HP can meet = 10 · an HP-related technology or workplace project = 8 · a major business change (new site, expansion, acquisition, hiring growth) = 6 · a weak link to HP = 3 · no link = 0',
-      'Recency: within 7 days = 10 · 30 days = 8 · 90 days = 6 · 6 months = 4 · 1 year = 2 · older = 0',
-      'Source: the company’s own announcement or filing = 10 · established news outlet = 8 · business data provider = 6 · smaller site = 3 · unverified = 0',
-      'Label: 8 or more = Critical · 6 or more = High · 4 or more = Medium · below 4 = Low',
+      'Score = Relevance × 50% + Recency × 30% + Source reliability × 20%',
+      'Relevance, highest to lowest: a stated need HP can meet · an HP-related technology or workplace project · a major business change (new site, expansion, acquisition, hiring growth) · a weak link to HP · no link',
+      'Source, highest to lowest: the company’s own announcement or filing · established news outlet · business data provider · smaller site · unverified',
     ],
   },
   intentHpCategory: {
@@ -161,44 +129,14 @@ export const SCORE_EXPLANATIONS = {
     ],
     note: 'Intent shows research activity, not a confirmed plan to buy.',
   },
-  intentCategoryInterest: {
-    title: 'How these area scores work',
-    intro: 'Each HP area is scored from 0 to 100 for how much buying interest the company shows in it.',
-    points: [
-      'A higher score means stronger signs of interest in that area, such as research activity.',
-      'Each area also shows a buying stage, from early awareness to a purchase decision.',
-    ],
-    rules: [
-      'Scores are shown as received from a specialist research provider, without changes.',
-      'Areas are listed from the highest score to the lowest.',
-    ],
-    note: 'Intent shows research activity, not a confirmed plan to buy.',
-  },
-  intentTopic: {
-    title: 'What the topic score means',
-    intro: 'A score from 0 to 100 for how much more than usual people at this company have been reading about the topic.',
-    points: [
-      'A higher score means a stronger, more recent rise in interest.',
-      'It reflects research across the whole company, not one person.',
-    ],
-    rules: [
-      'Scores are shown as received from a specialist research provider, without changes.',
-      'Filter: 70+ and 85+ show only the strongest topics.',
-    ],
-    note: 'Intent shows research activity, not a confirmed plan to buy.',
-  },
   opportunityPriority: {
     title: 'How opportunity priority is set',
-    intro: 'Each opportunity is ranked by how strong and how timely the evidence for it is.',
+    intro: 'Each opportunity is given a priority from the evidence behind it:',
     points: [
-      'Direct evidence: the company is clearly working on this initiative.',
-      'Timing: a recent event makes it time-sensitive.',
-    ],
-    rules: [
-      'Critical = direct evidence + a timing event',
-      'High = direct evidence, no timing event yet',
-      'Medium = related signals only, no direct evidence',
-      'Low = background context only',
+      'Critical: a specific initiative is confirmed and another independent signal supports it. Example: an announced AI programme plus related AI hiring; a facility expansion plus workforce or meeting-room growth.',
+      'High: a specific initiative is confirmed, but there is no second supporting signal. Example: an announced AI programme but no related AI hiring or technology evidence; a confirmed office expansion but no supporting workforce or technology signal.',
+      'Medium: no confirmed initiative, but relevant signals suggest a potential opportunity. Example: strong AI, PC or workstation intent without an active programme; relevant AI or engineering hiring; technologies indicating workstation or device relevance.',
+      'Low: the evidence is general or indirect, with no clear opportunity. Example: general company growth or a revenue increase; broad hiring with no relevant role or skill connection; generic expansion news without a technology or workplace signal.',
     ],
   },
   techRisk: {
@@ -211,20 +149,6 @@ export const SCORE_EXPLANATIONS = {
       'Compete (high risk) = a competitor’s product where HP offers a direct alternative',
       'Complement (low risk) = technology that works alongside HP products',
       'Open opportunity (medium risk) = no product found in this area, so it is open for HP to discuss',
-    ],
-  },
-  hpRecommendation: {
-    title: 'How recommendation confidence works',
-    intro: 'Each HP recommendation carries two labels: how certain the fit is, and how much evidence supports it.',
-    points: [
-      'Fit: whether the company’s technology matches this HP offering and whether the timing is right.',
-      'Evidence: how many separate kinds of data point to the same need.',
-    ],
-    rules: [
-      'Confirmed = the technology fits + a recent event makes it timely',
-      'Likely = the technology fits, nothing time-sensitive yet',
-      'Discovery = the area looks open or related; worth exploring in conversation',
-      'Opportunity = 2 or more separate kinds of data support it · Conversation starter = 1 strong signal · Context only = background',
     ],
   },
   messageScore: {
