@@ -156,6 +156,34 @@ def test_token_usage_reaches_the_timer_in_scope(api):
     assert timer.counters["cached_tokens"] == 139_000
 
 
+def test_token_usage_reaches_a_timer_passed_in_with_none_in_scope(api):
+    """The case that was missing, and the one production actually runs.
+
+    `answer_stream` cannot hold a context variable across a `yield`, so it wraps
+    only setup in `steps.use` and generation runs with nothing current. The test
+    above passes because it sets the context variable; the real streamed turn
+    does not, so `steps.current()` was None, `_record_usage` returned at its
+    first line, and every logged turn read `"tokens": {}` and `cache n/a` - which
+    is why nobody could tell whether the cache was engaging.
+
+    `generate_stream` already took the timer explicitly and was tested that way.
+    `generate` did not.
+    """
+    api.script.append(_response(usage=_usage(prompt=140_000, cached=139_000)))
+    timer = steps.StepTimer()
+    assert steps.current() is None
+    gemini.generate("S", QUESTION, timer=timer)
+    assert timer.counters["input_tokens"] == 140_000
+    assert timer.counters["cached_tokens"] == 139_000
+
+
+def test_a_turn_with_no_timer_anywhere_still_answers(api):
+    """Counters are telemetry. A missing one must never cost an answer."""
+    api.script.append(_response(usage=_usage()))
+    assert steps.current() is None
+    assert gemini.generate("S", QUESTION) == "an answer"
+
+
 # --- streaming -------------------------------------------------------------
 
 def test_streaming_yields_deltas_and_records_usage_on_the_given_timer(api):

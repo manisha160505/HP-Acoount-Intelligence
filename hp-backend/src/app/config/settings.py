@@ -140,6 +140,27 @@ class Settings(BaseSettings):
     GEMINI_MAX_OUTPUT_TOKENS: int = 16384
     GEMINI_TEMPERATURE: float = 0.3
 
+    # How long ONE model request may take before it is abandoned.
+    #
+    # There was no timeout at all, so every call ran on the SDK's own 600s
+    # default - and one logical answer is up to 3 validation attempts, each
+    # walking up to 5 rate-limit waits across every configured region. Nothing in
+    # that chain was bounded by anything anyone chose.
+    #
+    # 300s, chosen to be clearly above a slow REAL call rather than close to it.
+    # What is measured: a one-attempt answer on the largest account is ~12s, and a
+    # three-attempt turn is ~46s. What is not: how long a single generation takes
+    # when the model writes the full 16,384-token output cap. The nearest evidence
+    # is a 32,768-cap answer that wrote 42,528 tokens and spent 400s (see
+    # GEMINI_MAX_OUTPUT_TOKENS above), which is why this is not set to the ~60s
+    # the happy path would suggest - a timeout that fires on an answer that would
+    # have arrived is worse than one that fires late.
+    #
+    # Deliberately NOT added to `llm._retryable`: a timeout fails the turn instead
+    # of being retried. Retrying would spend another 300s per region on a request
+    # that has already shown it is stuck, and the seller is waiting.
+    LLM_REQUEST_TIMEOUT_SECONDS: float = 300.0
+
     # --- Observability -----------------------------------------------------
     # Stamped onto every log record, span and metric so that signals from the
     # backend stay distinguishable once other services share a project.
@@ -221,8 +242,10 @@ class Settings(BaseSettings):
         wants OAuth). Not ?key=: a URL lands in error messages and logs."""
         if self.llm_provider == "vertex":
             return {"base_url": self.llm_endpoint, "api_key": "vertex-express",
+                    "timeout": self.LLM_REQUEST_TIMEOUT_SECONDS,
                     "default_headers": {"x-goog-api-key": self.llm_api_key}}
-        return {"base_url": self.llm_endpoint or None, "api_key": self.llm_api_key}
+        return {"base_url": self.llm_endpoint or None, "api_key": self.llm_api_key,
+                "timeout": self.LLM_REQUEST_TIMEOUT_SECONDS}
 
     @property
     def llm_request_extra(self) -> dict:

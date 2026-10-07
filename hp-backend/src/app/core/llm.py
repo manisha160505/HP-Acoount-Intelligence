@@ -1,3 +1,4 @@
+import hashlib
 import json
 import logging
 import threading
@@ -39,27 +40,57 @@ _chat_lock = threading.Lock()
 _chat_turn = 0
 
 
-def _regional_clients(client) -> list:
-    """The client once per Vertex chat region, starting one further along on
-    each call so concurrent sections spread over the regions. The copies skip
-    the SDK's own retries: a 429 should move on to the next region at once.
-    One region (or another provider) is just the client as it was."""
+def _affinity_start(affinity: str, count: int) -> int:
+    """Which region a given key always starts at.
+
+    A stable digest, not `hash()`: Python randomises string hashing per process,
+    so `hash()` would pick a different region after every restart and a different
+    one per worker - which is the behaviour this function exists to remove.
+    """
+    digest = hashlib.blake2b(affinity.encode("utf-8"), digest_size=8).digest()
+    return int.from_bytes(digest, "big") % count
+
+
+def _regional_clients(client, affinity: str = "") -> list:
+    """The client once per Vertex chat region, in the order they should be tried.
+
+    Without an `affinity` the list starts one further along on each call, so
+    concurrent sections spread over the regions - which is what regeneration
+    wants: many accounts, no shared prefix, spread the quota.
+
+    **With an `affinity` the starting region is fixed for that key.** Strategy
+    Chat sends the same ~400k-token prefix again on every turn and on every
+    validation retry, and a prompt cache is per region. Under the rotation,
+    consecutive turns of one conversation landed on different regions - 24 of
+    them in production - so the cache was never reused and `cached_tokens` came
+    back 0. Keying on the account keeps one conversation on one region while
+    different accounts still spread across all of them.
+
+    A 429 still falls through to the next region, so this costs no resilience:
+    affinity decides where to START, not where it is allowed to go.
+
+    The copies skip the SDK's own retries: a 429 should move on at once. One
+    region (or another provider) is just the client as it was.
+    """
     global _chat_turn
     locations = settings.vertex_chat_locations
     if settings.llm_provider != "vertex" or len(locations) == 1:
         return [client]
-    with _chat_lock:
-        start = _chat_turn % len(locations)
-        _chat_turn += 1
+    if affinity:
+        start = _affinity_start(affinity, len(locations))
+    else:
+        with _chat_lock:
+            start = _chat_turn % len(locations)
+            _chat_turn += 1
     return [client.with_options(base_url=settings.vertex_chat_endpoint(loc),
                                 max_retries=0)
             for loc in locations[start:] + locations[:start]]
 
 
-def _create_in_some_region(client, kwargs):
+def _create_in_some_region(client, kwargs, affinity=""):
     """One chat call, moving to the next region on a 429; the last region's
     429 is raised so the waits in create_completion take over."""
-    clients = _regional_clients(client)
+    clients = _regional_clients(client, affinity)
     for i, regional in enumerate(clients):
         try:
             return regional.chat.completions.create(**kwargs)
@@ -69,7 +100,7 @@ def _create_in_some_region(client, kwargs):
     raise AssertionError("unreachable")
 
 
-def create_completion(client, **kwargs):
+def create_completion(client, affinity: str = "", **kwargs):
     """The SDK's chat completion call with the provider's request options and
     the short in-call waits above. Every model call goes through here, so this
     is also where a regeneration run counts its requests and tokens.
@@ -77,11 +108,16 @@ def create_completion(client, **kwargs):
     When the provider is still refusing for quota after every wait, the quota
     signal is raised before giving up: the engine then fails the section as
     QUOTA_EXHAUSTED and pauses the queue.
+
+    `affinity` pins which region this call starts at - pass it when the same
+    large prefix will be sent again, so a prompt cache can be reused. Strategy
+    Chat passes the account id. Left empty, the regions rotate as before, which
+    is what regeneration wants. See `_regional_clients`.
     """
     kwargs = {**settings.llm_request_extra, **kwargs}
     for wait in (*RATE_LIMIT_WAITS, None):
         try:
-            response = _create_in_some_region(client, kwargs)
+            response = _create_in_some_region(client, kwargs, affinity)
         except Exception as exc:
             if not _retryable(exc):
                 raise

@@ -506,10 +506,19 @@ def _answer_turns(question: str, messages: list, correction: str = "") -> list:
 
 
 def _answer_once(company: str, question: str, context: str, messages: list,
-                 correction: str = "", persona: dict | None = None) -> str:
-    """One generation attempt."""
+                 correction: str = "", persona: dict | None = None,
+                 timer=None, affinity: str = "") -> str:
+    """One generation attempt.
+
+    `timer` is handed down rather than left to `steps.current()`. The streamed
+    endpoint runs generation outside `steps.use` - it cannot hold a context
+    variable across a `yield` - so the token and cache counters were silently
+    dropped on the path the UI uses. Passing it makes the counters independent of
+    which entry point called.
+    """
     return gemini.generate(_system_prompt(company, persona, context),
-                           _answer_turns(question, messages, correction))
+                           _answer_turns(question, messages, correction),
+                           timer=timer, affinity=affinity)
 
 
 # ---------------------------------------------------------------------------
@@ -1118,7 +1127,8 @@ def _answer_advisor(timer, turn, messages) -> dict:
         try:
             with timer.step("generation", attempt=attempt + 1):
                 raw = _answer_once(turn["company"], turn["question"],
-                                   turn["payload"], messages, correction)
+                                   turn["payload"], messages, correction,
+                                   timer=timer, affinity=turn["account_id"])
         except gemini.GeminiTruncated as exc:
             # Cut off at the output limit. Worth one more go asking for less,
             # rather than ending the question with attempts still unspent -
@@ -1211,7 +1221,8 @@ def _answer_roleplay(timer, turn, messages, attempts) -> dict:
             with timer.step("generation", attempt=attempt + 1):
                 raw = _answer_once(turn["company"], turn["question"],
                                    turn["payload"], messages, correction,
-                                   persona=turn["persona"])
+                                   persona=turn["persona"], timer=timer,
+                                   affinity=turn["account_id"])
         except gemini.GeminiUnavailable as exc:
             logger.error("strategy chat: %s", exc)
             return _unavailable_for(turn, str(exc), attempts, cause=CAUSE_MODEL)
@@ -1269,6 +1280,9 @@ def _prepare(db, timer, account_id, messages, mode, persona_id) -> dict:
     with timer.step("payload_build"):
         payload, sections = account_context.build(account_id)
     turn = {"company": company, "question": question, "topic": topic,
+            # Carried so every generation for this turn can pin the same Vertex
+            # region and reuse the cached prefix - see llm._regional_clients.
+            "account_id": account_id,
             "persona": persona, "mode": resolved_mode, "payload": payload,
             "sections": sections,
             "widget_keys": [row["widget_key"] for row in sections],
@@ -1367,11 +1381,12 @@ def _unavailable_for(turn: dict, reason: str, attempts=None, timer=None,
 
 def _answer_once_stream(company: str, question: str, context: str, messages: list,
                         correction: str = "", persona: dict | None = None,
-                        timer=None):
+                        timer=None, affinity: str = ""):
     """`_answer_once`, yielding deltas. The prompt is identical."""
     yield from gemini.generate_stream(
         _system_prompt(company, persona, context),
-        _answer_turns(question, messages, correction), timer=timer)
+        _answer_turns(question, messages, correction), timer=timer,
+        affinity=affinity)
 
 
 def _last_citation_end(buffer: str) -> int:
@@ -1469,7 +1484,8 @@ def answer_stream(account_id: str, messages: list, mode: str | None = None,
                 buffer, published, last_end = "", "", -1
                 for chunk in _answer_once_stream(
                         turn["company"], turn["question"], turn["payload"],
-                        messages, correction, turn["persona"], timer):
+                        messages, correction, turn["persona"], timer,
+                        affinity=turn["account_id"]):
                     buffer += chunk
                     end = _last_citation_end(buffer)
                     if end == last_end:
@@ -1481,10 +1497,10 @@ def answer_stream(account_id: str, messages: list, mode: str | None = None,
                         yield {"type": "delta", "text": published}
                 raw = buffer
             else:
-                with steps.use(timer):
-                    raw = _answer_once(turn["company"], turn["question"],
-                                       turn["payload"], messages, correction,
-                                       persona=turn["persona"])
+                raw = _answer_once(turn["company"], turn["question"],
+                                   turn["payload"], messages, correction,
+                                   persona=turn["persona"], timer=timer,
+                                   affinity=turn["account_id"])
         except gemini.GeminiUnavailable as exc:
             logger.error("strategy chat: %s", exc)
             yield {"type": "done", **_unavailable_for(turn, str(exc), attempts)}

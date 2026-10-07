@@ -124,16 +124,33 @@ def _unavailable(exc) -> GeminiUnavailable:
 
 def generate(system_prompt: str, messages: list, *,
              max_output_tokens: int | None = None,
-             temperature: float | None = None) -> str:
-    """One answer over the whole account payload."""
+             temperature: float | None = None, timer=None,
+             affinity: str = "") -> str:
+    """One answer over the whole account payload.
+
+    `timer` is passed explicitly for the same reason `generate_stream` takes one.
+    The streamed endpoint cannot hold a context variable across a `yield`, so
+    `answer_stream` only wraps setup in `steps.use` and generation runs with
+    nothing current - which meant `steps.current()` was None here, `_record_usage`
+    returned immediately, and every turn logged `"tokens": {}` and `cache n/a`.
+    Timings survived because they use the timer object directly; the token and
+    cache counters did not, which is why the cache rate has never been visible on
+    the path the UI actually uses.
+
+    `affinity` pins the Vertex region. The prefix here is the whole account and is
+    byte-identical across the turns of a conversation, so it is exactly what a
+    prompt cache is for - but a cache is per region, and the client rotated
+    regions on every call. Passing the account id keeps one conversation on one
+    region. See `llm._regional_clients`.
+    """
     client, request = _request(system_prompt, messages, max_output_tokens,
                                temperature)
     try:
-        response = llm.create_completion(client, **request)
+        response = llm.create_completion(client, affinity=affinity, **request)
     except Exception as exc:
         raise _unavailable(exc) from exc
 
-    _record_usage(getattr(response, "usage", None))
+    _record_usage(getattr(response, "usage", None), timer)
     choice = response.choices[0]
     _check_finish(choice.finish_reason, request["max_tokens"])
     text = (choice.message.content or "").strip()
@@ -145,7 +162,8 @@ def generate(system_prompt: str, messages: list, *,
 
 def generate_stream(system_prompt: str, messages: list, *,
                     max_output_tokens: int | None = None,
-                    temperature: float | None = None, timer=None):
+                    temperature: float | None = None, timer=None,
+                    affinity: str = ""):
     """`generate`, yielding text as the model writes it.
 
     Same request and same checks; the caller sees the answer being written
@@ -156,8 +174,8 @@ def generate_stream(system_prompt: str, messages: list, *,
                                temperature)
     try:
         stream = llm.create_completion(
-            client, stream=True, stream_options={"include_usage": True},
-            **request)
+            client, affinity=affinity, stream=True,
+            stream_options={"include_usage": True}, **request)
         finish = None
         for chunk in stream:
             if getattr(chunk, "usage", None):
