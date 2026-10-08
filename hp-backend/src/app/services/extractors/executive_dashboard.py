@@ -20,6 +20,7 @@ from app.services.extractors.grounding import (
     build_corpus,
     check_text,
 )
+from app.services.hp import company_relationships
 from app.services.regen import store as widget_store
 
 logger = logging.getLogger(__name__)
@@ -82,10 +83,10 @@ def _resolve_parent(hier_row: dict | None, account_name: str = "") -> tuple[str,
     the sheet does name is not lost. Nothing else is read: no 'subsidiary of'
     clause in the Business Description.
 
-    Client, 8 Oct: an account whose parent Explorium holds differently shows no
-    parent at all - "we should not display potentially incorrect parent
-    information". Those accounts are listed in config/account_overrides.yaml
-    (`hide_parent_company`), which replaced the per-name HELD_PARENTS list.
+    Explorium only. `_parents` decides what is shown: the client's 7 Oct
+    mapping replaces this for the accounts it covers. An account flagged
+    `hide_parent_company` in config/account_overrides.yaml (client, 8 Oct
+    mechanism) shows no parent at all, whatever any source says.
     """
     if not hier_row or account_overrides.hides_parent(account_name):
         return "", None
@@ -106,18 +107,72 @@ def _resolve_parent(hier_row: dict | None, account_name: str = "") -> tuple[str,
     return "", None
 
 
-def _subsidiaries(rows: list[dict], account_name: str, parent: str) -> list[str]:
+MAPPING_SOURCE = "Client parent-company mapping (7 Oct)"
+MERGED_SOURCE = "Merged company hierarchy (7 Oct)"
+
+
+def _parents(hier_row: dict | None, account_name: str = "") -> tuple[list[str], list[str]]:
+    """(parents to display, where they came from), in display order.
+
+    Client, 7 Oct. For the 11 accounts in the client's parent-company mapping,
+    the mapping is the answer, Explorium is not read, and "no parent" means
+    nothing is shown. Its names are shown as written - 'BHP Group Limited' for
+    BHP Billiton, which the own-name rule would otherwise hide - unless one is
+    exactly the account itself.
+
+    An account flagged `hide_parent_company` in config/account_overrides.yaml
+    shows none at all; that is checked first and overrides every source.
+
+    For every other account: Explorium's parent (`_resolve_parent`), then any
+    parent the merged hierarchy sheet adds. A company can have two - a direct
+    parent and an ultimate one - and both are shown. The sheet's rows were
+    reviewed for self-references when the file was built, so they are only
+    dropped here when they repeat a parent already listed or are exactly the
+    account's own name ('Kuok Group' stays for Kuok (Singapore)).
+    """
+    if account_overrides.hides_parent(account_name):
+        return [], []
+    rel = company_relationships.for_account(account_name)
+    if rel["override"] is not None:
+        parents = [p for p in rel["override"]
+                   if p and not (account_name and _is_own_name(p, account_name, exact=True))]
+        return parents, [MAPPING_SOURCE] if parents else []
+
+    parents, sources = [], []
+    explorium, column = _resolve_parent(hier_row, account_name)
+    if explorium:
+        parents.append(explorium)
+        sources.append("Company Hierarchy - " + column)
+    seen = {p.lower() for p in parents}
+    for p in rel["parents"]:
+        if (not p or p.lower() in seen
+                or (account_name and _is_own_name(p, account_name, exact=True))):
+            continue
+        seen.add(p.lower())
+        parents.append(p)
+        if MERGED_SOURCE not in sources:
+            sources.append(MERGED_SOURCE)
+    return parents, sources
+
+
+def _subsidiaries(rows: list[dict], account_name: str, parent) -> list[str]:
     """Column A of the Subsidiaries sheet (Subsidiary Name), as supplied, in
-    file order: blanks and repeats dropped, and the account and its parent left
-    out, since neither is a subsidiary of the account."""
+    file order, then the merged hierarchy sheet's subsidiaries for the account
+    (client, 7 Oct): blanks and repeats dropped, and the account and its
+    parents left out, since none of them is a subsidiary of the account.
+    `parent` is one name or a list of them."""
+    parents = [parent] if isinstance(parent, str) else list(parent or [])
+    excluded = {p.lower() for p in parents if p}
+    merged = [{"Subsidiary Name": s}
+              for s in company_relationships.for_account(account_name)["subsidiaries"]]
     out, seen = [], set()
-    for row in rows or []:
+    for row in list(rows or []) + merged:
         value = row.get("Subsidiary Name")
         if value is None and row:
             value = next(iter(row.values()))  # column A
         value = " ".join(str(value or "").split())
         key = value.lower()
-        if (not value or key in seen or key == parent.lower()
+        if (not value or key in seen or key in excluded
                 or (account_name and _is_own_name(value, account_name, exact=True))):
             continue
         seen.add(key)
@@ -261,9 +316,9 @@ def extract_executive_dashboard(account_id: str) -> list[dict]:
         # Blank unless the hierarchy sheet names another company - see
         # _resolve_parent. Subsidiaries are column A of the Subsidiaries sheet.
         company_name = account_display_name(account_id, row)
-        parent_company, parent_column = _resolve_parent(
+        parents, parent_sources = _parents(
             hier_rows[0] if hier_rows else None, company_name)
-        subsidiaries = _subsidiaries(subsidiary_rows, company_name, parent_company)
+        subsidiaries = _subsidiaries(subsidiary_rows, company_name, parents)
 
         summary_data = {
             # DEC-052: the audit sheet's name, held on the account record,
@@ -273,9 +328,11 @@ def extract_executive_dashboard(account_id: str) -> list[dict]:
             "business_description": business_description,
             "industry_classification": industry_classification,
             "hq_location": hq_location,
-            "parent_company": parent_company,
-            "parent_company_source": (
-                "Company Hierarchy - " + parent_column if parent_column else None),
+            # One string for every reader that predates two parents (Strategy
+            # Chat's corpus, older screens); the list is what the card shows.
+            "parent_company": " · ".join(parents),
+            "parent_companies": parents,
+            "parent_company_source": "; ".join(parent_sources) or None,
             "subsidiaries": subsidiaries,
             "subsidiaries_count": len(subsidiaries),
             # The company profile, as bullets. See _description_points.

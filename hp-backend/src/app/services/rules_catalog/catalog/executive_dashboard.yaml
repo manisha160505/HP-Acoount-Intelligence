@@ -158,34 +158,42 @@ rules:
   parent: exec_summary_card
   name: Parent company
   kind: selection
-  summary: Shows the parent company named in the corporate structure information, unless it is the account
-    itself.
-  purpose: Shows the parent company named in the corporate structure information, unless it is the account
-    itself.
+  summary: Shows the account's parent companies - the client's corrected parent where it gave one,
+    otherwise the corporate structure information plus the client's merged hierarchy - unless it is the
+    account itself.
+  purpose: Shows the account's parent companies - the client's corrected parent where it gave one,
+    otherwise the corporate structure information plus the client's merged hierarchy - unless it is the
+    account itself.
   inputs:
+  - The client's parent-company mapping for 11 accounts (7 Oct)
   - 'The corporate structure information: ultimate parent name (column E) and id, parent company name
     (column C), the company''s own id'
+  - The client's merged company hierarchy sheet (7 Oct), parent rows
   - The account's name
-  logic: 'The parent is the ultimate parent name (column E), exactly as supplied with spaces trimmed. It
-    is skipped when it is the account itself: its id is the company''s own id, or it is the account''s
-    own name (''canon'' for Canon Inc.; ''mitsubishi'' for Mitsubishi Motors). When column E gives no
-    other company, the parent company name (column C) is used under the same test. An account whose
-    parent the source holds differently shows no parent at all. With neither, nothing is
-    shown. The parent is never looked for in the business description.'
+  logic: 'For the 11 accounts in the client''s parent-company mapping, the mapping is used as written and
+    nothing else is read; where it says the account has no parent, or names the account itself, nothing
+    is shown. For every other account the parent is the ultimate parent name (column E), exactly as
+    supplied with spaces trimmed, skipped when it is the account itself: its id is the company''s own id,
+    or it is the account''s own name (''canon'' for Canon Inc.; ''mitsubishi'' for Mitsubishi Motors).
+    When column E gives no other company, the parent company name (column C) is used under the same
+    test. Any parent the client''s merged hierarchy sheet adds is shown beside it - a company can have a
+    direct and an ultimate parent, and both are shown - unless it repeats one already listed. An account
+    whose parent is hidden in the per-account settings shows none at all, whatever any source says. With
+    none, nothing is shown. The parent is never looked for in the business description.'
   conditions:
-  - 'Column E first; column C only when column E names no other company'
-  - 'Blank, the account itself, or the account''s parent is hidden: not shown'
-  - 'Accounts whose parent the source holds differently (9, e.g. MUFG, Shiseido) show no parent at
-    all, as the client decided'
+  - 'An account whose parent is hidden in the per-account settings: nothing shown (none is hidden today)'
+  - 'Client mapping first; it replaces the corporate structure information for its 11 accounts'
+  - 'Otherwise column E, then column C only when column E names no other company, then the merged sheet'
+  - 'Blank, a repeat, or the account itself: not shown'
   example:
     scenario: 'Four accounts: BDO with column E ''sm investments''; San Miguel whose column E is San Miguel
       itself and column C ''top frontier investment holdings''; Canon whose column E is ''canon''; MUFG
-      whose column E is ''us bancorp''.'
+      whose column E is ''us bancorp'' and which the client''s mapping says has no parent.'
     steps:
     - 'BDO: column E names another company, shown.'
     - 'San Miguel: column E is the account itself, so column C is used.'
     - 'Canon: column E is its own name, nothing shown.'
-    - 'MUFG: parent hidden for this account (client, 8 Oct), nothing shown.'
+    - 'MUFG: the client''s mapping says it is the top-level company, nothing shown.'
     result: '''sm investments'', ''top frontier investment holdings'', nothing, nothing.'
     verified: true
     expect:
@@ -193,13 +201,15 @@ rules:
     - top frontier investment holdings
     - ''
     - ''
-  output: Parent company (hidden on screen when blank)
+  output: Parent company or companies (hidden on screen when blank)
   sources:
+  - hp-backend/src/app/services/extractors/executive_dashboard.py:_parents
   - hp-backend/src/app/services/extractors/executive_dashboard.py:_resolve_parent
+  - hp-backend/src/app/services/hp/company_relationships.py:for_account
   - hp-backend/src/app/config/account_overrides.py:hides_parent
   - hp-frontend/src/app/dashboard/page.tsx:parentVal
-  doc_source: Client, 5 Oct (issue list v3) - column E of the company hierarchy sheet; client, 8 Oct
-    - no parent for the 9 accounts held differently in Explorium
+  doc_source: Client, 5 Oct (issue list v3) - column E of the company hierarchy sheet; client, 7 Oct -
+    parent-company mapping and merged company hierarchy; client, 8 Oct - per-account parent hiding
   confidence: high
 - id: summary_subsidiaries
   parent: exec_summary_card
@@ -209,9 +219,11 @@ rules:
   purpose: Lists the subsidiaries named in the subsidiaries information.
   inputs:
   - 'The subsidiaries information: subsidiary name (column A)'
-  logic: 'Every subsidiary name, exactly as supplied with spaces trimmed, in the order supplied. Blank
-    names and repeats (ignoring case) are dropped, and so are the account''s own name and its parent,
-    since neither is its subsidiary. A name that only starts with the account''s name is kept (''toyota
+  - The client's merged company hierarchy sheet (7 Oct), subsidiary rows
+  logic: 'Every subsidiary name, exactly as supplied with spaces trimmed, in the order supplied, followed
+    by the subsidiaries the client''s merged hierarchy sheet adds. Blank
+    names and repeats (ignoring case) are dropped, and so are the account''s own name and its parents,
+    since none of them is its subsidiary. A name that only starts with the account''s name is kept (''toyota
     motor'' is a Toyota Group subsidiary). The screen shows the first few and folds the rest. With none,
     the line is hidden.'
   conditions:

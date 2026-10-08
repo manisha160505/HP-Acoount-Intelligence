@@ -324,15 +324,23 @@ def test_a_feature_hidden_for_the_account_reads_empty(env):
     assert "secret" not in resp.text
 
 
-def test_a_hidden_parent_is_removed_on_read(env):
+def test_a_hidden_parent_is_removed_on_read(env, monkeypatch):
+    # No account is flagged in the shipped overrides (the client's 7 Oct mapping
+    # corrected every parent the 8 Oct decision would have hidden), so the flag
+    # is set here: the read path must still honour it.
+    from app.config import account_overrides
     from app.services.regen import store
+    monkeypatch.setattr(account_overrides, "OVERRIDES", account_overrides._parse(
+        {"accounts": {"BHP BILLITON - AU": {"hide_parent_company": True}}}))
     client, db, acct = env
     db["accounts"].update_one({"_id": ObjectId(acct)},
                               {"$set": {"name": "BHP BILLITON - AU"}})
     store.put(acct, "exec_summary_card",
               {"status": "available", "data": {"company_name": "BHP BILLITON - AU",
-                                               "parent_company": "andeavor"}}, db=db)
+                                               "parent_company": "andeavor",
+                                               "parent_companies": ["andeavor"]}}, db=db)
     resp = client.get("/api/v1/accounts/%s/widgets/executive_dashboard" % acct)
     card = next(w for w in resp.json() if w["widget_key"] == "exec_summary_card")
     assert card["status"] == "available"
     assert card["data"]["parent_company"] == ""
+    assert card["data"]["parent_companies"] == []

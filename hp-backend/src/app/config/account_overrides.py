@@ -119,8 +119,12 @@ def masked(account_name, widget_key: str, data: dict) -> dict:
     once it next runs. Returns a copy when anything is removed, never mutates.
     """
     if widget_key == PARENT_WIDGET and hides_parent(account_name) and (
-            data.get("parent_company") or data.get("parent_company_source")):
-        return {**data, "parent_company": "", "parent_company_source": None}
+            data.get("parent_company") or data.get("parent_company_source")
+            or data.get("parent_companies")):
+        # `parent_companies` is the list the card shows (an account can have
+        # two parents); `parent_company` is the same names as one string.
+        return {**data, "parent_company": "", "parent_companies": [],
+                "parent_company_source": None}
     return data
 
 

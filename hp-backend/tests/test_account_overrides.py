@@ -29,12 +29,14 @@ def test_the_client_decisions_are_in_the_shipped_file():
     assert ao.is_hidden("MINISTRY OF DEFENCE - MY", "tech_landscape")
     assert ao.is_hidden("YAMATO HOLDINGS CO.,LTD. - JP", "intent_demand_signals")
     assert not ao.is_hidden("YAMATO HOLDINGS CO.,LTD. - JP", "tech_landscape")
-    assert ao.hides_parent("BHP BILLITON - AU")
-    # 16 Intent, 3 Tech Landscape, 9 parents.
+    # 16 Intent, 3 Tech Landscape. No parent is hidden: the client's 7 Oct
+    # mapping corrected the nine the 8 Oct decision would have hidden
+    # (config/company_relationships.csv).
+    assert not ao.hides_parent("BHP BILLITON - AU")
     entries = ao.OVERRIDES.values()
     assert sum("intent_demand_signals" in e["hidden_features"] for e in entries) == 16
     assert sum("tech_landscape" in e["hidden_features"] for e in entries) == 3
-    assert sum(e["hide_parent_company"] for e in entries) == 9
+    assert sum(e["hide_parent_company"] for e in entries) == 0
 
 
 def test_an_account_not_listed_hides_nothing():
@@ -72,7 +74,13 @@ def test_a_misspelt_feature_key_is_refused(monkeypatch):
 
 # --- the parent, masked on read ----------------------------------------------
 
-def test_the_parent_is_removed_for_a_listed_account():
+@pytest.fixture
+def bhp_hidden(monkeypatch):
+    monkeypatch.setattr(ao, "OVERRIDES", ao._parse(
+        {"accounts": {"BHP BILLITON - AU": {"hide_parent_company": True}}}))
+
+
+def test_the_parent_is_removed_for_a_listed_account(bhp_hidden):
     data = {"company_name": "BHP BILLITON - AU", "parent_company": "andeavor",
             "parent_company_source": "Company Hierarchy - Parent Company Name"}
     out = ao.masked("BHP BILLITON - AU", "exec_summary_card", data)
@@ -81,7 +89,17 @@ def test_the_parent_is_removed_for_a_listed_account():
     assert data["parent_company"] == "andeavor", "the stored copy is never mutated"
 
 
-def test_other_accounts_and_widgets_are_untouched():
+def test_every_parent_in_the_list_is_removed_too(bhp_hidden):
+    """The card shows `parent_companies` (an account can have two parents);
+    clearing only the joined string would leave them on screen."""
+    data = {"parent_company": "BHP Group Limited · Other",
+            "parent_companies": ["BHP Group Limited", "Other"],
+            "parent_company_source": "Client parent-company mapping (7 Oct)"}
+    out = ao.masked("BHP BILLITON - AU", "exec_summary_card", data)
+    assert out["parent_companies"] == [] and out["parent_company"] == ""
+
+
+def test_other_accounts_and_widgets_are_untouched(bhp_hidden):
     data = {"parent_company": "wesfarmers"}
     assert ao.masked("ACCENTURE INC - PH", "exec_summary_card", data) is data
     assert ao.masked("BHP BILLITON - AU", "exec_key_metrics", data) is data

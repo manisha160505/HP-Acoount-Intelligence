@@ -278,7 +278,9 @@ function AnswerWithCitations({ text, citations, idPrefix }:
 // it means for HP - "nowhere else". It strengthens a recommendation and never
 // creates one, so it renders below the prose rather than inside it.
 function ProofPoint({ proof }: { proof: any }) {
+  const ctx = React.useContext(AccountIdContext);
   if (!proof?.text) return null;
+  const href = openableUrl(proof.source_url, ctx);
   return (
     <div className="bg-amber-50/60 border border-amber-200 rounded-xl px-3 py-2 space-y-1 mt-2">
       <span className="text-[9px] font-mono font-extrabold uppercase tracking-widest text-amber-800 block">
@@ -289,11 +291,11 @@ function ProofPoint({ proof }: { proof: any }) {
         <p className="text-[10px] text-amber-800">
           {proof.customer && <span className="font-semibold">{proof.customer}</span>}
           {proof.industry && <span className="text-amber-700"> &middot; {proof.industry}</span>}
-          {caseStudyUrl(proof.source_url) && (
+          {href && (
             <>
               {' · '}
               <a
-                href={caseStudyUrl(proof.source_url) ?? undefined}
+                href={href}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="underline hover:text-amber-950"
@@ -340,9 +342,29 @@ function PendingNotice({ widget, title }: { widget: any; title: string }) {
 // The default is empty on purpose: a chip rendered outside the provider, or
 // before the manifest answers, is plain text rather than a link that might not
 // work. It fails in the safe direction.
-interface SourceLinkContext { accountId: string; filings: Set<string> }
-const AccountIdContext = React.createContext<SourceLinkContext>(
-  { accountId: '', filings: new Set<string>() });
+//
+// `unreachable` is this account's links the link check found do not open
+// (`scripts/check_evidence_links.py`). Empty until it answers, so a link shows
+// until it is known to be dead - an unchecked link is far more often fine.
+interface SourceLinkContext { accountId: string; filings: Set<string>; unreachable: Set<string> }
+const NO_LINKS: SourceLinkContext =
+  { accountId: '', filings: new Set<string>(), unreachable: new Set<string>() };
+const AccountIdContext = React.createContext<SourceLinkContext>(NO_LINKS);
+
+// A link worth showing: present, not known dead, and not one of HP's retired
+// case studies. '' otherwise - and a source with no openable link is not
+// shown at all (client, 7 Oct).
+//
+// A retired case study we hold our own copy of is swapped for that copy FIRST:
+// its old address is recorded as dead by the link check, and testing that
+// address would hide the copy we serve.
+function openableUrl(url: unknown, ctx?: SourceLinkContext): string {
+  const raw = String(url ?? '').trim();
+  if (!raw) return '';
+  const u = caseStudyUrl(raw) || '';
+  if (!u || (ctx || NO_LINKS).unreachable.has(u)) return '';
+  return u;
+}
 
 // Two evidence rows from the same unlinked source are one chip. A row that
 // links somewhere keeps its own, since the links genuinely go to different
@@ -396,19 +418,18 @@ function filingHref(ctx: SourceLinkContext, s: any): string {
 // or returned something that was not a document, and a public URL cannot open at
 // page 11. But when we have no openable copy, the public `source_url` part one
 // put on these rows is still something we HAVE, so it is offered rather than
-// dropped - and only when there is neither does the chip go plain.
+// dropped - and when there is neither, the source is not shown.
 //
 // For everything else, `resolved_source_url` is preferred where it exists - a
-// Live Signal's raw `source_url` is often a news.google.com redirect. An HP
-// case-study link goes through `caseStudyUrl`, which drops the document ids HP
-// has retired; a dead link is worse than plain text.
+// Live Signal's raw `source_url` is often a news.google.com redirect. A link the
+// link check found dead, or an HP case study HP has retired, counts as no link:
+// a dead link is worse than none. The redirect is not tried in its place - it
+// leads to the same retired article.
 function sourceHref(s: any, ctx?: SourceLinkContext): string {
-  const filing = filingHref(ctx || { accountId: '', filings: new Set() }, s);
+  const filing = filingHref(ctx || NO_LINKS, s);
   if (filing) return filing;
-  const raw = String(s?.resolved_source_url || s?.resolved_url
-                     || s?.source_url || s?.url || '').trim();
-  if (!raw) return '';
-  return raw.includes('h20195.www2.hp.com') ? (caseStudyUrl(raw) || '') : raw;
+  return openableUrl(s?.resolved_source_url || s?.resolved_url
+                     || s?.source_url || s?.url, ctx);
 }
 
 // What a chip reads when the row names no source of its own. The link's host is
@@ -427,18 +448,18 @@ function hostLabel(href: string): string {
 // behind it.
 //
 // Client, 6 Oct: wherever evidence is shown the source should be clickable, so
-// a seller can verify the claim before sending it. Much of this evidence is a
-// cell in an uploaded CSV with no web page to open, so an unlinkable source is
-// flat and carries no external-link mark - what can be opened is obvious before
-// anyone clicks, and nothing is dressed up as a link that goes nowhere.
+// a seller can verify the claim before sending it. Client, 7 Oct: a source with
+// no link, or with a link that does not open, is not shown at all - much of this
+// evidence is a cell in an uploaded CSV, and a grey name with nothing to open
+// behind it read as a broken link.
 function SourceChip({ s, tone = 'emerald' }: { s: any; tone?: 'emerald' | 'slate' }) {
   const ctx = React.useContext(AccountIdContext);
   const href = sourceHref(s, ctx);
+  if (!href) return null;
   const detail = s.quote
     ? `${s.field ? s.field + ' — ' : ''}"${s.quote}"`
     : String(s.source_text || '').slice(0, 180);
-  // Named by the source, else by where the link goes. Nothing stands in when
-  // there is neither - the chip is dropped by the caller instead.
+  // Named by the source, else by where the link goes.
   const name = s.label || s.publisher || hostLabel(href);
   if (!name) return null;
   const label = `${name}${s.count > 1 ? ` (${s.count})` : ''}`;
@@ -448,19 +469,23 @@ function SourceChip({ s, tone = 'emerald' }: { s: any; tone?: 'emerald' | 'slate
   return (
     <span
       title={[s.evidence_id, detail].filter(Boolean).join(' — ') || undefined}
-      className={`inline-flex max-w-full items-center gap-1 rounded-full border px-2 py-[3px] text-[10px] font-semibold align-middle ${
-        href ? linkedClass : 'border-slate-200 bg-slate-50 text-slate-500'}`}
+      className={`inline-flex max-w-full items-center gap-1 rounded-full border px-2 py-[3px] text-[10px] font-semibold align-middle ${linkedClass}`}
     >
       <FileText className="w-2.5 h-2.5 flex-shrink-0" />
-      {href ? (
-        <a href={href} target="_blank" rel="noopener noreferrer"
-           className="truncate hover:underline">{label}</a>
-      ) : (
-        <span className="truncate">{label}</span>
-      )}
-      {href && <ExternalLink className="w-2.5 h-2.5 flex-shrink-0" />}
+      <a href={href} target="_blank" rel="noopener noreferrer"
+         className="truncate hover:underline">{label}</a>
+      <ExternalLink className="w-2.5 h-2.5 flex-shrink-0" />
     </span>
   );
+}
+
+// The sources among `sources` that would render - for a caller that heads a
+// list with a count, or that should vanish when nothing in it can be opened.
+function linkedSources(sources: any[], ctx?: SourceLinkContext): any[] {
+  return (sources || []).filter((s: any) => {
+    const href = sourceHref(s, ctx);
+    return href && (s.label || s.publisher || hostLabel(href));
+  });
 }
 
 // One HP recommendation, rendered to match the vendor cards it sits beneath.
@@ -644,11 +669,14 @@ export default function UserDashboardPage() {
   // Empty until the manifest answers, so a chip starts plain and becomes a link
   // rather than starting as a link that might not work.
   const [filingsAvailable, setFilingsAvailable] = useState<Set<string>>(new Set());
+  // This account's evidence links known not to open; those sources are hidden.
+  const [unreachableLinks, setUnreachableLinks] = useState<Set<string>>(new Set());
   // Memoised: a fresh object on every render would re-render every source chip
   // on the screen, and this component renders a lot.
   const sourceLinkCtx = useMemo(
-    () => ({ accountId: selectedAccount?.id || '', filings: filingsAvailable }),
-    [selectedAccount?.id, filingsAvailable]);
+    () => ({ accountId: selectedAccount?.id || '', filings: filingsAvailable,
+             unreachable: unreachableLinks }),
+    [selectedAccount?.id, filingsAvailable, unreachableLinks]);
   const [expandedObjectionId, setExpandedObjectionId] = useState<string | null>(null);
 
   // Intent Topics Filter State
@@ -794,6 +822,24 @@ export default function UserDashboardPage() {
           (res.data?.filings || []).map((f: any) => String(f.filename))));
       } catch {
         if (!cancelled) setFilingsAvailable(new Set());
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [selectedAccountId]);
+
+  // Which of this account's links the link check found dead. Fails soft to an
+  // empty set: the links then show as they did before the check existed.
+  useEffect(() => {
+    if (!selectedAccountId) { setUnreachableLinks(new Set()); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await api.get<any>(`/accounts/${selectedAccountId}/data/unreachable-links`);
+        if (cancelled) return;
+        setUnreachableLinks(new Set<string>(
+          (res.data?.unreachable || []).map((u: any) => String(u))));
+      } catch {
+        if (!cancelled) setUnreachableLinks(new Set());
       }
     })();
     return () => { cancelled = true; };
@@ -1474,7 +1520,11 @@ export default function UserDashboardPage() {
                   // (column C where E is the account itself) and the
                   // subsidiaries are column A of the Subsidiaries sheet, both as
                   // supplied. Blank means hidden, not shown as missing.
-                  const parentVal = summaryData?.parent_company || null;
+                  // Client, 7 Oct: its corrected parent where it gave one, and
+                  // a company can have two (direct and ultimate) - both shown.
+                  const parentsVal: string[] = summaryData?.parent_companies
+                    || (summaryData?.parent_company ? [summaryData.parent_company] : []);
+                  const parentVal = parentsVal.length ? parentsVal.join(' · ') : null;
                   const subsidiariesVal: string[] = summaryData?.subsidiaries || [];
                   // Feature 1's header CEO, read from the newest filing naming one.
                   const ceoVal: any = metricsData?.ceo || null;
@@ -1550,7 +1600,7 @@ export default function UserDashboardPage() {
                               {parentVal && (
                                 <div className="flex items-center space-x-1.5 text-slate-700" title={summaryData?.parent_company_source || undefined}>
                                   <Building2 className="w-4 h-4 text-hp-navy" />
-                                  <span>Parent Company: <strong className="font-bold text-slate-900 capitalize">{parentVal}</strong></span>
+                                  <span>{parentsVal.length > 1 ? 'Parent Companies' : 'Parent Company'}: <strong className="font-bold text-slate-900 capitalize">{parentVal}</strong></span>
                                 </div>
                               )}
                             </div>
@@ -1908,7 +1958,6 @@ export default function UserDashboardPage() {
                                     {group.map((p: any) => {
                                       const idx = priorityList.indexOf(p);
                                       const open = expandedPriority === idx;
-                                      const m = p.measures || {};
                                       return (
                                         <div key={idx} className="border border-slate-200 rounded-xl p-4 space-y-3 hover:border-slate-300 transition">
                                           <div className="flex items-start gap-3">
@@ -1989,11 +2038,11 @@ export default function UserDashboardPage() {
                                                   {p.hp_proof_point_detail.industry && (
                                                     <span className="text-amber-700"> &middot; {p.hp_proof_point_detail.industry}</span>
                                                   )}
-                                                  {caseStudyUrl(p.hp_proof_point_detail.source_url) && (
+                                                  {openableUrl(p.hp_proof_point_detail.source_url, sourceLinkCtx) && (
                                                     <>
                                                       {' · '}
                                                       <a
-                                                        href={caseStudyUrl(p.hp_proof_point_detail.source_url) ?? undefined}
+                                                        href={openableUrl(p.hp_proof_point_detail.source_url, sourceLinkCtx)}
                                                         target="_blank"
                                                         rel="noopener noreferrer"
                                                         className="underline hover:text-amber-950"
@@ -2006,49 +2055,6 @@ export default function UserDashboardPage() {
                                               )}
                                             </div>
                                           )}
-
-{/* Only the counts we have. With nothing measured this read
-                                              "Evidence: 0 source sentences - 0 document sections",
-                                              which announces an absence. */}
-                                          {(m.support_count || m.distinct_sections
-                                            || m.independent_source_count) ? (
-                                            <p className="text-[10px] text-slate-500">
-                                              <span className="font-bold text-slate-600">Evidence: </span>
-                                              {[
-                                                m.support_count && `${m.support_count} source sentence${m.support_count === 1 ? '' : 's'}`,
-                                                m.distinct_sections && `${m.distinct_sections} document section${m.distinct_sections === 1 ? '' : 's'}`,
-                                                m.independent_source_count && `${m.independent_source_count} independent source${m.independent_source_count === 1 ? '' : 's'}`,
-                                              ].filter(Boolean).join(' · ')}
-                                            </p>
-                                          ) : null}
-
-                                          <div className="flex flex-wrap items-center gap-1.5">
-                                            {(p.sources || []).slice(0, 4).map((s: any, si: number) => (
-                                              s.source_url ? (
-                                                <a
-                                                  key={si}
-                                                  href={s.source_url}
-                                                  target="_blank"
-                                                  rel="noopener noreferrer"
-                                                  title={s.source_text}
-                                                  className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded bg-blue-50 text-hp-navy border border-blue-200 hover:bg-blue-100 transition max-w-full"
-                                                >
-                                                  <FileText className="w-3 h-3 flex-shrink-0" />
-                                                  <span className="truncate max-w-[11rem]">{s.label}</span>
-                                                  <ExternalLink className="w-2.5 h-2.5 flex-shrink-0" />
-                                                </a>
-                                              ) : (
-                                                <span
-                                                  key={si}
-                                                  title={s.source_text}
-                                                  className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded bg-slate-50 text-slate-600 border border-slate-200 max-w-full"
-                                                >
-                                                  <FileText className="w-3 h-3 flex-shrink-0" />
-                                                  <span className="truncate max-w-[11rem]">{s.label}</span>
-                                                </span>
-                                              )
-                                            ))}
-                                          </div>
 
                                           <button
                                             type="button"
@@ -2118,12 +2124,11 @@ export default function UserDashboardPage() {
                                                             </li>
                                                           ))}
                                                         </ul>
-                                                        {/* The source, clickable where there is
-                                                            something to open (client, 6 Oct). This
-                                                            read as a plain grey line while the row
-                                                            next to it already carried source_url -
-                                                            the chip on the card face above has been
-                                                            linking the same field all along. */}
+                                                        {/* The source, shown only when it has a
+                                                            link that opens (client, 6-7 Oct). This
+                                                            is the one place a catalyst's sources
+                                                            appear: the card face no longer repeats
+                                                            them. */}
                                                         <span className="block mt-1 pl-4">
                                                           <SourceChip s={s} tone="slate" />
                                                         </span>
@@ -3961,7 +3966,7 @@ export default function UserDashboardPage() {
                                         </div>
                                       )}
 
-                                      {play.hp_resource_url && (
+                                      {openableUrl(play.hp_resource_url, sourceLinkCtx) && (
                                         <div className="space-y-1">
                                           <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">
                                             HP RESOURCE
@@ -3969,7 +3974,7 @@ export default function UserDashboardPage() {
                                           </span>
                                           <div className="flex flex-wrap items-center gap-2">
                                             <a
-                                              href={play.hp_resource_url}
+                                              href={openableUrl(play.hp_resource_url, sourceLinkCtx)}
                                               target="_blank"
                                               rel="noreferrer"
                                               className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 font-semibold text-[11px] hover:bg-emerald-100 transition"
@@ -4006,9 +4011,9 @@ export default function UserDashboardPage() {
                                             )}
                                             {/* `hp_product` is deliberately NOT shown - see the
                                                 objection card for why the tag contradicts the text. */}
-                                            {caseStudyUrl(play.hp_proof_point_detail.source_url) && (
+                                            {openableUrl(play.hp_proof_point_detail.source_url, sourceLinkCtx) && (
                                               <a
-                                                href={caseStudyUrl(play.hp_proof_point_detail.source_url) ?? undefined}
+                                                href={openableUrl(play.hp_proof_point_detail.source_url, sourceLinkCtx)}
                                                 target="_blank"
                                                 rel="noopener noreferrer"
                                                 className="underline hover:text-amber-900"
@@ -6609,9 +6614,9 @@ export default function UserDashboardPage() {
                                                 Managed Device Services. The headline above already
                                                 names the offering, from the study's own text, so
                                                 printing the tag beside it only contradicts it. */}
-                                            {caseStudyUrl(card.hp_proof_point_detail.source_url) && (
+                                            {openableUrl(card.hp_proof_point_detail.source_url, sourceLinkCtx) && (
                                               <a
-                                                href={caseStudyUrl(card.hp_proof_point_detail.source_url) ?? undefined}
+                                                href={openableUrl(card.hp_proof_point_detail.source_url, sourceLinkCtx)}
                                                 target="_blank"
                                                 rel="noopener noreferrer"
                                                 className="underline hover:text-amber-900"
@@ -6852,13 +6857,13 @@ export default function UserDashboardPage() {
                                             {/* The public HP page for what this pillar sells.
                                                 Separate from the proof chips on purpose: the
                                                 proof came from a deck slide, not this page. */}
-                                            {p.hp_resource?.url && (
+                                            {openableUrl(p.hp_resource?.url, sourceLinkCtx) && (
                                               <div className="flex items-center gap-2 mt-3">
                                                 <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">
                                                   HP resource
                                                 </span>
                                                 <a
-                                                  href={p.hp_resource.url}
+                                                  href={openableUrl(p.hp_resource.url, sourceLinkCtx)}
                                                   target="_blank"
                                                   rel="noopener noreferrer"
                                                   className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-[3px] text-[10px] font-semibold text-emerald-800 hover:underline"
@@ -6920,11 +6925,11 @@ export default function UserDashboardPage() {
                                               <p className="mt-1.5 text-[11px] text-slate-500">
                                                 {p.hp_proof_point_detail.customer}
                                                 {p.hp_proof_point_detail.industry && ` · ${p.hp_proof_point_detail.industry}`}
-                                                {caseStudyUrl(p.hp_proof_point_detail.source_url) && (
+                                                {openableUrl(p.hp_proof_point_detail.source_url, sourceLinkCtx) && (
                                                   <>
                                                     {' · '}
                                                     <a
-                                                      href={caseStudyUrl(p.hp_proof_point_detail.source_url) ?? undefined}
+                                                      href={openableUrl(p.hp_proof_point_detail.source_url, sourceLinkCtx)}
                                                       target="_blank"
                                                       rel="noopener noreferrer"
                                                       className="underline hover:text-hp-navy"
@@ -6979,12 +6984,14 @@ export default function UserDashboardPage() {
                               expanding each row. Built from the same proof-point sources
                               the rows show, so it can never list something unused. */}
                           {(() => {
-                            const used = dedupeSources(
+                            // Only the sources that can be opened - the ones the
+                            // rows above actually show (client, 7 Oct).
+                            const used = linkedSources(dedupeSources(
                               pillars.flatMap((p: any) => [
                                 ...(p.proof_points || []).flatMap((pr: any) => pr.sources || []),
                                 ...(p.challenge_evidence || []),
                               ])
-                            );
+                            ), sourceLinkCtx);
                             if (!used.length) return null;
                             return (
                               <section className="rounded-xl border border-slate-200 bg-white p-4">
@@ -7665,11 +7672,11 @@ export default function UserDashboardPage() {
                                           rendered the raw URL, so the three case-study
                                           documents HP has retired were offered here as links
                                           while the rest of the app already suppressed them. */}
-                                      {caseStudyUrl(g.hp_proof_point_detail.source_url) && (
+                                      {openableUrl(g.hp_proof_point_detail.source_url, sourceLinkCtx) && (
                                         <>
                                           {' · '}
                                           <a
-                                            href={caseStudyUrl(g.hp_proof_point_detail.source_url) ?? undefined}
+                                            href={openableUrl(g.hp_proof_point_detail.source_url, sourceLinkCtx)}
                                             target="_blank"
                                             rel="noopener noreferrer"
                                             className="underline hover:text-hp-navy"
@@ -8004,38 +8011,47 @@ export default function UserDashboardPage() {
                                         rendered as written rather than parsed
                                         as markdown - except for the evidence
                                         tags, which become footnote markers. */}
-                                    <AnswerWithCitations
-                                      text={msg.text}
-                                      citations={msg.citations || []}
-                                      idPrefix={msg.id}
-                                    />
-
-                                    {(msg.citations?.length ?? 0) > 0 && (
-                                      <div className="pt-2 border-t border-slate-200/80 space-y-1.5">
-                                        <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 block">
-                                          Sources ({msg.citations!.length})
-                                        </span>
-                                        {msg.citations!.map((c: any, ci: number) => (
-                                          <div key={ci} id={`${msg.id}-src-${ci + 1}`}
-                                               className="text-[10px] text-slate-600 leading-relaxed scroll-mt-24">
-                                            <span className="font-bold text-slate-400 mr-1">{ci + 1}.</span>
-                                            {c.source_url ? (
-                                              <a href={c.source_url} target="_blank" rel="noopener noreferrer"
-                                                 className="text-hp-navy hover:underline inline-flex items-center gap-1">
-                                                <FileText className="w-3 h-3 flex-shrink-0" />
-                                                <span>{c.publisher || c.filing_label || c.dataset || 'Source'}</span>
-                                                <ExternalLink className="w-2.5 h-2.5" />
-                                              </a>
-                                            ) : (
-                                              <span className="font-bold text-slate-500">
-                                                {c.filing_label ? `${c.filing_label}${c.page ? ` p.${c.page}` : ''}` : (c.dataset || 'Account evidence')}
+                                    {/* Only citations with a link that opens are listed
+                                        (client, 7 Oct), and only those get a footnote
+                                        marker - AnswerWithCitations drops a tag whose
+                                        citation is not in the list it is given, so the
+                                        numbers and the list always agree. */}
+                                    {(() => {
+                                      const cites = (msg.citations || [])
+                                        .map((c: any) => ({ c, href: sourceHref(c, sourceLinkCtx) }))
+                                        .filter((x: any) => x.href);
+                                      return (
+                                        <>
+                                          <AnswerWithCitations
+                                            text={msg.text}
+                                            citations={cites.map((x: any) => x.c)}
+                                            idPrefix={msg.id}
+                                          />
+                                          {cites.length > 0 && (
+                                            <div className="pt-2 border-t border-slate-200/80 space-y-1.5">
+                                              <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 block">
+                                                Sources ({cites.length})
                                               </span>
-                                            )}
-                                            {c.source_text && <span> — {c.source_text}</span>}
-                                          </div>
-                                        ))}
-                                      </div>
-                                    )}
+                                              {cites.map(({ c, href }: any, ci: number) => (
+                                                <div key={ci} id={`${msg.id}-src-${ci + 1}`}
+                                                     className="text-[10px] text-slate-600 leading-relaxed scroll-mt-24">
+                                                  <span className="font-bold text-slate-400 mr-1">{ci + 1}.</span>
+                                                  <a href={href} target="_blank" rel="noopener noreferrer"
+                                                     className="text-hp-navy hover:underline inline-flex items-center gap-1">
+                                                    <FileText className="w-3 h-3 flex-shrink-0" />
+                                                    <span>{c.publisher
+                                                      || (c.filing_label ? `${c.filing_label}${c.page ? ` p.${c.page}` : ''}` : '')
+                                                      || hostLabel(href) || c.dataset}</span>
+                                                    <ExternalLink className="w-2.5 h-2.5" />
+                                                  </a>
+                                                  {c.source_text && <span> — {c.source_text}</span>}
+                                                </div>
+                                              ))}
+                                            </div>
+                                          )}
+                                        </>
+                                      );
+                                    })()}
 
                                     {/* Copy and Send as email, as the reference
                                         offers. The email is a mailto: so it

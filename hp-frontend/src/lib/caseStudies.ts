@@ -5,13 +5,27 @@
 // the case-study store, because changing that store marks every section built
 // from it stale on every account.
 const UNREACHABLE = new Set([
-  'https://h20195.www2.hp.com/v2/GetPDF.aspx/4AA8-4899ENW.pdf', // STERNAUTO
   'https://h20195.www2.hp.com/v2/GetDocument.aspx?docname=4AA7-1694ENW', // Invent Medical
-  'https://h20195.www2.hp.com/v2/GetDocument.aspx?docname=4AA8-4051ENW', // NORM ADDITIVE
 ]);
 
-/** The case-study link to show, or null when it does not open. */
+// Retired links whose document the client sent us (7 Oct), served from our
+// own site (hp-frontend/public/case-studies) - so "View the HP case study"
+// opens our copy, never an outside link. Same reason as above for keeping the
+// mapping here instead of in the store.
+const OWN_COPY: Record<string, string> = {
+  // STERNAUTO: the case-study PDF itself.
+  'https://h20195.www2.hp.com/v2/GetPDF.aspx/4AA8-4899ENW.pdf':
+    '/case-studies/STERNAUTO_4AA8-4899ENW.pdf',
+  // NORM ADDITIVE: the NORM Holding sustainability report 2024.
+  'https://h20195.www2.hp.com/v2/GetDocument.aspx?docname=4AA8-4051ENW':
+    '/case-studies/NORM_HOLDING_SUSTAINABILITY_REPORT_2024.pdf',
+};
+
+/** The case-study link to show - our own copy where we hold one - or null
+ * when it does not open. */
 export function caseStudyUrl(url?: string | null): string | null {
   const u = (url || '').trim();
-  return u && !UNREACHABLE.has(u) ? u : null;
+  if (!u) return null;
+  if (OWN_COPY[u]) return OWN_COPY[u];
+  return UNREACHABLE.has(u) ? null : u;
 }

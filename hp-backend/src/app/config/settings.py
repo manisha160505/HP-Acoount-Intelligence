@@ -37,6 +37,10 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440
     CORS_ORIGINS: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
     DATA_STORAGE_DIR: str = "data/accounts"
+    # A contact email for scripts/check_evidence_links.py. sec.gov answers 403
+    # to any request whose User-Agent does not declare one (SEC fair-access
+    # policy), so without it every SEC link is UNSURE and stays shown.
+    LINK_CHECK_CONTACT: str = ""
 
     # --- Which LLM provider every model call goes to -------------------------
     # "gemini" (Google AI Studio key, AIza...), "vertex" (Gemini on Vertex AI

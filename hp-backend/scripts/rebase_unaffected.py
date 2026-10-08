@@ -21,7 +21,8 @@ It changes output only for:
   opp_core, stakeholder_talking_points   accounts with news outside the last 12 months
   objection, tech_recs                   news or technology detections outside 12 months
   tech_core                              technology detections outside 12 months
-  exec_core                              accounts with filings (the list is now 24 months)
+  exec_core                              accounts with filings (the list is now 24 months),
+                                         and accounts in the client's 7 Oct hierarchy data
   exec_priorities                        catalyst evidence older than 24 months
 
 Release "oct5" (PR 68/69): intent on Bombora-led accounts, objection on the
@@ -49,6 +50,7 @@ from app.services.extractors.datasets import (  # noqa: E402
     read_dataset_records,
 )
 from app.services.dashboard import evidence_strength  # noqa: E402
+from app.services.hp import company_relationships  # noqa: E402
 from app.services.hp import time_windows  # noqa: E402
 from app.services.regen import rebase, runs, store as widget_store  # noqa: E402
 from app.services.regen.engine import get_engine  # noqa: E402
@@ -98,6 +100,11 @@ def affected_windows(db, account_id: str) -> set:
     if len(time_windows.recent_detections(detections)) < len(detections):
         out |= {"tech_core", "objection", "tech_recs"}
     if _rows(db, account_id, "compliance_filings") or _rows(db, account_id, "filings_financials"):
+        out.add("exec_core")
+    # The client's 7 Oct parents and subsidiaries (hp/company_relationships.py)
+    # change the summary card of every account they name.
+    rel = company_relationships.for_account(account_display_name(account_id))
+    if rel["override"] is not None or rel["parents"] or rel["subsidiaries"]:
         out.add("exec_core")
     oldest_ok = time_windows.today().toordinal() - time_windows.FILINGS_WINDOW_DAYS
     for row in db[ev.COLLECTION].find({"account_id": account_id, "index": "executive_dashboard"},

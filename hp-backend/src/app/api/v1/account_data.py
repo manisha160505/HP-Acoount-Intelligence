@@ -23,6 +23,7 @@ from app.core.deps import (
 from app.database.mongodb import get_db
 from app.schemas.account_data import DATASET_REGISTRY, AccountDataFileResponse
 from app.services.extractors.datasets import find_file_path
+from app.services.hp import link_health
 
 logger = logging.getLogger(__name__)
 from app.services.extractors.content_studio import extract_content_studio
@@ -538,6 +539,32 @@ def list_account_filings(
     # An account with no filings answers with an empty list. That is an answer,
     # not an error - most accounts have none.
     return {"filings": sorted(filings, key=lambda f: f["filename"])}
+
+
+@router.get("/unreachable-links")
+def list_unreachable_links(
+    account_id: str,
+    current_user: dict = Depends(require_user_role),
+):
+    """This account's evidence links that are known not to open.
+
+    The dashboard shows a source only when it has a link that opens (client,
+    7 Oct), so it hides these. Verdicts come from
+    `scripts/check_evidence_links.py`; see `services.hp.link_health` for what
+    counts as dead. A link that has never been checked is not listed.
+
+    URLs that already appear in this account's own widgets - nothing the
+    dashboard could not already read.
+    """
+    if not ObjectId.is_valid(account_id):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Invalid account ID format")
+
+    db = get_db()
+    if not db["accounts"].find_one({"_id": ObjectId(account_id)}):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="Company account not found")
+    return {"unreachable": link_health.unreachable(db, account_id)}
 
 
 @router.get("/filing")
