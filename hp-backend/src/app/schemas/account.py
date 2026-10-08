@@ -26,6 +26,8 @@ class AccountResponse(BaseModel):
     status: Literal['active', 'hidden']
     created_at: str
     updated_at: str
+    # Feature keys hidden for this account (config/account_overrides.yaml).
+    hidden_features: list[str] = []
 
 
 class UserAccountResponse(AccountResponse):

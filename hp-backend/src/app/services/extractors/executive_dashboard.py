@@ -2,6 +2,7 @@ import hashlib
 import logging
 from datetime import UTC, datetime
 
+from app.config import account_overrides
 from app.core.llm import generate_gpt4o_json_completion
 from app.database.mongodb import get_db
 from app.observability import pipeline
@@ -45,22 +46,6 @@ _LEGAL_WORDS = {
     "pte", "sdn", "bhd", "kk", "kabushiki", "kaisha",
 }
 
-# Parents Explorium names that are wrong at source, held off the dashboard
-# until the client confirms them (5 Oct, issue list v3). Keyed by the account's
-# name; a held name is skipped, so a corrected value in a later file shows.
-HELD_PARENTS = {
-    "bank for agriculture and agricultural cooperative": {"ministry of finance | egypt"},
-    "bhp billiton": {"marathon petroleum", "andeavor"},
-    "charoen pokphand group co ltd": {"pt charoen pokphand indonesia tbk",
-                                      "pt charoen pokphand indonesia"},
-    "military bank": {"icici bank"},
-    "mitsubishi ufj financial group, inc.": {"us bancorp"},
-    "the bank of tokyo-mitsubishi limited (bangkok branch)": {"us bancorp"},
-    "sumitomo mitsui financial group, inc.": {"citibank"},
-    "shiseido company, limited": {"henkel"},
-    "viettel corporation": {"uk ministry of defence"},
-}
-
 
 def _account_key(name: str) -> str:
     """The account's name without its ' - XX' country suffix, lowercased."""
@@ -94,13 +79,16 @@ def _resolve_parent(hier_row: dict | None, account_name: str = "") -> tuple[str,
     Parent Id equal to Business Id, or the account's own name ('canon' for
     Canon Inc.). Where column E gives no other company, column C (Parent
     Company Name, the September rule) is used under the same test, so a parent
-    the sheet does name is not lost. A name in HELD_PARENTS for this account is
-    skipped. Nothing else is read: no 'subsidiary of' clause in the Business
-    Description.
+    the sheet does name is not lost. Nothing else is read: no 'subsidiary of'
+    clause in the Business Description.
+
+    Client, 8 Oct: an account whose parent Explorium holds differently shows no
+    parent at all - "we should not display potentially incorrect parent
+    information". Those accounts are listed in config/account_overrides.yaml
+    (`hide_parent_company`), which replaced the per-name HELD_PARENTS list.
     """
-    if not hier_row:
+    if not hier_row or account_overrides.hides_parent(account_name):
         return "", None
-    held = HELD_PARENTS.get(_account_key(account_name), set())
     bid = str(hier_row.get("Business Id") or "").strip()
     upid = str(hier_row.get("Ultimate Parent Id") or "").strip()
     candidates = (
@@ -111,7 +99,7 @@ def _resolve_parent(hier_row: dict | None, account_name: str = "") -> tuple[str,
     )
     for value, column, is_self in candidates:
         value = " ".join(str(value or "").split())
-        if (not value or is_self or value.lower() in held
+        if (not value or is_self
                 or (account_name and _is_own_name(value, account_name))):
             continue
         return value, column

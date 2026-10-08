@@ -307,3 +307,32 @@ def test_preview_reports_sections_whose_files_are_missing_on_the_server(env):
     assert intent["action"] == "cannot_run" and intent["missing_files"]
     body = client.get("/api/v1/accounts/%s/pipeline" % acct).json()
     assert any(n["node_id"] == "intent" for n in body["groups"]["FILES_MISSING"])
+
+
+def test_a_feature_hidden_for_the_account_reads_empty(env):
+    """config/account_overrides.yaml: Intent is hidden for this account, so
+    its widgets read empty even though the section was generated."""
+    from app.services.regen import store
+    client, db, acct = env
+    db["accounts"].update_one({"_id": ObjectId(acct)},
+                              {"$set": {"name": "MINISTRY OF DEFENCE - MY"}})
+    store.put(acct, "intent_topics_table",
+              {"status": "available", "data": {"topics": ["secret"]}}, db=db)
+    resp = client.get("/api/v1/accounts/%s/widgets/intent_demand_signals" % acct)
+    assert resp.status_code == 200
+    assert {w["status"] for w in resp.json()} == {"empty"}
+    assert "secret" not in resp.text
+
+
+def test_a_hidden_parent_is_removed_on_read(env):
+    from app.services.regen import store
+    client, db, acct = env
+    db["accounts"].update_one({"_id": ObjectId(acct)},
+                              {"$set": {"name": "BHP BILLITON - AU"}})
+    store.put(acct, "exec_summary_card",
+              {"status": "available", "data": {"company_name": "BHP BILLITON - AU",
+                                               "parent_company": "andeavor"}}, db=db)
+    resp = client.get("/api/v1/accounts/%s/widgets/executive_dashboard" % acct)
+    card = next(w for w in resp.json() if w["widget_key"] == "exec_summary_card")
+    assert card["status"] == "available"
+    assert card["data"]["parent_company"] == ""
