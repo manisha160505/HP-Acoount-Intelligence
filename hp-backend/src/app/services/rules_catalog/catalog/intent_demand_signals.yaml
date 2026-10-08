@@ -65,20 +65,21 @@ rules:
   logic: 'The website the research data was collected for is tidied up (web prefix, ''www.'' and any path
     removed) and compared with the account''s website. It matches when the two are equal, when one is
     a subdomain of the other (health.nsw.gov.au and nsw.gov.au), or when the data''s website is on the
-    confirmed list of the same organisation''s other websites (iag.com.au for IAG NZ, client 5 Oct).
+    confirmed list of websites the client accepted for the account (iag.com.au for IAG NZ, client 5 Oct;
+    six more, e.g. nga.mil for NIS Korea, client 8 Oct).
     Anything else is a mismatch: the topics are not attached and the tab names both websites. No website
     on either side: unverified, and the topics are still shown. The observation date is the data''s date
     stamp (YYYYMMDD) when exactly one is present.'
   conditions:
   - Look-alike registered websites (posco-inc.com and posco.com) never match by rule
-  - Research for a different company (e.g. nga.mil for NIS Korea) stays a mismatch
+  - Research for a different company stays a mismatch unless the client confirmed it for this account
   example:
     scenario: 'Three accounts: NSW Health (health.nsw.gov.au) with data for nsw.gov.au; IAG NZ (iag.co.nz)
-      with data for www.iag.com.au; NIS Korea (nis.go.kr) with data for nga.mil.'
+      with data for www.iag.com.au; Astra (astra.co.id) with data for acme-holdings.com.'
     steps:
     - 'NSW Health: nsw.gov.au is the parent of health.nsw.gov.au -> matched.'
     - 'IAG NZ: iag.com.au is on the confirmed list -> matched.'
-    - 'NIS Korea: nga.mil is another organisation -> mismatch, topics dropped.'
+    - 'Astra: acme-holdings.com is another organisation, never confirmed -> mismatch, topics dropped.'
     result: matched, matched, mismatch.
     verified: true
     expect:

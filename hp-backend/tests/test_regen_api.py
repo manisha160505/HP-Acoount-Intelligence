@@ -325,9 +325,7 @@ def test_a_feature_hidden_for_the_account_reads_empty(env):
 
 
 def test_a_hidden_parent_is_removed_on_read(env, monkeypatch):
-    # No account is flagged in the shipped overrides (the client's 7 Oct mapping
-    # corrected every parent the 8 Oct decision would have hidden), so the flag
-    # is set here: the read path must still honour it.
+    # The flag is set here, so the test does not depend on the shipped file.
     from app.config import account_overrides
     from app.services.regen import store
     monkeypatch.setattr(account_overrides, "OVERRIDES", account_overrides._parse(

@@ -23,13 +23,14 @@ authority: "Client decisions on the open data gaps, 8 Oct 2026 (HP_Open_Types_Co
 accounts:
   # Intent hidden: no Bombora topics and every PredictLeads HP category score is 0.
   # Tech Landscape hidden: government accounts with no technology data.
-  # Parents: none hidden. The 8 Oct decision hid the parent for 9 accounts whose
-  # Explorium parent was wrong; the client's 7 Oct mapping gives the correct
-  # parent for each of them instead (config/company_relationships.csv), and that
-  # is what is shown. hide_parent_company still works for any account added here.
+  # Parent hidden: Explorium holds a parent the client has not confirmed.
   "BANK FOR AGRICULTURE AND AGRICULTURAL COOPERATIVE - TH":
     hidden_features: [intent_demand_signals]
+    hide_parent_company: true
+  "BHP BILLITON - AU":
+    hide_parent_company: true
   "CHAROEN POKPHAND GROUP CO LTD - TH":
+    hide_parent_company: true
   "HANJIN GROUP - KR":
     hidden_features: [intent_demand_signals]
   "ISUZU MOTORS LIMITED - JP":
@@ -40,6 +41,8 @@ accounts:
     hidden_features: [intent_demand_signals]
   "MEIJI HOLDINGS CO., LTD. - JP":
     hidden_features: [intent_demand_signals]
+  "MILITARY BANK - VN":
+    hide_parent_company: true
   "MINISTRY OF DEFENCE - MY":
     hidden_features: [intent_demand_signals, tech_landscape]
   "MINISTRY OF DEFENCE - VN":
@@ -48,9 +51,16 @@ accounts:
     hidden_features: [intent_demand_signals]
   "MINISTRY OF PUBLIC SECURITY - VN":
     hidden_features: [intent_demand_signals, tech_landscape]
+  "MITSUBISHI UFJ FINANCIAL GROUP, INC. - JP":
+    hide_parent_company: true
   "SHISEIDO COMPANY, LIMITED - JP":
+    hide_parent_company: true
+  "SUMITOMO MITSUI FINANCIAL GROUP, INC. - JP":
+    hide_parent_company: true
   "T&D HOLDINGS, INC. - JP":
     hidden_features: [intent_demand_signals]
+  "THE BANK OF TOKYO-MITSUBISHI LIMITED (BANGKOK BRANCH) - TH":
+    hide_parent_company: true
   "UNITED OVERSEAS BANK (MALAYSIA) BHD - MY":
     hidden_features: [intent_demand_signals]
   "UNITED OVERSEAS BANK LIMITED (UOB) - SG":
@@ -59,5 +69,7 @@ accounts:
     hidden_features: [intent_demand_signals]
   "VIETNAM POST CORPORATION - VN":
     hidden_features: [intent_demand_signals]
+  "VIETTEL CORPORATION - VN":
+    hide_parent_company: true
   "YAMATO HOLDINGS CO.,LTD. - JP":
     hidden_features: [intent_demand_signals]
