@@ -9,6 +9,7 @@ from bson import ObjectId
 from app.core.llm import generate_gpt4o_json_completion
 from app.database.mongodb import get_db
 from app.observability import pipeline
+from app.services.extractors import recent_news_signals as news_feed
 from app.services.extractors.datasets import (
     account_display_name,
     account_domain,
@@ -113,8 +114,17 @@ NL = chr(10)
 #      superseded may not carry a play or appear in its prose.
 # 35 - a model number is not a version: the first cut of that rule read Office
 #      365 as older than Office 2016 and a Catalyst 6500 as an older 6503.
+# Not bumped for the 8 Oct news-only triggers (see NEWS_ONLY_TRIGGER_LIMIT): the
+# prompt and evidence change only for an account with no tech stack and no
+# intent (6 of 220), whose evidence fingerprint changes anyway; a bump would
+# rerun the model on the other 214 for identical output. Regenerate those six.
 OPPORTUNITY_PROMPT_VERSION = 35
 MAX_PLAYS = 5
+
+# Raw news headlines offered as triggers normally, and the cap on gated Live
+# Signals items when the account has nothing else (no tech stack, no intent).
+NEWS_TRIGGER_LIMIT = 10
+NEWS_ONLY_TRIGGER_LIMIT = 30
 
 # HP_ABX_v3_final defines NO numeric opportunity score for this feature. Plays
 # are ordered by how many of its three checks they meet, with trigger recency as
@@ -997,10 +1007,40 @@ def generate_opportunity_map_plays_with_gpt4o(account_id: str) -> dict:  # noqa:
         })
     news_triggers.sort(key=lambda t: t["dt"] or datetime.min.replace(tzinfo=UTC),
                        reverse=True)
-    for t in news_triggers[:10]:
-        corpus.append({"text": t["headline"], "dataset": "google_news / news_events",
+
+    # Client, 8 Oct: with no technology stack and no Bombora intent there is
+    # almost nothing for a play to match (MINISTRY OF NATIONAL DEFENSE - KR came
+    # out empty), so "use relevant data from Live Signals". The Live Signals
+    # widget cannot be read here - Live Signals reads this feature, so that
+    # would be a cycle in the regeneration graph - so the same raw news goes
+    # through Live Signals' own gate (12 months, dated, not future) and dedupe,
+    # and every surviving signal is used, headline AND evidence sentence,
+    # instead of ten raw headlines.
+    news_limit = NEWS_TRIGGER_LIMIT
+    if not full_tech_stack and not intent_rows:
+        gated, _ = news_feed._apply_gate(
+            news_feed._normalize_signals(gnews_records, events_records), now)
+        live = news_feed._dedupe(gated)[:NEWS_ONLY_TRIGGER_LIMIT]
+        if live:
+            news_triggers = [{
+                "headline": s["headline"],
+                "evidence": s.get("evidence_sentence") or "",
+                "date": s["event_date"], "dt": s["_event_dt"],
+                "url": s.get("source_url") or "", "dataset": s["dataset"],
+            } for s in live]
+            news_limit = len(news_triggers)
+            pipeline.step("news_only", "%d gated Live Signals news item(s) used: "
+                          "no tech stack and no intent" % news_limit)
+
+    for t in news_triggers[:news_limit]:
+        corpus.append({"text": t["headline"],
+                       "dataset": t.get("dataset") or "google_news / news_events",
                        "field": "event_headline", "date": t["date"], "dt": t["dt"],
                        "url": t["url"], "kind": "trigger"})
+        if t.get("evidence"):
+            corpus.append({"text": t["evidence"], "dataset": t["dataset"],
+                           "field": "evidence_sentence", "date": t["date"],
+                           "dt": t["dt"], "url": t["url"], "kind": "trigger"})
 
     # Only demand a trigger citation when the account actually has triggers to
     # cite - an account with no news or intent data must not be blanked out.
@@ -1127,8 +1167,9 @@ def generate_opportunity_map_plays_with_gpt4o(account_id: str) -> dict:  # noqa:
            if r.get("demoted_reason") else "")
         for r in intent_rows[:10]]
     news_lines = [f"- {t['headline']} ({t['date'] or 'undated'})"
+                  + (f" | {t['evidence']}" if t.get("evidence") else "")
                   + (f" | URL: {t['url']}" if t["url"] else " | URL: none")
-                  for t in news_triggers[:10]]
+                  for t in news_triggers[:news_limit]]
 
     system_prompt = f"""You are an expert ABM strategist for HP Inc. ("HP"). You identify HP hardware and solution opportunity plays for {company_name}.
 

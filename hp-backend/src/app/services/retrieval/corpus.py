@@ -28,6 +28,7 @@ import json
 import logging
 import re
 
+from app.config import account_overrides
 from app.database.mongodb import get_db
 from app.services.regen import store as widget_store
 from app.services.retrieval.evidence import EvidenceBuilder
@@ -1123,6 +1124,10 @@ def executive_dashboard_documents(account_id: str,
     docs = []
 
     summary = _widget(db, account_id, "exec_summary_card")
+    # A parent hidden for this account (config/account_overrides.yaml) is not
+    # indexed either, even before the Executive Dashboard regenerates.
+    summary = account_overrides.masked(summary.get("company_name"),
+                                       "exec_summary_card", summary)
     metrics = _widget(db, account_id, "exec_key_metrics")
     company = _text(summary.get("company_name")) or _text(
         (db["accounts"].find_one({"_id": _oid(account_id)}) or {}).get("name"))
@@ -1434,6 +1439,10 @@ def strategy_documents(account_id: str, index: str = "strategy") -> list:
     docs = []
 
     summary = _widget(db, account_id, "exec_summary_card")
+    # A parent hidden for this account (config/account_overrides.yaml) is not
+    # indexed either, even before the Executive Dashboard regenerates.
+    summary = account_overrides.masked(summary.get("company_name"),
+                                       "exec_summary_card", summary)
     company = _text(summary.get("company_name")) or _text(
         (db["accounts"].find_one({"_id": _oid(account_id)}) or {}).get("name"))
 

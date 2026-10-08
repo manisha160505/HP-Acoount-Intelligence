@@ -83,9 +83,14 @@ rules:
   - 'Research activity: the top 10 topics by composite score'
   - 'Category research activity: topics researched in each HP category'
   - 'Recent news: the 10 most recent distinct headlines'
+  - 'With no installed technology and no research activity: every recent news item that passes the Live
+    Signals checks, up to 30, with its evidence sentence'
   logic: Context items are the business description, employee range, revenue range and every installed
     technology item. Trigger items are the 10 most recent distinct news headlines (sorted by date, undated
-    last). Research topics and category research themes are triggers or context depending on the research
+    last). When the account has no installed technology and no research activity, there is almost
+    nothing for a play to match, so the triggers come from Live Signals instead (client, 8 Oct) - every
+    news item that passes Live Signals' own checks (last 12 months, dated, not in the future, duplicates
+    merged), up to 30, each with its headline and its evidence sentence. Research topics and category research themes are triggers or context depending on the research
     timing gate (see the next rule). Job postings, filings and contact records are not part of this evidence.
     Contacts are used only to name owners.
   constants:
@@ -93,6 +98,8 @@ rules:
     value: 10
   - label: News headlines used
     value: 10
+  - label: Live Signals news items used when there is no technology and no research activity
+    value: 30
   example:
     scenario: 15 news rows (2 duplicates), 25 research topics, 180 technology items.
     steps:

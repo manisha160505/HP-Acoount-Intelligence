@@ -6,7 +6,6 @@ import { ProtectedRoute } from '@/components/common/ProtectedRoute';
 import ScoreInfo from '@/components/common/ScoreInfo';
 import { CountUpText, ParallaxBand, SlidingSegments, growDelay } from '@/components/common/motion';
 import api from '@/services/api';
-import { NO_SIGNAL } from '@/lib/placeholders';
 import { CompanyAccount } from '@/types/account';
 import {
   URGENCY_FILTERS,
@@ -301,11 +300,9 @@ function AccountRow({ account, index, opening, dimmed, onOpen }: {
               </span>
             </>
           ) : (
-            <span
-              className="whitespace-nowrap sm:w-[10.25rem] text-right text-[11px] font-semibold text-slate-400"
-            >
-              {NO_SIGNAL}
-            </span>
+            // No score (withheld below the 60% gate, or not generated): the
+            // space is kept so rows line up, but no "No signal" tag (client, 8 Oct).
+            <span className="sm:w-[10.25rem]" aria-hidden />
           )}
           <ArrowRight className="as-row-arrow w-4 h-4 text-[#0096D6]" aria-hidden />
         </span>

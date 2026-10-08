@@ -74,7 +74,7 @@ def test_column_c_naming_the_account_itself_shows_nothing():
     assert _resolve_parent(row, "TRUE CORPORATION PUBLIC COMPANY LIMITED - TH") == ("", None)
 
 
-def test_held_parents_are_not_shown():
+def test_hidden_parents_are_not_shown():
     row = {"Business Id": "m", "Parent Company Name": "us bancorp",
            "Ultimate Parent Id": "u", "Ultimate Parent Name": "us bancorp"}
     assert _resolve_parent(row, "MITSUBISHI UFJ FINANCIAL GROUP, INC. - JP") == ("", None)
@@ -83,9 +83,12 @@ def test_held_parents_are_not_shown():
     assert _resolve_parent(row, "BHP BILLITON - AU") == ("", None)
 
 
-def test_a_corrected_value_for_a_held_account_shows():
+def test_a_hidden_account_shows_no_parent_whatever_the_sheet_says():
+    """Client, 8 Oct: no parent at all for an account Explorium holds
+    differently - not just the wrong name skipped (config/account_overrides.yaml)."""
     row = {"Business Id": "m", "Ultimate Parent Id": "u", "Ultimate Parent Name": "Real Parent"}
-    assert _resolve_parent(row, "MITSUBISHI UFJ FINANCIAL GROUP, INC. - JP")[0] == "Real Parent"
+    assert _resolve_parent(row, "MITSUBISHI UFJ FINANCIAL GROUP, INC. - JP") == ("", None)
+    assert _resolve_parent(row, "mitsubishi ufj financial group,  inc. - jp") == ("", None)
 
 
 def test_names_are_trimmed_and_blanks_ignored():

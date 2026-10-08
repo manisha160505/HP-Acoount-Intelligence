@@ -125,6 +125,23 @@ def test_another_accounts_widgets_cannot_reach_the_payload(db):
     assert [s["widget_key"] for s in sections] == ["exec_summary_card"]
 
 
+def test_a_feature_hidden_for_the_account_stays_out_of_the_chat(db, monkeypatch):
+    """Taken off the dashboard in config/account_overrides.yaml, so it must not
+    come back through Strategy Chat either."""
+    db([
+        _row("exec_summary_card", "executive_dashboard", {"company_name": "Kept"}),
+        _row("intent_topics_table", "intent_demand_signals", {"topics": ["HIDDEN"]}),
+    ])
+    monkeypatch.setattr(context, "_account_doc",
+                        lambda _db, _id: {"name": "MINISTRY OF DEFENCE - MY"})
+
+    payload, sections = context.build(ACCOUNT)
+
+    assert "Kept" in payload
+    assert "HIDDEN" not in payload
+    assert [s["widget_key"] for s in sections] == ["exec_summary_card"]
+
+
 def test_every_read_is_scoped_by_account_id(db):
     installed = db([_row("exec_summary_card", "executive_dashboard", {"a": 1})])
     context.build(ACCOUNT)

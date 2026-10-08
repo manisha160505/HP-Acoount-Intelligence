@@ -6,6 +6,7 @@ from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 
+from app.config import account_overrides
 from app.core.sse import with_keepalive
 from app.database.mongodb import get_db
 from app.errors import APIError, ErrorCode
@@ -594,7 +595,11 @@ def get_account_feature_widgets(
     # feature could show different content from one view to the next.
     # Read through the widget store: the committed generation of each widget's
     # producer, or `account_widgets` for an account the engine has not adopted.
-    stored = [w for w in widget_store.get_many(
+    # Hidden for this account in config/account_overrides.yaml: every widget
+    # reads as empty, so nothing reaches a client that bypasses the sidebar.
+    # Still generated - other features read these sections.
+    hidden = account_overrides.is_hidden(account.get("name"), key_clean)
+    stored = [] if hidden else [w for w in widget_store.get_many(
         account_id, [c["widget_key"] for c in widget_contracts]).values() if w]
 
     # A fresh account, or a feature added since the last run, has nothing
@@ -625,6 +630,9 @@ def get_account_feature_widgets(
             # nothing written back.
             if w_key == priorities.WIDGET_KEY:
                 data = priorities.with_claim_points(data)
+            # A parent hidden for this account (config/account_overrides.yaml)
+            # is removed on read, so the YAML applies without a regeneration.
+            data = account_overrides.masked(account.get("name"), w_key, data)
 
             responses.append({
                 "account_id": account_id,

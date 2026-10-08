@@ -936,7 +936,22 @@ export default function UserDashboardPage() {
     return `${baseUrl}/api/v1/accounts/${selectedAccount?.id}/data/download/${datasetKey}?token=${encodeURIComponent(token)}`;
   };
 
-  const allItems = NORTHSTAR_SIDEBAR_GROUPS.flatMap(g => g.items);
+  // Features the client asked not to show for this account (backend
+  // config/account_overrides.yaml, sent on the account as hidden_features).
+  const hiddenFeatures = useMemo(
+    () => new Set(selectedAccount?.hidden_features ?? []),
+    [selectedAccount?.hidden_features]);
+  const sidebarGroups = useMemo(
+    () => NORTHSTAR_SIDEBAR_GROUPS
+      .map(g => ({ ...g, items: g.items.filter(i => !hiddenFeatures.has(i.key)) }))
+      .filter(g => g.items.length > 0),
+    [hiddenFeatures]);
+  // Switching to an account that hides the open feature lands on the dashboard.
+  useEffect(() => {
+    if (hiddenFeatures.has(activeFeatureKey)) setActiveFeatureKey('executive_dashboard');
+  }, [hiddenFeatures, activeFeatureKey]);
+
+  const allItems = sidebarGroups.flatMap(g => g.items);
   const activeFeatureDef = allItems.find(f => f.key === activeFeatureKey) || allItems[0];
 
   const getClassificationBadge = (cls: WidgetClassification) => {
@@ -1120,7 +1135,7 @@ export default function UserDashboardPage() {
 
             {/* Vertical Navigation Groups (INTELLIGENCE, ACTION, SIMULATION & PLANNING) */}
             <div className="flex-1 overflow-y-auto p-2 space-y-4 no-scrollbar">
-              {NORTHSTAR_SIDEBAR_GROUPS.map((group) => (
+              {sidebarGroups.map((group) => (
                 <div key={group.sectionTitle} className="space-y-1">
                   {!isSidebarCollapsed && (
                     <span className="text-[9px] font-extrabold text-gray-400 uppercase tracking-widest px-2.5 pt-2 block">
@@ -1226,23 +1241,14 @@ export default function UserDashboardPage() {
 
                 if (!urgency) return null;
 
-                // The score always computes now: a missing input costs its own
-                // component 0 and nothing blocks the composite. The null branch
-                // is kept for a payload written before that rule changed.
-                const hasScore = urgency.score != null;
+                // Withheld below the 60% coverage gate: no tag at all, rather
+                // than a "No signal" one (client, 8 Oct).
+                if (urgency.score == null) return null;
                 return (
-                  <div
-                    className={`inline-flex items-center space-x-1.5 px-3 py-1 rounded-full border text-xs font-bold ${
-                      hasScore
-                        ? 'bg-amber-50 text-amber-800 border-amber-200/80'
-                        : 'bg-slate-50 text-slate-600 border-slate-200'
-                    }`}
-                  >
+                  <div className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full border text-xs font-bold bg-amber-50 text-amber-800 border-amber-200/80">
                     <span className="text-[11px]">Urgency Score</span>
-                    <span className={`px-1.5 py-0.5 rounded font-mono text-[10px] ${
-                      hasScore ? 'bg-amber-200 text-amber-900' : 'bg-slate-200 text-slate-700'
-                    }`}>
-                      {hasScore ? <><CountUpText text={urgency.score} />/{urgency.max_score ?? 100}</> : NO_SIGNAL}
+                    <span className="px-1.5 py-0.5 rounded font-mono text-[10px] bg-amber-200 text-amber-900">
+                      <CountUpText text={urgency.score} />/{urgency.max_score ?? 100}
                     </span>
                     <ScoreInfo topic="urgency" align="right" worked={urgencyWorked(urgency)} />
                   </div>
@@ -1743,38 +1749,28 @@ export default function UserDashboardPage() {
 
                           <div className="flex flex-col sm:flex-row items-center gap-6">
                             {/* The ring fills to the score on the same clock the
-                                number counts on. */}
-                            <div className={`relative w-24 h-24 rounded-full flex flex-col items-center justify-center flex-shrink-0 shadow-inner ${
-                              urgencyData?.score != null
-                                ? 'bg-amber-50/50'
-                                : 'border-4 border-slate-300 bg-slate-50'
-                            }`}>
-                              {urgencyData?.score != null && (
+                                number counts on. Below the client's 60% coverage
+                                gate there is no score, and no ring: the client
+                                asked (8 Oct) for the "No signal" circle to go
+                                rather than stand in for a number. */}
+                            {urgencyData?.score != null && (
+                              <div className="relative w-24 h-24 rounded-full flex flex-col items-center justify-center flex-shrink-0 shadow-inner bg-amber-50/50">
                                 <ScoreRing value={urgencyData.score} max={urgencyData.max_score ?? 100}
                                   className="stroke-amber-400" trackClassName="stroke-amber-100" />
-                              )}
-                              <span
-                                className={`font-extrabold ${
-                                  urgencyData?.score != null ? 'text-3xl text-slate-800' : 'text-xs leading-tight text-center px-3 text-slate-400'
-                                }`}
-                                // Withheld rather than absent: the client's
-                                // 16 Sep gate publishes a score only where at
-                                // least 60% of the weighted driver coverage is
-                                // available. Showing 0 there would read as "not
-                                // urgent" when the truth is "not measured".
-                                title={urgencyData?.publishable === false
-                                  ? `Not published: ${urgencyData?.coverage_percent}% of the weighted driver coverage is available, and the minimum is ${urgencyData?.coverage_minimum}%.`
-                                  : undefined}
-                              >
-                                {urgencyData?.score != null ? <CountUpText text={urgencyData.score} /> : NO_SIGNAL}
-                              </span>
-                              {urgencyData?.score != null && (
+                                <span className="font-extrabold text-3xl text-slate-800">
+                                  <CountUpText text={urgencyData.score} />
+                                </span>
                                 <span className="text-[10px] font-bold text-slate-400">/100</span>
-                              )}
-                            </div>
+                              </div>
+                            )}
 
                             <div className="flex-1 w-full space-y-3 text-xs">
-                              {(urgencyData?.drivers ?? []).map((d: any) => {
+                              {(urgencyData?.drivers ?? [])
+                                // Withheld score (below the 60% gate): a driver
+                                // with nothing behind it shows an empty bar, so
+                                // it is left out (client, 8 Oct).
+                                .filter((d: any) => urgencyData?.score != null || Number(d.value) > 0)
+                                .map((d: any) => {
                                   // A component with no input on file scores 0
                                   // under the client's missing-input rule and
                                   // is shown like any other 0: the client asked
@@ -1822,7 +1818,9 @@ export default function UserDashboardPage() {
                               publishes and they sum to the headline score, so a
                               reader checking the column by hand reaches the
                               number on the dial rather than a near miss. */}
-                          {urgencyData && urgencyData.weighted_contributions && (
+                          {/* Not for a withheld score: the sum would print the
+                              total the gate holds back. */}
+                          {urgencyData && urgencyData.score != null && urgencyData.weighted_contributions && (
                             <p className="text-[10px] text-slate-500 font-mono leading-relaxed border-t border-slate-100 pt-3">
                               {(urgencyData.drivers ?? [])
                                 .map((d: any) =>
