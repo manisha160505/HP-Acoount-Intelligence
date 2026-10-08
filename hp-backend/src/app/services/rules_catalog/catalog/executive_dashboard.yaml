@@ -6,7 +6,7 @@ purpose: 'Gives a seller a one-page view of the account: who the company is, its
   its hiring, how urgent it is for HP, and its evidenced strategic priorities.'
 final_output: Company profile (with description bullets and parent company), size bands, filed figures
   with growth and CEO, a 12-month job-postings tile, a 0-100 Urgency Score with four driver breakdowns
-  (or 'No signal observed' when less than 60% of the inputs are available), and up to 6 strategic priority
+  (with no score, ring or tag shown when less than 60% of the inputs are available), and up to 6 strategic priority
   cards grouped by theme, each with an evidence score, HP-focused bullets, source points and an optional
   case-study proof.
 how_it_combines: 'Five independent cards, each with its own rules.
@@ -177,9 +177,11 @@ rules:
     or it is the account''s own name (''canon'' for Canon Inc.; ''mitsubishi'' for Mitsubishi Motors).
     When column E gives no other company, the parent company name (column C) is used under the same
     test. Any parent the client''s merged hierarchy sheet adds is shown beside it - a company can have a
-    direct and an ultimate parent, and both are shown - unless it repeats one already listed. With none,
-    nothing is shown. The parent is never looked for in the business description.'
+    direct and an ultimate parent, and both are shown - unless it repeats one already listed. An account
+    whose parent is hidden in the per-account settings shows none at all, whatever any source says. With
+    none, nothing is shown. The parent is never looked for in the business description.'
   conditions:
+  - 'An account whose parent is hidden in the per-account settings: nothing shown (none is hidden today)'
   - 'Client mapping first; it replaces the corporate structure information for its 11 accounts'
   - 'Otherwise column E, then column C only when column E names no other company, then the merged sheet'
   - 'Blank, a repeat, or the account itself: not shown'
@@ -204,9 +206,10 @@ rules:
   - hp-backend/src/app/services/extractors/executive_dashboard.py:_parents
   - hp-backend/src/app/services/extractors/executive_dashboard.py:_resolve_parent
   - hp-backend/src/app/services/hp/company_relationships.py:for_account
+  - hp-backend/src/app/config/account_overrides.py:hides_parent
   - hp-frontend/src/app/dashboard/page.tsx:parentVal
   doc_source: Client, 5 Oct (issue list v3) - column E of the company hierarchy sheet; client, 7 Oct -
-    parent-company mapping and merged company hierarchy
+    parent-company mapping and merged company hierarchy; client, 8 Oct - per-account parent hiding
   confidence: high
 - id: summary_subsidiaries
   parent: exec_summary_card
@@ -927,8 +930,9 @@ rules:
   logic: 'Coverage is measured on inputs, not points: for each driver, the share of its components'' maximum
     points whose input is present, times the driver''s weight, summed and shown as a percentage (1 decimal).
     A component that is present but scores 0 counts as covered. If coverage is below 60%, the headline
-    score is withheld (shown as ''No signal observed'' with a tooltip giving the coverage); the drivers
-    are still shown and the score that would have been shown is kept for reference.'
+    score is withheld: no score ring, no urgency tag at the top of the page and no calculation line are
+    shown, and drivers that scored 0 are left out (client, 8 Oct); drivers with a value are still shown and
+    the score that would have been shown is kept for reference.'
   formula: 'coverage % = 100 x the sum, over the four drivers, of: driver weight x (maximum points of
     components with input present / maximum points of all components of that driver)'
   conditions:

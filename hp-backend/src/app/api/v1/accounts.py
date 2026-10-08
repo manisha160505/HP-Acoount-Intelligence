@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
+from app.config import account_overrides
 from app.core.deps import require_admin_role, require_user_role
 from app.database.mongodb import get_db
 from app.schemas.account import (
@@ -22,7 +23,10 @@ def serialize_account(doc: dict) -> dict:
         "name": doc["name"],
         "status": doc.get("status", "active"),
         "created_at": doc["created_at"].isoformat() if isinstance(doc.get("created_at"), datetime) else str(doc.get("created_at", "")),
-        "updated_at": doc["updated_at"].isoformat() if isinstance(doc.get("updated_at"), datetime) else str(doc.get("updated_at", ""))
+        "updated_at": doc["updated_at"].isoformat() if isinstance(doc.get("updated_at"), datetime) else str(doc.get("updated_at", "")),
+        # From config/account_overrides.yaml: the dashboard drops these from
+        # the sidebar. Sorted so the response is stable.
+        "hidden_features": sorted(account_overrides.hidden_features(doc["name"])),
     }
 
 def urgency_of(widget: dict | None) -> tuple[int | None, int | None]:

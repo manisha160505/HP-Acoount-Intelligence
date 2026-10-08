@@ -1,0 +1,63 @@
+# Per-account display overrides. Loaded by src/app/config/account_overrides.py.
+#
+# Edit this file - not the code - to hide a feature or the parent company for
+# one account. Keys are the account's name exactly as the platform holds it
+# (`name_for_upload` in the account's _account.json, e.g. "MINISTRY OF
+# DEFENCE - MY"); matching ignores case and repeated spaces. A name that matches
+# no account does nothing, so check the spelling against the admin page.
+#
+# Fields:
+#   hidden_features      feature keys removed from this account's sidebar, its
+#                        widget API and Strategy Chat. Keys as in
+#                        api/v1/feature_mapping.py (FEATURE_MAPPINGS).
+#                        Sections are still generated - other features read them.
+#   hide_parent_company  true = no "Parent Company" line on the Executive
+#                        Dashboard (and none in Strategy Chat). Regenerate the
+#                        Executive Dashboard after changing it.
+#
+# An unknown field or feature key stops the backend at startup, on purpose: a
+# typo here would otherwise silently show what the client asked us to hide.
+
+authority: "Client decisions on the open data gaps, 8 Oct 2026 (HP_Open_Types_Company_Domain.xlsx, Open Types by Account)"
+
+accounts:
+  # Intent hidden: no Bombora topics and every PredictLeads HP category score is 0.
+  # Tech Landscape hidden: government accounts with no technology data.
+  # Parents: none hidden. The 8 Oct decision hid the parent for 9 accounts whose
+  # Explorium parent was wrong; the client's 7 Oct mapping gives the correct
+  # parent for each of them instead (config/company_relationships.csv), and that
+  # is what is shown. hide_parent_company still works for any account added here.
+  "BANK FOR AGRICULTURE AND AGRICULTURAL COOPERATIVE - TH":
+    hidden_features: [intent_demand_signals]
+  "CHAROEN POKPHAND GROUP CO LTD - TH":
+  "HANJIN GROUP - KR":
+    hidden_features: [intent_demand_signals]
+  "ISUZU MOTORS LIMITED - JP":
+    hidden_features: [intent_demand_signals]
+  "JAPAN POST HOLDINGS CO.,LTD. - JP":
+    hidden_features: [intent_demand_signals]
+  "JFE HOLDINGS, INC. - JP":
+    hidden_features: [intent_demand_signals]
+  "MEIJI HOLDINGS CO., LTD. - JP":
+    hidden_features: [intent_demand_signals]
+  "MINISTRY OF DEFENCE - MY":
+    hidden_features: [intent_demand_signals, tech_landscape]
+  "MINISTRY OF DEFENCE - VN":
+    hidden_features: [intent_demand_signals, tech_landscape]
+  "MINISTRY OF NATIONAL DEFENSE - KR":
+    hidden_features: [intent_demand_signals]
+  "MINISTRY OF PUBLIC SECURITY - VN":
+    hidden_features: [intent_demand_signals, tech_landscape]
+  "SHISEIDO COMPANY, LIMITED - JP":
+  "T&D HOLDINGS, INC. - JP":
+    hidden_features: [intent_demand_signals]
+  "UNITED OVERSEAS BANK (MALAYSIA) BHD - MY":
+    hidden_features: [intent_demand_signals]
+  "UNITED OVERSEAS BANK LIMITED (UOB) - SG":
+    hidden_features: [intent_demand_signals]
+  "VIETNAM BANK FOR AGRICULTURE & RURAL DEVELOPMENT - VN":
+    hidden_features: [intent_demand_signals]
+  "VIETNAM POST CORPORATION - VN":
+    hidden_features: [intent_demand_signals]
+  "YAMATO HOLDINGS CO.,LTD. - JP":
+    hidden_features: [intent_demand_signals]

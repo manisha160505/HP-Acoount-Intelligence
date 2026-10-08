@@ -10,6 +10,9 @@ export interface CompanyAccount {
   // number the Executive Dashboard shows. Null when not generated or withheld.
   urgency_score?: number | null;
   urgency_max_score?: number | null;
+  // Feature keys the client asked not to show for this account (backend
+  // config/account_overrides.yaml). The dashboard drops them from the sidebar.
+  hidden_features?: string[];
 }
 
 export type DatasetKey = 

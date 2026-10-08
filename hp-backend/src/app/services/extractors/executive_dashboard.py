@@ -2,6 +2,7 @@ import hashlib
 import logging
 from datetime import UTC, datetime
 
+from app.config import account_overrides
 from app.core.llm import generate_gpt4o_json_completion
 from app.database.mongodb import get_db
 from app.observability import pipeline
@@ -46,6 +47,7 @@ _LEGAL_WORDS = {
     "pte", "sdn", "bhd", "kk", "kabushiki", "kaisha",
 }
 
+
 def _account_key(name: str) -> str:
     """The account's name without its ' - XX' country suffix, lowercased."""
     name = " ".join(str(name or "").lower().split())
@@ -82,9 +84,11 @@ def _resolve_parent(hier_row: dict | None, account_name: str = "") -> tuple[str,
     clause in the Business Description.
 
     Explorium only. `_parents` decides what is shown: the client's 7 Oct
-    mapping replaces this for the accounts it covers.
+    mapping replaces this for the accounts it covers. An account flagged
+    `hide_parent_company` in config/account_overrides.yaml (client, 8 Oct
+    mechanism) shows no parent at all, whatever any source says.
     """
-    if not hier_row:
+    if not hier_row or account_overrides.hides_parent(account_name):
         return "", None
     bid = str(hier_row.get("Business Id") or "").strip()
     upid = str(hier_row.get("Ultimate Parent Id") or "").strip()
@@ -116,6 +120,9 @@ def _parents(hier_row: dict | None, account_name: str = "") -> tuple[list[str], 
     BHP Billiton, which the own-name rule would otherwise hide - unless one is
     exactly the account itself.
 
+    An account flagged `hide_parent_company` in config/account_overrides.yaml
+    shows none at all; that is checked first and overrides every source.
+
     For every other account: Explorium's parent (`_resolve_parent`), then any
     parent the merged hierarchy sheet adds. A company can have two - a direct
     parent and an ultimate one - and both are shown. The sheet's rows were
@@ -123,6 +130,8 @@ def _parents(hier_row: dict | None, account_name: str = "") -> tuple[list[str], 
     dropped here when they repeat a parent already listed or are exactly the
     account's own name ('Kuok Group' stays for Kuok (Singapore)).
     """
+    if account_overrides.hides_parent(account_name):
+        return [], []
     rel = company_relationships.for_account(account_name)
     if rel["override"] is not None:
         parents = [p for p in rel["override"]

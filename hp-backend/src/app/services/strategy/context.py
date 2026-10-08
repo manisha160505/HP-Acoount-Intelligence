@@ -29,11 +29,25 @@ directly, which the engine keeps only as a rollback copy.
 import json
 import logging
 
+from bson import ObjectId
+from bson.errors import InvalidId
+
+from app.config import account_overrides
 from app.database.mongodb import get_db
 from app.services.regen import store as widget_store
 from app.services.regen.graph import DEFAULT
 
 logger = logging.getLogger(__name__)
+
+
+def _account_doc(db, account_id: str) -> dict:
+    """The account's own record, or {} - a test id or a deleted account simply
+    has no overrides."""
+    try:
+        oid = ObjectId(account_id)
+    except (InvalidId, TypeError):
+        return {}
+    return db["accounts"].find_one({"_id": oid}, {"name": 1}) or {}
 
 # The platform's own output rather than the account's.
 EXCLUDED_FEATURES = frozenset({"content_studio", "message_evaluator",
@@ -186,17 +200,22 @@ def account_widgets(account_id: str, graph=None) -> list:
     """
     graph = graph or DEFAULT
     db = get_db()
+    # A feature hidden for this account (config/account_overrides.yaml) must
+    # not come back through the chat after being taken off the dashboard.
+    account = _account_doc(db, account_id)
+    hidden = account_overrides.hidden_features(account.get("name"))
     found = []
     for widget_key, node_id in graph.owner.items():
         feature = graph[node_id].feature
-        if feature in EXCLUDED_FEATURES:
+        if feature in EXCLUDED_FEATURES or feature in hidden:
             continue
         widget = widget_store.committed(db, account_id, widget_key, graph) or {}
         # A widget that never generated carries no data worth sending, and its
         # "pending" notice would read to the model as a fact about the account.
         if widget.get("status") != "available":
             continue
-        data = compact(widget_key, widget.get("data") or {})
+        data = compact(widget_key, account_overrides.masked(
+            account.get("name"), widget_key, widget.get("data") or {}))
         if not data:
             continue
         found.append((widget_key, feature, data))

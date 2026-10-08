@@ -19,6 +19,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
+from app.config import account_overrides
 from app.services.extractors.executive_dashboard import (
     MAPPING_SOURCE,
     MERGED_SOURCE,
@@ -144,6 +145,21 @@ def test_the_merged_sheets_subsidiaries_fill_an_account_with_none():
 def test_subsidiaries_leave_out_every_parent():
     rows = [{"Subsidiary Name": "Kerry Group"}, {"Subsidiary Name": "Pacific Carriers"}]
     assert _subsidiaries(rows, "ACME - SG", ["Kerry Group", "Kuok Group"]) == ["Pacific Carriers"]
+
+
+def test_a_hidden_account_shows_no_parent_whatever_any_source_says(monkeypatch):
+    """Client, 8 Oct mechanism: an account flagged `hide_parent_company` in
+    config/account_overrides.yaml shows no parent at all - over Explorium and
+    over the 7 Oct mapping. No account is flagged in the shipped file (the 7 Oct
+    mapping corrected all nine), so the flag is set here."""
+    monkeypatch.setattr(account_overrides, "OVERRIDES", account_overrides._parse(
+        {"accounts": {"ACME - SG": {"hide_parent_company": True},
+                      "BHP BILLITON - AU": {"hide_parent_company": True}}}))
+    row = {"Business Id": "m", "Ultimate Parent Id": "u", "Ultimate Parent Name": "Real Parent"}
+    assert _resolve_parent(row, "ACME - SG") == ("", None)
+    assert _resolve_parent(row, "acme  - sg") == ("", None)
+    assert _parents(row, "ACME - SG") == ([], [])
+    assert _parents({}, "BHP BILLITON - AU") == ([], [])
 
 
 def test_names_are_trimmed_and_blanks_ignored():

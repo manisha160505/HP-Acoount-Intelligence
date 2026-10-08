@@ -61,6 +61,12 @@ def _log_readiness() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # A feature hidden in config/account_overrides.yaml under a misspelt key
+    # would show the client what they asked us to hide. Refuse to start instead.
+    from app.api.v1.feature_mapping import FEATURE_MAPPINGS
+    from app.config import account_overrides
+    account_overrides.validate_feature_keys(FEATURE_MAPPINGS)
+
     # Raises if the database is unreachable. Serving an app whose every query
     # will time out is worse than refusing to start: the old code caught this,
     # printed a notice, and left the UI blank with no working explanation.
