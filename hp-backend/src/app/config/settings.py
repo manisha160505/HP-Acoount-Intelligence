@@ -76,6 +76,23 @@ class Settings(BaseSettings):
     # one region moves the call to the next instead of waiting. Empty = only
     # VERTEX_LOCATION. Same model everywhere (checked 2 Oct).
     VERTEX_LOCATIONS: str = ""
+    # Regions that serve gemini-2.5-flash with a 131,072-token input window
+    # instead of its full 1,048,576.
+    #
+    # MEASURED, 7 Oct, from the VM against all 24 configured regions with one
+    # 232,986-token prompt: 22 accepted it, and these two answered
+    # `400 INVALID_ARGUMENT ... maximum number of tokens allowed (131072)`.
+    # `global` and `asia-south1` went on to accept 963,786 tokens, so the window
+    # really is ~1M everywhere else. Same prompt, same seconds, same key - this is
+    # a property of the region, not load and not the model name.
+    #
+    # Why it matters: the chat corpus is ~300k tokens on the largest accounts, so
+    # a request that lands here fails outright. Rotating over 24 regions put ~8% of
+    # calls on one, which is what made Strategy Chat fail on some turns and not
+    # others. Listed rather than hardcoded so a region that gains the full window
+    # can simply be removed.
+    VERTEX_SMALL_WINDOW_LOCATIONS: str = "asia-northeast3,europe-west9"
+    VERTEX_SMALL_WINDOW_TOKENS: int = 131_072
     # Embeddings go to a regional host: on the global one every request waited
     # ~12 s before its first byte (28 Sep, 1 or 16 texts alike), regional hosts
     # answer in under a second. asia-south1 is where the GCP VM runs.
@@ -140,6 +157,49 @@ class Settings(BaseSettings):
     GEMINI_MAX_OUTPUT_TOKENS: int = 16384
     GEMINI_TEMPERATURE: float = 0.3
 
+    # The INPUT window this platform works to: gemini-2.5-flash's own, 1,048,576
+    # tokens. Stated here because it was not stated anywhere, and the gap cost
+    # real debugging time.
+    #
+    # Measured, 7 Oct: the largest account's Strategy Chat payload is 1,226,071
+    # characters, which is ~333,000 tokens at the 3.68 chars/token this corpus
+    # actually tokenises at - a third of the window, not over it. A provider 400
+    # naming "maximum number of tokens allowed (131072)" was read as the model's
+    # limit; it is not. The same shape accepts 316,794 tokens when the project is
+    # quiet, so that number was transient capacity (see llm._is_capacity_refusal).
+    #
+    # Checked before the call so an oversized prompt is named as what it is
+    # rather than surfacing as a provider error that means something else.
+    GEMINI_MAX_INPUT_TOKENS: int = 1_048_576
+
+    # Chars per token to assume when estimating a prompt's size without calling
+    # the tokenizer. Deliberately LOWER than the 3.68 measured on this corpus:
+    # fewer chars per token means more tokens per char, so the estimate errs
+    # high and the guard trips early rather than late. An estimate that lets an
+    # oversized prompt through is the one failure mode worth avoiding.
+    TOKEN_ESTIMATE_CHARS: float = 3.0
+
+    # How long ONE model request may take before it is abandoned.
+    #
+    # There was no timeout at all, so every call ran on the SDK's own 600s
+    # default - and one logical answer is up to 3 validation attempts, each
+    # walking up to 5 rate-limit waits across every configured region. Nothing in
+    # that chain was bounded by anything anyone chose.
+    #
+    # 300s, chosen to be clearly above a slow REAL call rather than close to it.
+    # What is measured: a one-attempt answer on the largest account is ~12s, and a
+    # three-attempt turn is ~46s. What is not: how long a single generation takes
+    # when the model writes the full 16,384-token output cap. The nearest evidence
+    # is a 32,768-cap answer that wrote 42,528 tokens and spent 400s (see
+    # GEMINI_MAX_OUTPUT_TOKENS above), which is why this is not set to the ~60s
+    # the happy path would suggest - a timeout that fires on an answer that would
+    # have arrived is worse than one that fires late.
+    #
+    # Deliberately NOT added to `llm._retryable`: a timeout fails the turn instead
+    # of being retried. Retrying would spend another 300s per region on a request
+    # that has already shown it is stuck, and the seller is waiting.
+    LLM_REQUEST_TIMEOUT_SECONDS: float = 300.0
+
     # --- Observability -----------------------------------------------------
     # Stamped onto every log record, span and metric so that signals from the
     # backend stay distinguishable once other services share a project.
@@ -197,6 +257,27 @@ class Settings(BaseSettings):
         listed = [loc.strip() for loc in self.VERTEX_LOCATIONS.split(",") if loc.strip()]
         return listed or [(self.VERTEX_LOCATION or "global").strip()]
 
+    @property
+    def vertex_small_window_locations(self) -> set:
+        """Regions whose input window is only `VERTEX_SMALL_WINDOW_TOKENS`."""
+        return {loc.strip() for loc in
+                self.VERTEX_SMALL_WINDOW_LOCATIONS.split(",") if loc.strip()}
+
+    def vertex_chat_locations_for(self, estimated_tokens: int) -> list:
+        """The regions a prompt this size may be sent to, in configured order.
+
+        A prompt that fits the small window may go anywhere. One that does not has
+        the small-window regions removed, because they would refuse it - and the
+        refusal is a 400, which used to end the turn. Never returns an empty list:
+        if every region were excluded the prompt is going nowhere useful, so the
+        full list is returned and the provider's own answer stands.
+        """
+        locations = self.vertex_chat_locations
+        if estimated_tokens <= self.VERTEX_SMALL_WINDOW_TOKENS:
+            return locations
+        small = self.vertex_small_window_locations
+        return [loc for loc in locations if loc not in small] or locations
+
     def vertex_chat_endpoint(self, location: str) -> str:
         """Vertex's OpenAI-compatible endpoint in one region. Regional hosts
         are <region>-aiplatform; `global` is the bare host."""
@@ -221,8 +302,10 @@ class Settings(BaseSettings):
         wants OAuth). Not ?key=: a URL lands in error messages and logs."""
         if self.llm_provider == "vertex":
             return {"base_url": self.llm_endpoint, "api_key": "vertex-express",
+                    "timeout": self.LLM_REQUEST_TIMEOUT_SECONDS,
                     "default_headers": {"x-goog-api-key": self.llm_api_key}}
-        return {"base_url": self.llm_endpoint or None, "api_key": self.llm_api_key}
+        return {"base_url": self.llm_endpoint or None, "api_key": self.llm_api_key,
+                "timeout": self.LLM_REQUEST_TIMEOUT_SECONDS}
 
     @property
     def llm_request_extra(self) -> dict:
