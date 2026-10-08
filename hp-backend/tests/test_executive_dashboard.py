@@ -84,11 +84,23 @@ def test_column_c_naming_the_account_itself_shows_nothing():
 # --- client data, 7 Oct: the parent-company mapping and the merged hierarchy ---
 
 def test_the_clients_mapping_replaces_explorium():
+    row = {"Business Id": "s", "Ultimate Parent Id": "x",
+           "Ultimate Parent Name": "sembcorp industries"}
+    assert _parents(row, "SEATRIUM LIMITED - SG") == (["Temasek Holdings"], [MAPPING_SOURCE])
+    row = {"Business Id": "h", "Ultimate Parent Id": "x",
+           "Ultimate Parent Name": "brookfield dtla fund office trust investor"}
+    assert _parents(row, "HEALTHSCOPE - AU")[0] == [
+        "Brookfield Asset Management (via Brookfield Business Partners)"]
+
+
+def test_the_nine_hidden_accounts_show_no_parent_despite_the_mapping():
+    """Client, 8 Oct: no parent for the nine accounts Explorium held differently
+    (config/account_overrides.yaml), even where the 7 Oct mapping names one."""
     row = {"Business Id": "b", "Parent Company Name": "andeavor",
            "Ultimate Parent Id": "m", "Ultimate Parent Name": "marathon petroleum"}
-    assert _parents(row, "BHP BILLITON - AU") == (["BHP Group Limited"], [MAPPING_SOURCE])
-    row = {"Business Id": "v", "Ultimate Parent Id": "u", "Ultimate Parent Name": "uk ministry of defence"}
-    assert _parents(row, "VIETTEL CORPORATION - VN")[0] == ["Ministry of National Defence, Vietnam"]
+    assert _parents(row, "BHP BILLITON - AU") == ([], [])
+    assert _parents({}, "VIETTEL CORPORATION - VN") == ([], [])
+    assert _parents({}, "THE BANK OF TOKYO-MITSUBISHI LIMITED (BANGKOK BRANCH) - TH") == ([], [])
 
 
 def test_no_parent_in_the_mapping_shows_nothing_whatever_explorium_says():
@@ -150,8 +162,8 @@ def test_subsidiaries_leave_out_every_parent():
 def test_a_hidden_account_shows_no_parent_whatever_any_source_says(monkeypatch):
     """Client, 8 Oct mechanism: an account flagged `hide_parent_company` in
     config/account_overrides.yaml shows no parent at all - over Explorium and
-    over the 7 Oct mapping. No account is flagged in the shipped file (the 7 Oct
-    mapping corrected all nine), so the flag is set here."""
+    over the 7 Oct mapping. Set here, so the test does not depend on which
+    accounts the shipped file lists."""
     monkeypatch.setattr(account_overrides, "OVERRIDES", account_overrides._parse(
         {"accounts": {"ACME - SG": {"hide_parent_company": True},
                       "BHP BILLITON - AU": {"hide_parent_company": True}}}))

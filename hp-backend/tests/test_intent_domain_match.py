@@ -40,9 +40,23 @@ def test_confirmed_alias_matches():
     assert (m["status"], m["matched_by"]) == ("matched", "confirmed_alias")
 
 
-def test_a_different_company_stays_a_mismatch():
+def test_the_six_exports_the_client_confirmed_on_8_oct_are_attached():
+    """Point 9 of the open data gaps: 'not actual mismatch cases'."""
     for website, domain in (("nga.mil", "nis.go.kr"), ("ubldigital.com", "uob.com.my"),
-                            ("smrc.co.jp", "smfg.co.jp"), ("uweei.org.sg", "ntuc.org.sg")):
+                            ("smrc.co.jp", "smfg.co.jp"), ("uweei.org.sg", "ntuc.org.sg"),
+                            ("mufg.com", "mufg.jp")):
+        m = _match(website, domain)
+        assert (m["status"], m["matched_by"]) == ("matched", "confirmed_alias"), website
+        assert m["provider_domain"] == website
+
+
+def test_a_confirmed_alias_is_for_its_own_account_only():
+    # nga.mil is accepted for NIS Korea, not for any other account.
+    assert _match("nga.mil", "ntuc.org.sg")["status"] == "mismatch"
+
+
+def test_a_different_company_stays_a_mismatch():
+    for website, domain in (("acme-holdings.com", "astra.co.id"), ("nga.mil", "mod.gov.my")):
         m = _match(website, domain)
         assert (m["status"], m["matched_by"]) == ("mismatch", None), website
 

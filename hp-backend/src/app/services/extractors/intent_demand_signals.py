@@ -91,10 +91,16 @@ DISCLAIMER = ("Intent indicates research activity, not confirmed purchase intent
 # or its group, accepted for the account (account domain -> export domains).
 # Client, 5 Oct (issue list v3): IAG NZ's export is "of iag.co.nz ... pls use
 # bambora data". The rest name the account's own company on its other domain.
-# Exports for a different company are deliberately absent and stay rejected:
-# nis.go.kr (nga.mil), mufg.jp (Link Administration Holdings), smfg.co.jp
-# (Sumiken Mitsui Road), uob.com.my (UBL United Bank), ntuc.org.sg (uweei.org.sg).
+# Client, 8 Oct (open data gaps, point 9): the six exports held as a different
+# company "are not actual mismatch cases - proceed with the existing Bombora
+# export data". Accepted on the client's word, although the export names
+# another organisation for some of them (nga.mil for NIS, Sumiken Mitsui Road
+# for SMFG, UBL United Bank for UOB Malaysia). mufg.jp covers MUFG and BTMU
+# Bangkok, which share the domain.
 # Subdomains (health.nsw.gov.au / nsw.gov.au) need no entry - see _same_site.
+#
+# Not part of the Intent section's fingerprint: after changing this, Submit the
+# affected accounts with force (Intent and what reads it).
 CONFIRMED_INTENT_DOMAINS = {
     "iag.co.nz": ("iag.com.au",),
     "airnewzealand.co.nz": ("airnewzealand.com",),
@@ -102,6 +108,12 @@ CONFIRMED_INTENT_DOMAINS = {
     "khi.co.jp": ("kawasaki.com",),
     "nomura.com": ("nomuraholdings.com",),
     "sagilityhealth.com": ("sagility.com",),
+    # Client, 8 Oct, point 9.
+    "nis.go.kr": ("nga.mil",),
+    "ntuc.org.sg": ("uweei.org.sg",),
+    "smfg.co.jp": ("smrc.co.jp",),
+    "uob.com.my": ("ubldigital.com",),
+    "mufg.jp": ("mufg.com",),
 }
 
 # How the category file marks an empty cell. "\ufffd" is its em dash read

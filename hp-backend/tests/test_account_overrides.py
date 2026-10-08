@@ -29,14 +29,12 @@ def test_the_client_decisions_are_in_the_shipped_file():
     assert ao.is_hidden("MINISTRY OF DEFENCE - MY", "tech_landscape")
     assert ao.is_hidden("YAMATO HOLDINGS CO.,LTD. - JP", "intent_demand_signals")
     assert not ao.is_hidden("YAMATO HOLDINGS CO.,LTD. - JP", "tech_landscape")
-    # 16 Intent, 3 Tech Landscape. No parent is hidden: the client's 7 Oct
-    # mapping corrected the nine the 8 Oct decision would have hidden
-    # (config/company_relationships.csv).
-    assert not ao.hides_parent("BHP BILLITON - AU")
+    assert ao.hides_parent("BHP BILLITON - AU")
+    # 16 Intent, 3 Tech Landscape, 9 parents.
     entries = ao.OVERRIDES.values()
     assert sum("intent_demand_signals" in e["hidden_features"] for e in entries) == 16
     assert sum("tech_landscape" in e["hidden_features"] for e in entries) == 3
-    assert sum(e["hide_parent_company"] for e in entries) == 0
+    assert sum(e["hide_parent_company"] for e in entries) == 9
 
 
 def test_an_account_not_listed_hides_nothing():

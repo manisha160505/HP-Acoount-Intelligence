@@ -181,7 +181,8 @@ rules:
     whose parent is hidden in the per-account settings shows none at all, whatever any source says. With
     none, nothing is shown. The parent is never looked for in the business description.'
   conditions:
-  - 'An account whose parent is hidden in the per-account settings: nothing shown (none is hidden today)'
+  - 'An account whose parent is hidden in the per-account settings: nothing shown (9 accounts Explorium held
+    differently, e.g. BHP, MUFG, Viettel - client, 8 Oct; this wins over the 7 Oct mapping)'
   - 'Client mapping first; it replaces the corporate structure information for its 11 accounts'
   - 'Otherwise column E, then column C only when column E names no other company, then the merged sheet'
   - 'Blank, a repeat, or the account itself: not shown'

@@ -324,7 +324,7 @@ def ex_intent_demand_signals__int_domain_match():
     from app.services.extractors import intent_demand_signals as ids
     return [[m['status'], m['matched_by']] for m in (
         ids._match_provider_account([{'Company Website': w, 'Company Name': 'x', 'Date Stamp': '20260901'}], d)[0]
-        for w, d in (('nsw.gov.au', 'health.nsw.gov.au'), ('https://www.iag.com.au', 'iag.co.nz'), ('nga.mil', 'nis.go.kr')))]
+        for w, d in (('nsw.gov.au', 'health.nsw.gov.au'), ('https://www.iag.com.au', 'iag.co.nz'), ('acme-holdings.com', 'astra.co.id')))]
 
 def ex_intent_demand_signals__int_topics_table():
     from app.services.extractors import intent_demand_signals as ids
