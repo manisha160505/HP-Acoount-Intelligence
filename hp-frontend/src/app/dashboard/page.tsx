@@ -354,10 +354,16 @@ const AccountIdContext = React.createContext<SourceLinkContext>(NO_LINKS);
 // A link worth showing: present, not known dead, and not one of HP's retired
 // case studies. '' otherwise - and a source with no openable link is not
 // shown at all (client, 7 Oct).
+//
+// A retired case study we hold our own copy of is swapped for that copy FIRST:
+// its old address is recorded as dead by the link check, and testing that
+// address would hide the copy we serve.
 function openableUrl(url: unknown, ctx?: SourceLinkContext): string {
-  const u = String(url ?? '').trim();
+  const raw = String(url ?? '').trim();
+  if (!raw) return '';
+  const u = caseStudyUrl(raw) || '';
   if (!u || (ctx || NO_LINKS).unreachable.has(u)) return '';
-  return u.includes('h20195.www2.hp.com') ? (caseStudyUrl(u) || '') : u;
+  return u;
 }
 
 // Two evidence rows from the same unlinked source are one chip. A row that
@@ -1508,7 +1514,11 @@ export default function UserDashboardPage() {
                   // (column C where E is the account itself) and the
                   // subsidiaries are column A of the Subsidiaries sheet, both as
                   // supplied. Blank means hidden, not shown as missing.
-                  const parentVal = summaryData?.parent_company || null;
+                  // Client, 7 Oct: its corrected parent where it gave one, and
+                  // a company can have two (direct and ultimate) - both shown.
+                  const parentsVal: string[] = summaryData?.parent_companies
+                    || (summaryData?.parent_company ? [summaryData.parent_company] : []);
+                  const parentVal = parentsVal.length ? parentsVal.join(' · ') : null;
                   const subsidiariesVal: string[] = summaryData?.subsidiaries || [];
                   // Feature 1's header CEO, read from the newest filing naming one.
                   const ceoVal: any = metricsData?.ceo || null;
@@ -1584,7 +1594,7 @@ export default function UserDashboardPage() {
                               {parentVal && (
                                 <div className="flex items-center space-x-1.5 text-slate-700" title={summaryData?.parent_company_source || undefined}>
                                   <Building2 className="w-4 h-4 text-hp-navy" />
-                                  <span>Parent Company: <strong className="font-bold text-slate-900 capitalize">{parentVal}</strong></span>
+                                  <span>{parentsVal.length > 1 ? 'Parent Companies' : 'Parent Company'}: <strong className="font-bold text-slate-900 capitalize">{parentVal}</strong></span>
                                 </div>
                               )}
                             </div>

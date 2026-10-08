@@ -110,7 +110,7 @@ def ex_content_studio__cs_tier_language():
 
 def ex_executive_dashboard__summary_parent_company():
     from app.services.extractors import executive_dashboard as ed
-    return [ed._resolve_parent(row, name)[0] for row, name in (
+    return [' · '.join(ed._parents(row, name)[0]) for row, name in (
         ({'Business Id': 'b', 'Ultimate Parent Id': 's', 'Ultimate Parent Name': 'sm investments'}, 'BANCO DE ORO UNIBANK, INC. (BDO) - PH'),
         ({'Business Id': 'sm', 'Ultimate Parent Id': 'sm', 'Ultimate Parent Name': 'san miguel', 'Parent Company Name': 'top frontier investment holdings'}, 'SAN MIGUEL CORPORATION - PH'),
         ({'Business Id': 'c', 'Ultimate Parent Id': 'x', 'Ultimate Parent Name': 'canon'}, 'CANON INC. - JP'),

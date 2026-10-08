@@ -245,7 +245,9 @@ NODES = (
          # The company description is reorganised into bullets by one cached,
          # grounded model call (client feedback 1.a, 27 Sep).
          llm=True,
-         logic_refs=(TIME_WINDOWS_REF, "app.services.extractors.executive_dashboard:SUMMARY_PROMPT_VERSION",),
+         # The client's 7 Oct parent/subsidiary data (hp/company_relationships.py).
+         logic_refs=(TIME_WINDOWS_REF, "app.services.extractors.executive_dashboard:SUMMARY_PROMPT_VERSION",
+                     "app.services.hp.company_relationships:RELATIONSHIPS_VERSION",),
          # 2: exec_key_metrics lists the filings on record (the filings list
          # CSV uploaded with the PDFs under compliance_filings); Quick Stats
          # counts and the contacts read dropped (client feedback 1.e).

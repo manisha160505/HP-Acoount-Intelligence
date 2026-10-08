@@ -19,7 +19,13 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from app.services.extractors.executive_dashboard import _resolve_parent, _subsidiaries
+from app.services.extractors.executive_dashboard import (
+    MAPPING_SOURCE,
+    MERGED_SOURCE,
+    _parents,
+    _resolve_parent,
+    _subsidiaries,
+)
 
 ASTRA_ID = "8fe936f404e732f41c273a98045b8526"
 ASTRA = "PT ASTRA INTERNATIONAL TBK - ID"
@@ -74,18 +80,70 @@ def test_column_c_naming_the_account_itself_shows_nothing():
     assert _resolve_parent(row, "TRUE CORPORATION PUBLIC COMPANY LIMITED - TH") == ("", None)
 
 
-def test_held_parents_are_not_shown():
-    row = {"Business Id": "m", "Parent Company Name": "us bancorp",
-           "Ultimate Parent Id": "u", "Ultimate Parent Name": "us bancorp"}
-    assert _resolve_parent(row, "MITSUBISHI UFJ FINANCIAL GROUP, INC. - JP") == ("", None)
+# --- client data, 7 Oct: the parent-company mapping and the merged hierarchy ---
+
+def test_the_clients_mapping_replaces_explorium():
     row = {"Business Id": "b", "Parent Company Name": "andeavor",
            "Ultimate Parent Id": "m", "Ultimate Parent Name": "marathon petroleum"}
-    assert _resolve_parent(row, "BHP BILLITON - AU") == ("", None)
+    assert _parents(row, "BHP BILLITON - AU") == (["BHP Group Limited"], [MAPPING_SOURCE])
+    row = {"Business Id": "v", "Ultimate Parent Id": "u", "Ultimate Parent Name": "uk ministry of defence"}
+    assert _parents(row, "VIETTEL CORPORATION - VN")[0] == ["Ministry of National Defence, Vietnam"]
 
 
-def test_a_corrected_value_for_a_held_account_shows():
-    row = {"Business Id": "m", "Ultimate Parent Id": "u", "Ultimate Parent Name": "Real Parent"}
-    assert _resolve_parent(row, "MITSUBISHI UFJ FINANCIAL GROUP, INC. - JP")[0] == "Real Parent"
+def test_no_parent_in_the_mapping_shows_nothing_whatever_explorium_says():
+    row = {"Business Id": "m", "Parent Company Name": "us bancorp",
+           "Ultimate Parent Id": "u", "Ultimate Parent Name": "us bancorp"}
+    assert _parents(row, "MITSUBISHI UFJ FINANCIAL GROUP, INC. - JP") == ([], [])
+    assert _parents({"Business Id": "s", "Ultimate Parent Id": "c",
+                     "Ultimate Parent Name": "citibank"},
+                    "SUMITOMO MITSUI FINANCIAL GROUP, INC. - JP") == ([], [])
+    # The client named Shiseido itself as its parent: independent, so none.
+    assert _parents({"Ultimate Parent Name": "henkel", "Business Id": "s",
+                     "Ultimate Parent Id": "h"}, "SHISEIDO COMPANY, LIMITED - JP") == ([], [])
+
+
+def test_a_parent_from_the_merged_sheet_is_added_to_explorium():
+    row = {"Business Id": "b", "Ultimate Parent Id": "w", "Ultimate Parent Name": "wesfarmers"}
+    # Both sources name Wesfarmers: shown once, credited to Explorium.
+    assert _parents(row, "BUNNINGS GROUP LIMITED") == (["wesfarmers"], ["Company Hierarchy - Ultimate Parent Name"])
+    # Explorium has nothing: the merged sheet's parent shows.
+    assert _parents({}, "ANZ HOLDINGS (NEW ZEALAND) LIMITED - NZ") == (
+        ["Australia and New Zealand Banking Group"], [MERGED_SOURCE])
+
+
+def test_two_parents_are_both_shown():
+    row = {"Business Id": "k", "Ultimate Parent Id": "p", "Ultimate Parent Name": "Kerry Group"}
+    parents, sources = _parents(row, "KUOK (SINGAPORE) LIMITED - SG")
+    assert parents == ["Kerry Group", "Kuok Group"]
+    assert sources == ["Company Hierarchy - Ultimate Parent Name", MERGED_SOURCE]
+
+
+def test_a_reviewed_parent_sharing_the_accounts_first_word_is_kept():
+    # 'Kuok Group' starts like 'KUOK (SINGAPORE)' and is its real parent; the
+    # Explorium own-name rule would drop it, so the merged rows use exact names.
+    assert _parents({}, "KUOK (SINGAPORE) LIMITED - SG")[0] == ["Kuok Group"]
+    assert _parents({}, "SEIKO EPSON CORPORATION - JP")[0] == ["Seiko Group"]
+
+
+def test_an_account_outside_the_clients_data_is_unchanged():
+    row = {"Business Id": "b", "Ultimate Parent Id": "s", "Ultimate Parent Name": "sm investments"}
+    assert _parents(row, "BANCO DE ORO UNIBANK, INC. (BDO) - PH") == (
+        ["sm investments"], ["Company Hierarchy - Ultimate Parent Name"])
+    assert _parents({}, "CANON INC. - JP") == ([], [])
+
+
+def test_the_merged_sheets_subsidiaries_fill_an_account_with_none():
+    subs = _subsidiaries([], "ACCENTURE INC - PH", [])
+    # 62 in the sheet; 'Accenture' and 'Accenture PLC.' are the account's own
+    # name and are not its subsidiaries.
+    assert len(subs) == 60
+    assert "Accenture" not in subs and "Accenture PLC." not in subs
+    assert len({s.lower() for s in subs}) == len(subs)
+
+
+def test_subsidiaries_leave_out_every_parent():
+    rows = [{"Subsidiary Name": "Kerry Group"}, {"Subsidiary Name": "Pacific Carriers"}]
+    assert _subsidiaries(rows, "ACME - SG", ["Kerry Group", "Kuok Group"]) == ["Pacific Carriers"]
 
 
 def test_names_are_trimmed_and_blanks_ignored():
