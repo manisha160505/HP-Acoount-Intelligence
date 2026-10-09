@@ -6,6 +6,7 @@ import { useAuth } from '@/providers/AuthProvider';
 import { homeRouteFor } from '@/lib/accountSelection';
 import { ParallaxBand } from '@/components/common/motion';
 import { Shield, User as UserIcon, Lock, Mail, AlertCircle, Loader2 } from 'lucide-react';
+import HpLogo from '@/components/common/HpLogo';
 
 export default function LoginPage() {
   const [activeTab, setActiveTab] = useState<'user' | 'admin'>('user');
@@ -64,9 +65,7 @@ export default function LoginPage() {
   return (
     <ParallaxBand fadeOnScroll={false} className="min-h-screen text-white flex flex-col justify-center py-12 sm:px-6 lg:px-8">
       <div className="as-rise sm:mx-auto sm:w-full sm:max-w-md text-center">
-        <div className="inline-flex items-center justify-center bg-hp-navy text-white p-3 rounded-full text-3xl font-extrabold tracking-widest shadow-2xl border-2 border-white/20">
-          HP
-        </div>
+        <HpLogo size={64} onDark className="mx-auto" />
         <h2 className="mt-4 text-center text-2xl font-extrabold text-white tracking-tight">
           Account Intelligence
         </h2>

@@ -84,6 +84,7 @@ import {
   BarChart3,
   Briefcase
 } from 'lucide-react';
+import HpLogo from '@/components/common/HpLogo';
 
 const ICON_MAP: Record<string, React.FC<{ className?: string }>> = {
   LayoutDashboard,
@@ -1080,9 +1081,7 @@ export default function UserDashboardPage() {
             
             {/* Top Brand Header */}
             <div className="p-4 flex items-center space-x-3 border-b border-slate-800/80">
-              <div className="w-8 h-8 bg-hp-navy text-white rounded-lg flex items-center justify-center font-extrabold text-sm tracking-wider shadow-md flex-shrink-0">
-                HP
-              </div>
+              <HpLogo size={36} onDark />
               {!isSidebarCollapsed && (
                 <div>
                   <h1 className="text-sm font-bold text-white leading-tight tracking-tight">HP</h1>
@@ -7573,9 +7572,7 @@ export default function UserDashboardPage() {
                                   <div className="h-1.5 bg-gradient-to-r from-[#0096D6] to-[#00629B]" />
                                   <div className="px-5 py-5 space-y-4 text-[15px] text-slate-700 leading-7">
                                     <div className="flex items-center gap-2">
-                                      <span className="w-7 h-7 rounded-full bg-[#0096D6] text-white text-xs font-bold italic flex items-center justify-center">
-                                        hp
-                                      </span>
+                                      <HpLogo size={36} />
                                       <span className="text-[11px] font-black text-slate-900">HP</span>
                                     </div>
                                     {generatedAsset.greeting && <p>{generatedAsset.greeting}</p>}
