@@ -29,6 +29,7 @@ one basis), and only otherwise from two filings a year apart.
 import re
 from datetime import date, timedelta
 
+from app.services.dashboard import filings_register
 from app.services.dashboard.priorities import _format_value
 from app.services.hp import time_windows
 
@@ -300,9 +301,23 @@ def _choose(rows: list, metric: str, types: tuple):
     return _newest_first(pool)[0], _newest_first(of_type)[0], pool
 
 
-def _filed_on(row: dict):
-    """When the filing was published, else the end of the period it covers."""
-    return _date(row.get("publication_date")) or _date(row.get("period_end"))
+def _published(value):
+    """A publication date in any form the filings crawl wrote it (the filings
+    list's reader: ISO, YYYY/MM/DD, day-first DD/MM/YYYY, ...), else ISO."""
+    return filings_register._date(value) or _date(value)
+
+
+def _filed_on(row: dict, as_of: date | None = None):
+    """When the filing was published, else the end of the period it covers.
+
+    A publication date after today is not one. Where the filings crawl found
+    no date it wrote the year's end - 2026-12-31 on 37 rows in 25 accounts
+    (9 Oct), Accenture's Q3 FY26 release of 18 Jun 2026 among them - and the
+    window then dropped filings already out as not yet published."""
+    published = _published(row.get("publication_date"))
+    if published is not None and published <= (as_of or time_windows.today()):
+        return published
+    return _date(row.get("period_end"))
 
 
 def recent_filings(rows: list, as_of: date | None = None) -> list:
@@ -311,7 +326,7 @@ def recent_filings(rows: list, as_of: date | None = None) -> list:
     out: the window cannot be shown to hold for them."""
     end = as_of or time_windows.today()
     start = end - timedelta(days=time_windows.FILINGS_WINDOW_DAYS)
-    return [r for r in rows or [] if (d := _filed_on(r)) is not None and start <= d <= end]
+    return [r for r in rows or [] if (d := _filed_on(r, end)) is not None and start <= d <= end]
 
 
 def reported_metrics(rows: list, company: str = "", as_of: date | None = None) -> list:

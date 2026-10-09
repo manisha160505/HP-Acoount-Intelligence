@@ -229,3 +229,30 @@ def test_ceo_only_from_a_filing_in_the_window():
     old = {**_row(period_end="2023-06-30", file="ar2023.pdf"),
            "ceo_check": "verified", "ceo_name": "Old CEO", "ceo_title": "CEO", "ceo_page": "3"}
     assert ff.ceo([old]) is None
+
+
+@pytest.mark.window
+def test_a_placeholder_publication_date_after_today_falls_back_to_the_period_end():
+    """The filings crawl wrote the year's end where it found no date (2026-12-31
+    on Accenture's Q3 FY26 release, published 18 Jun 2026). A date after today
+    is not a publication date: the period end stands in, so the filing stays."""
+    row = _row(period_end="2025-06-30", file="ar2025.pdf", **_metric("revenue", 100.0))
+    row["publication_date"] = "2026-12-31T00:00:00Z"
+    [card] = ff.reported_metrics([row])
+    assert card["metric"] == "Revenue"
+    assert ff._filed_on(row, AS_OF) == date(2025, 6, 30)
+
+
+@pytest.mark.window
+def test_a_filing_whose_period_has_not_ended_is_still_left_out():
+    row = _row(period_end="2026-03-31", file="future.pdf", **_metric("revenue", 100.0))
+    row["publication_date"] = "2026-12-31T00:00:00Z"
+    assert ff.reported_metrics([row]) == []
+
+
+def test_publication_dates_in_every_form_the_crawl_wrote():
+    assert ff._published("2025/06/22") == date(2025, 6, 22)        # Japanese EDINET
+    assert ff._published("20250312") == date(2025, 3, 12)          # Korean DART
+    assert ff._published("05/11/2025") == date(2025, 11, 5)        # ASX, day first
+    assert ff._published("2025-06-18T00:00:00Z") == date(2025, 6, 18)
+    assert ff._published("") is None
