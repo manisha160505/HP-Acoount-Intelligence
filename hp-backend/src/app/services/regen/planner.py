@@ -28,7 +28,7 @@ now, and the live jobs. Nothing here writes.
 
 from bson import ObjectId
 
-from app.services.regen import jobs, reasons, state
+from app.services.regen import coverage, jobs, reasons, state
 from app.services.regen.graph import INDEX
 
 # The statuses the admin page groups nodes by. They refine state.derive's
@@ -93,6 +93,8 @@ def account_view(engine, account_id: str) -> dict:
     live = jobs.live(engine.db, account_id)
     derived = state.derive(engine.graph, snapshot.states, fps, live,
                            rows=snapshot.rows)
+    account_name = _account_name(engine.db, account_id)
+    provided = {k for k, rows in snapshot.rows.items() if rows}
 
     nodes = {}
     for nid in engine.graph.order:
@@ -144,8 +146,17 @@ def account_view(engine, account_id: str) -> dict:
             status = NO_DATA
             why.insert(0, reasons.no_data(sorted(closure)))
         # The section's own datasets with no file for this account: the data
-        # gaps to fill. It may still run on the rest, with less to go on.
-        not_provided = sorted(k for k in node.datasets if not snapshot.rows.get(k))
+        # gaps to fill. It may still run on the rest, with less to go on. One
+        # another source already fills for the same card is listed apart as
+        # covered (regen/coverage.py) - unless the section has nothing to run
+        # on, where the cover shows nothing either.
+        not_provided, covered = [], []
+        for k in sorted(k for k in node.datasets if not snapshot.rows.get(k)):
+            by = None if status == NO_DATA else coverage.covered_by(k, account_name, provided)
+            if by:
+                covered.append({"dataset": k, "label": reasons.dataset_label(k), "covered_by": by})
+            else:
+                not_provided.append(k)
 
         nodes[nid] = {
             "node_id": nid,
@@ -168,6 +179,7 @@ def account_view(engine, account_id: str) -> dict:
             "datasets": sorted(closure),
             "datasets_not_provided": [{"dataset": k, "label": reasons.dataset_label(k)}
                                       for k in not_provided],
+            "datasets_covered": covered,
             "missing_files": [{"dataset": r.get("dataset_key") or r.get("category"),
                                "label": reasons.dataset_label(
                                    str(r.get("dataset_key") or r.get("category") or "")),
@@ -176,7 +188,15 @@ def account_view(engine, account_id: str) -> dict:
             "handed_back": handed_back,
         }
     return {"account_id": account_id, "nodes": nodes, "derived": derived,
-            "fingerprints": fps, "data_gaps": data_gaps(nodes)}
+            "fingerprints": fps, "data_gaps": data_gaps(nodes),
+            "data_covered": data_covered(nodes)}
+
+
+def _account_name(db, account_id: str) -> str:
+    if not ObjectId.is_valid(str(account_id)):
+        return ""
+    doc = db["accounts"].find_one({"_id": ObjectId(str(account_id))}, {"name": 1})
+    return (doc or {}).get("name") or ""
 
 
 def data_gaps(nodes: dict) -> list:
@@ -191,6 +211,16 @@ def data_gaps(nodes: dict) -> list:
                 entry["blocks"].append(n["label"])
     # The ones that leave a section with nothing at all to build from first.
     return sorted(gaps.values(), key=lambda g: (not g["blocks"], g["label"].lower()))
+
+
+def data_covered(nodes: dict) -> list:
+    """Every unprovided dataset another source fills, with what fills it and
+    the sections that read it - not gaps, listed so nothing is hidden."""
+    out: dict = {}
+    for n in nodes.values():
+        for d in n["datasets_covered"]:
+            out.setdefault(d["dataset"], {**d, "sections": []})["sections"].append(n["label"])
+    return sorted(out.values(), key=lambda c: c["label"].lower())
 
 
 def _job_view(job: dict | None) -> dict | None:
