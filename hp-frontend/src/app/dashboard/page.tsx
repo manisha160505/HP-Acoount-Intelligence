@@ -1603,14 +1603,14 @@ export default function UserDashboardPage() {
                               )}
 
                               {ceoVal?.name && (
-                                <div className="flex items-center space-x-1.5 text-slate-700" title={`${ceoVal.title} · ${ceoVal.filing_label || ceoVal.source}`}>
+                                <div className="flex items-center space-x-1.5 text-slate-700" title={`${ceoVal.title} · ${ceoVal.filing_label || ceoVal.source}${ceoVal.name_original ? ` · As printed: ${ceoVal.name_original}` : ''}`}>
                                   <User className="w-4 h-4 text-hp-navy" />
                                   <span>CEO: <strong className="font-bold text-slate-900">{ceoVal.name}</strong></span>
                                 </div>
                               )}
 
                               {parentVal && (
-                                <div className="flex items-center space-x-1.5 text-slate-700" title={summaryData?.parent_company_source || undefined}>
+                                <div className="flex items-center space-x-1.5 text-slate-700" title={[summaryData?.parent_company_source, ...Object.values(summaryData?.parent_companies_original || {}).map((o: any) => `As listed: ${o}`)].filter(Boolean).join(' · ') || undefined}>
                                   <Building2 className="w-4 h-4 text-hp-navy" />
                                   <span>{parentsVal.length > 1 ? 'Parent Companies' : 'Parent Company'}: <strong className="font-bold text-slate-900">{parentVal}</strong></span>
                                 </div>
@@ -1624,7 +1624,9 @@ export default function UserDashboardPage() {
                                   <Layers className="w-4 h-4 text-hp-navy shrink-0 mt-0.5" />
                                   <span className="min-w-0">
                                     <span className="font-medium text-slate-500">Subsidiaries ({subsidiariesVal.length}): </span>
-                                    <span className="text-slate-900 font-semibold">
+                                    <span className="text-slate-900 font-semibold"
+                                      title={subsidiariesVal.slice(0, 5).filter((n: string) => summaryData?.subsidiaries_original?.[n])
+                                        .map((n: string) => `${n} = ${summaryData?.subsidiaries_original?.[n]}`).join(' · ') || undefined}>
                                       {subsidiariesVal.slice(0, 5).join(' · ')}
                                     </span>
                                     {subsidiariesVal.length > 5 && (
@@ -1635,7 +1637,7 @@ export default function UserDashboardPage() {
                                 {subsidiariesVal.length > 5 && (
                                   <div className="mt-2 ml-5 flex flex-wrap gap-1.5">
                                     {subsidiariesVal.slice(5).map((s, i) => (
-                                      <span key={`${s}-${i}`} className="px-2 py-0.5 rounded bg-slate-100 text-slate-700">{s}</span>
+                                      <span key={`${s}-${i}`} title={summaryData?.subsidiaries_original?.[s] ? `As listed: ${summaryData.subsidiaries_original[s]}` : undefined} className="px-2 py-0.5 rounded bg-slate-100 text-slate-700">{s}</span>
                                     ))}
                                   </div>
                                 )}
@@ -1772,7 +1774,10 @@ export default function UserDashboardPage() {
                                       the backend (data_gaps) and are not shown to the client. */}
                                   {m.quote && (
                                     <p className="text-[10px] text-slate-500 mt-2 border-t border-slate-100 pt-2 break-words">
-                                      <span className="font-bold text-slate-600">Row as printed: </span>{m.quote}
+                                      {/* In English where the filing is not (client, 9 Oct); the row
+                                          exactly as printed stays on hover. */}
+                                      <span className="font-bold text-slate-600">{m.quote_en ? 'Row (in English): ' : 'Row as printed: '}</span>
+                                      <span title={m.quote_en ? `As printed: ${m.quote}` : undefined}>{m.quote_en || m.quote}</span>
                                     </p>
                                   )}
                                 </div>
@@ -2524,7 +2529,7 @@ export default function UserDashboardPage() {
                                       What&apos;s new:
                                     </span>
                                     <span
-                                      title={s.headline}
+                                      title={s.headline_original ? `${s.headline} · As posted: ${s.headline_original}` : s.headline}
                                       className="text-sm font-semibold text-slate-900 truncate min-w-0"
                                     >
                                       {s.headline}
@@ -2568,7 +2573,8 @@ export default function UserDashboardPage() {
                                       : detail;
                                     return (
                                       <>
-                                        <p className="mt-2 text-xs text-slate-500 leading-relaxed">{shown}</p>
+                                        <p className="mt-2 text-xs text-slate-500 leading-relaxed"
+                                          title={s.evidence_original ? `As posted: ${s.evidence_original}` : undefined}>{shown}</p>
                                         {needsClamp && (
                                           <button
                                             type="button"
@@ -2609,7 +2615,7 @@ export default function UserDashboardPage() {
                                               className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full hover:bg-emerald-100 transition"
                                             >
                                               <FileText className="w-3 h-3" />
-                                              <span>{s.source_publisher || hostLabel(primaryHref) || 'Source'}</span>
+                                              <span title={s.publisher_original ? `As posted: ${s.publisher_original}` : undefined}>{s.source_publisher || hostLabel(primaryHref) || 'Source'}</span>
                                               <ExternalLink className="w-3 h-3" />
                                             </a>
                                           )}
@@ -3772,7 +3778,7 @@ export default function UserDashboardPage() {
                                           {(c.titles || []).map((t: any) => (
                                             <li key={t.title} className="text-xs text-slate-700 flex gap-2">
                                               <span className="text-slate-400">•</span>
-                                              <span>{t.title}{t.posted > 1 ? ` (posted ${t.posted}×)` : ''}</span>
+                                              <span title={t.originals?.length ? `As posted: ${t.originals.join(' / ')}` : undefined}>{t.title}{t.posted > 1 ? ` (posted ${t.posted}×)` : ''}</span>
                                             </li>
                                           ))}
                                         </ul>
@@ -3789,7 +3795,7 @@ export default function UserDashboardPage() {
                                               {c.more_titles.map((t: any) => (
                                                 <li key={t.title} className="text-xs text-slate-700 flex gap-2">
                                                   <span className="text-slate-400">•</span>
-                                                  <span>{t.title}{t.posted > 1 ? ` (posted ${t.posted}×)` : ''}</span>
+                                                  <span title={t.originals?.length ? `As posted: ${t.originals.join(' / ')}` : undefined}>{t.title}{t.posted > 1 ? ` (posted ${t.posted}×)` : ''}</span>
                                                 </li>
                                               ))}
                                             </ul>
@@ -4326,7 +4332,7 @@ export default function UserDashboardPage() {
                                             </a>
                                           )}
                                         </div>
-                                        <p className="text-xs text-slate-500 font-normal leading-snug">{c.title || NOT_DISCLOSED}</p>
+                                        <p className="text-xs text-slate-500 font-normal leading-snug" title={c.title_original ? `As listed: ${c.title_original}` : undefined}>{c.title || NOT_DISCLOSED}</p>
                                         <p className="text-[11px] text-slate-400 font-normal">{c.normalized_department}</p>
                                       </div>
                                     </div>
@@ -4492,7 +4498,7 @@ export default function UserDashboardPage() {
                               <span className="text-sm font-bold text-slate-900">{c.full_name}</span>
                             </div>
                             <p className="text-xs text-slate-500 font-normal leading-snug">
-                              {c.title || NOT_DISCLOSED} &middot; <span className="text-slate-400">{c.normalized_department}</span>
+                              <span title={c.title_original ? `As listed: ${c.title_original}` : undefined}>{c.title || NOT_DISCLOSED}</span> &middot; <span className="text-slate-400">{c.normalized_department}</span>
                             </p>
                           </div>
                           <div className="hidden sm:flex items-center gap-1.5 flex-wrap justify-end flex-shrink-0">

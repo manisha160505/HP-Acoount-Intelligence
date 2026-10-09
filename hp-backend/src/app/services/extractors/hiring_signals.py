@@ -4,8 +4,10 @@ A section at the bottom of Intent & Demand Signals, not a feature of its own
 (client, 1 Oct); its widgets carry that feature's key.
 
 Source: Hiring_Signals_Rule_Set_Final.docx and the worked example "Hiring
-Signals - Australia Post (desktop)" (Dhruvi, 1 Oct 2026). Entirely
-deterministic - no model call. The jobs are the shared selection in
+Signals - Australia Post (desktop)" (Dhruvi, 1 Oct 2026). Deterministic but
+for one thing: job titles are shown in English (client, 9 Oct), and a title the
+job file gives no English for is translated by the model once and cached - see
+`hp/job_titles.py`. The jobs are the shared selection in
 `hp/hiring_jobs.py` (country check, last 12 months to the pull date, open and
 closed), the same jobs every other feature reads.
 
@@ -41,7 +43,7 @@ from app.services.extractors.datasets import (
     account_domain,
     requires_local_datasets,
 )
-from app.services.hp import hiring_jobs, hiring_themes
+from app.services.hp import hiring_jobs, hiring_themes, job_titles
 from app.services.regen import store as widget_store
 
 logger = logging.getLogger(__name__)
@@ -133,11 +135,21 @@ def _first_seen_range(jobs: list) -> tuple:
 SAMPLE_ROLES = 5
 
 
-def sample_roles(jobs: list) -> list:
-    """The first distinct job titles, in file order."""
+def _posted_title(job: dict) -> str:
+    return " ".join(str(job.get("title") or job.get("normalized_title") or "").split())
+
+
+def _shown_title(job: dict, english: dict | None) -> str:
+    """The title as the seller reads it: English where we have it."""
+    posted = _posted_title(job)
+    return (english or {}).get(posted, posted)
+
+
+def sample_roles(jobs: list, english: dict | None = None) -> list:
+    """The first distinct job titles, in file order, in English."""
     roles = []
     for j in jobs:
-        title = str(j.get("title") or j.get("normalized_title") or "").strip()
+        title = _shown_title(j, english)
         if title and title not in roles:
             roles.append(title)
             if len(roles) == SAMPLE_ROLES:
@@ -145,7 +157,7 @@ def sample_roles(jobs: list) -> list:
     return roles
 
 
-def postings_summary(jobs: list) -> dict:
+def postings_summary(jobs: list, english: dict | None = None) -> dict:
     total = len(jobs)
     hybrid = sum(1 for j in jobs if _is_hybrid(j))
     seen_from, seen_to = _first_seen_range(jobs)
@@ -157,7 +169,7 @@ def postings_summary(jobs: list) -> dict:
         "hybrid_count": hybrid,
         "hybrid_pct": round(100 * hybrid / total) if total else 0,
         "hybrid_rule": "column F contains hybrid, remote or work from home",
-        "sample_roles": sample_roles(jobs),
+        "sample_roles": sample_roles(jobs, english),
     }
 
 
@@ -196,9 +208,13 @@ def tech_tags(jobs: list, own: set) -> dict:
     return {"tags": tags[:TECH_TAG_LIMIT], "removed": removed}
 
 
-def theme_cards(jobs: list) -> dict:
+def theme_cards(jobs: list, english: dict | None = None) -> dict:
     """One card per theme with at least one job, largest first; ties keep the
-    rule set's theme order."""
+    rule set's theme order.
+
+    Titles are counted by their English form, so three Korean postings that all
+    read "IT Project Manager" in English are one line, "posted 3x". Each line
+    keeps up to three of the titles as posted, for the hover."""
     grouped = {}
     unthemed = 0
     for j in jobs:
@@ -210,10 +226,21 @@ def theme_cards(jobs: list) -> dict:
 
     cards = []
     for theme, members in grouped.values():
-        titles = Counter(str(j.get("title") or j.get("normalized_title") or "").strip()
-                         for j in members)
-        titles.pop("", None)
-        ranked = [{"title": t, "posted": n} for t, n in titles.most_common()]
+        titles, originals = Counter(), {}
+        for j in members:
+            shown = _shown_title(j, english)
+            if not shown:
+                continue
+            titles[shown] += 1
+            posted = _posted_title(j)
+            kept = originals.setdefault(shown, [])
+            if posted != shown and posted not in kept and len(kept) < 3:
+                kept.append(posted)
+        # `originals` only where a title was translated: an English-language
+        # account's cards are exactly what they were.
+        ranked = [{"title": t, "posted": n,
+                   **({"originals": originals[t]} if originals.get(t) else {})}
+                  for t, n in titles.most_common()]
         shown = ranked[:CARD_TITLES]
         cards.append({
             "theme_key": theme.key,
@@ -269,11 +296,16 @@ def extract_hiring_signals(account_id: str) -> list[dict]:
                   "") or account_domain(account_id)
     summary = families = tags = cards = {}
     if jobs:
-        summary = {**postings_summary(jobs), "company": name, "domain": domain,
+        english, translated = job_titles.english_titles(jobs, db)
+        basis["titles_translated_by_model"] = translated
+        basis["title_language"] = ("English: the job file's own translation, "
+                                   "otherwise machine-translated; original on hover")
+        pipeline.step("titles", "%d title(s) translated by the model" % translated)
+        summary = {**postings_summary(jobs, english), "company": name, "domain": domain,
                    "country_code": selected.country_code or None}
         families = family_breakdown(jobs)
         tags = tech_tags(jobs, _own_name_keys(name, domain))
-        cards = theme_cards(jobs)
+        cards = theme_cards(jobs, english)
         if not tags["tags"]:
             tags = {}
         if not cards["cards"]:

@@ -148,3 +148,20 @@ def test_cards_largest_first_ties_in_rule_set_order():
 
 def test_only_themes_with_jobs_get_a_card():
     assert len(theme_cards([job(code="25-1011.00")])["cards"]) == 1
+
+
+def test_titles_are_shown_and_counted_in_english():
+    """Client, 9 Oct: Korean and Japanese postings read in English, and postings
+    that are the same job in English are one line, with the posted titles kept
+    for the hover."""
+    posted = ["[SDx] IT PM - 로봇SI 프로젝트 제안/수행", "[EnIT] IT PM - 자동화 설비 구축"]
+    jobs = [job(title=posted[0]), job(title=posted[0]), job(title=posted[1]),
+            job(title="Business Analyst")]
+    english = {posted[0]: "IT Project Manager", posted[1]: "IT Project Manager",
+               "Business Analyst": "Business Analyst"}
+    card = theme_cards(jobs, english)["cards"][0]
+    assert card["titles"][0] == {"title": "IT Project Manager", "posted": 3,
+                                 "originals": posted}
+    assert card["titles"][1] == {"title": "Business Analyst", "posted": 1}
+    assert postings_summary(jobs, english)["sample_roles"] == [
+        "IT Project Manager", "Business Analyst"]
