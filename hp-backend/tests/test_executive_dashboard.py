@@ -195,6 +195,20 @@ def test_subsidiaries_are_column_a_as_supplied_in_order():
         "verigy us", "w2bi a member of the advantest group"]
 
 
+def test_a_government_is_never_a_subsidiary():
+    """Explorium lists the Government of Japan - a shareholder - as a subsidiary
+    of eight Japanese accounts, and the Queensland Government under Coles."""
+    rows = [{"Subsidiary Name": n} for n in
+            ("verigy us", "japan the government of japan", "crea srl")]
+    assert _subsidiaries(rows, "ADVANTEST CORPORATION - JP", "") == ["verigy us", "crea srl"]
+    rows = [{"Subsidiary Name": n} for n in ("queensland government", "liquorland")]
+    assert _subsidiaries(rows, "COLES GROUP - AU", "") == ["liquorland"]
+    # Only the word "government": these are real subsidiaries.
+    rows = [{"Subsidiary Name": n} for n in
+            ("commonwealth superannuation", "daikin czech republic in pilsen")]
+    assert len(_subsidiaries(rows, "ACME - AU", "")) == 2
+
+
 def test_subsidiaries_drop_blanks_repeats_self_and_parent():
     rows = [{"Subsidiary Name": n} for n in
             ("woolworths", "Big W", "big w", "", "endeavour group", "wesfarmers")]

@@ -1,5 +1,6 @@
 import hashlib
 import logging
+import re
 from datetime import UTC, datetime
 
 from app.config import account_overrides
@@ -155,12 +156,22 @@ def _parents(hier_row: dict | None, account_name: str = "") -> tuple[list[str], 
     return parents, sources
 
 
+_GOVERNMENT = re.compile(r"\bgovernment\b")
+
+
 def _subsidiaries(rows: list[dict], account_name: str, parent) -> list[str]:
     """Column A of the Subsidiaries sheet (Subsidiary Name), as supplied, in
     file order, then the merged hierarchy sheet's subsidiaries for the account
     (client, 7 Oct): blanks and repeats dropped, and the account and its
     parents left out, since none of them is a subsidiary of the account.
-    `parent` is one name or a list of them."""
+    `parent` is one name or a list of them.
+
+    A government is never a subsidiary: Explorium lists "japan the government of
+    japan" - a shareholder - as a subsidiary of eight Japanese accounts
+    (Advantest, IHI, JAL, Konica Minolta, Marubeni, Nissan, Shiseido...), and
+    "queensland government" under Coles. Only the word "government" is matched;
+    "commonwealth superannuation" and "daikin czech republic" are real
+    subsidiaries."""
     parents = [parent] if isinstance(parent, str) else list(parent or [])
     excluded = {p.lower() for p in parents if p}
     merged = [{"Subsidiary Name": s}
@@ -173,6 +184,7 @@ def _subsidiaries(rows: list[dict], account_name: str, parent) -> list[str]:
         value = " ".join(str(value or "").split())
         key = value.lower()
         if (not value or key in seen or key in excluded
+                or _GOVERNMENT.search(key)
                 or (account_name and _is_own_name(value, account_name, exact=True))):
             continue
         seen.add(key)
