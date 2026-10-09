@@ -1,5 +1,6 @@
 import hashlib
 import logging
+import re
 from datetime import UTC, datetime
 
 from app.config import account_overrides
@@ -20,7 +21,7 @@ from app.services.extractors.grounding import (
     build_corpus,
     check_text,
 )
-from app.services.hp import company_relationships
+from app.services.hp import company_relationships, translate
 from app.services.regen import store as widget_store
 
 logger = logging.getLogger(__name__)
@@ -155,12 +156,68 @@ def _parents(hier_row: dict | None, account_name: str = "") -> tuple[list[str], 
     return parents, sources
 
 
+def _in_english(db, names: list[str]) -> tuple[list[str], dict]:
+    """(names in English, {English: as supplied}) - order kept, and a name
+    that becomes a repeat of one already listed is dropped. The mapping is
+    empty when nothing needed translating."""
+    english = translate.to_english(names, db, "company")
+    if not english:
+        return list(names), {}
+    out, original, seen = [], {}, set()
+    for name in names:
+        shown = english.get(" ".join(name.split()), name)
+        if shown.lower() in seen:
+            continue
+        seen.add(shown.lower())
+        out.append(shown)
+        if shown != name:
+            original[shown] = name
+    return out, original
+
+
+def _filings_in_english(db, filings: list, reported: list, chief: dict | None) -> None:
+    """Filing titles, figure labels and the CEO in English, in place (client,
+    9 Oct). Japanese filings are titled "有価証券報告書 ..." and print their tables
+    in Japanese. The original stays beside each value for the hover; a figure's
+    `quote` is the row as printed and is never rewritten - `quote_en` is added.
+    """
+    def apply(items, field, kind, keep_as=None):
+        english = translate.to_english([i.get(field) for i in items], db, kind)
+        for item in items:
+            value = " ".join(str(item.get(field) or "").split())
+            if value in english:
+                if keep_as:
+                    item[keep_as] = english[value]
+                else:
+                    item[field + "_original"] = item[field]
+                    item[field] = english[value]
+
+    filings, reported = filings or [], reported or []
+    chief_list = [chief] if chief else []
+    apply(filings, "title", "document")
+    apply(reported, "filing_label", "document")
+    apply(reported, "quote", "table_row", keep_as="quote_en")
+    apply(chief_list, "filing_label", "document")
+    apply(chief_list, "name", "person")
+    apply(chief_list, "title", "job_title")
+
+
+_GOVERNMENT = re.compile(r"\bgovernment\b")
+
+
 def _subsidiaries(rows: list[dict], account_name: str, parent) -> list[str]:
     """Column A of the Subsidiaries sheet (Subsidiary Name), as supplied, in
     file order, then the merged hierarchy sheet's subsidiaries for the account
     (client, 7 Oct): blanks and repeats dropped, and the account and its
     parents left out, since none of them is a subsidiary of the account.
-    `parent` is one name or a list of them."""
+    `parent` is one name or a list of them.
+
+    A government is never a subsidiary: Explorium lists "japan the government of
+    japan" - a shareholder - as a subsidiary of eight Japanese accounts
+    (Advantest, IHI, JAL, Konica Minolta, Marubeni, Nissan, Shiseido...), and
+    "queensland government" under Coles. Only the word "government" is matched;
+    "commonwealth superannuation" and "daikin czech republic" are real
+    subsidiaries."""
     parents = [parent] if isinstance(parent, str) else list(parent or [])
     excluded = {p.lower() for p in parents if p}
     merged = [{"Subsidiary Name": s}
@@ -173,6 +230,7 @@ def _subsidiaries(rows: list[dict], account_name: str, parent) -> list[str]:
         value = " ".join(str(value or "").split())
         key = value.lower()
         if (not value or key in seen or key in excluded
+                or _GOVERNMENT.search(key)
                 or (account_name and _is_own_name(value, account_name, exact=True))):
             continue
         seen.add(key)
@@ -319,6 +377,10 @@ def extract_executive_dashboard(account_id: str) -> list[dict]:
         parents, parent_sources = _parents(
             hier_rows[0] if hier_rows else None, company_name)
         subsidiaries = _subsidiaries(subsidiary_rows, company_name, parents)
+        # In English for the card (client, 9 Oct), translated only now so the
+        # own-name and parent exclusions above compared the names as supplied.
+        parents, parents_original = _in_english(db, parents)
+        subsidiaries, subsidiaries_original = _in_english(db, subsidiaries)
 
         summary_data = {
             # DEC-052: the audit sheet's name, held on the account record,
@@ -335,6 +397,11 @@ def extract_executive_dashboard(account_id: str) -> list[dict]:
             "parent_company_source": "; ".join(parent_sources) or None,
             "subsidiaries": subsidiaries,
             "subsidiaries_count": len(subsidiaries),
+            # The names as supplied, beside the English, for the hover. Only
+            # present when something was translated.
+            **({"parent_companies_original": parents_original} if parents_original else {}),
+            **({"subsidiaries_original": subsidiaries_original}
+               if subsidiaries_original else {}),
             # The company profile, as bullets. See _description_points.
             "business_description_points": points,
             "business_description_points_basis": points_basis,
@@ -380,6 +447,7 @@ def extract_executive_dashboard(account_id: str) -> list[dict]:
     financial_rows = _read_dataset_csv(account_id, "filings_financials")
     reported = filings_financials.reported_metrics(financial_rows)
     chief_executive = filings_financials.ceo(financial_rows)
+    _filings_in_english(db, filings, reported, chief_executive)
     if reported or chief_executive:
         filings_sources.append(filings_financials.SOURCE)
 

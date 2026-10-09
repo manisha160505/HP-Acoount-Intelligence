@@ -1578,6 +1578,21 @@ rules:
   - hp-backend/src/app/services/hp/buyer_personas.py:is_line_allowed
   doc_source: Build Specification v1.0 Section 2.3 (buyer_personas.py:152-171)
   confidence: high
+- id: contact_title_in_english
+  parent: contact_intake
+  name: Job titles shown in English
+  kind: display
+  summary: A contact's job title that arrives in Japanese, Korean or Thai is shown in English.
+  purpose: A contact's job title that arrives in Japanese, Korean or Thai is shown in English.
+  logic: 'A job title that is not in English is translated once by AI before anything reads it, so the
+    seniority, relevance and influence rules work on the English title. A translation is used only if it is
+    in English and keeps every number the original had; otherwise the original is shown. The title as listed
+    is shown when the reader hovers over it (client, 9 Oct).'
+  output: The contact's job title in English, with the original on hover.
+  sources:
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:extract_stakeholder_map
+  - hp-backend/src/app/services/hp/translate.py:to_english
+  confidence: high
 undetermined:
 - The talking-points opener quality, angle uniqueness, hedging of pain points and decision-power wording
   are entirely model-judged; there is no fixed formula and only the checks listed are applied in Python.

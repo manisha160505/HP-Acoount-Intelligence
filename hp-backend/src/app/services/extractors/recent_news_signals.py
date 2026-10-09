@@ -2,7 +2,6 @@ import difflib
 import hashlib
 import json
 import logging
-import re
 from collections import Counter
 from datetime import UTC, datetime, timedelta
 
@@ -22,7 +21,7 @@ from app.services.extractors.grounding import (
     build_corpus,
     check_text,
 )
-from app.services.hp import case_studies as cs
+from app.services.hp import case_studies as cs, translate
 from app.services.regen import (
     context as run_context,
     manifest as regen_manifest,
@@ -215,8 +214,41 @@ def _sort_timestamp(signal: dict) -> float:
 
 
 def _canonical(text: str) -> str:
-    """Lowercased, punctuation-stripped headline used as the dedup key."""
-    return re.sub(r"[^a-z0-9 ]", " ", (text or "").lower())
+    """Lowercased, punctuation-stripped headline used as the dedup key.
+
+    Letters in any script are kept. It used to keep only a-z and 0-9, so an
+    all-Japanese headline reduced to spaces and digits, two different stories
+    scored as near-identical and were merged into one card under one id. For
+    an ASCII headline the key is exactly what it always was."""
+    return "".join(c if c == " " or (c.isalnum() and (not c.isascii() or c in _ASCII_KEY))
+                   else " " for c in (text or "").lower())
+
+
+_ASCII_KEY = frozenset("abcdefghijklmnopqrstuvwxyz0123456789")
+
+
+def _translate_signals(signals: list[dict], db) -> int:
+    """Headline, evidence sentence and publisher in English, in place.
+
+    Client, 9 Oct: Japanese, Korean and Thai news is shown in English. Run
+    after the gate (only what can be shown is translated) and before dedupe and
+    scoring, so both work on the English text. The original is kept beside
+    each field for the hover. Returns how many signals changed."""
+    fields = (("headline", "headline_original", "headline"),
+              ("evidence_sentence", "evidence_original", "sentence"),
+              ("source_publisher", "publisher_original", "publisher"))
+    changed = set()
+    for field, original_key, kind in fields:
+        english = translate.to_english([s.get(field) for s in signals], db, kind)
+        if not english:
+            continue
+        for i, s in enumerate(signals):
+            value = " ".join(str(s.get(field) or "").split())
+            if value in english:
+                s[original_key] = s.get(field)
+                s[field] = english[value]
+                changed.add(i)
+    return len(changed)
 
 
 def _split_headline_publisher(headline: str) -> tuple[str, str]:
@@ -826,10 +858,16 @@ def score_news_signals(account_id: str, signals: list[dict], company_name: str) 
         widget_store.keep(account_id, "news_relevance_summary")
         return existing
 
-    # Grounding corpus: the two news datasets this feature reads.
+    # Grounding corpus: the two news datasets this feature reads, plus the
+    # English the model was shown for any translated signal - an angle may
+    # repeat a figure as the translation wrote it.
     ground = build_corpus({
         "google_news": _read_dataset_records(account_id, "google_news"),
         "news_events": _read_dataset_records(account_id, "news_events"),
+        "translations": [{"headline": s.get("headline"),
+                          "evidence_sentence": s.get("evidence_sentence")}
+                         for s in signals
+                         if s.get("headline_original") or s.get("evidence_original")],
     })
     report = GroundingReport(ground, ["sales_angle", "rationales"])
 
@@ -1112,6 +1150,9 @@ def extract_recent_news_signals(account_id: str) -> list[dict]:
 
     raw = _normalize_signals(gnews, events)
     passed, rejected = _apply_gate(raw, now)
+    translated = _translate_signals(passed, db)
+    if translated:
+        pipeline.step("translation", "%d signal(s) shown in English" % translated)
     deduped = _dedupe(passed)
 
     pipeline.step("datasets", "", google_news=len(gnews or []),

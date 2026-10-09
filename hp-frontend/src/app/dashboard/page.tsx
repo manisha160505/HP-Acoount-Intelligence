@@ -12,6 +12,7 @@ import { CompanyAccount } from '@/types/account';
 import { NORTHSTAR_SIDEBAR_GROUPS } from '@/lib/features';
 import { activeAccountFrom, dashboardHref } from '@/lib/accountSelection';
 import { NO_SIGNAL, NOT_DISCLOSED } from '@/lib/placeholders';
+import { displayCase, displayPlace, fmtDate as formatDate } from '@/lib/format';
 import { track, stopFeatureTime } from '@/lib/track';
 import { MyActivityPanel } from '@/components/analytics/MyActivityPanel';
 import { CountUpText, ScoreRing, growDelay, useParallax } from '@/components/common/motion';
@@ -1513,8 +1514,18 @@ export default function UserDashboardPage() {
                   const displayName = summaryData?.company_name || selectedAccount.name;
                   const displayDesc = summaryData?.business_description || NOT_DISCLOSED;
                   const domainVal = summaryData?.domain || null;
-                  const locationVal = summaryData?.hq_location || null;
-                  const industryVal = summaryData?.industry_classification || null;
+                  // Explorium sends these in lowercase ("tokyo, japan"); cased
+                  // for display only, the stored values stay as supplied.
+                  const locationVal = summaryData?.hq_location && summaryData.hq_location !== 'N/A'
+                    ? displayPlace(summaryData.hq_location) : null;
+                  // LinkedIn / NAICS / SIC usually say the same thing three ways
+                  // ("semiconductor manufacturing / Semiconductor and Related
+                  // Device Manufacturing / Semiconductors and related devices"):
+                  // the first is shown, all three on hover.
+                  const industryParts: string[] = String(summaryData?.industry_classification || '')
+                    .split(' / ').map((p: string) => p.trim()).filter((p: string) => p && p !== 'N/A');
+                  const industryVal = industryParts.length ? displayCase(industryParts[0]) : null;
+                  const industryAll = industryParts.map((p: string) => displayCase(p)).join(' / ');
                   // Client, 5 Oct: the parent is the hierarchy sheet's column E
                   // (column C where E is the account itself) and the
                   // subsidiaries are column A of the Subsidiaries sheet, both as
@@ -1523,8 +1534,10 @@ export default function UserDashboardPage() {
                   // a company can have two (direct and ultimate) - both shown.
                   const parentsVal: string[] = summaryData?.parent_companies
                     || (summaryData?.parent_company ? [summaryData.parent_company] : []);
-                  const parentVal = parentsVal.length ? parentsVal.join(' · ') : null;
-                  const subsidiariesVal: string[] = summaryData?.subsidiaries || [];
+                  const parentVal = parentsVal.length
+                    ? parentsVal.map(p => displayCase(p, { name: true })).join(' · ') : null;
+                  const subsidiariesVal: string[] = (summaryData?.subsidiaries || [])
+                    .map((s: string) => displayCase(s, { name: true }));
                   // Feature 1's header CEO, read from the newest filing naming one.
                   const ceoVal: any = metricsData?.ceo || null;
 
@@ -1583,23 +1596,23 @@ export default function UserDashboardPage() {
                               )}
 
                               {industryVal && (
-                                <div className="flex items-start space-x-1.5 text-slate-700">
+                                <div className="flex items-start space-x-1.5 text-slate-700" title={industryAll}>
                                   <Building2 className="w-4 h-4 text-hp-navy shrink-0 mt-0.5" />
                                   <span className="break-words">{industryVal}</span>
                                 </div>
                               )}
 
                               {ceoVal?.name && (
-                                <div className="flex items-center space-x-1.5 text-slate-700" title={`${ceoVal.title} · ${ceoVal.filing_label || ceoVal.source}`}>
+                                <div className="flex items-center space-x-1.5 text-slate-700" title={`${ceoVal.title} · ${ceoVal.filing_label || ceoVal.source}${ceoVal.name_original ? ` · As printed: ${ceoVal.name_original}` : ''}`}>
                                   <User className="w-4 h-4 text-hp-navy" />
                                   <span>CEO: <strong className="font-bold text-slate-900">{ceoVal.name}</strong></span>
                                 </div>
                               )}
 
                               {parentVal && (
-                                <div className="flex items-center space-x-1.5 text-slate-700" title={summaryData?.parent_company_source || undefined}>
+                                <div className="flex items-center space-x-1.5 text-slate-700" title={[summaryData?.parent_company_source, ...Object.values(summaryData?.parent_companies_original || {}).map((o: any) => `As listed: ${o}`)].filter(Boolean).join(' · ') || undefined}>
                                   <Building2 className="w-4 h-4 text-hp-navy" />
-                                  <span>{parentsVal.length > 1 ? 'Parent Companies' : 'Parent Company'}: <strong className="font-bold text-slate-900 capitalize">{parentVal}</strong></span>
+                                  <span>{parentsVal.length > 1 ? 'Parent Companies' : 'Parent Company'}: <strong className="font-bold text-slate-900">{parentVal}</strong></span>
                                 </div>
                               )}
                             </div>
@@ -1611,7 +1624,9 @@ export default function UserDashboardPage() {
                                   <Layers className="w-4 h-4 text-hp-navy shrink-0 mt-0.5" />
                                   <span className="min-w-0">
                                     <span className="font-medium text-slate-500">Subsidiaries ({subsidiariesVal.length}): </span>
-                                    <span className="capitalize text-slate-900 font-semibold">
+                                    <span className="text-slate-900 font-semibold"
+                                      title={subsidiariesVal.slice(0, 5).filter((n: string) => summaryData?.subsidiaries_original?.[n])
+                                        .map((n: string) => `${n} = ${summaryData?.subsidiaries_original?.[n]}`).join(' · ') || undefined}>
                                       {subsidiariesVal.slice(0, 5).join(' · ')}
                                     </span>
                                     {subsidiariesVal.length > 5 && (
@@ -1622,7 +1637,7 @@ export default function UserDashboardPage() {
                                 {subsidiariesVal.length > 5 && (
                                   <div className="mt-2 ml-5 flex flex-wrap gap-1.5">
                                     {subsidiariesVal.slice(5).map((s, i) => (
-                                      <span key={`${s}-${i}`} className="capitalize px-2 py-0.5 rounded bg-slate-100 text-slate-700">{s}</span>
+                                      <span key={`${s}-${i}`} title={summaryData?.subsidiaries_original?.[s] ? `As listed: ${summaryData.subsidiaries_original[s]}` : undefined} className="px-2 py-0.5 rounded bg-slate-100 text-slate-700">{s}</span>
                                     ))}
                                   </div>
                                 )}
@@ -1759,7 +1774,10 @@ export default function UserDashboardPage() {
                                       the backend (data_gaps) and are not shown to the client. */}
                                   {m.quote && (
                                     <p className="text-[10px] text-slate-500 mt-2 border-t border-slate-100 pt-2 break-words">
-                                      <span className="font-bold text-slate-600">Row as printed: </span>{m.quote}
+                                      {/* In English where the filing is not (client, 9 Oct); the row
+                                          exactly as printed stays on hover. */}
+                                      <span className="font-bold text-slate-600">{m.quote_en ? 'Row (in English): ' : 'Row as printed: '}</span>
+                                      <span title={m.quote_en ? `As printed: ${m.quote}` : undefined}>{m.quote_en || m.quote}</span>
                                     </p>
                                   )}
                                 </div>
@@ -2296,12 +2314,7 @@ export default function UserDashboardPage() {
                     return acc;
                   }, {});
 
-                  const fmtDate = (d: string) => {
-                    if (!d) return NOT_DISCLOSED;
-                    const dt = new Date(d);
-                    if (isNaN(dt.getTime())) return d;
-                    return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-                  };
+                  const fmtDate = (d: string) => formatDate(d, NOT_DISCLOSED);
 
                   return (
                     <div className="space-y-5 animate-fade-in">
@@ -2516,7 +2529,7 @@ export default function UserDashboardPage() {
                                       What&apos;s new:
                                     </span>
                                     <span
-                                      title={s.headline}
+                                      title={s.headline_original ? `${s.headline} · As posted: ${s.headline_original}` : s.headline}
                                       className="text-sm font-semibold text-slate-900 truncate min-w-0"
                                     >
                                       {s.headline}
@@ -2560,7 +2573,8 @@ export default function UserDashboardPage() {
                                       : detail;
                                     return (
                                       <>
-                                        <p className="mt-2 text-xs text-slate-500 leading-relaxed">{shown}</p>
+                                        <p className="mt-2 text-xs text-slate-500 leading-relaxed"
+                                          title={s.evidence_original ? `As posted: ${s.evidence_original}` : undefined}>{shown}</p>
                                         {needsClamp && (
                                           <button
                                             type="button"
@@ -2601,7 +2615,7 @@ export default function UserDashboardPage() {
                                               className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full hover:bg-emerald-100 transition"
                                             >
                                               <FileText className="w-3 h-3" />
-                                              <span>{s.source_publisher || hostLabel(primaryHref) || 'Source'}</span>
+                                              <span title={s.publisher_original ? `As posted: ${s.publisher_original}` : undefined}>{s.source_publisher || hostLabel(primaryHref) || 'Source'}</span>
                                               <ExternalLink className="w-3 h-3" />
                                             </a>
                                           )}
@@ -2798,7 +2812,9 @@ export default function UserDashboardPage() {
                   };
                   const categoryLabel = (name: string) => (name === 'Poly/Collaboration' ? 'Poly' : name);
 
-                  const shortTopic = (name: string) => (name.includes(':') ? name.split(':').slice(1).join(':').trim() : name);
+                  // Bombora sends every topic in lowercase; cased here so one
+                  // topic never shows two ways on the same screen.
+                  const shortTopic = (name: string) => displayCase(name.includes(':') ? name.split(':').slice(1).join(':').trim() : name);
 
                   // The category file's own detail for one category, shown as received.
                   const renderFileDetails = (p: any) => (
@@ -2820,7 +2836,7 @@ export default function UserDashboardPage() {
                         <p className="text-[10px] text-slate-500"><span className="font-bold text-slate-400 uppercase mr-1">Technologies</span>{p.related_technologies.join(' · ')}</p>
                       )}
                       <p className="text-[10px] text-slate-400">
-                        {p.first_intent_date ? `Observed ${p.first_intent_date} → ${p.latest_intent_date || p.first_intent_date}` : NO_SIGNAL}
+                        {p.first_intent_date ? `Observed ${formatDate(p.first_intent_date)} → ${formatDate(p.latest_intent_date || p.first_intent_date)}` : NO_SIGNAL}
                       </p>
                       {/* quality_flags are review notes; they live in the backend, not on the client's screen. */}
                     </div>
@@ -2845,8 +2861,8 @@ export default function UserDashboardPage() {
                             {sg.topics.length > 0 && (
                               <div className="flex flex-wrap gap-1 mt-1.5">
                                 {sg.topics.slice(0, topicLimit).map((t: any) => (
-                                  <span key={t.topic_name} title={t.topic_name} className="px-1.5 py-0.5 rounded bg-white border border-slate-200 text-[10px] text-slate-700 font-medium">
-                                    {shortTopic(t.topic_name)} <strong className="text-hp-navy">{t.composite_score}</strong>
+                                  <span key={t.topic_name} title={displayCase(t.topic_name)} className="px-1.5 py-0.5 rounded bg-white border border-slate-200 text-[10px] text-slate-700 font-medium">
+                                    {shortTopic(t.topic_name)} <strong className="text-hp-navy">{Math.round(Number(t.composite_score) || 0)}</strong>
                                   </span>
                                 ))}
                                 {sg.topics.length > topicLimit && (
@@ -2858,8 +2874,10 @@ export default function UserDashboardPage() {
                               {sg.technologies.length > 0 ? (
                                 <>
                                   <span className="font-bold text-slate-400 uppercase mr-1">Technologies</span>
-                                  {sg.technologies.map((t: any) => t.name).join(', ')}
-                                  <span className="text-slate-400"> ({Array.from(new Set(sg.technologies.map((t: any) => `${t.sheet} · ${t.column}`))).join('; ')})</span>
+                                  {/* Where each came from (export sheet and column) is on hover, not in the text. */}
+                                  <span title={Array.from(new Set(sg.technologies.map((t: any) => `${t.sheet} · ${t.column}`))).join('; ')}>
+                                    {sg.technologies.map((t: any) => t.name).join(', ')}
+                                  </span>
                                 </>
                               ) : (
                                 <span className="text-slate-400">{NO_SIGNAL}</span>
@@ -2875,7 +2893,7 @@ export default function UserDashboardPage() {
                     <div key={item.topic_name} className="flex items-center justify-between text-xs py-1 px-2 rounded-lg hover:bg-slate-50 transition">
                       <div className="flex items-center space-x-3 font-semibold text-slate-800 truncate pr-2 min-w-0">
                         <span className="text-slate-400 font-mono text-[11px] w-5 text-right flex-shrink-0">{idx + 1}</span>
-                        <span className="capitalize truncate">{item.topic_name}</span>
+                        <span className="truncate">{displayCase(item.topic_name)}</span>
                         {item.hp_category && (
                           <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-hp-navy border border-blue-200 flex-shrink-0">{categoryLabel(item.hp_category)}</span>
                         )}
@@ -3089,7 +3107,7 @@ export default function UserDashboardPage() {
                                         </p>
                                         {listed.length > 0 ? (
                                           <p className="text-[10px] text-slate-500 leading-snug">
-                                            {listed.map((t: any) => `${shortTopic(t.topic)} ${t.score}`).join(' · ')}
+                                            {listed.map((t: any) => `${shortTopic(t.topic)} (${Math.round(Number(t.score) || 0)})`).join(' · ')}
                                           </p>
                                         ) : hovered.score_basis !== 'category_file' && (
                                           <p className="text-[10px] text-slate-400">{NO_SIGNAL}</p>
@@ -3153,7 +3171,7 @@ export default function UserDashboardPage() {
                                               title={t.reason || undefined}
                                               className="text-[10px] font-medium text-slate-600 bg-slate-50 border border-slate-200 px-1.5 py-0.5 rounded-full"
                                             >
-                                              {shortTopic(t.topic)} <span className="text-slate-400">{t.score}</span>
+                                              {shortTopic(t.topic)} <span className="text-slate-400">{Math.round(Number(t.score) || 0)}</span>
                                             </span>
                                           ))}
                                         </div>
@@ -3195,7 +3213,7 @@ export default function UserDashboardPage() {
                                 <div className="px-3.5 pb-3 space-y-1 max-h-96 overflow-y-auto">
                                   {longTail.map((t: any, idx: number) => (
                                     <div key={`${t.topic}-${idx}`} className="flex items-center justify-between gap-3 text-xs py-0.5">
-                                      <span className="capitalize text-slate-700 truncate">{t.topic}</span>
+                                      <span className="text-slate-700 truncate">{displayCase(t.topic)}</span>
                                       <span className="font-mono font-bold text-slate-900 flex-shrink-0">{t.score}</span>
                                     </div>
                                   ))}
@@ -3339,7 +3357,7 @@ export default function UserDashboardPage() {
                                                 <p className="text-[10px] text-slate-500 leading-snug">
                                                   <span className="font-bold text-slate-400 uppercase tracking-wider block">Observed</span>
                                                   {p.first_intent_date
-                                                    ? `${p.first_intent_date} \u2192 ${p.latest_intent_date || p.first_intent_date}`
+                                                    ? `${formatDate(p.first_intent_date)} \u2192 ${formatDate(p.latest_intent_date || p.first_intent_date)}`
                                                     : NO_SIGNAL}
                                                 </p>
                                                 <p className="text-[9px] text-slate-400 leading-snug pt-0.5 border-t border-slate-100">
@@ -3387,11 +3405,11 @@ export default function UserDashboardPage() {
                                     return u.bombora_topic_count > 0 ? (
                                       <div className="rounded-lg bg-blue-50/60 border border-blue-100 px-3 py-2 space-y-1">
                                         <p className="text-[11px] font-bold text-slate-800">
-                                          Research activity &middot; {u.bombora_topic_count} topic{u.bombora_topic_count === 1 ? '' : 's'} &middot; max {u.bombora_max}
+                                          Research activity &middot; {u.bombora_topic_count} topic{u.bombora_topic_count === 1 ? '' : 's'} &middot; max {Math.round(Number(u.bombora_max) || 0)}
                                         </p>
                                         {u.bombora_top_topics?.length > 0 && (
                                           <p className="text-[11px] text-slate-600 leading-relaxed">
-                                            {u.bombora_top_topics.map((t: any) => `${t.topic} ${t.score}`).join(' · ')}
+                                            {u.bombora_top_topics.map((t: any) => `${displayCase(t.topic)} (${Math.round(Number(t.score) || 0)})`).join(' · ')}
                                           </p>
                                         )}
                                       </div>
@@ -3451,7 +3469,7 @@ export default function UserDashboardPage() {
                                   {/* Observation window */}
                                   {p?.first_intent_date && (
                                     <p className="text-[11px] text-slate-400">
-                                      Observed {p.first_intent_date} → {p.latest_intent_date || p.first_intent_date}
+                                      Observed {formatDate(p.first_intent_date)} → {formatDate(p.latest_intent_date || p.first_intent_date)}
                                     </p>
                                   )}
 
@@ -3630,10 +3648,10 @@ export default function UserDashboardPage() {
                                 <span className="text-slate-500 font-bold uppercase text-[10px] block">Not in any summary</span>
                                 {/* exclusion_reason stays in the payload; the client sees the topic only. */}
                                 {excludedTopics.map((t: any) => (
-                                  <div key={`x-${t.topic_name}`}><span className="font-semibold capitalize">{t.topic_name}</span></div>
+                                  <div key={`x-${t.topic_name}`}><span className="font-semibold">{displayCase(t.topic_name)}</span></div>
                                 ))}
                                 {duplicatesRemoved.map((d: any, i: number) => (
-                                  <div key={`d-${i}`}><span className="font-semibold capitalize">{d.topic_name}</span>: duplicate row (score {d.composite_score ?? NO_SIGNAL}) removed; kept score {d.kept_score ?? NO_SIGNAL}</div>
+                                  <div key={`d-${i}`}><span className="font-semibold">{displayCase(d.topic_name)}</span>: duplicate row (score {d.composite_score ?? NO_SIGNAL}) removed; kept score {d.kept_score ?? NO_SIGNAL}</div>
                                 ))}
                               </div>
                             )}
@@ -3760,7 +3778,7 @@ export default function UserDashboardPage() {
                                           {(c.titles || []).map((t: any) => (
                                             <li key={t.title} className="text-xs text-slate-700 flex gap-2">
                                               <span className="text-slate-400">•</span>
-                                              <span>{t.title}{t.posted > 1 ? ` (posted ${t.posted}×)` : ''}</span>
+                                              <span title={t.originals?.length ? `As posted: ${t.originals.join(' / ')}` : undefined}>{t.title}{t.posted > 1 ? ` (posted ${t.posted}×)` : ''}</span>
                                             </li>
                                           ))}
                                         </ul>
@@ -3777,7 +3795,7 @@ export default function UserDashboardPage() {
                                               {c.more_titles.map((t: any) => (
                                                 <li key={t.title} className="text-xs text-slate-700 flex gap-2">
                                                   <span className="text-slate-400">•</span>
-                                                  <span>{t.title}{t.posted > 1 ? ` (posted ${t.posted}×)` : ''}</span>
+                                                  <span title={t.originals?.length ? `As posted: ${t.originals.join(' / ')}` : undefined}>{t.title}{t.posted > 1 ? ` (posted ${t.posted}×)` : ''}</span>
                                                 </li>
                                               ))}
                                             </ul>
@@ -4314,7 +4332,7 @@ export default function UserDashboardPage() {
                                             </a>
                                           )}
                                         </div>
-                                        <p className="text-xs text-slate-500 font-normal leading-snug">{c.title || NOT_DISCLOSED}</p>
+                                        <p className="text-xs text-slate-500 font-normal leading-snug" title={c.title_original ? `As listed: ${c.title_original}` : undefined}>{c.title || NOT_DISCLOSED}</p>
                                         <p className="text-[11px] text-slate-400 font-normal">{c.normalized_department}</p>
                                       </div>
                                     </div>
@@ -4480,7 +4498,7 @@ export default function UserDashboardPage() {
                               <span className="text-sm font-bold text-slate-900">{c.full_name}</span>
                             </div>
                             <p className="text-xs text-slate-500 font-normal leading-snug">
-                              {c.title || NOT_DISCLOSED} &middot; <span className="text-slate-400">{c.normalized_department}</span>
+                              <span title={c.title_original ? `As listed: ${c.title_original}` : undefined}>{c.title || NOT_DISCLOSED}</span> &middot; <span className="text-slate-400">{c.normalized_department}</span>
                             </p>
                           </div>
                           <div className="hidden sm:flex items-center gap-1.5 flex-wrap justify-end flex-shrink-0">

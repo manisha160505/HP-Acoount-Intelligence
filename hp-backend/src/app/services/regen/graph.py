@@ -83,6 +83,9 @@ HIRING_RULES_REF = "app.services.hp.hiring_jobs:HIRING_RULES_VERSION"
 # Referenced by every node that applies those windows, so changing a window
 # marks exactly those sections stale.
 TIME_WINDOWS_REF = "app.services.hp.time_windows:TIME_WINDOWS_VERSION"
+# Vendor text shown in English (client, 9 Oct; hp/translate.py). Referenced by
+# every node that translates, so a prompt change re-translates exactly those.
+TRANSLATE_REF = "app.services.hp.translate:TRANSLATE_PROMPT_VERSION"
 
 
 _P = "app.services.regen.producers"
@@ -101,7 +104,10 @@ NODES = (
          # seniority rather than the composite score, and `source_breakdown`
          # and `ranked_entry_path` are gone. All of it is Python, so nothing
          # else here would have moved the fingerprint.
-         logic_version=2,
+         # 3: contact job titles in English before they are scored (9 Oct).
+         logic_version=3,
+         logic_refs=(TRANSLATE_REF,),
+         llm=True,
          run=f"{_P}:stakeholder_roster"),
     Node("tech_core", "tech_landscape",
          widgets=("technographic_map", "tech_stack_matrix",
@@ -163,9 +169,14 @@ NODES = (
          widgets=("hiring_postings_summary", "hiring_family_breakdown",
                   "hiring_tech_tags", "hiring_theme_cards"),
          datasets=("job_openings",),
-         logic_refs=("app.services.hp.hiring_themes:THEMES_VERSION",),
+         logic_refs=("app.services.hp.hiring_themes:THEMES_VERSION",
+                     TRANSLATE_REF),
+         # Job titles with no English in the job file are translated by the
+         # model, once per title, cached (hp/job_titles.py).
+         llm=True,
          # 2: theme cards carry more_titles, behind "+ N more jobs" (6 Oct).
-         logic_version=2,
+         # 3: job titles shown and counted in English (client, 9 Oct).
+         logic_version=3,
          run=f"{_P}:hiring"),
     Node("opp_core", "solution_narrative_opportunity_map",
          widgets=("opportunity_context_card", "opportunity_narrative_plays"),
@@ -193,8 +204,11 @@ NODES = (
          # The pack is a logic input in its own right: editing a persona card or
          # a row of the eligibility matrix changes what this widget offers, so
          # it has to invalidate the widget without anyone remembering to bump.
-         logic_refs=("app.services.hp.buyer_personas:PERSONA_PACK_VERSION",),
-         logic_version=3,
+         logic_refs=("app.services.hp.buyer_personas:PERSONA_PACK_VERSION",
+                     TRANSLATE_REF),
+         # 4: persona job titles and the hiring titles in English (9 Oct).
+         logic_version=4,
+         llm=True,
          run=f"{_P}:content_persona"),
     Node("news", "recent_news_signals",
          widgets=("news_relevance_summary", "news_signals_feed"),
@@ -216,9 +230,11 @@ NODES = (
          # READ time from the reliability score the widget already stores,
          # and nothing goes stale. See `signal_scoring.describe_source` and
          # its mirror in the dashboard.
-         logic_version=2,
+         # 3: headlines, evidence and publishers in English before dedupe and
+         # scoring; Japanese stories no longer merge on a blank key (9 Oct).
+         logic_version=3,
          logic_refs=("app.services.extractors.recent_news_signals:"
-                     "SIGNAL_SCORING_PROMPT_VERSION",),
+                     "SIGNAL_SCORING_PROMPT_VERSION", TRANSLATE_REF),
          run=f"{_P}:news"),
     Node("stakeholder_talking_points", "stakeholder_map",
          widgets=("stakeholder_talking_points",),
@@ -247,7 +263,8 @@ NODES = (
          llm=True,
          # The client's 7 Oct parent/subsidiary data (hp/company_relationships.py).
          logic_refs=(TIME_WINDOWS_REF, "app.services.extractors.executive_dashboard:SUMMARY_PROMPT_VERSION",
-                     "app.services.hp.company_relationships:RELATIONSHIPS_VERSION",),
+                     "app.services.hp.company_relationships:RELATIONSHIPS_VERSION",
+                     TRANSLATE_REF),
          # 2: exec_key_metrics lists the filings on record (the filings list
          # CSV uploaded with the PDFs under compliance_filings); Quick Stats
          # counts and the contacts read dropped (client feedback 1.e).
@@ -259,7 +276,11 @@ NODES = (
          # job_openings stays for the urgency score's Growth driver.
          # 6: exec_summary_card's parent is Ultimate Parent Name (column E) and it
          # lists the Subsidiaries sheet (client, 5 Oct, issue list v3).
-         logic_version=6,
+         # 7: a government ("japan the government of japan") is dropped from the
+         # subsidiaries - a shareholder, not a subsidiary.
+         # 8: parent, subsidiary and filing names in English, originals kept
+         # for the hover (client, 9 Oct).
+         logic_version=8,
          run=f"{_P}:exec_core"),
     Node("evaluator_personas", "message_evaluator",
          widgets=("evaluator_persona_context",),

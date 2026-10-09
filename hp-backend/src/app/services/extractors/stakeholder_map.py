@@ -21,7 +21,7 @@ from app.services.extractors.grounding import (
     build_corpus,
     check_text,
 )
-from app.services.hp import time_windows
+from app.services.hp import time_windows, translate
 from app.services.regen import (
     context as run_context,
     manifest as regen_manifest,
@@ -1042,6 +1042,13 @@ def extract_stakeholder_map(account_id: str,
     extracted_contacts = []
     dept_counter = Counter()
 
+    # Job titles in English before anything reads them (client, 9 Oct): the
+    # seniority, relevance and influence rules match English words, so
+    # "CIO 最高情報責任者" was shown as received and scored as if it said nothing.
+    titles_english = translate.to_english(
+        [resolve_field(row, ["Prospect job_title", "apollo_title"]) for row in contact_records],
+        db, "job_title")
+
     for idx, row in enumerate(contact_records):
         # --- existing deterministic fields, unchanged ---------------------------
         is_apollo = bool(resolve_field(row, ["apollo_requested_contact", "apollo_matched_contact"]))
@@ -1054,7 +1061,8 @@ def extract_stakeholder_map(account_id: str,
             combined = f"{fname} {lname}".strip()
             full_name = combined if combined else (resolve_field(row, ["apollo_title"]) or "Unknown Contact")
 
-        title = resolve_field(row, ["Prospect job_title", "apollo_title"])
+        title_original = resolve_field(row, ["Prospect job_title", "apollo_title"])
+        title = titles_english.get(" ".join(str(title_original or "").split()), title_original)
         department = resolve_field(row, ["Prospect job_department_main", "apollo_department"])
         dept_key = department if department else "Unassigned"
         dept_counter[dept_key] += 1
@@ -1105,6 +1113,8 @@ def extract_stakeholder_map(account_id: str,
             # existing fields - names and values unchanged
             "full_name": full_name,
             "title": title,
+            # As supplied, for the hover - only when it was translated.
+            **({"title_original": title_original} if title != title_original else {}),
             "department": department,
             "seniority": seniority,
             "email": email,
