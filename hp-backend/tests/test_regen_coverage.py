@@ -50,6 +50,14 @@ def test_tech_breakdown_is_covered_by_webstack_only():
     assert coverage.covered_by("tech_breakdown", "ACME - SG", {"technographics"}) is None
 
 
+def test_technographics_is_covered_by_the_website_sheets():
+    """Client, 27 Sep: with no Technographics row the tech map reads the
+    website technology (Webstack, Tech Breakdown) and says so on the card."""
+    assert coverage.covered_by("technographics", "ACME - SG", {"webstack"}) == coverage.WEBSITE_TECHNOLOGY
+    assert coverage.covered_by("technographics", "ACME - SG", {"tech_breakdown"}) == coverage.WEBSITE_TECHNOLOGY
+    assert coverage.covered_by("technographics", "ACME - SG", {"technology_detections"}) is None
+
+
 def test_the_two_news_sources_cover_each_other():
     assert coverage.covered_by("news_events", "ACME - SG", {"google_news"}) == coverage.GOOGLE_NEWS
     assert coverage.covered_by("google_news", "ACME - SG", {"news_events"}) == coverage.NEWS_EVENTS
@@ -61,6 +69,6 @@ def test_a_weaker_stand_in_is_never_cover():
     everything = {"firmographics", "technographics", "webstack", "intent_score",
                   "hp_category_intent", "news_events", "google_news"}
     for key in ("filings_financials", "job_openings", "prospect_contacts",
-                "compliance_filings", "technographics", "webstack",
+                "compliance_filings", "webstack",
                 "technology_detections", "extended_company"):
         assert coverage.covered_by(key, "ACCENTURE INC - PH", everything) is None

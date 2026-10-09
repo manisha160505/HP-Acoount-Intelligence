@@ -22,6 +22,7 @@ BOMBORA = "Bombora intent"
 CLIENT_HIERARCHY = "client company hierarchy (7 Oct)"
 CLIENT_NO_PARENT = "client: no parent shown (8 Oct)"
 WEBSTACK = "Webstack"
+WEBSITE_TECHNOLOGY = "website technology (client, 27 Sep)"
 GOOGLE_NEWS = "Google News"
 NEWS_EVENTS = "News & Events"
 
@@ -47,6 +48,11 @@ def covered_by(dataset: str, account_name: str, provided) -> str | None:
             return CLIENT_HIERARCHY
     if dataset == "subsidiaries" and company_relationships.for_account(account_name)["subsidiaries"]:
         return CLIENT_HIERARCHY
+    # No Technographics row: the tech map is built from the website sheets
+    # instead, as the client directed (tech_landscape.detected_technologies), and
+    # the card names that basis.
+    if dataset == "technographics" and provided & {"webstack", "tech_breakdown"}:
+        return WEBSITE_TECHNOLOGY
     # Tech Breakdown only groups the Website stack card's technologies, which
     # come from webstack.
     if dataset == "tech_breakdown" and "webstack" in provided:
