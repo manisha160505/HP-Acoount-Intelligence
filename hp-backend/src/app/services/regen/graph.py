@@ -276,9 +276,11 @@ NODES = (
          # job_openings stays for the urgency score's Growth driver.
          # 6: exec_summary_card's parent is Ultimate Parent Name (column E) and it
          # lists the Subsidiaries sheet (client, 5 Oct, issue list v3).
-         # 7: parent, subsidiary and filing names in English, originals kept
+         # 7: a government ("japan the government of japan") is dropped from the
+         # subsidiaries - a shareholder, not a subsidiary.
+         # 8: parent, subsidiary and filing names in English, originals kept
          # for the hover (client, 9 Oct).
-         logic_version=7,
+         logic_version=8,
          run=f"{_P}:exec_core"),
     Node("evaluator_personas", "message_evaluator",
          widgets=("evaluator_persona_context",),
