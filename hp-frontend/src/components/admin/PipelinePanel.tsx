@@ -68,6 +68,8 @@ interface Section {
   has_data: boolean;
   missing_files?: { dataset?: string; label?: string; file?: string; path?: string }[];
   datasets_not_provided?: { dataset: string; label: string }[];
+  // Unprovided datasets another source fills for the same card - not gaps.
+  datasets_covered?: { dataset: string; label: string; covered_by: string }[];
 }
 
 // A dataset some section reads that this account has no file for.
@@ -76,6 +78,14 @@ interface DataGap {
   label: string;
   sections: string[];
   blocks: string[];   // sections left with nothing at all to build from
+}
+
+// A dataset with no file that another source fills (regen/coverage.py).
+interface DataCovered {
+  dataset: string;
+  label: string;
+  covered_by: string;
+  sections: string[];
 }
 
 interface RunRow {
@@ -94,6 +104,7 @@ interface PipelineResponse {
   counts: Record<Status, number>;
   needs_run: number;
   data_gaps?: DataGap[];
+  data_covered?: DataCovered[];
   queue: { paused: boolean; reason?: string | null; paused_at?: string | null;
            resume_after?: string | null };
   runs: RunRow[];
@@ -189,7 +200,8 @@ function missingOnServer(sections: Section[]): MissingOnServer[] {
   return Object.values(by).sort((a, b) => a.label.localeCompare(b.label));
 }
 
-function DataGapsBox({ gaps, missing }: { gaps: DataGap[]; missing: MissingOnServer[] }) {
+function DataGapsBox({ gaps, missing, covered }:
+  { gaps: DataGap[]; missing: MissingOnServer[]; covered: DataCovered[] }) {
   const blocking = gaps.filter(g => g.blocks.length > 0).length;
   return (
     <div className="rounded-xl border border-stone-300 bg-stone-50 px-4 py-3">
@@ -222,6 +234,21 @@ function DataGapsBox({ gaps, missing }: { gaps: DataGap[]; missing: MissingOnSer
           </li>
         ))}
       </ul>
+      {covered.length > 0 && (
+        <div className="mt-2.5 border-t border-stone-200 pt-2">
+          <div className="text-[10px] font-bold uppercase tracking-wider text-stone-500">
+            Covered by another source ({covered.length}) - not gaps
+          </div>
+          <ul className="mt-1 space-y-0.5">
+            {covered.map(c => (
+              <li key={`covered-${c.dataset}`} className="text-[11px] text-stone-500"
+                title={`Read by ${c.sections.join(', ')}`}>
+                {c.label}: covered by {c.covered_by}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }
@@ -526,8 +553,9 @@ export default function PipelinePanel({ accountId }: { accountId: string }) {
       )}
       {data && (() => {
         const missing = missingOnServer(data.groups.FILES_MISSING || []);
-        return ((data.data_gaps?.length ?? 0) > 0 || missing.length > 0)
-          ? <DataGapsBox gaps={data.data_gaps || []} missing={missing} />
+        return ((data.data_gaps?.length ?? 0) > 0 || missing.length > 0
+                || (data.data_covered?.length ?? 0) > 0)
+          ? <DataGapsBox gaps={data.data_gaps || []} missing={missing} covered={data.data_covered || []} />
           : null;
       })()}
       {data && GROUPS.filter(g => (data.groups[g.key] || []).length > 0).map(g => {
@@ -579,6 +607,12 @@ export default function PipelinePanel({ accountId }: { accountId: string }) {
                           <div className="mt-1.5 text-[11px] text-stone-700">
                             <span className="font-bold">Not provided:</span>{' '}
                             {s.datasets_not_provided!.map(d => d.label).join(', ')}
+                          </div>
+                        )}
+                        {(s.datasets_covered?.length ?? 0) > 0 && (
+                          <div className="mt-1 text-[11px] text-stone-500">
+                            <span className="font-bold">Covered:</span>{' '}
+                            {s.datasets_covered!.map(d => `${d.label} (by ${d.covered_by})`).join(', ')}
                           </div>
                         )}
                         {s.reasons.length > 0 && (

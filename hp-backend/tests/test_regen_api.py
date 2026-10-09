@@ -266,6 +266,30 @@ def test_sections_with_no_data_say_what_to_upload(env):
     assert after["counts"]["NO_DATA"] == 0 and after["data_gaps"] == []
 
 
+def test_a_covered_dataset_is_listed_apart_and_changes_no_status(env):
+    """Bombora missing where the HP category file is uploaded: covered, so it is
+    not a data gap - and the sections' statuses are what they would be anyway."""
+    client, db, acct = env
+    _data(db, acct, "firmographics", "hp_category_intent")
+    before = client.get("/api/v1/accounts/%s/pipeline" % acct).json()
+
+    gap_keys = [g["dataset"] for g in before["data_gaps"]]
+    assert "intent_score" not in gap_keys and "intent_topics" not in gap_keys
+    covered = {c["dataset"]: c for c in before["data_covered"]}
+    assert covered["intent_score"]["covered_by"] == "HP category file"
+    assert covered["intent_score"]["sections"]
+    intent = next(s for v in before["groups"].values() for s in v if s["node_id"] == "intent")
+    assert {d["dataset"] for d in intent["datasets_covered"]} >= {"intent_score", "intent_topics"}
+    assert not {d["dataset"] for d in intent["datasets_not_provided"]} & {"intent_score", "intent_topics"}
+
+    summary = client.get("/api/v1/regeneration/accounts-summary").json()
+    row = next(a for a in summary["accounts"] if a["account_id"] == acct)
+    assert [g["dataset"] for g in row["data_gaps"]] == gap_keys
+    assert {c["dataset"] for c in row["data_covered"]} == set(covered)
+    # Coverage is display only: the counts match the pipeline view's.
+    assert row["counts"].get("NO_DATA", 0) == before["counts"]["NO_DATA"]
+
+
 def test_live_counts_running_and_queued_jobs_per_account(env):
     client, db, acct = env
     assert client.get("/api/v1/regeneration/live").json()["accounts"] == {}
