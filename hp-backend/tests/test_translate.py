@@ -96,3 +96,21 @@ def test_is_english():
     assert not tr.is_english(HEADLINE)
     assert not tr.is_english("กระทรวงการคลัง")
     assert not tr.is_english("보안 엔지니어")
+
+
+def test_the_database_is_only_opened_when_something_needs_translating(model):
+    """Callers pass `get_db` itself. All-English data - nearly every account -
+    must not open a connection (CI has no database, and a page of English needs
+    no cache)."""
+    opened = []
+
+    def get_db():
+        opened.append(1)
+        return FakeDb()
+
+    assert tr.to_english(["Chief Information Officer", ""], get_db, "job_title") == {}
+    assert opened == []
+    _, answers = model
+    answers[COMPANY] = "AEON Kyushu Co., Ltd."
+    assert tr.to_english([COMPANY], get_db, "company") == {COMPANY: "AEON Kyushu Co., Ltd."}
+    assert opened == [1]

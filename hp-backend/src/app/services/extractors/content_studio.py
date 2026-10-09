@@ -248,7 +248,7 @@ def _derive_client_personas(account_id: str) -> list[dict]:
     roles = personas.read_roles(account_id)
     # The contact's job title in English for the persona card (client, 9 Oct).
     titles_english = translate.to_english([r.get("actual_job_title") for r in roles],
-                                          get_db(), "job_title")
+                                          get_db, "job_title")
     by_persona = {}
     for role in roles:
         title = " ".join(str(role.get("actual_job_title") or "").split())
@@ -310,7 +310,7 @@ def _derive_role_proxy_personas(job_records: list[dict]) -> list[dict]:
     groups: dict[tuple[str, str], dict] = {}
     # Titles in English (client, 9 Oct): the keyword gates below and the
     # "Open hiring" evidence read them, and a Japanese title passed neither.
-    english, _ = job_titles.english_titles(job_records, get_db())
+    english, _ = job_titles.english_titles(job_records, get_db)
     for row in job_records:
         title = str(row.get("normalized_title") or row.get("title") or "").strip()
         if title and not job_titles.is_english(title):

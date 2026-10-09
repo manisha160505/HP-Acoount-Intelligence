@@ -131,6 +131,10 @@ def to_english(texts, db, kind: str) -> dict:
 
     English text, and text the model could not translate acceptably, is not in
     the result - callers use `.get(text, text)`.
+
+    `db` may be the database or a function returning it (`get_db`). A function
+    is only called when there is something to translate, so a caller with
+    all-English data - nearly every account - never opens a connection for this.
     """
     if kind not in KINDS:
         raise ValueError("unknown translation kind %r" % kind)
@@ -143,6 +147,8 @@ def to_english(texts, db, kind: str) -> dict:
         return {}
 
     english = {}
+    if callable(db):
+        db = db()
     cache = db[COLLECTION] if db is not None else None
     if cache is not None:
         by_key = {_key(kind, t): t for t in wanted}
