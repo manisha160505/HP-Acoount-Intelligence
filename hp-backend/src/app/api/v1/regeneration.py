@@ -153,7 +153,9 @@ def _summary_row(engine, account: dict) -> dict:
             "needs_run": sum(counts.get(s, 0) for s in planner.NEEDS_RUN),
             "running": progress,
             "data_gaps": [{"dataset": g["dataset"], "label": g["label"],
-                           "blocks": len(g["blocks"])} for g in view["data_gaps"]]}
+                           "blocks": len(g["blocks"])} for g in view["data_gaps"]],
+            "data_covered": [{"dataset": c["dataset"], "label": c["label"],
+                              "covered_by": c["covered_by"]} for c in view["data_covered"]]}
 
 
 # account_view is a handful of Mongo round trips per account, so 220 accounts
@@ -236,6 +238,7 @@ def account_pipeline(account_id: str, current_user: dict = Depends(require_admin
                      "counts": {k: len(v) for k, v in groups.items()},
                      "needs_run": sum(len(groups[s]) for s in planner.NEEDS_RUN),
                      "data_gaps": view["data_gaps"],
+                     "data_covered": view["data_covered"],
                      "queue": regen_jobs.queue_state(db),
                      "runs": runs.recent(db, account_id, 5)})
 
