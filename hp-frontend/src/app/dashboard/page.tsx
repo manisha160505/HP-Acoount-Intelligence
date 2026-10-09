@@ -3220,6 +3220,20 @@ export default function UserDashboardPage() {
                                 </div>
                               </details>
                             )}
+
+                            {/* Topics left out before classification, moved here from
+                                the raw-topics card, which a grouped account no longer has. */}
+                            {hpGrouped && (excludedTopics.length > 0 || duplicatesRemoved.length > 0) && (
+                              <div className="bg-slate-50 rounded-xl p-4 border border-slate-200 text-[11px] text-slate-600 space-y-1">
+                                <span className="text-slate-500 font-bold uppercase text-[10px] block">Not in any summary</span>
+                                {excludedTopics.map((t: any) => (
+                                  <div key={`x-${t.topic_name}`}><span className="font-semibold capitalize">{t.topic_name}</span></div>
+                                ))}
+                                {duplicatesRemoved.map((d: any, i: number) => (
+                                  <div key={`d-${i}`}><span className="font-semibold capitalize">{d.topic_name}</span>: duplicate row (score {d.composite_score ?? NO_SIGNAL}) removed; kept score {d.kept_score ?? NO_SIGNAL}</div>
+                                ))}
+                              </div>
+                            )}
                           </div>
                         );
                       })()}
@@ -3493,8 +3507,12 @@ export default function UserDashboardPage() {
                         </>
                       )}
 
-                      {/* Broader intent topics, raw view */}
-                      {topicsData && (
+                      {/* Broader intent topics, raw view. Left out on a Bombora
+                          account grouped by HP category (client email, 5 Oct):
+                          its topics are on the cards and in the "Other researched
+                          topics" dropdown, and the theme groups this card held
+                          would be a second grouping of the same topics. */}
+                      {topicsData && !hpGrouped && (
                         <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-6">
                           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
                             <div>
