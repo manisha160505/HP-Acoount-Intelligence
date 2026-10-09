@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useAuth } from '@/providers/AuthProvider';
 import { LogOut, User as UserIcon, Shield, Building2, Users, BarChart3, BookOpen } from 'lucide-react';
+import HpLogo from '@/components/common/HpLogo';
 
 const ADMIN_LINKS = [
   { href: '/admin/platform', label: 'Platform', Icon: Building2 },
@@ -29,9 +30,7 @@ export const Navbar: React.FC = () => {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between h-16 items-center">
           <div className="flex items-center space-x-3">
-            <div className="bg-hp-navy text-white p-2 rounded-xl font-bold text-lg tracking-wider border border-white/20">
-              HP
-            </div>
+            <HpLogo size={40} onDark />
             <div>
               <span className="text-lg font-bold tracking-tight text-white">
                 Account Intelligence
