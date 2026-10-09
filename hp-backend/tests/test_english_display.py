@@ -70,6 +70,21 @@ def test_filings_titles_figures_and_ceo_in_english():
     assert chief["title"] == "President and Representative Director"
 
 
+def test_the_filings_register_output_is_translated_in_place():
+    """The extractor passes the register's listed filings, not the register:
+    passing the dict made every Executive Dashboard build fail (9 Oct)."""
+    from datetime import date
+
+    from app.services.dashboard import filings_register
+    register = filings_register.register(
+        [{"document_title": "有価証券報告書 2025/04/01 - 2026/03/31",
+          "publication_date": "2026-06-20", "document_url": "https://example.com/ar.pdf"}],
+        as_of=date(2026, 10, 9))
+    ed._filings_in_english(FakeDb(), register.get("filings") or [], [], None)
+    assert register["filings"][0]["title"].startswith("Annual Securities Report")
+    assert register["filings"][0]["title_original"].startswith("有価証券報告書")
+
+
 def test_a_translated_cio_title_is_read_as_c_suite():
     """The seniority rule matches English words; the Japanese title said
     nothing it could read."""

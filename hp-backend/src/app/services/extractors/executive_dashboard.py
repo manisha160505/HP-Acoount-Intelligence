@@ -447,7 +447,9 @@ def extract_executive_dashboard(account_id: str) -> list[dict]:
     financial_rows = _read_dataset_csv(account_id, "filings_financials")
     reported = filings_financials.reported_metrics(financial_rows)
     chief_executive = filings_financials.ceo(financial_rows)
-    _filings_in_english(db, filings, reported, chief_executive)
+    # register() returns {"filings": [...], "excluded": ...}; the titles are
+    # translated in place on the listed filings themselves.
+    _filings_in_english(db, filings.get("filings") or [], reported, chief_executive)
     if reported or chief_executive:
         filings_sources.append(filings_financials.SOURCE)
 
