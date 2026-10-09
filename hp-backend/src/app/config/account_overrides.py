@@ -123,8 +123,10 @@ def masked(account_name, widget_key: str, data: dict) -> dict:
             or data.get("parent_companies")):
         # `parent_companies` is the list the card shows (an account can have
         # two parents); `parent_company` is the same names as one string.
+        # `parent_companies_original` is the same names as supplied, for the
+        # hover - hidden with them.
         return {**data, "parent_company": "", "parent_companies": [],
-                "parent_company_source": None}
+                "parent_company_source": None, "parent_companies_original": {}}
     return data
 
 

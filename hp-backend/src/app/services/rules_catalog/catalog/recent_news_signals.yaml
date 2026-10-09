@@ -1014,6 +1014,25 @@ rules:
   - hp-frontend/src/app/dashboard/page.tsx:confidenceDot
   - hp-backend/src/app/services/extractors/recent_news_signals.py:_normalize_signals
   confidence: high
+- id: ls_in_english
+  parent: ls_sources
+  name: News shown in English
+  kind: display
+  summary: Headlines, their detail and publisher names that arrive in Japanese, Korean or Thai are shown
+    in English.
+  purpose: Headlines, their detail and publisher names that arrive in Japanese, Korean or Thai are shown
+    in English.
+  logic: 'After the 12-month check and before duplicates are merged and items are scored, each headline,
+    detail sentence and publisher name that is not in English is translated once by AI and the result is
+    reused for every later run. A translation is used only if it is in English and keeps every number the
+    original had; otherwise the original is shown. The text as published is shown when the reader hovers
+    over it. Duplicates are merged on the English text, so two different stories in Japanese are no longer
+    mistaken for one (client, 9 Oct).'
+  output: Headline, detail and publisher in English, with the original on hover.
+  sources:
+  - hp-backend/src/app/services/extractors/recent_news_signals.py:_translate_signals
+  - hp-backend/src/app/services/hp/translate.py:to_english
+  confidence: high
 undetermined:
 - 'Possible defect (static reading, not executed): when signals pass the gate but the model scores none,
   `rejected_by_model` is never assigned (only set inside `if scores:` at hp-backend/src/app/services/extractors/recent_news_signals.py:1177)

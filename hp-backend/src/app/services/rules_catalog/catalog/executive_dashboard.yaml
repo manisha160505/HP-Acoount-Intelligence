@@ -2445,6 +2445,26 @@ rules:
   - hp-backend/src/app/services/dashboard/priorities.py:_executive_summary
   - hp-frontend/src/app/dashboard/page.tsx
   confidence: high
+- id: summary_in_english
+  parent: exec_summary_card
+  name: Names and filings shown in English
+  kind: display
+  summary: Parent and subsidiary names, filing titles, the CEO's name and title, and filed table rows that
+    arrive in Japanese, Korean or Thai are shown in English.
+  purpose: Parent and subsidiary names, filing titles, the CEO's name and title, and filed table rows that
+    arrive in Japanese, Korean or Thai are shown in English.
+  logic: 'Each of these that is not in English is translated once by AI and the result reused. Parent and
+    subsidiary names are translated only after the account''s own name and its parents have been left out,
+    so those checks compare the names as supplied; a name that becomes a repeat of one already listed is
+    dropped. A filed table row is never rewritten: its English version is shown beside it, and the row as
+    printed is shown on hover. A translation is used only if it is in English and keeps every number the
+    original had; otherwise the original is shown (client, 9 Oct).'
+  output: Names, filing titles and table rows in English, with the originals on hover.
+  sources:
+  - hp-backend/src/app/services/extractors/executive_dashboard.py:_in_english
+  - hp-backend/src/app/services/extractors/executive_dashboard.py:_filings_in_english
+  - hp-backend/src/app/services/hp/translate.py:to_english
+  confidence: high
 undetermined:
 - Strategic priority content (titles, themes, 'why now', which evidence is retrieved) is model-judged;
   there is no fixed formula. Only the checks applied afterwards are deterministic.

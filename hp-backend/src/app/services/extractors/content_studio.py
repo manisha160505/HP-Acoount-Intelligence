@@ -39,6 +39,8 @@ from app.services.hp import (
     content_audit,
     content_gates,
     hiring_jobs,
+    job_titles,
+    translate,
 )
 from app.services.regen import context as run_context, store as widget_store
 
@@ -243,8 +245,16 @@ def _derive_client_personas(account_id: str) -> list[dict]:
     Ordered by the pack, not by the file, so the picker reads the same on
     every account.
     """
+    roles = personas.read_roles(account_id)
+    # The contact's job title in English for the persona card (client, 9 Oct).
+    titles_english = translate.to_english([r.get("actual_job_title") for r in roles],
+                                          get_db(), "job_title")
     by_persona = {}
-    for role in personas.read_roles(account_id):
+    for role in roles:
+        title = " ".join(str(role.get("actual_job_title") or "").split())
+        if title in titles_english:
+            role = {**role, "actual_job_title": titles_english[title],
+                    "actual_job_title_original": role["actual_job_title"]}
         persona_id = bp.match_role(role["target_persona"])
         # The other twenty-four roles are not this programme's personas.
         if persona_id and persona_id not in by_persona:
@@ -281,6 +291,8 @@ def _derive_client_personas(account_id: str) -> list[dict]:
             "buying_committee_persona": angle,
             "full_name": role["contact_name"] or None,
             "actual_job_title": role["actual_job_title"] or None,
+            **({"actual_job_title_original": role["actual_job_title_original"]}
+               if role.get("actual_job_title_original") else {}),
             "contact_status": role["contact_status"] or None,
             "is_filled": role["is_filled"],
         })
@@ -296,8 +308,14 @@ def _derive_role_proxy_personas(job_records: list[dict]) -> list[dict]:
     intern postings are gated out before clustering. The jobs are the one
     selection every feature reads (hp/hiring_jobs.py), open and closed."""
     groups: dict[tuple[str, str], dict] = {}
+    # Titles in English (client, 9 Oct): the keyword gates below and the
+    # "Open hiring" evidence read them, and a Japanese title passed neither.
+    english, _ = job_titles.english_titles(job_records, get_db())
     for row in job_records:
         title = str(row.get("normalized_title") or row.get("title") or "").strip()
+        if title and not job_titles.is_english(title):
+            posted = " ".join(str(row.get("title") or row.get("normalized_title") or "").split())
+            title = english.get(posted, title)
         if not title:
             continue
         sen_raw = str(row.get("seniority") or "").strip().lower()
