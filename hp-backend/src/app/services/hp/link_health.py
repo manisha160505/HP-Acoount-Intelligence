@@ -52,15 +52,15 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 def _gone_host(exc: Exception) -> bool:
-    """A host that does not resolve, or refuses every connection. A timeout is
-    not this: a slow site is not a missing one."""
+    """A host that does not resolve. A timeout is not this - a slow site is not a
+    missing one - and nor is a refused connection: Secom's IR site refuses the
+    server's cloud address while its PDFs open in a browser (9 Oct)."""
     if isinstance(exc, requests.exceptions.Timeout):
         return False
     text = str(exc)
     return isinstance(exc, requests.exceptions.ConnectionError) and any(
         m in text for m in ("NameResolutionError", "Name or service not known",
-                            "nodename nor servname", "getaddrinfo failed",
-                            "Connection refused"))
+                            "nodename nor servname", "getaddrinfo failed"))
 
 
 def _to_home_page(url: str, final: str) -> bool:

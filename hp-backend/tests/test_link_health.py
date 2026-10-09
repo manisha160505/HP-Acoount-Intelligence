@@ -59,7 +59,8 @@ ARTICLE = "https://news.example.com/2026/09/acme-opens-plant"
     ((503, None), link_health.UNSURE),
     (requests.exceptions.ReadTimeout("slow"), link_health.UNSURE),
     (requests.exceptions.ConnectionError("NameResolutionError: no such host"), link_health.DEAD),
-    (requests.exceptions.ConnectionError("[Errno 61] Connection refused"), link_health.DEAD),
+    # A site that refuses the server's address can still open for the user.
+    (requests.exceptions.ConnectionError("[Errno 111] Connection refused"), link_health.UNSURE),
     (requests.exceptions.ConnectionError("Connection reset by peer"), link_health.UNSURE),
 ])
 def test_only_a_definite_failure_is_dead(monkeypatch, outcome, verdict):
