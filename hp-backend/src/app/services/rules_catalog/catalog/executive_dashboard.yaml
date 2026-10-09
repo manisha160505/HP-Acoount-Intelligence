@@ -120,8 +120,9 @@ rules:
   purpose: Shows where the company is headquartered.
   inputs:
   - 'The company profile: city, region and country'
-  logic: City, region and country are joined with commas, skipping any that are blank. If all three are
-    blank the value is 'N/A'.
+  logic: City, region and country are joined with commas, skipping any that are blank, and shown in proper
+    case (the source sends 'tokyo, japan'; the screen reads 'Tokyo, Japan'). If all three are blank the
+    line is hidden.
   formula: City, Region, Country (blanks skipped)
   example:
     scenario: City 'Jakarta', Region blank, Country 'Indonesia'.
@@ -142,7 +143,9 @@ rules:
   inputs:
   - 'The company profile: LinkedIn industry category, NAICS description and SIC description'
   logic: The LinkedIn industry, NAICS description and SIC description are joined with ' / ' in that order,
-    skipping blanks and dropping exact repeats. If all are blank the value is 'N/A'.
+    skipping blanks and dropping exact repeats. Because the three usually say the same thing three ways,
+    the screen shows only the first (normally the LinkedIn industry) in proper case, and all of them when
+    the reader hovers over it. If all are blank the line is hidden.
   formula: LinkedIn / NAICS / SIC (blanks and exact duplicates removed)
   example:
     scenario: LinkedIn 'Motor Vehicle Manufacturing', NAICS 'Automobile Manufacturing', SIC 'Automobile
@@ -224,8 +227,10 @@ rules:
   logic: 'Every subsidiary name, exactly as supplied with spaces trimmed, in the order supplied, followed
     by the subsidiaries the client''s merged hierarchy sheet adds. Blank
     names and repeats (ignoring case) are dropped, and so are the account''s own name and its parents,
-    since none of them is its subsidiary. A name that only starts with the account''s name is kept (''toyota
-    motor'' is a Toyota Group subsidiary). The screen shows the first few and folds the rest. With none,
+    since none of them is its subsidiary. A government is dropped too: the source lists ''japan the
+    government of japan'', a shareholder, under eight Japanese accounts. A name that only starts with the
+    account''s name is kept (''toyota motor'' is a Toyota Group subsidiary). Names are shown in proper
+    case (''verigy us'' reads ''Verigy US''). The screen shows the first few and folds the rest. With none,
     the line is hidden.'
   conditions:
   - 'No subsidiaries: line hidden'
