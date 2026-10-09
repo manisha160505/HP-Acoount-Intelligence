@@ -25,6 +25,21 @@ It changes output only for:
                                          and accounts in the client's 7 Oct hierarchy data
   exec_priorities                        catalyst evidence older than 24 months
 
+Release "english" (9 Oct, PRs 81/82: vendor text in English, no government
+subsidiaries). See regen/english_release.py. Run in this order, waiting for
+each run to finish before the next step:
+
+    python scripts/rebase_unaffected.py --release english            # report only
+    python scripts/rebase_unaffected.py --release english --apply    # re-stamp News and the rest
+    python scripts/rebase_unaffected.py --release english --submit stakeholder_roster,hiring,content_persona
+    python scripts/rebase_unaffected.py --release english --apply
+    python scripts/rebase_unaffected.py --release english --submit exec_core
+    python scripts/rebase_unaffected.py --release english --apply
+    python scripts/translate_stored_news.py --apply                  # News text, in place
+
+It rebuilds only Python sections; News and the model-written sections are
+re-stamped, never re-generated.
+
 Release "oct5" (PR 68/69): intent on Bombora-led accounts, objection on the
 Tech breakdown fallback accounts, exec_core where a parent or subsidiaries show.
 
@@ -52,11 +67,13 @@ from app.services.extractors.datasets import (  # noqa: E402
 from app.services.dashboard import evidence_strength  # noqa: E402
 from app.services.hp import company_relationships  # noqa: E402
 from app.services.hp import time_windows  # noqa: E402
-from app.services.regen import rebase, runs, store as widget_store  # noqa: E402
+from app.services.regen import english_release, rebase, runs, store as widget_store  # noqa: E402
 from app.services.regen.engine import get_engine  # noqa: E402
+from app.services.regen.graph import DEFAULT  # noqa: E402
 from app.services.retrieval import evidence as ev  # noqa: E402
 
-LABELS = {"oct5": "rebase_unaffected 5 Oct (PR 68/69)",
+LABELS = {"english": "rebase_unaffected 9 Oct (English, PR 81/82)",
+          "oct5": "rebase_unaffected 5 Oct (PR 68/69)",
           "windows": "rebase_unaffected 6 Oct (data time periods)"}
 
 
@@ -116,7 +133,18 @@ def affected_windows(db, account_id: str) -> set:
     return out
 
 
-RELEASES = {"oct5": affected_oct5, "windows": affected_windows}
+def affected_english(db, account_id: str) -> set:
+    """The sections the 9 Oct English release rebuilds (regen/english_release.py)."""
+    out = set(english_release.REBUILD_WHEREVER_STALE)
+    payloads = [((widget_store.committed(db, account_id, w) or {}).get("data") or {})
+                for w in DEFAULT["exec_core"].widgets]
+    if (english_release.has_foreign_text(payloads)
+            or english_release.has_government_subsidiary(payloads)):
+        out.add("exec_core")
+    return out
+
+
+RELEASES = {"english": affected_english, "oct5": affected_oct5, "windows": affected_windows}
 
 
 def main():
