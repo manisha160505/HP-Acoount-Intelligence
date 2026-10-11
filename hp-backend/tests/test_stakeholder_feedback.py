@@ -227,3 +227,16 @@ class TestTheCorpusDoesNotRecycleWhatWasDropped:
     def test_seniority_is_kept(self):
         """It is read off the title in the file, and it orders the roster."""
         assert "seniority_breakdown" in self._source()
+
+
+def test_the_clients_verified_email_tier_counts_as_a_confirmed_mailbox():
+    """Balance-accounts contacts (client, 11 Oct): the file labels a confirmed
+    mailbox "Verified" where the vendor data says "valid". Catch-all and
+    risky addresses are shown with their label and earn no confirmation points."""
+    from app.services.extractors import stakeholder_map as sm
+    with_email = sm.score_data_completeness("a@x.com", None, None, None, None)
+    confirmed = with_email + sm.DATA_COMPLETENESS_POINTS["email_valid"]
+    assert sm.score_data_completeness("a@x.com", "Verified", None, None, None) == confirmed
+    assert sm.score_data_completeness("a@x.com", "valid", None, None, None) == confirmed
+    for label in ("Valid - risky", "Catch-all", "Unknown"):
+        assert sm.score_data_completeness("a@x.com", label, None, None, None) == with_email
