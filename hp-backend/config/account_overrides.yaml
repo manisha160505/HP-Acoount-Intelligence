@@ -24,6 +24,8 @@ accounts:
   # Intent hidden: no Bombora topics and every PredictLeads HP category score is 0.
   # Tech Landscape hidden: government accounts with no technology data.
   # Parent hidden: Explorium holds a parent the client has not confirmed.
+  # Stakeholder Map hidden: no contact found for the account by any source
+  # (client, 11 Oct: "Drop the contacts tab for these accounts").
   "BANK FOR AGRICULTURE AND AGRICULTURAL COOPERATIVE - TH":
     hidden_features: [intent_demand_signals]
     hide_parent_company: true
@@ -44,15 +46,17 @@ accounts:
   "MILITARY BANK - VN":
     hide_parent_company: true
   "MINISTRY OF DEFENCE - MY":
-    hidden_features: [intent_demand_signals, tech_landscape]
+    hidden_features: [intent_demand_signals, tech_landscape, stakeholder_map]
   "MINISTRY OF DEFENCE - VN":
-    hidden_features: [intent_demand_signals, tech_landscape]
+    hidden_features: [intent_demand_signals, tech_landscape, stakeholder_map]
   "MINISTRY OF NATIONAL DEFENSE - KR":
     hidden_features: [intent_demand_signals]
   "MINISTRY OF PUBLIC SECURITY - VN":
     hidden_features: [intent_demand_signals, tech_landscape]
   "MITSUBISHI UFJ FINANCIAL GROUP, INC. - JP":
     hide_parent_company: true
+  "NATIONAL INTELLIGENCE SERVICE - KR":
+    hidden_features: [stakeholder_map]
   "SHISEIDO COMPANY, LIMITED - JP":
     hide_parent_company: true
   "SUMITOMO MITSUI FINANCIAL GROUP, INC. - JP":

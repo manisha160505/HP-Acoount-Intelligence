@@ -35,6 +35,11 @@ def test_the_client_decisions_are_in_the_shipped_file():
     assert sum("intent_demand_signals" in e["hidden_features"] for e in entries) == 16
     assert sum("tech_landscape" in e["hidden_features"] for e in entries) == 3
     assert sum(e["hide_parent_company"] for e in entries) == 9
+    # Client, 11 Oct: no Stakeholder Map on the three accounts no source
+    # returned a contact for.
+    assert {n for n, e in ao.OVERRIDES.items() if "stakeholder_map" in e["hidden_features"]} == {
+        ao._key(n) for n in ("MINISTRY OF DEFENCE - MY", "MINISTRY OF DEFENCE - VN",
+                             "NATIONAL INTELLIGENCE SERVICE - KR")}
 
 
 def test_an_account_not_listed_hides_nothing():
@@ -113,5 +118,5 @@ def test_the_account_response_carries_its_hidden_features():
            "created_at": datetime(2026, 1, 1, tzinfo=UTC),
            "updated_at": datetime(2026, 1, 1, tzinfo=UTC)}
     assert serialize_account(doc)["hidden_features"] == [
-        "intent_demand_signals", "tech_landscape"]
+        "intent_demand_signals", "stakeholder_map", "tech_landscape"]
     assert serialize_account({**doc, "name": "ACCENTURE INC - PH"})["hidden_features"] == []

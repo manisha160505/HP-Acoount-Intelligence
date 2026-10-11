@@ -815,7 +815,7 @@ rules:
   summary: Rewards contacts the seller can actually reach.
   purpose: Rewards contacts the seller can actually reach.
   logic: Start at 20. Add 15 if there is a LinkedIn address, 20 if there is an email, a further 10 if
-    the email status is exactly 'valid', 20 if there is a phone number, and 15 if there is profile data
+    the email status is 'valid' or 'verified' (a confirmed mailbox), 20 if there is a phone number, and 15 if there is profile data
     (skills or experience). Maximum 100.
   table:
     columns:
@@ -828,7 +828,7 @@ rules:
       - 15
     - - Email
       - 20
-    - - Email status is 'valid'
+    - - Email status is 'valid' or 'verified'
       - 10
     - - Phone number
       - 20
@@ -850,7 +850,7 @@ rules:
     - 20 starting points
     - +15 LinkedIn
     - +20 email
-    - The status is not 'valid', so +0
+    - The status is neither 'valid' nor 'verified', so +0
     - No phone, no profile
     result: '55'
     verified: true

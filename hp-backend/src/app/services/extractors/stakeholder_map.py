@@ -515,7 +515,9 @@ def score_data_completeness(email: str | None, email_status: str | None,
         pts += DATA_COMPLETENESS_POINTS["linkedin"]
     if email:
         pts += DATA_COMPLETENESS_POINTS["email"]
-        if (email_status or "").strip().lower() == "valid":
+        # "valid" is the vendor's word; "verified" is the client's own tier for
+        # a confirmed mailbox (balance-accounts contacts file, 11 Oct).
+        if (email_status or "").strip().lower() in ("valid", "verified"):
             pts += DATA_COMPLETENESS_POINTS["email_valid"]
     if phone:
         pts += DATA_COMPLETENESS_POINTS["phone"]
