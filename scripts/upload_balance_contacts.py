@@ -81,13 +81,10 @@ SUB_DEPARTMENT = {
     "general management": "General Management",
 }
 
-# The client's confidence tiers, as the label shown beside the email (5).
-EMAIL_LABEL = {
-    "VERIFIED": "Verified",
-    "VALID_RISKY": "Valid - risky",
-    "CATCH_ALL": "Catch-all",
-    "UNKNOWN": "Unknown",
-}
+# The client's confidence tiers, shown beside the email exactly as the file
+# gives them (5: "show every email with its confidence label"). NONE means the
+# row has no email, so there is nothing to label.
+EMAIL_TIERS = ("VERIFIED", "VALID_RISKY", "CATCH_ALL", "UNKNOWN")
 
 COUNTRY = {"AU": "Australia", "NZ": "New Zealand", "US": "United States", "KR": "South Korea",
            "ES": "Spain"}
@@ -121,7 +118,8 @@ def convert(row: dict, account: dict) -> dict:
     seniority = clean(row.get("seniority"))
     seniority = SENIORITY.get(seniority.lower(), seniority.lower())
     email = clean(row.get("email"))
-    status = EMAIL_LABEL.get(clean(row.get("email_confidence")).upper(), "") if email else ""
+    tier = clean(row.get("email_confidence")).upper()
+    status = tier if email and tier in EMAIL_TIERS else ""
     phone = clean(row.get("phone"))
     linkedin = clean(row.get("linkedin_url"))
     dept = department(row)

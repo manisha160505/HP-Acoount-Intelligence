@@ -231,12 +231,12 @@ class TestTheCorpusDoesNotRecycleWhatWasDropped:
 
 def test_the_clients_verified_email_tier_counts_as_a_confirmed_mailbox():
     """Balance-accounts contacts (client, 11 Oct): the file labels a confirmed
-    mailbox "Verified" where the vendor data says "valid". Catch-all and
-    risky addresses are shown with their label and earn no confirmation points."""
+    mailbox VERIFIED where the vendor data says "valid". The file's other tiers
+    are shown exactly as it gives them and earn no confirmation points."""
     from app.services.extractors import stakeholder_map as sm
     with_email = sm.score_data_completeness("a@x.com", None, None, None, None)
     confirmed = with_email + sm.DATA_COMPLETENESS_POINTS["email_valid"]
-    assert sm.score_data_completeness("a@x.com", "Verified", None, None, None) == confirmed
+    assert sm.score_data_completeness("a@x.com", "VERIFIED", None, None, None) == confirmed
     assert sm.score_data_completeness("a@x.com", "valid", None, None, None) == confirmed
-    for label in ("Valid - risky", "Catch-all", "Unknown"):
+    for label in ("VALID_RISKY", "CATCH_ALL", "UNKNOWN"):
         assert sm.score_data_completeness("a@x.com", label, None, None, None) == with_email
