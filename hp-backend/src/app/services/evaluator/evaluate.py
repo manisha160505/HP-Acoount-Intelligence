@@ -41,13 +41,22 @@ logger = logging.getLogger(__name__)
 # 7 - 12 Oct: a capped format's evaluation is told its character cap and the
 #     message's current length, so it stops recommending additions that cannot
 #     fit; and a recommendation carrying a figure no source holds is withheld.
-PROMPT_VERSION = 7
+# 8 - 12 Oct: suggestions may not introduce a line this persona is not offered,
+#     a link no source holds, or (where the market blocks them) a superlative
+#     or a competitor name; and the rewrite keeps account facts and HP
+#     statements in separate sentences.
+PROMPT_VERSION = 8
 
 # How close to a format's character cap a message must be before the evaluator
 # is told to recommend swaps and cuts rather than additions.
 NEAR_CAP_SHARE = 0.85
 # Extra "same rewrite, shorter" passes when length is the only fault left.
 SHORTEN_PASSES = 2
+# The most model calls one rewrite request may make: the attempt, one retry,
+# the shorten passes (length only) and one repair pass (claims or structure).
+# A fault that changes kind after a pass does not start another cycle - the
+# seller is told what is wrong instead of waiting on a sixth call.
+MAX_REWRITE_CALLS = 2 + SHORTEN_PASSES + 1
 
 MODE_LITE = "LITE"
 MODE_DEEP = "DEEP"
@@ -96,6 +105,12 @@ RULES THAT ARE CHECKED IN CODE AFTER YOU ANSWER:
 3. Do not introduce a number, percentage, statistic or URL that is not in the
    supplied context. Anything you invent is stripped.
 4. Do not claim an HP capability that is not in the approved HP facts below.
+5. A suggestion is something the seller can apply with one click, so it must be
+   applicable. It must not introduce an HP line from the list that is wrong for
+   this persona, a link that is not in the context, or - where the market
+   restrictions below say so - a superlative or a competitor's name. Telling
+   the seller to REMOVE one of those is fine. A suggestion that breaks this is
+   shown without a checkbox.
 
 Two dimensions are measured against something supplied below rather than
 against your own taste:
@@ -561,31 +576,62 @@ def _cap_block(spec, message) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _withhold_untraceable(phrases, sources) -> list:
+def _unusable(text, sources, denied_lines) -> str:
+    """Why a rewrite could not apply this suggestion, or "" when it could.
+
+    Everything here is something the rewrite is checked for and refused over,
+    asked of the suggestion first. "Introduces" matters throughout: a term the
+    seller's draft already contains is not introduced by a suggestion that
+    names it - "remove the Poly mention" is how a seller takes it out.
+    """
+    if not text:
+        return ""
+    figures = sources.untraceable_figures(text)
+    if figures:
+        return "a figure no source holds (%s)" % ", ".join(figures)
+    links = sources.untraceable_links(text)
+    if links:
+        return "a link no source holds (%s)" % ", ".join(links)
+    low, draft = text.lower(), sources.draft.lower()
+    for line in denied_lines:
+        if line.lower() in low and line.lower() not in draft:
+            return "an HP line this persona is not offered (%s)" % line
+    added = sources.introduces(text)
+    if added["superlative"]:
+        return ("a superlative claim not permitted in %s (%s)"
+                % ((sources.country or "this market").title(), added["superlative"]))
+    if added["competitor"]:
+        return ("a competitor's name, not permitted in %s (%s)"
+                % ((sources.country or "this market").title(), added["competitor"]))
+    return ""
+
+
+def _withhold_unusable(phrases, sources, card=None) -> list:
     """Stop offering a suggestion the rewrite check is certain to reject.
 
-    A suggestion that carries a figure held by no source - not the account's
-    data, not HP's approved facts, not the draft, not a case study or Rulebook
-    line this evaluation showed - cannot be applied: the rewrite would be
-    refused for introducing it. It is withheld (kept on the phrase for the
-    audit, off the list the seller ticks). The phrase itself, its verdict and
-    its reason stay.
+    The seller ticks a suggestion and presses Rewrite; if the rewrite that
+    applies it would be refused, the tool has contradicted itself. So each
+    suggestion is asked the rewrite's own questions first - see `_unusable` -
+    and one that fails is withheld: kept on the phrase for the audit, off the
+    list the seller ticks. The phrase itself, its verdict and its reason stay.
     """
+    denied = bp.denied_lines(card["persona_id"]) if card else ()
     withheld = []
     for phrase in phrases:
         for field in ("suggestion", "comment"):
             text = phrase.get(field) or ""
-            figures = sources.untraceable_figures(text) if text else []
-            if not figures:
+            reason = _unusable(text, sources, denied)
+            if not reason:
                 continue
             if field == "suggestion":
                 phrase["suggestion_withheld"] = text
                 phrase["suggestion"] = ""
             # The dashboard ticks the suggestion, or the comment when there is
-            # none - so a comment carrying the figure must not be tickable either.
+            # none - so a comment carrying the problem must not be tickable either.
             phrase["actionable"] = False
+            phrase["withheld_reason"] = reason
             withheld.append({"chunk": phrase["chunk"][:120], "field": field,
-                             "figures": figures})
+                             "reason": reason})
     return withheld
 
 
@@ -774,10 +820,10 @@ def evaluate_message(account_id, persona_id, objective, fmt, message,
                 audit.append({"stage": "chunks_retry", "problems": retry_fidelity})
     if dropped:
         audit.append({"stage": "phrases", "dropped": dropped})
-    withheld = _withhold_untraceable(phrases, sources)
+    withheld = _withhold_unusable(phrases, sources, card)
     if withheld:
-        logger.info("evaluator: %d suggestion(s) withheld for an untraceable figure",
-                    len(withheld))
+        logger.info("evaluator: %d suggestion(s) withheld: a rewrite could not "
+                    "apply them", len(withheld))
         audit.append({"stage": "suggestions_withheld", "withheld": withheld})
     if mode == MODE_DEEP and phrases and len(phrases) < DEEP_MIN_CHUNKS:
         # Recorded, not failed: a short message cannot be cut into ten spans.
@@ -886,6 +932,11 @@ claim that is not in the supplied context. A claim the original made without
 support must NOT be carried over as though it were verified - drop it or soften
 it to what the context supports.
 
+Keep a fact about the account and a statement about an HP product in SEPARATE
+sentences. "They run 12,000 devices. HP EliteBook is built for fleets that size."
+is right; one sentence carrying both is rejected, because a figure about the
+account cannot be verified as an HP capability.
+
 Return a single JSON object in the exact structured shape requested. Do not
 return a single block of prose, and do not wrap the JSON in markdown."""
 
@@ -969,23 +1020,63 @@ def _offered_block(sources) -> str:
 _FIGURES_RE = re.compile(r"not found in [^:]+: (.+?)(?:;|$)")
 
 
+_SUPERLATIVE_FAULT_RE = re.compile(r"adds a superlative claim \((.+?)\) not permitted in (.+)$")
+_COMPETITOR_FAULT_RE = re.compile(r"names a competitor \((.+?)\), .* not permitted in (.+)$")
+
+
 def _unsupported_message(diff_faults) -> str:
-    """The seller-facing reason a rewrite was refused for an unsupported claim."""
-    figures = []
+    """The seller-facing reason a rewrite was refused for what it claims."""
+    figures, others = [], []
     for fault in diff_faults:
-        for group in _FIGURES_RE.findall(str(fault)):
+        fault = str(fault)
+        if m := _SUPERLATIVE_FAULT_RE.search(fault):
+            others.append('it added "%s", and superlative claims are not permitted '
+                          "in %s" % m.groups())
+            continue
+        if m := _COMPETITOR_FAULT_RE.search(fault):
+            others.append("it named %s, and competitor comparisons are not permitted "
+                          "in %s" % m.groups())
+            continue
+        for group in _FIGURES_RE.findall(fault):
             for token in group.split(","):
                 token = token.strip()
                 if token and token not in figures:
                     figures.append(token)
+    parts = []
     if figures:
-        return ("The rewrite used %s we can't trace to this account's data, HP's "
-                "approved facts or the HP proof shown with this evaluation (%s). "
-                "Untick the change that adds it, or remove it from your message, "
-                "then try again."
-                % ("a figure" if len(figures) == 1 else "figures", ", ".join(figures)))
-    return ("the rewrite introduced claims the sources do not support: %s"
-            % "; ".join(diff_faults))
+        parts.append("it used %s we can't trace to this account's data, HP's approved "
+                     "facts or the HP proof shown with this evaluation (%s)"
+                     % ("a figure" if len(figures) == 1 else "figures", ", ".join(figures)))
+    parts += others
+    if not parts:
+        return ("the rewrite introduced claims the sources do not support: %s"
+                % "; ".join(diff_faults))
+    return ("The rewrite was not used: %s. Untick the change that adds it, or remove "
+            "it from your message, then try again." % "; and ".join(parts))
+
+
+def _refusal_message(faults, label, cap=None, shortest=None) -> str:
+    """The seller-facing reason a rewrite was refused for its shape or a gate.
+
+    The raw faults ("body_sections has 2 entries; 4-4 required") go to the
+    stored evaluation and the log. The seller is told what happened and what to
+    do next.
+    """
+    if F.length_only(faults):
+        return ("The selected changes don't fit in a %s (%s characters): the "
+                "shortest rewrite came out at %s. Select fewer changes, or shorten "
+                "the message, then try again." % (label, cap, shortest))
+    if any(str(f) == "no rewrite object was returned" for f in faults):
+        return ("The rewrite could not be generated just now. Your message is "
+                "unchanged - try again in a moment.")
+    gates = [str(f).split(": ", 1)[1] for f in faults if F.is_gate_fault(f)]
+    if gates:
+        return ("The rewrite was not used because it brought in something this "
+                "persona can't be sent: %s. Untick the change that adds it, then "
+                "try again." % "; ".join(gates))
+    reasons = F.structure_plain(faults, label)
+    return ("The rewrite didn't come back in the shape a %s needs (%s). Try again, "
+            "or select fewer changes." % (label, "; ".join(reasons)))
 
 
 def rewrite_message(account_id, fingerprint, selected_recommendations,
@@ -1032,12 +1123,20 @@ def rewrite_message(account_id, fingerprint, selected_recommendations,
     ])
 
     card = _card_for(persona, evaluation.get("mode") or MODE_DEEP)
-    raw = _ask(REWRITE_SYSTEM, prompt)
     banned = sources.contact_names()
+    label = evaluation["format_label"]
     # Spec 4.8 runs the Section 6 gates on the rewrite because it is the
     # version that actually gets sent, so its findings belong in the same audit
     # files as a generation's - see `content_audit`.
     gate_audit: list = []
+    calls = {"made": 0}
+
+    def ask(user):
+        """One model call, inside the request's budget."""
+        if calls["made"] >= MAX_REWRITE_CALLS:
+            return None
+        calls["made"] += 1
+        return _ask(REWRITE_SYSTEM, user)
 
     def check(answer):
         """(rewrite or None, faults, the draft as built)."""
@@ -1047,20 +1146,25 @@ def rewrite_message(account_id, fingerprint, selected_recommendations,
                                              original, fmt, audit=gate_audit)
         return (None if found else clean), found, draft
 
-    rewrite, faults, draft = check(raw)
+    def claims(candidate):
+        """(diff report, faults) for a rewrite that has passed the contract."""
+        return verify.diff_rewrite(original, candidate["plain_text"], sources, selected)
+
+    rewrite, faults, draft = check(ask(prompt))
 
     if faults:
         logger.warning("evaluator: rewrite rejected (%s), retrying once",
                        "; ".join(faults))
-        # A length fault is restated in numbers: how long, how much to cut, and
-        # each field's own length. "360 characters; the limit is 300" alone left
-        # the model to work out the greeting and the blank lines for itself.
-        note = F.length_retry_note(fmt, draft, persona, original) \
-            if any(F.LENGTH_FAULT_RE.match(f) for f in faults) else ""
-        retry = _ask(REWRITE_SYSTEM, prompt + "\n\nYour previous answer was rejected:\n"
-                     + "\n".join("  - %s" % f for f in faults)
-                     + ("\n\n" + note if note else ""))
-        rewrite, faults, draft = check(retry)
+        # Each fault is restated as what to do about it. A length fault gets its
+        # numbers - how long, how much to cut, each field's own length - and a
+        # shape fault gets the format's own rule ("exactly 4 sections; you
+        # returned 2") rather than the validator's shorthand.
+        notes = [F.structure_repair_note(fmt, faults)]
+        if any(F.LENGTH_FAULT_RE.match(f) for f in faults):
+            notes.append(F.length_retry_note(fmt, draft, persona, original))
+        rewrite, faults, draft = check(ask(
+            prompt + "\n\nYour previous answer was rejected. Fix exactly this:\n"
+            + "\n\n".join(n for n in notes if n)))
 
     # Too long and nothing else wrong: the content is right, so ask for the SAME
     # rewrite shorter rather than giving up. Every shortened draft goes back
@@ -1075,21 +1179,57 @@ def rewrite_message(account_id, fingerprint, selected_recommendations,
         passes += 1
         logger.info("evaluator: rewrite is %d characters, shorten pass %d",
                     length, passes)
-        shorter = _ask(REWRITE_SYSTEM, F.shorten_prompt(fmt, draft, persona, original))
-        rewrite, faults, shorter_draft = check(shorter)
+        rewrite, faults, shorter_draft = check(
+            ask(F.shorten_prompt(fmt, draft, persona, original)))
         draft = shorter_draft or draft
     if faults and F.length_only(faults) and draft:
         length = len(draft.get("plain_text") or "")
         shortest = length if shortest is None else min(shortest, length)
+
+    # One repair pass per request, for whichever needs it. The model is shown
+    # its own draft and the named problem, so it fixes that rather than starting
+    # again and failing somewhere new. Gate rejections are not repaired here:
+    # they had their retry, and a denied line that survives it is the seller's
+    # to untick.
+    repaired = False
+    if faults and F.structure_only(faults) and draft:
+        repaired = True
+        logger.info("evaluator: rewrite shape still wrong (%s), one repair pass",
+                    "; ".join(faults))
+        fixed, _fixed_faults, _draft = check(ask(F.repair_prompt(
+            fmt, draft, F.structure_repair_note(fmt, faults).splitlines())))
+        if fixed:
+            rewrite, faults = fixed, []
     if faults:
         rewrite = None
+
+    # What the rewrite CLAIMS, checked only once its shape is right. A fault
+    # here used to end the request on the spot; the commonest one - an account
+    # figure and an HP product in the same sentence - is fixed by splitting the
+    # sentence, so the rewrite gets the one repair pass to do that. The verdict
+    # is never softened: the repaired draft is checked exactly as the first was.
+    diff, diff_faults = {}, []
+    if rewrite:
+        diff, diff_faults = claims(rewrite)
+        if diff_faults and not repaired:
+            repaired = True
+            logger.info("evaluator: rewrite claims rejected (%s), one repair pass",
+                        "; ".join(diff_faults))
+            fixed, _fixed_faults, _draft = check(ask(F.repair_prompt(
+                fmt, rewrite, diff.get("repairs") or diff_faults)))
+            if fixed:
+                fixed_diff, fixed_diff_faults = claims(fixed)
+                if not fixed_diff_faults:
+                    rewrite, diff, diff_faults = fixed, fixed_diff, []
+                else:
+                    diff, diff_faults = fixed_diff, fixed_diff_faults
 
     content_audit.record(
         db, gate_audit, account_id=account_id,
         persona_id=(card or {}).get("persona_id") or evaluation["persona_contact_id"],
         content_type=fmt, asset_id=fingerprint[:16],
         surface=content_audit.SURFACE_REWRITE,
-        outcome=(content_audit.OUTCOME_PUBLISHED if rewrite
+        outcome=(content_audit.OUTCOME_PUBLISHED if rewrite and not diff_faults
                  else content_audit.OUTCOME_WITHHELD))
 
     if not rewrite:
@@ -1099,18 +1239,9 @@ def rewrite_message(account_id, fingerprint, selected_recommendations,
             {"$set": {"rewrite": None,
                       "rewrite_faults": faults,
                       "rewrite_attempted_at": datetime.now(UTC)}})
-        if F.length_only(faults):
-            cap = (F.body_budget(fmt, persona, original) or {}).get("max")
-            raise EvaluationError(
-                "The selected changes don't fit in a %s (%s characters): the "
-                "shortest rewrite came out at %s. Select fewer changes, or shorten "
-                "the message, then try again."
-                % (evaluation["format_label"], cap, shortest))
-        raise EvaluationError("the rewrite did not meet the %s format contract: %s"
-                              % (evaluation["format_label"], "; ".join(faults)))
+        cap = (F.body_budget(fmt, persona, original) or {}).get("max")
+        raise EvaluationError(_refusal_message(faults, label, cap, shortest))
 
-    diff, diff_faults = verify.diff_rewrite(original, rewrite["plain_text"],
-                                            sources, selected)
     if diff_faults:
         db[storage.COLLECTION].update_one(
             {"account_id": account_id, "fingerprint": fingerprint},

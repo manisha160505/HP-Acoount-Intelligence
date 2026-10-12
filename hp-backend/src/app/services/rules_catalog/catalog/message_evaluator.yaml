@@ -734,7 +734,7 @@ rules:
     - Create the request fingerprint
     result: The first 16 characters of the fingerprint.
     verified: true
-    expect: 2545a890213fb05c
+    expect: 143c78db0293a711
   sources:
   - hp-backend/src/app/services/evaluator/storage.py:message_fingerprint
   - hp-backend/src/app/services/evaluator/storage.py:save
@@ -893,7 +893,7 @@ rules:
   constants:
   - label: Instruction version
     ref: py:app.services.evaluator.evaluate:PROMPT_VERSION
-    stated: 7
+    stated: 8
   sources:
   - hp-backend/src/app/services/evaluator/evaluate.py:SYSTEM_PROMPT
   - hp-backend/src/app/services/evaluator/evaluate.py:_user_prompt
@@ -942,16 +942,47 @@ rules:
   - hp-backend/src/app/services/evaluator/formats.py:shorten_prompt
   - hp-backend/src/app/services/evaluator/evaluate.py:rewrite_message
   confidence: high
+- id: me_rewrite_repair
+  parent: me_rewrite
+  name: A rewrite with one named problem is repaired once
+  kind: guardrail
+  summary: A rewrite that fails for a specific, fixable reason is given one chance to fix exactly that.
+  purpose: A rewrite that fails for a specific, fixable reason is given one chance to fix exactly that.
+  logic: 'If a rewrite has the wrong shape (a missing part, the wrong number of sections, a section with
+    no heading, a subject line that is too long) it is first asked again with the rule spelled out, and
+    then, if still wrong, shown its own draft and asked to fix only that. If a rewrite has the right
+    shape but makes a claim that cannot be supported, it is likewise shown its own draft and told what
+    to change: remove a figure or link nothing supports, remove a superlative or a competitor''s name
+    where the country does not permit them, or split a sentence that states a fact about the account
+    and names an HP product at the same time (a figure about the account cannot be verified as an HP
+    capability, so the two belong in separate sentences). The repaired rewrite goes through every check
+    again and no check is relaxed. There is one repair per request. A rewrite that names an HP line the
+    role is never offered, or a contact who must not be named, is not repaired this way: it is asked
+    again once, and if it still does so the seller is told which line or name and to untick the change
+    that adds it. One request never asks the AI more than five times in all (12 Oct).'
+  constants:
+  - label: Most times the AI is asked for one rewrite
+    ref: py:app.services.evaluator.evaluate:MAX_REWRITE_CALLS
+    stated: 5
+  output: A rewrite that passes every check, or a plain-English reason and what to do next.
+  sources:
+  - hp-backend/src/app/services/evaluator/formats.py:repair_prompt
+  - hp-backend/src/app/services/evaluator/formats.py:structure_repair_note
+  - hp-backend/src/app/services/evaluator/evaluate.py:_refusal_message
+  - hp-backend/src/app/services/evaluator/evaluate.py:rewrite_message
+  confidence: high
 - id: me_suggestions_traceable
   parent: null
   name: Suggestions the rewrite could not apply are not offered
   kind: guardrail
   summary: A suggested change is offered for ticking only if a rewrite could apply it.
   purpose: A suggested change is offered for ticking only if a rewrite could apply it.
-  logic: 'A suggestion that contains a figure found in none of the sources (the account''s data, the
-    approved HP facts, the message itself, or the HP case studies and positioning shown) is not offered
-    for ticking, because a rewrite that used it would be refused. The phrase, its rating and its reason
-    are still shown. For a format with a character limit, the AI is told the limit and the message''s
+  logic: 'A suggestion is not offered for ticking when a rewrite that applied it would be refused. That
+    is a suggestion that would add: a figure or a web link found in none of the sources (the account''s
+    data, the approved HP facts, the message itself, or the HP case studies and positioning shown); an HP
+    line this role is never offered; or, in a country that does not permit them, a superlative claim or a
+    competitor''s name. A suggestion to REMOVE one of these from the message stays tickable, because the
+    wording is already in the message. The phrase, its rating and its reason are still shown. For a format with a character limit, the AI is told the limit and the message''s
     current length; when the message is at 85% of the limit or more, it is told to suggest replacing or
     cutting words rather than adding them (12 Oct).'
   constants:
@@ -960,7 +991,8 @@ rules:
     stated: 0.85
   output: A list of changes the seller can tick, each one a rewrite can apply.
   sources:
-  - hp-backend/src/app/services/evaluator/evaluate.py:_withhold_untraceable
+  - hp-backend/src/app/services/evaluator/evaluate.py:_withhold_unusable
+  - hp-backend/src/app/services/evaluator/evaluate.py:_unusable
   - hp-backend/src/app/services/evaluator/evaluate.py:_cap_block
   confidence: high
 undetermined:

@@ -250,6 +250,42 @@ class EvaluatorSources:
                 break
         return sorted(missing)
 
+    def untraceable_links(self, text) -> list:
+        """Links in `text` that no source at all holds. The URL twin of
+        `untraceable_figures`, for the same reason: a suggestion that adds one
+        cannot survive the rewrite check."""
+        claim = _text(text)
+        if not claim:
+            return []
+        if self._draft_corpus is None:
+            self._draft_corpus = corpus_from_texts([self.draft])
+        missing = set(self.account.unsourced_urls(claim))
+        for corpus in [self.hp, self._draft_corpus] + [c for _i, c in self.offered]:
+            missing &= set(corpus.unsourced_urls(claim))
+            if not missing:
+                break
+        return sorted(missing)
+
+    def introduces(self, text) -> dict:
+        """What `text` would ADD that this market or these sources do not allow.
+
+        {"superlative": str|None, "competitor": str|None}. A term already in
+        the seller's draft is not introduced by a suggestion that mentions it -
+        "remove 'the world's most secure'" names the phrase in order to take it
+        out, and must stay something the seller can tick.
+        """
+        claim, draft = _text(text), self.draft
+        out = {"superlative": None, "competitor": None}
+        if self.superlatives_blocked:
+            hit = next((m.group(0) for m in SUPERLATIVE_RE.finditer(claim)
+                        if m.group(0).lower() not in draft.lower()), None)
+            out["superlative"] = hit
+        if self.competitor_claims_blocked:
+            hit = next((m.group(0) for m in COMPETITOR_RE.finditer(claim)
+                        if m.group(0).lower() not in draft.lower()), None)
+            out["competitor"] = hit
+        return out
+
     # -- submitted draft: spans, and nothing else ---------------------------
 
     def locate(self, phrase):
@@ -322,6 +358,15 @@ class EvaluatorSources:
         if self.offered:
             where += " or the HP proof shown with this evaluation"
         via_offered = False
+        # Guidance for a repair, never a second chance at the verdict. A figure
+        # the OTHER corpus holds was put in a sentence the routed corpus has
+        # authority over - "AEON's 20,000 staff need HP EliteBook" is an HP
+        # claim, so 20,000 is checked against HP facts and fails. That is
+        # correct (guardrail 13) and stays a failure; the hint only says the
+        # way out is two sentences, not a different number.
+        other = self.account if hp_claim else self.hp
+        other_label = AUTHORITY[ACCOUNT_CORPUS if hp_claim else HP_FACT_CORPUS]["label"]
+        hints = []
 
         numbers = corpus.unsourced_numbers(_without_ask_durations(claim))
         if numbers:
@@ -332,6 +377,10 @@ class EvaluatorSources:
                 reasons.append("%s not found in %s: %s"
                                % ("figure" if len(set(left)) == 1 else "figures",
                                   where, ", ".join(sorted(set(left)))))
+                elsewhere = sorted({n for n in left if not other.unsourced_numbers(n)})
+                if elsewhere:
+                    hints.append({"kind": "mixed_sentence", "figures": elsewhere,
+                                  "held_by": other_label})
         urls = corpus.unsourced_urls(claim)
         if urls:
             checked.append("urls")
@@ -361,7 +410,7 @@ class EvaluatorSources:
 
         return {"claim": claim, "verdict": verdict, "routed_to": routed,
                 "reasons": reasons, "checked": checked,
-                "via_offered_proof": via_offered}
+                "via_offered_proof": via_offered, "hints": hints}
 
     # -- persona context: role facts only -----------------------------------
 

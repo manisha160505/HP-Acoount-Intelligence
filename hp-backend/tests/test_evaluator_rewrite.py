@@ -24,6 +24,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 from app.database import mongodb
 from app.services.evaluator import evaluate as E, formats as F, sources as SRC
 from app.services.extractors.grounding import build_corpus, corpus_from_texts
+from app.services.hp import buyer_personas as bp
 from regen_fakes import FakeDb
 
 PROOF = [{"line": "Managed Print Services",
@@ -32,10 +33,11 @@ PROOF = [{"line": "Managed Print Services",
 PERSONA = {"name": "Taro Yamada", "is_named_person": True, "title": "CIO"}
 
 
-def _sources(draft="We help retailers modernise their device estate.", country="japan"):
+def _sources(draft="We help retailers modernise their device estate.", country="japan",
+             account_fact="AEON operates supermarkets in Japan"):
     return SRC.EvaluatorSources(
         "acct", "AEON CO., LTD.", country,
-        build_corpus({"firmographics": [{"text": "AEON operates supermarkets in Japan"}]}),
+        build_corpus({"firmographics": [{"text": account_fact}]}),
         corpus_from_texts([]), PERSONA, draft, 0, False)
 
 
@@ -128,7 +130,7 @@ class TestUntraceableSuggestionsAreWithheld:
     def test_a_suggestion_with_a_figure_no_source_holds_is_withheld(self):
         s = _sources().offer(PROOF, [])
         phrases = self._phrases()
-        withheld = E._withhold_untraceable(phrases, s)
+        withheld = E._withhold_unusable(phrases, s)
 
         assert phrases[0]["suggestion"].startswith("Cite Seven & i"), "offered proof: kept"
         assert "actionable" not in phrases[0]
@@ -137,13 +139,15 @@ class TestUntraceableSuggestionsAreWithheld:
         assert phrases[1]["comment"] == "Vague.", "the phrase and its reason stay"
         # No suggestion, so the dashboard would tick the comment - also not tickable.
         assert phrases[2]["actionable"] is False
-        assert [w["figures"] for w in withheld] == [["40%"], ["9,000"]]
+        assert [w["reason"] for w in withheld] == [
+            "a figure no source holds (40%)", "a figure no source holds (9,000)"]
+        assert phrases[1]["withheld_reason"] == "a figure no source holds (40%)"
 
     def test_a_figure_already_in_the_draft_is_traceable(self):
         s = _sources(draft="Your 128 stores deserve better devices.")
         phrases = [{"chunk": "Your 128 stores", "verdict": "Improve", "comment": "",
                     "suggestion": "Lead with the 128 stores."}]
-        assert E._withhold_untraceable(phrases, s) == []
+        assert E._withhold_unusable(phrases, s) == []
 
 
 # --- the evaluation is told the cap ---------------------------------------------
@@ -216,15 +220,17 @@ def rewrite(monkeypatch):
     asked = []
 
     def run(answers, fmt="linkedin_message", original="We help retailers modernise.",
-            proof=(), selected=("Make it specific",)):
+            proof=(), selected=("Make it specific",), persona=None, country="japan",
+            account_fact="AEON operates supermarkets in Japan"):
         evaluation = {"format": fmt, "format_label": F.FORMATS[fmt]["label"],
                       "objective_label": "Awareness", "message_text": original,
                       "persona_contact_id": "p1", "mode": E.MODE_LITE,
                       "proof_available": list(proof), "rulebook_positioning": []}
         stored = {}
         monkeypatch.setattr(E.storage, "find_existing", lambda *_a: {**evaluation, **stored})
-        monkeypatch.setattr(E.storage, "resolve_persona", lambda *_a: PERSONA)
-        monkeypatch.setattr(E.SRC, "build", lambda *_a, **_k: _sources(original))
+        monkeypatch.setattr(E.storage, "resolve_persona", lambda *_a: persona or PERSONA)
+        monkeypatch.setattr(E.SRC, "build", lambda *_a, **_k: _sources(
+            original, country, account_fact))
         monkeypatch.setattr(E.content_audit, "record", lambda *_a, **_k: None)
         script = list(answers)
 
@@ -263,11 +269,13 @@ class TestATooLongRewriteIsShortenedNotRefused:
         assert "came out at %d" % shortest in message
 
     def test_a_fault_that_is_not_length_is_never_sent_to_shorten(self, rewrite):
+        """A shape fault goes to the repair pass, never the shorten pass."""
         run, asked = rewrite
         broken = {"opening": "", "body_sections": [], "cta": ""}
-        with pytest.raises(E.EvaluationError, match="format contract"):
-            run([broken, broken, FITS])
-        assert len(asked) == 2
+        run([broken, broken, FITS])
+        assert len(asked) == 3
+        assert asked[2].startswith("FIX THIS REWRITE")
+        assert not any(a.startswith("SHORTEN THIS REWRITE") for a in asked)
 
     def test_a_shortened_draft_that_invents_a_figure_is_still_refused(self, rewrite):
         run, _asked = rewrite
@@ -305,3 +313,171 @@ class TestARewriteMayCiteWhatTheEvaluationOffered:
         message = str(err.value)
         assert "128" in message and "13%" in message
         assert "Untick the change that adds it" in message
+
+
+# =============================================================================
+# Part 2 - the remaining ways the tool could suggest a change and then refuse it
+# =============================================================================
+
+CFO = {"persona_id": "cfo", "is_named_person": False, "name": None}
+CFO_CARD = bp.evaluator_card("cfo")
+DENIED = bp.denied_lines("cfo")[0]            # a line a CFO is never offered
+BLOCKED_MARKET = "indonesia"                  # blocks superlatives and competitors
+
+
+def _phrase(suggestion, chunk="We help retailers", comment="Generic."):
+    return {"chunk": chunk, "verdict": "Improve", "comment": comment,
+            "suggestion": suggestion}
+
+
+class TestASuggestionTheRewriteWouldRefuseHasNoCheckbox:
+
+    def test_a_line_this_persona_is_not_offered(self):
+        phrases = [_phrase("Mention %s for their meeting rooms." % DENIED)]
+        withheld = E._withhold_unusable(phrases, _sources(), CFO_CARD)
+        assert phrases[0]["actionable"] is False and phrases[0]["suggestion"] == ""
+        assert DENIED in withheld[0]["reason"]
+
+    def test_a_superlative_where_the_market_blocks_them(self):
+        phrases = [_phrase("Say it is the world's most secure PC.")]
+        withheld = E._withhold_unusable(phrases, _sources(country=BLOCKED_MARKET))
+        assert phrases[0]["actionable"] is False
+        assert "superlative" in withheld[0]["reason"]
+
+    def test_a_competitor_where_the_market_blocks_them(self):
+        phrases = [_phrase("Compare it with Lenovo's fleet pricing.")]
+        withheld = E._withhold_unusable(phrases, _sources(country=BLOCKED_MARKET))
+        assert phrases[0]["actionable"] is False
+        assert "competitor" in withheld[0]["reason"]
+
+    def test_a_link_no_source_holds(self):
+        phrases = [_phrase("Link to https://example.com/roi-calculator for the numbers.")]
+        withheld = E._withhold_unusable(phrases, _sources())
+        assert phrases[0]["actionable"] is False
+        assert "link" in withheld[0]["reason"]
+
+    @pytest.mark.parametrize("draft, suggestion, country", [
+        ("We also offer %s for your rooms." % DENIED, "Remove the %s mention." % DENIED, "japan"),
+        ("It is the world's most secure PC.", "Drop 'the world's most secure'.", BLOCKED_MARKET),
+        ("Unlike Lenovo, we include support.", "Cut the Lenovo comparison.", BLOCKED_MARKET),
+    ])
+    def test_telling_the_seller_to_remove_one_stays_tickable(self, draft, suggestion, country):
+        """The term is already in the draft; the suggestion takes it out."""
+        phrases = [_phrase(suggestion, chunk=draft[:20])]
+        assert E._withhold_unusable(phrases, _sources(draft, country), CFO_CARD) == []
+        assert phrases[0]["suggestion"] == suggestion and "actionable" not in phrases[0]
+
+    def test_a_superlative_is_fine_where_the_market_allows_it(self):
+        phrases = [_phrase("Say it is the world's most secure PC.")]
+        assert E._withhold_unusable(phrases, _sources(country="japan")) == []
+
+
+class TestGuardrail13IsUnchanged:
+
+    def test_a_mixed_sentence_is_still_unsupported_and_says_how_to_fix_it(self):
+        s = _sources(account_fact="AEON employs 20,000 staff")
+        check = s.verify_claim("AEON's 20,000 staff would benefit from HP EliteBook.")
+        assert check["verdict"] == SRC.VERDICT_UNSUPPORTED, "the verdict is not softened"
+        assert check["routed_to"] == SRC.HP_FACT_CORPUS
+        assert check["hints"] == [{"kind": "mixed_sentence", "figures": ["20,000"],
+                                   "held_by": "Account data"}]
+
+
+MIXED = _answer("Saw your store refresh plans.",
+                "AEON's 20,000 staff would benefit from HP EliteBook.",
+                "Worth a short call?")
+SPLIT = _answer("Saw your store refresh plans.",
+                "AEON employs 20,000 staff. HP EliteBook suits a fleet that size.",
+                "Worth a short call?")
+INVENTED = _answer("Saw your plans.", "We cut costs 40% for retailers.", "Worth a call?")
+CLEAN = _answer("Saw your plans.", "We cut costs for retailers.", "Worth a call?")
+
+
+class TestAClaimFaultGetsOneRepairPass:
+
+    def test_a_mixed_sentence_is_split_and_published(self, rewrite):
+        run, asked = rewrite
+        run([MIXED, SPLIT], original="We help AEON.",
+            account_fact="AEON employs 20,000 staff")
+        assert len(asked) == 2
+        assert asked[1].startswith("FIX THIS REWRITE")
+        assert "two separate sentences" in asked[1]
+        assert "20,000 staff would benefit" in asked[1], "it is shown its own draft"
+
+    def test_an_invented_figure_removed_on_repair_is_published(self, rewrite):
+        run, asked = rewrite
+        run([INVENTED, CLEAN])
+        assert len(asked) == 2 and "Remove it" in asked[1]
+
+    def test_still_wrong_after_the_one_repair_is_refused_with_a_clear_message(self, rewrite):
+        run, asked = rewrite
+        with pytest.raises(E.EvaluationError) as err:
+            run([INVENTED, INVENTED, CLEAN, CLEAN])
+        assert len(asked) == 2, "exactly one repair pass"
+        assert "40%" in str(err.value) and "Untick the change" in str(err.value)
+
+    def test_a_superlative_added_in_a_blocked_market_is_named_plainly(self, rewrite):
+        run, _asked = rewrite
+        boast = _answer("Saw your plans.", "It is the world's most secure PC.", "Call?")
+        with pytest.raises(E.EvaluationError) as err:
+            run([boast, boast], country=BLOCKED_MARKET)
+        assert "superlative claims are not permitted in Indonesia" in str(err.value)
+
+
+def _one_pager(sections):
+    return {"headline": "Less downtime across every store",
+            "opening": "AEON's stores depend on devices that stay up.",
+            "body_sections": [{"heading": "Part %d" % i, "text": "Point %d stands." % i}
+                              for i in range(1, sections + 1)],
+            "cta": "Let's review your estate together."}
+
+
+class TestAShapeFaultIsRepairedAndExplained:
+
+    def test_a_one_pager_with_too_few_sections_is_repaired(self, rewrite):
+        run, asked = rewrite
+        run([_one_pager(2), _one_pager(2), _one_pager(4)], fmt="one_pager",
+            original="AEON's stores depend on devices that stay up. We can help.")
+        assert len(asked) == 3
+        assert "needs exactly 4 body sections; you returned 2" in asked[1]
+        assert asked[2].startswith("FIX THIS REWRITE")
+
+    def test_a_shape_that_cannot_be_fixed_is_explained_in_plain_words(self, rewrite):
+        run, asked = rewrite
+        with pytest.raises(E.EvaluationError) as err:
+            run([_one_pager(2)] * 6, fmt="one_pager",
+                original="AEON's stores depend on devices that stay up. We can help.")
+        message = str(err.value)
+        assert "it needs 4 sections and the rewrite had 2" in message
+        assert "format contract" not in message and "body_sections" not in message
+        assert len(asked) == 3, "attempt, retry, one repair - and no more"
+
+    def test_a_line_the_persona_cannot_be_sent_is_not_repaired_and_is_named(self, rewrite):
+        run, asked = rewrite
+        pitch = _answer("Saw your plans.", "We also offer %s for your rooms." % DENIED,
+                        "Worth a call?")
+        with pytest.raises(E.EvaluationError) as err:
+            run([pitch, pitch, CLEAN], persona=CFO)
+        assert len(asked) == 2, "a gate rejection gets its retry and no repair pass"
+        assert DENIED in asked[1] and "Remove it completely" in asked[1]
+        assert DENIED in str(err.value) and "Untick the change" in str(err.value)
+
+    def test_no_answer_from_the_model_says_try_again(self, rewrite):
+        run, _asked = rewrite
+        with pytest.raises(E.EvaluationError, match="could not be generated just now"):
+            run([])
+
+
+class TestOneRequestNeverMakesMoreThanItsBudgetOfCalls:
+
+    @pytest.mark.parametrize("script", [
+        [LONG] * 12,                                   # never fits
+        [LONG, LONG, {"opening": "", "body_sections": [], "cta": ""}] + [LONG] * 9,
+        [INVENTED] * 12,                               # never supported
+        [LONG, LONG, INVENTED, INVENTED] + [LONG] * 8, # fits, then unsupported
+    ])
+    def test_the_cap_holds_on_every_path(self, rewrite, script):
+        run, asked = rewrite
+        with pytest.raises(E.EvaluationError):
+            run(script)
+        assert len(asked) <= E.MAX_REWRITE_CALLS == 5
