@@ -20,6 +20,7 @@ specification requires ("keep only checks that are explicitly coded in this
 feature, such as message length or whether a next-step request is present").
 """
 
+import json
 import re
 
 # A next-step request: the coded check the spec names explicitly.
@@ -510,6 +511,232 @@ def rewrite_output_schema(fmt: str) -> str:
     return "{\n" + ",\n".join(lines) + "\n}"
 
 
+def body_budget(fmt: str, persona=None, original="") -> dict | None:
+    """What the model's own text may total in a capped format, or None.
+
+    {"max": the format's cap, "composed": characters Python adds (greeting,
+    sign-off), "separators": characters of blank lines `render_rewrite` puts
+    between blocks, "budget": what is left for opening + body + cta}.
+
+    The blank lines count. The budget used to subtract only the greeting, so a
+    LinkedIn rewrite that hit its stated budget exactly still came out four
+    characters over - two per gap between opening, body and cta - and was
+    rejected for a length the model had been told was fine.
+    """
+    key = normalize_format(fmt)
+    contract = rewrite_contract(key)
+    cmax = contract.get("max_chars")
+    if not cmax:
+        return None
+    composed_blocks = [b for b in (compose_greeting(persona, contract, original),
+                                   compose_signoff(contract, original)) if b]
+    composed = sum(len(b) for b in composed_blocks)
+    fields = set(model_fields(key))
+    model_blocks = sum(1 for f in ("headline", "opening", "cta") if f in fields)
+    if "body_sections" in fields:
+        model_blocks += (contract.get("sections") or (1, 1))[1]
+    separators = 2 * max(len(composed_blocks) + model_blocks - 1, 0)
+    return {"max": cmax, "composed": composed, "separators": separators,
+            "budget": max(cmax - composed - separators, 80)}
+
+
+LENGTH_FAULT_RE = re.compile(r"^rewrite is (\d+) characters; ")
+
+
+def length_only(faults) -> bool:
+    """True when every fault is the length fault - the one a shorter draft of
+    the same content fixes."""
+    return bool(faults) and all(LENGTH_FAULT_RE.match(str(f)) for f in faults)
+
+
+def length_retry_note(fmt: str, draft: dict | None, persona=None, original="") -> str:
+    """How much to cut, in numbers, for a draft that came out too long.
+
+    Models count characters badly, and "360 characters; the limit is 300" on its
+    own leaves the model to work out the greeting, the blank lines and its own
+    field lengths. So it is given all of them.
+    """
+    spec = body_budget(fmt, persona, original)
+    if not spec or not draft:
+        return ""
+    parts = [("opening", draft.get("opening") or "")]
+    parts += [("body_sections[%d].text" % i, s.get("text") or "")
+              for i, s in enumerate(draft.get("body_sections") or [])]
+    parts.append(("cta", draft.get("cta") or ""))
+    used = sum(len(text) for _name, text in parts)
+    over = max(used - spec["budget"], 1)
+    lines = ["Your rewrite was %d characters; the limit is %d, including the "
+             "%d-character salutation and the blank lines that are added for you."
+             % (len(draft.get("plain_text") or ""), spec["max"], spec["composed"]),
+             "Your own text (opening + body + cta) totalled %d characters and may "
+             "total at most %d. Cut at least %d characters." % (used, spec["budget"], over),
+             "Current lengths:"]
+    lines += ["  - %s: %d characters" % (name, len(text)) for name, text in parts if text]
+    return "\n".join(lines)
+
+
+def shorten_prompt(fmt: str, draft: dict, persona=None, original="") -> str:
+    """Ask for the SAME rewrite, shorter. Used only when length is the one fault."""
+    key = normalize_format(fmt)
+    current = {"opening": draft.get("opening") or "",
+               "body_sections": [{"text": s.get("text") or ""}
+                                 for s in (draft.get("body_sections") or [])],
+               "cta": draft.get("cta") or ""}
+    return "\n".join([
+        "SHORTEN THIS REWRITE. It is correct but too long to send as a %s."
+        % FORMATS[key]["label"],
+        "",
+        length_retry_note(key, draft, persona, original),
+        "",
+        "YOUR REWRITE:",
+        json.dumps(current, ensure_ascii=False, indent=1),
+        "",
+        "Rules:",
+        "- Keep every change that was applied and every fact, figure and name. "
+        "Add nothing new.",
+        "- Cut the least important words first: filler, repetition, a second "
+        "example, pleasantries.",
+        "- Do not write a greeting or a sign-off; they are added for you.",
+        "",
+        "Return this JSON object, and nothing else:",
+        rewrite_output_schema(key),
+    ])
+
+
+_FAULT_MISSING_RE = re.compile(r"^(\w+) is missing$")
+_FAULT_SECTIONS_RE = re.compile(r"^body_sections has (\d+) entries; (\d+)-(\d+) required$")
+_FAULT_HEADING_RE = re.compile(r"^(\d+) body section\(s\) have no heading")
+_FAULT_SUBJECT_RE = re.compile(r"^subject_line is (\d+) characters; at most (\d+)$")
+_FAULT_PUBLIC_NAME_RE = re.compile(r"^a public .+ must not name a contact \((.+)\)$")
+GATE_FAULT_RE = re.compile(r"^G\d+: ")
+
+
+def is_gate_fault(fault) -> bool:
+    """A Section 6 gate rejection (a denied HP line, a leaked name, an invented
+    figure) rather than a fault in the rewrite's shape."""
+    return bool(GATE_FAULT_RE.match(str(fault)))
+
+
+def structure_only(faults) -> bool:
+    """True when every fault is about the rewrite's SHAPE - a missing part, the
+    wrong number of sections, a heading, a subject line - and so fixable by
+    reshaping the same content. Length and gate rejections are not."""
+    return bool(faults) and not any(
+        LENGTH_FAULT_RE.match(str(f)) or is_gate_fault(f) for f in faults)
+
+
+def structure_repair_note(fmt: str, faults) -> str:
+    """Each contract fault as an instruction, with the format's own numbers.
+
+    "body_sections has 2 entries; 4-4 required" is what the validator records;
+    it is not what a writer needs to be told.
+    """
+    key = normalize_format(fmt)
+    label = FORMATS[key]["label"]
+    lines = []
+    for fault in faults or ():
+        fault = str(fault)
+        if m := _FAULT_SECTIONS_RE.match(fault):
+            got, lo, hi = (int(g) for g in m.groups())
+            want = "exactly %d" % lo if lo == hi else "between %d and %d" % (lo, hi)
+            lines.append("A %s needs %s body sections; you returned %d. Return %s, "
+                         "moving content between sections rather than dropping it."
+                         % (label, want, got, want))
+        elif m := _FAULT_HEADING_RE.match(fault):
+            lines.append("Every body section of a %s needs its own short heading; "
+                         "%s of yours had none." % (label, m.group(1)))
+        elif m := _FAULT_SUBJECT_RE.match(fault):
+            lines.append("The subject line may be at most %s characters; yours was %s. "
+                         "Shorten it." % (m.group(2), m.group(1)))
+        elif m := _FAULT_MISSING_RE.match(fault):
+            lines.append('The "%s" part is required and was missing or empty. '
+                         "Write it." % m.group(1))
+        elif m := _FAULT_PUBLIC_NAME_RE.match(fault):
+            lines.append("This is a public %s, so it must not name the contact %s. "
+                         "Address the role or the audience instead." % (label, m.group(1)))
+        elif fault == "no rewrite object was returned":
+            lines.append("Return the JSON object described, and nothing else.")
+        elif is_gate_fault(fault):
+            lines.append("%s. Remove it completely - do not mention it in any part."
+                         % fault)
+        elif not LENGTH_FAULT_RE.match(fault):
+            lines.append(fault)
+    return "\n".join("  - %s" % line for line in lines)
+
+
+_PART_NAMES = {"opening": "an opening line", "cta": "a call to action",
+               "headline": "a headline", "subject_line": "a subject line",
+               "body_sections": "a body"}
+
+
+def structure_plain(faults, label: str) -> list:
+    """The same faults in the seller's words, for the message they are shown."""
+    out = []
+    for fault in faults or ():
+        fault = str(fault)
+        if m := _FAULT_SECTIONS_RE.match(fault):
+            got, lo, hi = (int(g) for g in m.groups())
+            want = "%d" % lo if lo == hi else "%d to %d" % (lo, hi)
+            out.append("it needs %s sections and the rewrite had %d" % (want, got))
+        elif _FAULT_HEADING_RE.match(fault):
+            out.append("each section needs a heading")
+        elif m := _FAULT_SUBJECT_RE.match(fault):
+            out.append("the subject line was %s characters and the limit is %s"
+                       % (m.group(1), m.group(2)))
+        elif m := _FAULT_MISSING_RE.match(fault):
+            out.append("it was missing %s" % _PART_NAMES.get(m.group(1), m.group(1)))
+        elif m := _FAULT_PUBLIC_NAME_RE.match(fault):
+            out.append("a public %s can't name the contact %s" % (label, m.group(1)))
+        elif m := LENGTH_FAULT_RE.match(fault):
+            out.append("it was %s characters, over the limit" % m.group(1))
+        else:
+            out.append(fault)
+    return out
+
+
+def _draft_fields(key: str, draft: dict) -> dict:
+    """The model's own fields from a built draft, in the shape it returns them."""
+    out = {}
+    for field in model_fields(key):
+        if field == "body_sections":
+            out[field] = [{k: v for k, v in (("heading", sec.get("heading")),
+                                             ("text", sec.get("text") or "")) if v}
+                          for sec in (draft.get("body_sections") or [])]
+        elif draft.get(field):
+            out[field] = draft[field]
+    return out
+
+
+def repair_prompt(fmt: str, draft: dict, problems) -> str:
+    """Ask for the SAME rewrite with named problems fixed, and nothing else.
+
+    One pass, used when the content is right but something specific is not: a
+    sentence mixing an account fact with an HP product, a figure nothing
+    supports, the wrong number of sections. The model is shown its own draft so
+    it repairs that, rather than starting again and failing somewhere new.
+    """
+    key = normalize_format(fmt)
+    listed = "\n".join(p if str(p).lstrip().startswith("-") else "  - %s" % p
+                       for p in (problems or ()) if str(p).strip())
+    return "\n".join([
+        "FIX THIS REWRITE. Change only what is listed; keep everything else as it is.",
+        "",
+        "WHAT TO FIX:",
+        listed,
+        "",
+        "YOUR REWRITE:",
+        json.dumps(_draft_fields(key, draft or {}), ensure_ascii=False, indent=1),
+        "",
+        "Rules:",
+        "- Keep every change that was applied. Add no new fact, figure, link, "
+        "product or name.",
+        "- Do not write a greeting or a sign-off; they are added for you.",
+        "",
+        "Return this JSON object, and nothing else:",
+        rewrite_output_schema(key),
+    ])
+
+
 def rewrite_instructions(fmt: str, persona=None, original="") -> str:
     """Format-specific shape text for the rewrite prompt."""
     key = normalize_format(fmt)
@@ -520,17 +747,14 @@ def rewrite_instructions(fmt: str, persona=None, original="") -> str:
     # sign-off are added after the model answers, so "fit inside 300 characters"
     # silently asks for 300 plus whatever Python prepends - and the rewrite is
     # then rejected for a length the model was never told about.
-    cmax = contract.get("max_chars")
-    if cmax:
-        composed = len(compose_greeting(persona, contract, original)) \
-            + len(compose_signoff(contract, original))
-        # +2 per composed block for the blank line render_rewrite puts between.
-        budget = cmax - composed - (2 if composed else 0)
+    spec = body_budget(key, persona, original)
+    if spec:
         shape += (" HARD LIMIT: your opening, body_sections and cta together must "
-                  "total at most %d characters - the %d-character salutation is "
-                  "added on top and counts towards the %d-character maximum. "
+                  "total at most %d characters - the %d-character salutation and "
+                  "the blank lines between blocks are added on top and count "
+                  "towards the %d-character maximum. "
                   "Be brief; going over means the rewrite is discarded."
-                  % (max(budget, 80), composed, cmax))
+                  % (spec["budget"], spec["composed"], spec["max"]))
 
     return ("OUTPUT CONTRACT - %s:\n%s\nRequired keys: %s. Return ONLY the keys "
             "shown below; any other key is discarded.\n\nReturn this JSON object:\n%s"
@@ -594,8 +818,11 @@ def render_rewrite(rewrite: dict) -> str:
 
 
 def validate_rewrite(raw, fmt: str, banned_names=(), persona=None,
-                     original="") -> tuple:
+                     original="", keep_draft=False) -> tuple:
     """(clean_rewrite, faults). Python decides what a valid rewrite looks like.
+
+    With `keep_draft`, a third value: the draft as built even when it has
+    faults (None when no rewrite object came back at all).
 
     A fault means the rewrite is not published in that shape - the caller
     retries, or keeps the seller's original draft. Publishing a malformed
@@ -614,7 +841,8 @@ def validate_rewrite(raw, fmt: str, banned_names=(), persona=None,
     if not isinstance(body, dict):
         body = raw if isinstance(raw, dict) else None
     if not isinstance(body, dict):
-        return None, ["no rewrite object was returned"]
+        faults = ["no rewrite object was returned"]
+        return (None, faults, None) if keep_draft else (None, faults)
 
     def field(name):
         return _text(body.get(name)) if name in fields else ""
@@ -708,4 +936,8 @@ def validate_rewrite(raw, fmt: str, banned_names=(), persona=None,
                 faults.append("a public %s must not name a contact (%r)"
                               % (FORMATS[key]["label"], name))
 
+    if keep_draft:
+        # The draft as built, faults or not - a too-long draft is what the
+        # shorten pass works from.
+        return (None if faults else rewrite), faults, rewrite
     return (None if faults else rewrite), faults

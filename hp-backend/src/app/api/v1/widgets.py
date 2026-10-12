@@ -1008,7 +1008,9 @@ def rewrite_message_endpoint(
     try:
         return evaluator_evaluate.rewrite_message(
             account_id, body.fingerprint, body.selected_recommendations)
-    except evaluator_evaluate.EvaluationError as exc:
+    except (evaluator_evaluate.EvaluationError,
+            evaluator_scoring.ScoringError,
+            evaluator_formats.FormatError) as exc:
         raise APIError(ErrorCode.EXTRACTION_FAILED, str(exc), status_code=422,
                        log_context={"account_id": account_id}) from exc
 

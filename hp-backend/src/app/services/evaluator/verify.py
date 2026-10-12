@@ -67,6 +67,11 @@ _ATTRIBUTION_RE = re.compile(
 # Third-person singular framing of a specific human ("he will", "she would").
 _PERSONAL_PRONOUN_RE = re.compile(r"\b(he|she|his|her|him|hers)\b", re.I)
 
+# A quoted span, straight or curly, and any quote character at all - the
+# second catches an unbalanced one, which cannot be matched to the draft.
+_QUOTED_RE = re.compile(r'["“]([^"“”]*)["”]')
+_QUOTE_CHARS_RE = re.compile(r'["“”]')
+
 SIMULATION_LABEL = ("Simulated reaction - how someone in this role would likely "
                     "read this message. Not a statement about the real contact.")
 
@@ -230,7 +235,15 @@ def guard_reaction(raw_reaction, sources):
                       "how a role would read the message, not what this person "
                       "thinks" % hit.group(0))
 
-    if '"' in text or "“" in text:
+    # A quotation is a problem when it puts words in the contact's mouth. The
+    # reaction quoting the SELLER'S OWN DRAFT back - 'would find "cut device
+    # downtime" too generic' - is commentary on the message, and withholding it
+    # threw away the most useful kind of reaction. So a quoted span is allowed
+    # when it is the draft's own wording, and only then.
+    draft = _text(sources.draft).lower()
+    quoted = [q.strip() for q in _QUOTED_RE.findall(text)]
+    stray = len(_QUOTE_CHARS_RE.findall(text)) != 2 * len(quoted)
+    if stray or any(_text(q).lower().strip(" .,;:!?") not in draft for q in quoted if q):
         faults.append("contains a quotation; the contact has not said anything")
 
     # Every factual assertion in the reaction is checked like any other claim.
@@ -240,7 +253,9 @@ def guard_reaction(raw_reaction, sources):
                 and not SUPERLATIVE_RE.search(sentence) \
                 and not COMPETITOR_RE.search(sentence):
             continue
-        check = sources.verify_claim(sentence, "reaction")
+        # `draft_ok`: a reaction that repeats a figure from the draft is
+        # questioning it, not asserting it.
+        check = sources.verify_claim(sentence, "reaction", draft_ok=True)
         if check["verdict"] in (VERDICT_UNSUPPORTED, VERDICT_RESTRICTED):
             unsupported.append(check)
     if unsupported:
@@ -283,7 +298,9 @@ def diff_rewrite(original, rewritten, sources, selected=None):
     added = sorted(after - before)
 
     # A new figure or link must be answerable by the source with authority.
-    new_claims = []
+    # `repairs` says, per fault, what would fix it - used for one repair pass
+    # and never to soften a verdict.
+    new_claims, repairs = [], []
     for sentence in re.split(r"(?<=[.!?])\s+", rewritten):
         if not any(token in sentence for token in added):
             continue
@@ -292,6 +309,19 @@ def diff_rewrite(original, rewritten, sources, selected=None):
         if check["verdict"] in (VERDICT_UNSUPPORTED, VERDICT_RESTRICTED):
             faults.append("the rewrite introduces an unsupported claim: %s"
                           % "; ".join(check["reasons"]))
+            mixed = [h for h in (check.get("hints") or [])
+                     if h.get("kind") == "mixed_sentence"]
+            if mixed:
+                repairs.append(
+                    'In "%s": %s is a fact about the account, and this sentence also '
+                    "names an HP product. Put the account fact and the HP statement "
+                    "in two separate sentences."
+                    % (sentence.strip()[:200], ", ".join(mixed[0]["figures"])))
+            else:
+                repairs.append(
+                    'In "%s": %s. Remove it, or make the point without it. Do not '
+                    "replace it with another figure or link."
+                    % (sentence.strip()[:200], "; ".join(check["reasons"])))
 
     # A restriction the original respected must not be broken by the rewrite.
     if sources.superlatives_blocked:
@@ -300,18 +330,23 @@ def diff_rewrite(original, rewritten, sources, selected=None):
         if new_super:
             faults.append("the rewrite adds a superlative claim (%s) not permitted "
                           "in %s" % (new_super[0], sources.country.title()))
+            repairs.append('Remove the phrase "%s"; superlative claims are not '
+                           "permitted in this market." % new_super[0])
     if sources.competitor_claims_blocked:
         new_comp = [m.group(0) for m in COMPETITOR_RE.finditer(rewritten)
                     if not COMPETITOR_RE.search(original)]
         if new_comp:
             faults.append("the rewrite names a competitor (%s), a comparison claim "
                           "not permitted in %s" % (new_comp[0], sources.country.title()))
+            repairs.append('Remove the mention of "%s"; naming a competitor is not '
+                           "permitted in this market." % new_comp[0])
 
     report = {
         "facts_dropped": dropped,
         "facts_added": added,
         "new_claim_checks": new_claims,
         "applied_recommendations": list(selected or []),
+        "repairs": repairs,
         "length_before": len(original),
         "length_after": len(rewritten),
     }

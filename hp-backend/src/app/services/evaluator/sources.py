@@ -17,6 +17,10 @@ the wrong one is not verified at all:
     persona context   may establish  the contact's role, department, seniority
                       never          what that person thinks, wants or has said
 
+    offered proof     may establish  what an HP case study or Rulebook line the
+                                     evaluation SHOWED says - its own figures
+                      never          any fact about this account
+
 The two corpora are kept as separate `Corpus` objects and are never merged.
 That is guardrail 13, and merging them is the easy mistake to make: an HP
 capability claim that happens to share a number with a row of the account's
@@ -28,6 +32,16 @@ look somewhere else.
 The HP corpus is already guardrail-filtered for this account's country by
 `approve_facts`, so anything withheld from a recommendation is equally
 unavailable to the evaluator.
+
+Offered proof is the one addition, and it is not a second place to look. The
+evaluation shows the model HP case studies and Rulebook "may state" lines and
+tells it to recommend citing them; the rewrite was then verified against two
+corpora that hold neither, so a seller who ticked "cite the case study" had the
+rewrite rejected for the study's own figures (AEON, one-pager: "figures not
+found in Account data: 128, 13"). Each offered item keeps its own corpus, and a
+figure counts only where the sentence is ABOUT that item - it names the customer,
+shares its wording, or is an HP capability claim. "AEON runs 128 stores" still
+fails: nothing offered is about AEON.
 """
 
 import logging
@@ -51,6 +65,7 @@ SUBMITTED_DRAFT = "submitted_draft"
 ACCOUNT_CORPUS = "account_corpus"
 HP_FACT_CORPUS = "hp_fact_corpus"
 PERSONA_CONTEXT = "persona_context"
+OFFERED_PROOF = "offered_proof"
 
 # Surfaced in the UI's Data Sources panel, so the seller can see which source
 # stands behind each part of the evaluation rather than reading one undivided
@@ -69,6 +84,11 @@ AUTHORITY = {
     HP_FACT_CORPUS: {
         "label": "Approved HP facts",
         "may_establish": ["HP product capability"],
+        "never_establishes": ["any fact about this account"],
+    },
+    OFFERED_PROOF: {
+        "label": "HP case studies and positioning shown with this evaluation",
+        "may_establish": ["what that case study or Rulebook line itself says"],
         "never_establishes": ["any fact about this account"],
     },
     PERSONA_CONTEXT: {
@@ -103,6 +123,44 @@ def _text(value) -> str:
     return " ".join(str(value or "").split())
 
 
+# How many content words a sentence must share with an offered case study to
+# count as being about it, when it does not name the customer. Three keeps
+# "cut downtime across stores" tied to its study without letting one shared
+# word ("stores") carry an unrelated figure across.
+OFFERED_SHARED_WORDS = 3
+_WORD_RE = re.compile(r"[a-z][a-z'-]{3,}")
+_STOP_WORDS = frozenset(
+    ["that", "this", "with", "from", "have", "been", "their", "they", "them", "were", "will", "would", "could", "should", "about", "into", "over", "under", "across", "than", "then", "when", "which", "while", "where", "your", "yours", "also", "more", "most", "some", "such", "only", "very", "after", "before", "through", "because", "being"])
+
+
+# The length of a meeting being asked for: "a 15-minute call", "30 minutes on
+# Thursday?". It is a request, not a fact about anyone, so there is nothing for
+# a source to hold - yet it was checked as a figure, and a rewrite whose call to
+# action asked for "a 15-minute call" was refused for the number 15.
+_DURATION_RE = re.compile(r"\b\d{1,3}(?:\s*-\s*|\s+)?(?:minutes?|mins?|hours?|hrs?)\b", re.I)
+_ASK_RE = re.compile(
+    r"\b(call|chat|meeting|meet|conversation|demo|session|catch-?up|intro|"
+    r"introduction|walkthrough|walk-through|briefing|coffee|discussion|slot)\b", re.I)
+
+
+def _without_ask_durations(claim: str) -> str:
+    """The claim with a requested meeting length taken out, for figure checks.
+
+    Only where the sentence is an ask - it names a call or a meeting, or is a
+    question. "We cut downtime by 30 minutes per device" is a claim and keeps
+    its number.
+    """
+    if not _DURATION_RE.search(claim):
+        return claim
+    if _ASK_RE.search(claim) or claim.rstrip().endswith("?"):
+        return _DURATION_RE.sub(" ", claim)
+    return claim
+
+
+def _content_words(text) -> set:
+    return {w for w in _WORD_RE.findall(str(text or "").lower()) if w not in _STOP_WORDS}
+
+
 class EvaluatorSources:
     """The four sources, assembled for one account and one draft."""
 
@@ -117,8 +175,116 @@ class EvaluatorSources:
         self.draft = str(draft or "")
         self.hp_fact_count = hp_fact_count
         self.hp_available = hp_available
+        # [(item, Corpus)] - one corpus per offered item, never pooled.
+        self.offered = []
+        self._draft_corpus = None
         self.superlatives_blocked = bool(country) and country in SUPERLATIVE_BLOCK_COUNTRIES
         self.competitor_claims_blocked = bool(country) and country in COMPETITOR_BLOCK_COUNTRIES
+
+    # -- offered proof: what the evaluation itself put in front of the model --
+
+    def offer(self, proof=(), positioning=()):
+        """Register the case studies and Rulebook lines this evaluation showed.
+
+        `proof` is `proof_available` and `positioning` is `rulebook_positioning`,
+        exactly as stored on the evaluation, so the rewrite is checked against
+        the same items the recommendations were written from.
+        """
+        self.offered = []
+        for point in (proof or ()):
+            text = _text((point or {}).get("text"))
+            if text:
+                item = {"kind": "case_study", "text": text,
+                        "customer": _text(point.get("customer")),
+                        "line": _text(point.get("line"))}
+                self.offered.append((item, corpus_from_texts([text, item["customer"]])))
+        for row in (positioning or ()):
+            for fact in ((row or {}).get("allowed") or ()):
+                text = _text(fact)
+                if text:
+                    item = {"kind": "positioning", "text": text, "customer": "",
+                            "line": _text(row.get("line"))}
+                    self.offered.append((item, corpus_from_texts([text])))
+        return self
+
+    def offered_items(self):
+        return [item for item, _corpus in self.offered]
+
+    def _about(self, claim: str, item: dict, hp_claim: bool) -> bool:
+        """Is this sentence talking about that offered item?"""
+        low = claim.lower()
+        if item["customer"] and item["customer"].lower() in low:
+            return True
+        # Rulebook positioning is HP capability, so it answers HP claims only.
+        if item["kind"] == "positioning":
+            return hp_claim
+        if hp_claim:
+            return True
+        shared = _content_words(claim) & _content_words(item["text"])
+        return len(shared) >= OFFERED_SHARED_WORDS
+
+    def _offered_holds(self, claim: str, token: str, hp_claim: bool, urls=False) -> bool:
+        for item, corpus in self.offered:
+            missing = corpus.unsourced_urls(token) if urls else corpus.unsourced_numbers(token)
+            if not missing and self._about(claim, item, hp_claim):
+                return True
+        return False
+
+    def untraceable_figures(self, text) -> list:
+        """Figures in `text` that no source at all holds - not the account's
+        data, not HP's approved facts, not the draft, not anything offered.
+
+        Used on a RECOMMENDATION before it is offered to the seller: one that
+        carries such a figure cannot survive the rewrite check, so ticking it
+        would only produce an error.
+        """
+        claim = _without_ask_durations(_text(text))
+        if not claim:
+            return []
+        if self._draft_corpus is None:
+            self._draft_corpus = corpus_from_texts([self.draft])
+        missing = set(self.account.unsourced_numbers(claim))
+        for corpus in [self.hp, self._draft_corpus] + [c for _i, c in self.offered]:
+            missing &= set(corpus.unsourced_numbers(claim))
+            if not missing:
+                break
+        return sorted(missing)
+
+    def untraceable_links(self, text) -> list:
+        """Links in `text` that no source at all holds. The URL twin of
+        `untraceable_figures`, for the same reason: a suggestion that adds one
+        cannot survive the rewrite check."""
+        claim = _text(text)
+        if not claim:
+            return []
+        if self._draft_corpus is None:
+            self._draft_corpus = corpus_from_texts([self.draft])
+        missing = set(self.account.unsourced_urls(claim))
+        for corpus in [self.hp, self._draft_corpus] + [c for _i, c in self.offered]:
+            missing &= set(corpus.unsourced_urls(claim))
+            if not missing:
+                break
+        return sorted(missing)
+
+    def introduces(self, text) -> dict:
+        """What `text` would ADD that this market or these sources do not allow.
+
+        {"superlative": str|None, "competitor": str|None}. A term already in
+        the seller's draft is not introduced by a suggestion that mentions it -
+        "remove 'the world's most secure'" names the phrase in order to take it
+        out, and must stay something the seller can tick.
+        """
+        claim, draft = _text(text), self.draft
+        out = {"superlative": None, "competitor": None}
+        if self.superlatives_blocked:
+            hit = next((m.group(0) for m in SUPERLATIVE_RE.finditer(claim)
+                        if m.group(0).lower() not in draft.lower()), None)
+            out["superlative"] = hit
+        if self.competitor_claims_blocked:
+            hit = next((m.group(0) for m in COMPETITOR_RE.finditer(claim)
+                        if m.group(0).lower() not in draft.lower()), None)
+            out["competitor"] = hit
+        return out
 
     # -- submitted draft: spans, and nothing else ---------------------------
 
@@ -153,12 +319,26 @@ class EvaluatorSources:
         """
         return HP_FACT_CORPUS if normalize_hp_product(text) else ACCOUNT_CORPUS
 
-    def verify_claim(self, text, label="claim"):
+    def _draft_holds(self, token: str, urls=False) -> bool:
+        if self._draft_corpus is None:
+            self._draft_corpus = corpus_from_texts([self.draft])
+        missing = (self._draft_corpus.unsourced_urls(token) if urls
+                   else self._draft_corpus.unsourced_numbers(token))
+        return not missing
+
+    def verify_claim(self, text, label="claim", draft_ok=False):
         """Check one claim against the single source that has authority over it.
 
         Returns a verdict dict. `not_checkable` is an honest answer and is used
         whenever the claim carries nothing deterministically checkable - it is
         reported as such rather than being quietly upgraded to supported.
+
+        `draft_ok` is for text that COMMENTS on the draft rather than making a
+        claim of its own - the simulated reaction. "Someone in this role would
+        want proof behind the 40% claim" repeats the seller's figure in order to
+        question it; it asserts nothing, so a figure or link the draft itself
+        contains is not held against it. Never set for the draft's own phrases
+        or for a rewrite: there the draft is the thing being checked.
         """
         claim = _text(text)
         if not claim:
@@ -173,36 +353,69 @@ class EvaluatorSources:
             hit = SUPERLATIVE_RE.search(claim)
             if hit:
                 checked.append("superlative")
-                reasons.append("superlative claim %r is not permitted in %s "
-                               "(guardrail 2)" % (hit.group(0), self.country.title()))
+                reasons.append("superlative claim %r is not permitted in %s"
+                               % (hit.group(0), self.country.title()))
         if self.competitor_claims_blocked:
             hit = COMPETITOR_RE.search(claim)
             if hit:
                 checked.append("competitor")
                 reasons.append("naming %s is a competitor comparison claim, not "
-                               "permitted in %s (guardrails 3-4)"
+                               "permitted in %s"
                                % (hit.group(0), self.country.title()))
         # A restriction does not short-circuit the rest. One sentence can carry
         # both a blocked superlative and an unsourced figure, and a seller
         # fixing only the problem they were shown would resubmit and fail again.
         restricted = bool(reasons)
 
-        numbers = corpus.unsourced_numbers(claim)
+        hp_claim = routed == HP_FACT_CORPUS
+        where = AUTHORITY[routed]["label"]
+        if self.offered:
+            where += " or the HP proof shown with this evaluation"
+        via_offered = False
+        # Guidance for a repair, never a second chance at the verdict. A figure
+        # the OTHER corpus holds was put in a sentence the routed corpus has
+        # authority over - "AEON's 20,000 staff need HP EliteBook" is an HP
+        # claim, so 20,000 is checked against HP facts and fails. That is
+        # correct (guardrail 13) and stays a failure; the hint only says the
+        # way out is two sentences, not a different number.
+        other = self.account if hp_claim else self.hp
+        other_label = AUTHORITY[ACCOUNT_CORPUS if hp_claim else HP_FACT_CORPUS]["label"]
+        hints = []
+
+        numbers = corpus.unsourced_numbers(_without_ask_durations(claim))
         if numbers:
             checked.append("numbers")
-            reasons.append("%s not found in %s: %s"
-                           % ("figure" if len(numbers) == 1 else "figures",
-                              AUTHORITY[routed]["label"], ", ".join(sorted(set(numbers)))))
+            left = [n for n in numbers if not self._offered_holds(claim, n, hp_claim)]
+            via_offered = via_offered or len(left) < len(numbers)
+            if draft_ok:
+                left = [n for n in left if not self._draft_holds(n)]
+            if left:
+                reasons.append("%s not found in %s: %s"
+                               % ("figure" if len(set(left)) == 1 else "figures",
+                                  where, ", ".join(sorted(set(left)))))
+                elsewhere = sorted({n for n in left if not other.unsourced_numbers(n)})
+                if elsewhere:
+                    hints.append({"kind": "mixed_sentence", "figures": elsewhere,
+                                  "held_by": other_label})
         urls = corpus.unsourced_urls(claim)
         if urls:
             checked.append("urls")
-            reasons.append("link not found in %s: %s"
-                           % (AUTHORITY[routed]["label"], ", ".join(sorted(set(urls)))))
+            left = [u for u in urls
+                    if not self._offered_holds(claim, u, hp_claim, urls=True)]
+            via_offered = via_offered or len(left) < len(urls)
+            if draft_ok:
+                left = [u for u in left if not self._draft_holds(u, urls=True)]
+            if left:
+                reasons.append("link not found in %s: %s"
+                               % (where, ", ".join(sorted(set(left)))))
 
-        if routed == HP_FACT_CORPUS and not self.hp_available:
+        # An HP claim an offered case study or Rulebook line answered is
+        # verified by that item; the missing recommendations corpus is then
+        # not what stands behind it.
+        if routed == HP_FACT_CORPUS and not self.hp_available and not via_offered:
             checked.append("hp_corpus")
-            reasons.append("no approved HP fact corpus exists for this account, "
-                           "so an HP capability claim cannot be verified")
+            reasons.append("there are no approved HP facts on file for this "
+                           "account, so this HP claim can't be checked")
 
         if restricted:
             verdict = VERDICT_RESTRICTED
@@ -214,7 +427,8 @@ class EvaluatorSources:
             verdict = VERDICT_NOT_CHECKABLE
 
         return {"claim": claim, "verdict": verdict, "routed_to": routed,
-                "reasons": reasons, "checked": checked}
+                "reasons": reasons, "checked": checked,
+                "via_offered_proof": via_offered, "hints": hints}
 
     # -- persona context: role facts only -----------------------------------
 

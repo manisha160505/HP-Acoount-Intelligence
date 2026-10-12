@@ -273,35 +273,43 @@ rules:
   purpose: What happens when the AI's scores are missing or invalid.
   logic: Quality names are matched loosely (for example 'CTA' means Next-step Strength, and 'Brand_Recall'
     and 'Emotional' are accepted). Unknown qualities are dropped. A score is valid only if it is a number
-    from 0 to 100. If anything is wrong, the AI is asked once more and told what the problems were. A
-    quality that is still missing after that is filled in with 50 and listed as filled in. Scores that
-    are not numbers, or are outside 0 to 100, are not filled in. In that case no scores and no total are
-    shown, and the band is 'Unavailable'.
+    from 0 to 100. If anything is wrong, the AI is asked once more and told what the problems were. The
+    second answer can only add to the first - a score that was valid the first time is kept, and one that
+    is valid only the second time is taken from there. A quality that is still missing after that is
+    filled in with 50 and listed as filled in, but only when no more than 2 are missing and together
+    they carry less than half of the total; otherwise nothing is filled in. Scores that are not numbers,
+    or are outside 0 to 100, are never filled in. Whenever a problem remains, the valid scores are still
+    shown, there is no total, the band is 'Unavailable', and the summary says which scores are missing
+    (12 Oct).
   constants:
   - label: Fill-in score
     ref: py:app.services.evaluator.scoring:PAD_SCORE
     stated: 50.0
+  - label: Most scores that may be filled in
+    ref: py:app.services.evaluator.scoring:MAX_PADDED_DIMENSIONS
+    stated: 2
+  - label: Share of the total that filled-in scores must stay under
+    ref: py:app.services.evaluator.scoring:MAX_PADDED_WEIGHT
+    stated: 0.5
   example:
     scenario: The AI returns Relevance 80, Impact '70', Brand Recall 400, Clarity 'excellent', and nothing
       else.
     steps:
     - Relevance and Impact are valid
     - Brand Recall is out of range and Clarity is not a number
-    - Creativity, Emotional Connection and Next-step Strength are missing, so they are filled in with
-      50
-    result: Three scores are filled in, but two problems remain, so no total is shown.
+    - Creativity, Emotional Connection and Next-step Strength are missing - three, which is more than
+      may be filled in
+    result: Nothing is filled in. The two valid scores are shown and no total is shown.
     verified: true
     expect:
     - relevance: 80.0
       impact: 70.0
-      creativity: 50.0
-      emotional_connection: 50.0
-      next_step_strength: 50.0
-    - - creativity
-      - emotional_connection
-      - next_step_strength
+    - []
     - - 'brand_recall: 400 outside 0-100'
       - 'clarity: not numeric (''excellent'')'
+      - 'creativity: missing'
+      - 'emotional_connection: missing'
+      - 'next_step_strength: missing'
   sources:
   - hp-backend/src/app/services/evaluator/scoring.py:validate_dimensions
   - hp-backend/src/app/services/evaluator/scoring.py:pad_missing
@@ -680,8 +688,11 @@ rules:
   logic: 'The reaction is withheld completely (it is not shown with a warning) if: it names the contact
     (full name, or any part of the name longer than 2 letters); it uses a verb about inner feelings (thinks,
     believes, wants, decided, is worried, prefers, said that, and so on) together with he, she, his or
-    her; it contains a double quotation mark; or any sentence with a number, web link, superlative or
-    competitor is Unsupported or Restricted. A reaction that is shown is labelled ''Simulated reaction
+    her; it contains a quotation that is not the message''s own wording (quoting the seller''s message
+    back is allowed); or any sentence with a number, web link, superlative or competitor is Unsupported
+    or Restricted (a figure or link that is in the message itself is not held against it - the reaction
+    is commenting on it). A reaction that fails is asked for once more, with the reason; if it fails
+    again it is withheld (12 Oct). A reaction that is shown is labelled ''Simulated reaction
     - how someone in this role would likely read this message. Not a statement about the real contact.'''
   example:
     scenario: Three reactions for the contact 'Budi Santoso'.
@@ -725,8 +736,11 @@ rules:
   summary: The same request gives the same answer; changes to the scoring rules trigger a fresh score.
   purpose: The same request gives the same answer; changes to the scoring rules trigger a fresh score.
   logic: A repeat request (the same message after spaces are tidied, role, objective, format, mode and
-    scoring-rules version) returns the saved evaluation without asking the AI again. Versions are counted
-    per role (V1, V2, and so on). The history shows up to 50 evaluations (20 by default).
+    scoring-rules version) returns the saved evaluation without asking the AI again - but only a complete
+    one. An evaluation saved while AI scoring was unavailable, or one with no total, is scored again on
+    the next request and keeps its version number; so is a message whose line breaks have changed.
+    Versions are counted per role (V1, V2, and so on). The history shows up to 50 evaluations (20 by
+    default).
   example:
     scenario: '''Hello  world'' for the CFO, awareness, email, Deep mode, under one set of scoring rules.'
     steps:
@@ -734,7 +748,7 @@ rules:
     - Create the request fingerprint
     result: The first 16 characters of the fingerprint.
     verified: true
-    expect: b39fda835a469451
+    expect: 143c78db0293a711
   sources:
   - hp-backend/src/app/services/evaluator/storage.py:message_fingerprint
   - hp-backend/src/app/services/evaluator/storage.py:save
@@ -874,7 +888,7 @@ rules:
     verified: true
     expect:
     - 'the rewrite introduces an unsupported claim: superlative claim ''the best PCs'' is not permitted
-      in Indonesia (guardrail 2); figure not found in Account data: 12'
+      in Indonesia; figure not found in Account data: 12'
     - the rewrite adds a superlative claim (the best PCs) not permitted in Indonesia
   sources:
   - hp-backend/src/app/services/evaluator/verify.py:diff_rewrite
@@ -893,13 +907,108 @@ rules:
   constants:
   - label: Instruction version
     ref: py:app.services.evaluator.evaluate:PROMPT_VERSION
-    stated: 6
+    stated: 8
   sources:
   - hp-backend/src/app/services/evaluator/evaluate.py:SYSTEM_PROMPT
   - hp-backend/src/app/services/evaluator/evaluate.py:_user_prompt
   - hp-backend/src/app/core/llm.py:generate_gpt4o_json_completion
   confidence: high
   internal: true
+- id: me_rewrite_offered_proof
+  parent: me_rewrite
+  name: HP proof the evaluation showed may be cited
+  kind: guardrail
+  summary: A rewrite may quote the HP case studies and approved positioning that its own evaluation showed.
+  purpose: A rewrite may quote the HP case studies and approved positioning that its own evaluation showed.
+  logic: 'When a message is scored, the AI is shown the HP case studies and the approved HP positioning
+    for the HP lines the message names, and recommends citing them. Those same items are given to the
+    rewrite, with their exact wording, and count as a source when the rewrite is checked. A figure taken
+    from one of them is accepted only where the sentence is about that item: it names the customer, shares
+    its wording, or is a statement about an HP line. A figure about the account itself is still checked
+    against the account''s own data only, and a figure found in none of the sources is still refused.
+    The length of a meeting being asked for (''a 15-minute call'') is a request, not a claim, and is not
+    checked as a figure; a duration that is a claim (''cut downtime by 30 minutes'') still is (12 Oct).'
+  output: A rewrite that may carry a recommended case study's own figures.
+  sources:
+  - hp-backend/src/app/services/evaluator/sources.py:OFFERED_PROOF
+  - hp-backend/src/app/services/evaluator/evaluate.py:_offered_block
+  confidence: high
+- id: me_rewrite_shorten
+  parent: me_rewrite
+  name: A rewrite that is only too long is shortened
+  kind: guardrail
+  summary: When length is the only thing wrong, the same rewrite is asked for again, shorter.
+  purpose: When length is the only thing wrong, the same rewrite is asked for again, shorter.
+  logic: 'A format with a character limit (LinkedIn: 300) tells the AI how many characters its own text may
+    use, after the greeting and the blank lines between parts are taken off. If the rewrite is still too
+    long, it is told how long each part was and how much to cut. If length is then the only fault left,
+    the same rewrite is asked for shorter, up to two more times, keeping every applied change and adding
+    nothing. Each shorter version goes through all the same checks. Text is never cut off automatically.
+    If it still does not fit, the seller is told the shortest length reached and asked to select fewer
+    changes (12 Oct).'
+  constants:
+  - label: Extra shorten attempts
+    ref: py:app.services.evaluator.evaluate:SHORTEN_PASSES
+    stated: 2
+  output: A rewrite within the limit, or a clear request to select fewer changes.
+  sources:
+  - hp-backend/src/app/services/evaluator/formats.py:body_budget
+  - hp-backend/src/app/services/evaluator/formats.py:shorten_prompt
+  - hp-backend/src/app/services/evaluator/evaluate.py:rewrite_message
+  confidence: high
+- id: me_rewrite_repair
+  parent: me_rewrite
+  name: A rewrite with one named problem is repaired once
+  kind: guardrail
+  summary: A rewrite that fails for a specific, fixable reason is given one chance to fix exactly that.
+  purpose: A rewrite that fails for a specific, fixable reason is given one chance to fix exactly that.
+  logic: 'If a rewrite has the wrong shape (a missing part, the wrong number of sections, a section with
+    no heading, a subject line that is too long) it is first asked again with the rule spelled out, and
+    then, if still wrong, shown its own draft and asked to fix only that. If a rewrite has the right
+    shape but makes a claim that cannot be supported, it is likewise shown its own draft and told what
+    to change: remove a figure or link nothing supports, remove a superlative or a competitor''s name
+    where the country does not permit them, or split a sentence that states a fact about the account
+    and names an HP product at the same time (a figure about the account cannot be verified as an HP
+    capability, so the two belong in separate sentences). The repaired rewrite goes through every check
+    again and no check is relaxed. There is one repair per request. A rewrite that names an HP line the
+    role is never offered, or a contact who must not be named, is not repaired this way: it is asked
+    again once, and if it still does so the seller is told which line or name and to untick the change
+    that adds it. One request never asks the AI more than five times in all (12 Oct).'
+  constants:
+  - label: Most times the AI is asked for one rewrite
+    ref: py:app.services.evaluator.evaluate:MAX_REWRITE_CALLS
+    stated: 5
+  output: A rewrite that passes every check, or a plain-English reason and what to do next.
+  sources:
+  - hp-backend/src/app/services/evaluator/formats.py:repair_prompt
+  - hp-backend/src/app/services/evaluator/formats.py:structure_repair_note
+  - hp-backend/src/app/services/evaluator/evaluate.py:_refusal_message
+  - hp-backend/src/app/services/evaluator/evaluate.py:rewrite_message
+  confidence: high
+- id: me_suggestions_traceable
+  parent: null
+  name: Suggestions the rewrite could not apply are not offered
+  kind: guardrail
+  summary: A suggested change is offered for ticking only if a rewrite could apply it.
+  purpose: A suggested change is offered for ticking only if a rewrite could apply it.
+  logic: 'A suggestion is not offered for ticking when a rewrite that applied it would be refused. That
+    is a suggestion that would add: a figure or a web link found in none of the sources (the account''s
+    data, the approved HP facts, the message itself, or the HP case studies and positioning shown); an HP
+    line this role is never offered; or, in a country that does not permit them, a superlative claim or a
+    competitor''s name. A suggestion to REMOVE one of these from the message stays tickable, because the
+    wording is already in the message. The phrase, its rating and its reason are still shown. For a format with a character limit, the AI is told the limit and the message''s
+    current length; when the message is at 85% of the limit or more, it is told to suggest replacing or
+    cutting words rather than adding them (12 Oct).'
+  constants:
+  - label: Share of the limit that counts as near it
+    ref: py:app.services.evaluator.evaluate:NEAR_CAP_SHARE
+    stated: 0.85
+  output: A list of changes the seller can tick, each one a rewrite can apply.
+  sources:
+  - hp-backend/src/app/services/evaluator/evaluate.py:_withhold_unusable
+  - hp-backend/src/app/services/evaluator/evaluate.py:_unusable
+  - hp-backend/src/app/services/evaluator/evaluate.py:_cap_block
+  confidence: high
 undetermined:
 - The seven dimension scores, their rationales, the chunk verdicts/comments, the summary and the reaction
   are model-judged; Python only validates, caps (severe failures) and combines them. There is no fixed

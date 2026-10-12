@@ -38,7 +38,25 @@ from app.services.hp import (
 
 logger = logging.getLogger(__name__)
 
-PROMPT_VERSION = 6
+# 7 - 12 Oct: a capped format's evaluation is told its character cap and the
+#     message's current length, so it stops recommending additions that cannot
+#     fit; and a recommendation carrying a figure no source holds is withheld.
+# 8 - 12 Oct: suggestions may not introduce a line this persona is not offered,
+#     a link no source holds, or (where the market blocks them) a superlative
+#     or a competitor name; and the rewrite keeps account facts and HP
+#     statements in separate sentences.
+PROMPT_VERSION = 8
+
+# How close to a format's character cap a message must be before the evaluator
+# is told to recommend swaps and cuts rather than additions.
+NEAR_CAP_SHARE = 0.85
+# Extra "same rewrite, shorter" passes when length is the only fault left.
+SHORTEN_PASSES = 2
+# The most model calls one rewrite request may make: the attempt, one retry,
+# the shorten passes (length only) and one repair pass (claims or structure).
+# A fault that changes kind after a pass does not start another cycle - the
+# seller is told what is wrong instead of waiting on a sixth call.
+MAX_REWRITE_CALLS = 2 + SHORTEN_PASSES + 1
 
 MODE_LITE = "LITE"
 MODE_DEEP = "DEEP"
@@ -87,6 +105,12 @@ RULES THAT ARE CHECKED IN CODE AFTER YOU ANSWER:
 3. Do not introduce a number, percentage, statistic or URL that is not in the
    supplied context. Anything you invent is stripped.
 4. Do not claim an HP capability that is not in the approved HP facts below.
+5. A suggestion is something the seller can apply with one click, so it must be
+   applicable. It must not introduce an HP line from the list that is wrong for
+   this persona, a link that is not in the context, or - where the market
+   restrictions below say so - a superlative or a competitor's name. Telling
+   the seller to REMOVE one of those is fine. A suggestion that breaks this is
+   shown without a checkbox.
 
 Two dimensions are measured against something supplied below rather than
 against your own taste:
@@ -492,6 +516,7 @@ def _user_prompt(message, persona, objective, fmt, mode, sources, checks,  # noq
         "CODED CHECKS ALREADY RUN (do not repeat these, build on them):",
         coded,
         "",
+        _cap_block(spec, message),
         _severe_block(severe),
         "",
         "THE MESSAGE TO EVALUATE (verbatim, between the markers):",
@@ -522,6 +547,92 @@ def _user_prompt(message, persona, objective, fmt, mode, sources, checks,  # noq
                      'think, want or said.>"')
     parts.append("}")
     return "\n".join(parts)
+
+
+def _cap_block(spec, message) -> str:
+    """What a capped format's evaluation must know before it recommends.
+
+    A LinkedIn message is capped at 300 characters. The evaluation used to
+    recommend additions - "name the case study", "add a specific" - to a message
+    already at 290, the seller ticked them, and the rewrite could not fit them:
+    "rewrite is 360 characters; LinkedIn Message allows 300". The recommendation
+    was the fault, so the constraint is stated where recommendations are made.
+    """
+    cap = spec.get("max_chars")
+    if not cap:
+        return ""
+    length = len(str(message or ""))
+    lines = ["LENGTH LIMIT: a %s may be at most %d characters, and this message is "
+             "%d. Every suggestion must be achievable inside that limit."
+             % (spec["label"], cap, length)]
+    if length >= cap * NEAR_CAP_SHARE:
+        lines.append("It is already at or near the limit, so suggest REPLACING or "
+                     "CUTTING words. If a suggestion adds anything, it must say what "
+                     "to remove to make room, and its replacement text must not be "
+                     "longer than the text it replaces.")
+    else:
+        lines.append("A suggestion that adds text must leave the whole message "
+                     "within the limit.")
+    return "\n".join(lines) + "\n"
+
+
+def _unusable(text, sources, denied_lines) -> str:
+    """Why a rewrite could not apply this suggestion, or "" when it could.
+
+    Everything here is something the rewrite is checked for and refused over,
+    asked of the suggestion first. "Introduces" matters throughout: a term the
+    seller's draft already contains is not introduced by a suggestion that
+    names it - "remove the Poly mention" is how a seller takes it out.
+    """
+    if not text:
+        return ""
+    figures = sources.untraceable_figures(text)
+    if figures:
+        return "a figure no source holds (%s)" % ", ".join(figures)
+    links = sources.untraceable_links(text)
+    if links:
+        return "a link no source holds (%s)" % ", ".join(links)
+    low, draft = text.lower(), sources.draft.lower()
+    for line in denied_lines:
+        if line.lower() in low and line.lower() not in draft:
+            return "an HP line this persona is not offered (%s)" % line
+    added = sources.introduces(text)
+    if added["superlative"]:
+        return ("a superlative claim not permitted in %s (%s)"
+                % ((sources.country or "this market").title(), added["superlative"]))
+    if added["competitor"]:
+        return ("a competitor's name, not permitted in %s (%s)"
+                % ((sources.country or "this market").title(), added["competitor"]))
+    return ""
+
+
+def _withhold_unusable(phrases, sources, card=None) -> list:
+    """Stop offering a suggestion the rewrite check is certain to reject.
+
+    The seller ticks a suggestion and presses Rewrite; if the rewrite that
+    applies it would be refused, the tool has contradicted itself. So each
+    suggestion is asked the rewrite's own questions first - see `_unusable` -
+    and one that fails is withheld: kept on the phrase for the audit, off the
+    list the seller ticks. The phrase itself, its verdict and its reason stay.
+    """
+    denied = bp.denied_lines(card["persona_id"]) if card else ()
+    withheld = []
+    for phrase in phrases:
+        for field in ("suggestion", "comment"):
+            text = phrase.get(field) or ""
+            reason = _unusable(text, sources, denied)
+            if not reason:
+                continue
+            if field == "suggestion":
+                phrase["suggestion_withheld"] = text
+                phrase["suggestion"] = ""
+            # The dashboard ticks the suggestion, or the comment when there is
+            # none - so a comment carrying the problem must not be tickable either.
+            phrase["actionable"] = False
+            phrase["withheld_reason"] = reason
+            withheld.append({"chunk": phrase["chunk"][:120], "field": field,
+                             "reason": reason})
+    return withheld
 
 
 def _chunk_instruction(mode):
@@ -566,6 +677,24 @@ def _ask(system, user):
         return {}
 
 
+def _reusable(stored: dict, text: str) -> bool:
+    """Whether a stored evaluation may answer this request without the model.
+
+    The store is a cache of GOOD answers. It also held the bad ones: an
+    evaluation made while the model was down ("AI scoring was unavailable"), or
+    one with no total, was stored under the same fingerprint and handed back on
+    every resubmission - so the seller could never get that message scored until
+    they changed a word of it. Those are scored again.
+
+    The text is compared too. The fingerprint ignores whitespace, so a draft
+    re-pasted with different line breaks matched a record whose character
+    offsets and structure checks describe the old layout.
+    """
+    return (stored.get("ai_available") is not False
+            and stored.get("composite") is not None
+            and stored.get("message_text") == text)
+
+
 def evaluate_message(account_id, persona_id, objective, fmt, message,
                      mode=MODE_DEEP, dataset_records=None):
     """Evaluate one draft. Returns the stored evaluation document."""
@@ -573,7 +702,7 @@ def evaluate_message(account_id, persona_id, objective, fmt, message,
 
     text = str(message or "").strip()
     if not text:
-        raise EvaluationError("the message is empty")
+        raise EvaluationError("Enter a message to evaluate.")
 
     objective = S.normalize_objective(objective)
     # The narrow reader: only the three formats the seller can pick. A stored
@@ -591,8 +720,11 @@ def evaluate_message(account_id, persona_id, objective, fmt, message,
     # quietly treated as missing context.
     persona = storage.resolve_persona(account_id, persona_id)
     if persona is None:
-        raise EvaluationError(
-            "persona %r does not belong to this account" % persona_id)
+        # Logged with the id; the seller is told what to do, not shown an id.
+        logger.warning("evaluator: persona %r does not belong to this account %s",
+                       persona_id, account_id)
+        raise EvaluationError("That persona isn't available for this account. "
+                              "Pick one from the list and try again.")
 
     # The scorer's version travels with the request, so a prompt change or a
     # corrected persona card re-scores rather than serving the old answer.
@@ -600,9 +732,13 @@ def evaluate_message(account_id, persona_id, objective, fmt, message,
         text, persona_id, objective, fmt, mode,
         logic_version="p%d-pack%d" % (PROMPT_VERSION, bp.PERSONA_PACK_VERSION))
     cached = storage.find_existing(account_id, fingerprint)
-    if cached:
+    if cached and _reusable(cached, text):
         logger.info("evaluator: returning stored evaluation for %s", fingerprint[:12])
         return cached
+    if cached:
+        logger.info("evaluator: stored evaluation %s is not reusable (ai_available=%s, "
+                    "composite=%s) - scoring again", fingerprint[:12],
+                    cached.get("ai_available"), cached.get("composite"))
 
     sources = SRC.build(db, account_id, persona, text, dataset_records)
     checks = F.structure_checks(text, fmt)
@@ -619,6 +755,9 @@ def evaluate_message(account_id, persona_id, objective, fmt, message,
     named_lines = _hp_lines_named(text)
     positioning = _rulebook_positioning(db, named_lines)
     proof = _proof_available(db, named_lines, _account_industry(db, account_id), text)
+    # The case studies and Rulebook lines shown to the model are a source in
+    # their own right from here on - see sources.OFFERED_PROOF.
+    sources.offer(proof, positioning)
 
     audit = []
     prompt = _user_prompt(text, persona, objective, fmt, mode, sources, checks,
@@ -643,12 +782,23 @@ def evaluate_message(account_id, persona_id, objective, fmt, message,
         if retry:
             retry_scores, retry_rationales = S.split_dimension_payload(
                 retry.get("dimensions"))
-            dimensions, problems = S.validate_dimensions(retry_scores, objective)
-            if not problems:
+            retry_valid, retry_problems = S.validate_dimensions(retry_scores, objective)
+            if not retry_problems:
+                # A complete answer: take it whole, so the phrases and summary
+                # are the ones written alongside these scores.
+                dimensions, problems = retry_valid, []
                 raw, rationales = retry, retry_rationales
             else:
-                audit.append({"stage": "dimensions_retry", "problems": problems,
-                              "raw": retry.get("dimensions")})
+                # An incomplete one may only ADD to what the first answer gave.
+                # It used to replace it - a retry with no dimensions at all
+                # discarded six good scores - see `S.merge_attempts`.
+                dimensions, problems = S.merge_attempts(
+                    dimensions, problems, retry_valid, retry_problems)
+                rationales = {**retry_rationales, **rationales}
+                if not raw:
+                    raw = retry
+                audit.append({"stage": "dimensions_retry", "problems": retry_problems,
+                              "remaining": problems, "raw": retry.get("dimensions")})
 
     # T21: a dimension still missing after the round trip is padded to 50 and
     # the pad is recorded, so the request succeeds and the seller can still see
@@ -657,7 +807,7 @@ def evaluate_message(account_id, persona_id, objective, fmt, message,
     # failure and stays a problem.
     padded = []
     if problems and raw:
-        dimensions, padded, problems = S.pad_missing(dimensions, problems)
+        dimensions, padded, problems = S.pad_missing(dimensions, problems, objective)
         if padded:
             logger.warning("evaluator: padded %s to %g for account %s",
                            ", ".join(padded), S.PAD_SCORE, account_id)
@@ -706,6 +856,11 @@ def evaluate_message(account_id, persona_id, objective, fmt, message,
                 audit.append({"stage": "chunks_retry", "problems": retry_fidelity})
     if dropped:
         audit.append({"stage": "phrases", "dropped": dropped})
+    withheld = _withhold_unusable(phrases, sources, card)
+    if withheld:
+        logger.info("evaluator: %d suggestion(s) withheld: a rewrite could not "
+                    "apply them", len(withheld))
+        audit.append({"stage": "suggestions_withheld", "withheld": withheld})
     if mode == MODE_DEEP and phrases and len(phrases) < DEEP_MIN_CHUNKS:
         # Recorded, not failed: a short message cannot be cut into ten spans.
         audit.append({"stage": "chunks", "problems": [
@@ -715,14 +870,35 @@ def evaluate_message(account_id, persona_id, objective, fmt, message,
     reaction, reaction_faults = (None, [])
     if mode == MODE_DEEP:
         reaction, reaction_faults = verify.guard_reaction(raw.get("reaction"), sources)
-        if reaction_faults:
+        if reaction_faults and raw:
+            # Scores and chunks each get one correction round trip; the reaction
+            # had none, so one stray name or figure meant Deep mode showed no
+            # reaction at all. One retry, with the fault named, for this part only.
+            audit.append({"stage": "reaction", "withheld": reaction_faults})
+            logger.warning("evaluator: reaction withheld (%s), retrying once",
+                           "; ".join(reaction_faults))
+            retry = _ask(SYSTEM_PROMPT, prompt
+                         + "\n\nYour simulated reaction was rejected:\n"
+                         + "\n".join("  - %s" % f for f in reaction_faults)
+                         + "\nWrite it again. Describe how someone in this ROLE would "
+                         "read the message; never name the contact or say what they "
+                         "think; add no figure, link or claim that is not in the "
+                         "message or the context. You may quote the message's own "
+                         'words. Return JSON with one key: {"reaction": "..."}')
+            if retry:
+                reaction, reaction_faults = verify.guard_reaction(
+                    retry.get("reaction"), sources)
+                if reaction_faults:
+                    audit.append({"stage": "reaction_retry", "withheld": reaction_faults})
+        elif reaction_faults:
             audit.append({"stage": "reaction", "withheld": reaction_faults})
 
     ai_failed = not raw
     evaluation = {
         "account_id": account_id,
         "persona_contact_id": persona_id,
-        "version": storage.next_version(account_id, persona_id),
+        "version": ((cached or {}).get("version")
+                    or storage.next_version(account_id, persona_id)),
         "fingerprint": fingerprint,
         "prompt_version": PROMPT_VERSION,
         "objective": objective,
@@ -734,7 +910,10 @@ def evaluate_message(account_id, persona_id, objective, fmt, message,
         "persona": {k: persona.get(k) for k in
                     ("persona_id", "name", "title", "department", "seniority_band",
                      "influence_type", "is_named_person")},
-        "dimensions": dimensions if not problems else {},
+        # Every score that IS valid is shown, even when another is not and no
+        # total can publish. Hiding six good bars because the seventh came back
+        # as "excellent" told the seller nothing was scored.
+        "dimensions": dimensions,
         "dimension_problems": problems,
         "dimensions_padded": padded,
         # Spec Section 4.10 and the tuning row: "Each scored 0-100 with a
@@ -794,9 +973,20 @@ def evaluate_message(account_id, persona_id, objective, fmt, message,
 
     if ai_failed:
         # The coded checks are still a real result and still publish.
-        evaluation["summary"] = ("AI scoring was unavailable. The checks below are "
-                                 "computed in code and are unaffected.")
+        evaluation["summary"] = ("AI scoring was unavailable just now, so this message "
+                                 "has no scores yet. The format checks are unaffected. "
+                                 "Evaluate again to score it.")
         logger.warning("evaluator: publishing coded checks only for account %s", account_id)
+    elif problems:
+        # Some scores came back and some did not; there is no total, and the
+        # seller is told which rather than shown a row of blanks.
+        missing = sorted({S.DIMENSION_LABELS.get(str(p).partition(": ")[0],
+                                                 str(p).partition(": ")[0])
+                          for p in problems})
+        evaluation["summary"] = (
+            "AI scoring was incomplete: no usable score came back for %s, so there is "
+            "no overall score. Evaluate again to score it. %s"
+            % (", ".join(missing), evaluation["summary"] or "")).strip()
 
     return storage.save(evaluation)
 
@@ -812,6 +1002,11 @@ You may not introduce any number, percentage, statistic, URL or HP capability
 claim that is not in the supplied context. A claim the original made without
 support must NOT be carried over as though it were verified - drop it or soften
 it to what the context supports.
+
+Keep a fact about the account and a statement about an HP product in SEPARATE
+sentences. "They run 12,000 devices. HP EliteBook is built for fleets that size."
+is right; one sentence carrying both is rejected, because a figure about the
+account cannot be verified as an HP capability.
 
 Return a single JSON object in the exact structured shape requested. Do not
 return a single block of prose, and do not wrap the JSON in markdown."""
@@ -850,8 +1045,12 @@ def _rewrite_gate_faults(rewrite, card, persona, banned, sources, original, fmt,
     # original: a figure the seller already wrote is not something the rewrite
     # invented, and whether it was ever supported is `diff_rewrite`'s question,
     # asked against the original a few lines later and asked more strictly.
+    # ...and the case studies and Rulebook lines the evaluation showed: a
+    # figure quoted from one of those was recommended, not invented.
+    offered = [text for item in sources.offered_items()
+               for text in (item["text"], item["customer"]) if text]
     corpus = corpus_from_texts([*sources.account.cells, *sources.hp.cells,
-                                str(original or "")])
+                                *offered, str(original or "")])
     findings = content_gates.run(
         asset, persona_id=card["persona_id"], content_type=fmt,
         filled=bool(persona.get("is_named_person")), corpus=corpus,
@@ -864,6 +1063,93 @@ def _rewrite_gate_faults(rewrite, card, persona, banned, sources, original, fmt,
             for f in content_gates.rejects(findings)]
 
 
+def _offered_block(sources) -> str:
+    """The HP proof and positioning the evaluation showed, for the rewrite.
+
+    The recommendations were written from these, and the rewrite is checked
+    against them, so the rewrite is given them too - with their exact wording.
+    Without this the model could only copy a figure from the recommendation's
+    paraphrase of it.
+    """
+    items = sources.offered_items()
+    if not items:
+        return ""
+    out = ["HP PROOF AND POSITIONING YOU MAY CITE. Use these only where a selected "
+           "change calls for them, and copy figures and names exactly as written:"]
+    for item in items:
+        if item["kind"] == "case_study":
+            out.append("  - Case study%s: %s"
+                       % (" (%s)" % item["customer"] if item["customer"] else "",
+                          item["text"][:400]))
+        else:
+            out.append("  - HP may state%s: %s"
+                       % (" about %s" % item["line"] if item["line"] else "",
+                          item["text"][:300]))
+    return "\n".join(out) + "\n"
+
+
+_FIGURES_RE = re.compile(r"not found in [^:]+: (.+?)(?:;|$)")
+
+
+_SUPERLATIVE_FAULT_RE = re.compile(r"adds a superlative claim \((.+?)\) not permitted in (.+)$")
+_COMPETITOR_FAULT_RE = re.compile(r"names a competitor \((.+?)\), .* not permitted in (.+)$")
+
+
+def _unsupported_message(diff_faults) -> str:
+    """The seller-facing reason a rewrite was refused for what it claims."""
+    figures, others = [], []
+    for fault in diff_faults:
+        fault = str(fault)
+        if m := _SUPERLATIVE_FAULT_RE.search(fault):
+            others.append('it added "%s", and superlative claims are not permitted '
+                          "in %s" % m.groups())
+            continue
+        if m := _COMPETITOR_FAULT_RE.search(fault):
+            others.append("it named %s, and competitor comparisons are not permitted "
+                          "in %s" % m.groups())
+            continue
+        for group in _FIGURES_RE.findall(fault):
+            for token in group.split(","):
+                token = token.strip()
+                if token and token not in figures:
+                    figures.append(token)
+    parts = []
+    if figures:
+        parts.append("it used %s we can't trace to this account's data, HP's approved "
+                     "facts or the HP proof shown with this evaluation (%s)"
+                     % ("a figure" if len(figures) == 1 else "figures", ", ".join(figures)))
+    parts += others
+    if not parts:
+        return ("the rewrite introduced claims the sources do not support: %s"
+                % "; ".join(diff_faults))
+    return ("The rewrite was not used: %s. Untick the change that adds it, or remove "
+            "it from your message, then try again." % "; and ".join(parts))
+
+
+def _refusal_message(faults, label, cap=None, shortest=None) -> str:
+    """The seller-facing reason a rewrite was refused for its shape or a gate.
+
+    The raw faults ("body_sections has 2 entries; 4-4 required") go to the
+    stored evaluation and the log. The seller is told what happened and what to
+    do next.
+    """
+    if F.length_only(faults):
+        return ("The selected changes don't fit in a %s (%s characters): the "
+                "shortest rewrite came out at %s. Select fewer changes, or shorten "
+                "the message, then try again." % (label, cap, shortest))
+    if any(str(f) == "no rewrite object was returned" for f in faults):
+        return ("The rewrite could not be generated just now. Your message is "
+                "unchanged - try again in a moment.")
+    gates = [str(f).split(": ", 1)[1] for f in faults if F.is_gate_fault(f)]
+    if gates:
+        return ("The rewrite was not used because it brought in something this "
+                "persona can't be sent: %s. Untick the change that adds it, then "
+                "try again." % "; ".join(gates))
+    reasons = F.structure_plain(faults, label)
+    return ("The rewrite didn't come back in the shape a %s needs (%s). Try again, "
+            "or select fewer changes." % (label, "; ".join(reasons)))
+
+
 def rewrite_message(account_id, fingerprint, selected_recommendations,
                     dataset_records=None):
     """Rewrite a stored evaluation's message, applying the selected changes."""
@@ -872,16 +1158,22 @@ def rewrite_message(account_id, fingerprint, selected_recommendations,
     db = get_db()
     evaluation = storage.find_existing(account_id, fingerprint)
     if not evaluation:
-        raise EvaluationError("no evaluation found for this account and message")
+        raise EvaluationError("This evaluation couldn't be found for this account. "
+                              "Evaluate the message again, then rewrite.")
 
     fmt = evaluation["format"]
     original = evaluation["message_text"]
     persona = storage.resolve_persona(account_id, evaluation["persona_contact_id"]) or {}
     sources = SRC.build(db, account_id, persona, original, dataset_records)
+    # The same case studies and Rulebook lines the evaluation showed the model
+    # and wrote its recommendations from. A rewrite that cites one is doing what
+    # it was told; verifying it against sources that hold neither refused it.
+    sources.offer(evaluation.get("proof_available"),
+                  evaluation.get("rulebook_positioning"))
 
     selected = [str(s) for s in (selected_recommendations or []) if str(s).strip()]
     if not selected:
-        raise EvaluationError("select at least one recommendation to apply")
+        raise EvaluationError("Select at least one suggested change to apply.")
 
     prompt = "\n".join([
         "OBJECTIVE: %s" % evaluation["objective_label"],
@@ -892,6 +1184,7 @@ def rewrite_message(account_id, fingerprint, selected_recommendations,
         "",
         _context_block(sources),
         "",
+        _offered_block(sources),
         "THE ORIGINAL MESSAGE:",
         "<<<MESSAGE", original, "MESSAGE>>>",
         "",
@@ -902,33 +1195,113 @@ def rewrite_message(account_id, fingerprint, selected_recommendations,
     ])
 
     card = _card_for(persona, evaluation.get("mode") or MODE_DEEP)
-    raw = _ask(REWRITE_SYSTEM, prompt)
     banned = sources.contact_names()
+    label = evaluation["format_label"]
     # Spec 4.8 runs the Section 6 gates on the rewrite because it is the
     # version that actually gets sent, so its findings belong in the same audit
     # files as a generation's - see `content_audit`.
     gate_audit: list = []
-    rewrite, faults = F.validate_rewrite(raw, fmt, banned, persona, original)
-    faults += _rewrite_gate_faults(rewrite, card, persona, banned, sources,
-                                   original, fmt, audit=gate_audit)
+    calls = {"made": 0}
+
+    def ask(user):
+        """One model call, inside the request's budget."""
+        if calls["made"] >= MAX_REWRITE_CALLS:
+            return None
+        calls["made"] += 1
+        return _ask(REWRITE_SYSTEM, user)
+
+    def check(answer):
+        """(rewrite or None, faults, the draft as built)."""
+        clean, found, draft = F.validate_rewrite(answer, fmt, banned, persona,
+                                                 original, keep_draft=True)
+        found = found + _rewrite_gate_faults(clean, card, persona, banned, sources,
+                                             original, fmt, audit=gate_audit)
+        return (None if found else clean), found, draft
+
+    def claims(candidate):
+        """(diff report, faults) for a rewrite that has passed the contract."""
+        return verify.diff_rewrite(original, candidate["plain_text"], sources, selected)
+
+    rewrite, faults, draft = check(ask(prompt))
 
     if faults:
         logger.warning("evaluator: rewrite rejected (%s), retrying once",
                        "; ".join(faults))
-        retry = _ask(REWRITE_SYSTEM, prompt + "\n\nYour previous answer was rejected:\n"
-                     + "\n".join("  - %s" % f for f in faults))
-        rewrite, faults = F.validate_rewrite(retry, fmt, banned, persona, original)
-        faults += _rewrite_gate_faults(rewrite, card, persona, banned, sources,
-                                       original, fmt, audit=gate_audit)
-        if faults:
-            rewrite = None
+        # Each fault is restated as what to do about it. A length fault gets its
+        # numbers - how long, how much to cut, each field's own length - and a
+        # shape fault gets the format's own rule ("exactly 4 sections; you
+        # returned 2") rather than the validator's shorthand.
+        notes = [F.structure_repair_note(fmt, faults)]
+        if any(F.LENGTH_FAULT_RE.match(f) for f in faults):
+            notes.append(F.length_retry_note(fmt, draft, persona, original))
+        rewrite, faults, draft = check(ask(
+            prompt + "\n\nYour previous answer was rejected. Fix exactly this:\n"
+            + "\n\n".join(n for n in notes if n)))
+
+    # Too long and nothing else wrong: the content is right, so ask for the SAME
+    # rewrite shorter rather than giving up. Every shortened draft goes back
+    # through the whole check - a shorter draft that invents something is still
+    # refused. Nothing is ever cut by Python: truncating could drop the ask or
+    # the qualifier on a claim.
+    shortest = None
+    passes = 0
+    while faults and F.length_only(faults) and draft and passes < SHORTEN_PASSES:
+        length = len(draft.get("plain_text") or "")
+        shortest = length if shortest is None else min(shortest, length)
+        passes += 1
+        logger.info("evaluator: rewrite is %d characters, shorten pass %d",
+                    length, passes)
+        rewrite, faults, shorter_draft = check(
+            ask(F.shorten_prompt(fmt, draft, persona, original)))
+        draft = shorter_draft or draft
+    if faults and F.length_only(faults) and draft:
+        length = len(draft.get("plain_text") or "")
+        shortest = length if shortest is None else min(shortest, length)
+
+    # One repair pass per request, for whichever needs it. The model is shown
+    # its own draft and the named problem, so it fixes that rather than starting
+    # again and failing somewhere new. Gate rejections are not repaired here:
+    # they had their retry, and a denied line that survives it is the seller's
+    # to untick.
+    repaired = False
+    if faults and F.structure_only(faults) and draft:
+        repaired = True
+        logger.info("evaluator: rewrite shape still wrong (%s), one repair pass",
+                    "; ".join(faults))
+        fixed, _fixed_faults, _draft = check(ask(F.repair_prompt(
+            fmt, draft, F.structure_repair_note(fmt, faults).splitlines())))
+        if fixed:
+            rewrite, faults = fixed, []
+    if faults:
+        rewrite = None
+
+    # What the rewrite CLAIMS, checked only once its shape is right. A fault
+    # here used to end the request on the spot; the commonest one - an account
+    # figure and an HP product in the same sentence - is fixed by splitting the
+    # sentence, so the rewrite gets the one repair pass to do that. The verdict
+    # is never softened: the repaired draft is checked exactly as the first was.
+    diff, diff_faults = {}, []
+    if rewrite:
+        diff, diff_faults = claims(rewrite)
+        if diff_faults and not repaired:
+            repaired = True
+            logger.info("evaluator: rewrite claims rejected (%s), one repair pass",
+                        "; ".join(diff_faults))
+            fixed, _fixed_faults, _draft = check(ask(F.repair_prompt(
+                fmt, rewrite, diff.get("repairs") or diff_faults)))
+            if fixed:
+                fixed_diff, fixed_diff_faults = claims(fixed)
+                if not fixed_diff_faults:
+                    rewrite, diff, diff_faults = fixed, fixed_diff, []
+                else:
+                    diff, diff_faults = fixed_diff, fixed_diff_faults
 
     content_audit.record(
         db, gate_audit, account_id=account_id,
         persona_id=(card or {}).get("persona_id") or evaluation["persona_contact_id"],
         content_type=fmt, asset_id=fingerprint[:16],
         surface=content_audit.SURFACE_REWRITE,
-        outcome=(content_audit.OUTCOME_PUBLISHED if rewrite
+        outcome=(content_audit.OUTCOME_PUBLISHED if rewrite and not diff_faults
                  else content_audit.OUTCOME_WITHHELD))
 
     if not rewrite:
@@ -938,19 +1311,16 @@ def rewrite_message(account_id, fingerprint, selected_recommendations,
             {"$set": {"rewrite": None,
                       "rewrite_faults": faults,
                       "rewrite_attempted_at": datetime.now(UTC)}})
-        raise EvaluationError("the rewrite did not meet the %s format contract: %s"
-                              % (evaluation["format_label"], "; ".join(faults)))
+        cap = (F.body_budget(fmt, persona, original) or {}).get("max")
+        raise EvaluationError(_refusal_message(faults, label, cap, shortest))
 
-    diff, diff_faults = verify.diff_rewrite(original, rewrite["plain_text"],
-                                            sources, selected)
     if diff_faults:
         db[storage.COLLECTION].update_one(
             {"account_id": account_id, "fingerprint": fingerprint},
             {"$set": {"rewrite": None, "rewrite_faults": diff_faults,
                       "rewrite_diff": diff,
                       "rewrite_attempted_at": datetime.now(UTC)}})
-        raise EvaluationError("the rewrite introduced claims the sources do not "
-                              "support: %s" % "; ".join(diff_faults))
+        raise EvaluationError(_unsupported_message(diff_faults))
 
     rewrite["diff"] = diff
     db[storage.COLLECTION].update_one(

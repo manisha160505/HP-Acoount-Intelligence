@@ -27,6 +27,8 @@ what reaches the composite; a dimension weighted 0 for this objective is still
 a number the seller sees, which is the point of showing all seven.
 """
 
+import math
+
 RELEVANCE = "relevance"
 IMPACT = "impact"
 BRAND_RECALL = "brand_recall"
@@ -126,6 +128,16 @@ SCORE_BANDS = (
 # scale, and it is recorded so nobody mistakes it for a score.
 PAD_SCORE = 50.0
 
+# How much of an evaluation may be the pad and still publish a total. T21 pads
+# "a dimension the model never returned", singular; it was applied to however
+# many were missing, so an answer with NO dimensions was padded seven times and
+# published as 50, "Average" - a score with nothing of the model's in it. Up to
+# two pads, carrying less than half the total's weight, still read as "the AI's
+# score with a gap"; beyond that there is no total, and the seller is told the
+# scoring was incomplete.
+MAX_PADDED_DIMENSIONS = 2
+MAX_PADDED_WEIGHT = 0.5
+
 # The one problem `pad_missing` may substitute for. Named rather than spelled
 # twice, because the pad is keyed off this exact string.
 MISSING_DETAIL = "missing"
@@ -197,8 +209,34 @@ def weight_of(objective: str, dimension: str) -> float:
     return formula_for(objective).get(dimension, 0.0)
 
 
-def pad_missing(valid: dict, problems: list) -> tuple[dict, list, list]:
+def merge_attempts(first_valid: dict, first_problems: list,
+                   retry_valid: dict, retry_problems: list) -> tuple[dict, list]:
+    """(dimensions, problems) from two answers to the same question.
+
+    The correction round trip exists to fill gaps, so it may only add. It used
+    to REPLACE: a first answer with six good scores and one missing, followed by
+    a retry that returned none, left nothing - and seven pads. A dimension valid
+    in the first answer keeps that score (the rest of the evaluation - phrases,
+    summary - came with it); one valid only in the retry is taken from there;
+    one valid in neither stays a problem, described as the retry described it.
+    """
+    dimensions = {**(retry_valid or {}), **(first_valid or {})}
+    problems, seen = [], set()
+    for problem in list(retry_problems or []) + list(first_problems or []):
+        dimension = str(problem).partition(": ")[0]
+        if dimension in dimensions or dimension in seen:
+            continue
+        seen.add(dimension)
+        problems.append(problem)
+    return dimensions, problems
+
+
+def pad_missing(valid: dict, problems: list, objective: str = "") -> tuple[dict, list, list]:
     """T21: pad a dimension the model never gave us, and say which.
+
+    Nothing is padded when the pads would be more than `MAX_PADDED_DIMENSIONS`
+    or - given the objective - would carry `MAX_PADDED_WEIGHT` or more of the
+    total: the problems are returned as they were and no total publishes.
 
     Called after the correction round trip, not instead of it. Returns
     (dimensions, padded, remaining_problems) - `padded` names every dimension
@@ -220,6 +258,9 @@ def pad_missing(valid: dict, problems: list) -> tuple[dict, list, list]:
             padded.append(dimension)
         else:
             remaining.append(problem)
+    weight = sum(weight_of(objective, d) for d in padded) if objective else 0.0
+    if len(padded) > MAX_PADDED_DIMENSIONS or weight >= MAX_PADDED_WEIGHT:
+        return dict(valid or {}), [], list(problems or [])
     return dimensions, padded, remaining
 
 
@@ -300,6 +341,9 @@ def validate_dimensions(raw: dict, objective: str):
             except (TypeError, ValueError):
                 problems.append("%s: not numeric (%r)" % (dimension, value))
                 continue
+        if math.isnan(value):     # "nan" parses as a float and fails no comparison
+            problems.append("%s: not numeric (%r)" % (dimension, value))
+            continue
         if value < SCORE_MIN or value > SCORE_MAX:
             problems.append("%s: %g outside %d-%d"
                             % (dimension, value, SCORE_MIN, SCORE_MAX))
