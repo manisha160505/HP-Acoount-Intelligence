@@ -319,12 +319,26 @@ class EvaluatorSources:
         """
         return HP_FACT_CORPUS if normalize_hp_product(text) else ACCOUNT_CORPUS
 
-    def verify_claim(self, text, label="claim"):
+    def _draft_holds(self, token: str, urls=False) -> bool:
+        if self._draft_corpus is None:
+            self._draft_corpus = corpus_from_texts([self.draft])
+        missing = (self._draft_corpus.unsourced_urls(token) if urls
+                   else self._draft_corpus.unsourced_numbers(token))
+        return not missing
+
+    def verify_claim(self, text, label="claim", draft_ok=False):
         """Check one claim against the single source that has authority over it.
 
         Returns a verdict dict. `not_checkable` is an honest answer and is used
         whenever the claim carries nothing deterministically checkable - it is
         reported as such rather than being quietly upgraded to supported.
+
+        `draft_ok` is for text that COMMENTS on the draft rather than making a
+        claim of its own - the simulated reaction. "Someone in this role would
+        want proof behind the 40% claim" repeats the seller's figure in order to
+        question it; it asserts nothing, so a figure or link the draft itself
+        contains is not held against it. Never set for the draft's own phrases
+        or for a rewrite: there the draft is the thing being checked.
         """
         claim = _text(text)
         if not claim:
@@ -339,14 +353,14 @@ class EvaluatorSources:
             hit = SUPERLATIVE_RE.search(claim)
             if hit:
                 checked.append("superlative")
-                reasons.append("superlative claim %r is not permitted in %s "
-                               "(guardrail 2)" % (hit.group(0), self.country.title()))
+                reasons.append("superlative claim %r is not permitted in %s"
+                               % (hit.group(0), self.country.title()))
         if self.competitor_claims_blocked:
             hit = COMPETITOR_RE.search(claim)
             if hit:
                 checked.append("competitor")
                 reasons.append("naming %s is a competitor comparison claim, not "
-                               "permitted in %s (guardrails 3-4)"
+                               "permitted in %s"
                                % (hit.group(0), self.country.title()))
         # A restriction does not short-circuit the rest. One sentence can carry
         # both a blocked superlative and an unsourced figure, and a seller
@@ -373,6 +387,8 @@ class EvaluatorSources:
             checked.append("numbers")
             left = [n for n in numbers if not self._offered_holds(claim, n, hp_claim)]
             via_offered = via_offered or len(left) < len(numbers)
+            if draft_ok:
+                left = [n for n in left if not self._draft_holds(n)]
             if left:
                 reasons.append("%s not found in %s: %s"
                                % ("figure" if len(set(left)) == 1 else "figures",
@@ -387,6 +403,8 @@ class EvaluatorSources:
             left = [u for u in urls
                     if not self._offered_holds(claim, u, hp_claim, urls=True)]
             via_offered = via_offered or len(left) < len(urls)
+            if draft_ok:
+                left = [u for u in left if not self._draft_holds(u, urls=True)]
             if left:
                 reasons.append("link not found in %s: %s"
                                % (where, ", ".join(sorted(set(left)))))
@@ -396,8 +414,8 @@ class EvaluatorSources:
         # not what stands behind it.
         if routed == HP_FACT_CORPUS and not self.hp_available and not via_offered:
             checked.append("hp_corpus")
-            reasons.append("no approved HP fact corpus exists for this account, "
-                           "so an HP capability claim cannot be verified")
+            reasons.append("there are no approved HP facts on file for this "
+                           "account, so this HP claim can't be checked")
 
         if restricted:
             verdict = VERDICT_RESTRICTED

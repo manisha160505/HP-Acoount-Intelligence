@@ -387,7 +387,7 @@ class TestT20TheRewriteIsGated:
         """The gate the specification puts on Step R itself."""
         import inspect
         source = inspect.getsource(E.rewrite_message)
-        assert "select at least one recommendation" in source
+        assert "Select at least one suggested change" in source
 
 
 # --- T21 --------------------------------------------------------------------

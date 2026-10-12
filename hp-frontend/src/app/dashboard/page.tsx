@@ -778,6 +778,20 @@ export default function UserDashboardPage() {
   const [rewriteError, setRewriteError] = useState<string | null>(null);
   const [stimulusText, setStimulusText] = useState<string>('');
   const [copiedRewrite, setCopiedRewrite] = useState<boolean>(false);
+  const [evalOptionsError, setEvalOptionsError] = useState<string | null>(null);
+  // An evaluation belongs to the account it was made for. Left in place across
+  // an account switch it showed account A's scores and ticks under account B,
+  // and Rewrite then failed with "no evaluation found".
+  useEffect(() => {
+    setEvaluation(null);
+    setSelectedRecs([]);
+    setRewriteError(null);
+    setEvalError(null);
+    setStimulusText('');
+    setSelectedPersonaId('');
+    setEvalHistory([]);
+    setEvalOptions(null);
+  }, [selectedAccountId]);
   const [evaluatorStep, setEvaluatorStep] = useState<string>('inputs');
 
   // Content Messaging
@@ -852,17 +866,25 @@ export default function UserDashboardPage() {
   useEffect(() => {
     if (activeFeatureKey !== 'message_evaluator' || !selectedAccountId) return;
     let cancelled = false;
+    // Two requests, not one Promise.all: a history failure used to take the
+    // dropdowns down with it, and either failure left them silently empty.
+    setEvalOptionsError(null);
     (async () => {
       try {
-        const [opts, hist] = await Promise.all([
-          api.get<any>(`/accounts/${selectedAccountId}/widgets/message_evaluator/options`),
-          api.get<any>(`/accounts/${selectedAccountId}/widgets/message_evaluator/history`),
-        ]);
-        if (cancelled) return;
-        setEvalOptions(opts.data);
-        setEvalHistory(hist.data?.evaluations || []);
+        const opts = await api.get<any>(`/accounts/${selectedAccountId}/widgets/message_evaluator/options`);
+        if (!cancelled) setEvalOptions(opts.data);
       } catch {
-        if (!cancelled) setEvalOptions({ objectives: [], formats: [], personas: [], modes: ['LITE', 'DEEP'] });
+        if (cancelled) return;
+        setEvalOptions({ objectives: [], formats: [], personas: [], modes: ['LITE', 'DEEP'] });
+        setEvalOptionsError("The persona, objective and format lists couldn't be loaded. Refresh the page to try again.");
+      }
+    })();
+    (async () => {
+      try {
+        const hist = await api.get<any>(`/accounts/${selectedAccountId}/widgets/message_evaluator/history`);
+        if (!cancelled) setEvalHistory(hist.data?.evaluations || []);
+      } catch {
+        /* past evaluations are a convenience; the evaluator works without them */
       }
     })();
     return () => { cancelled = true; };
@@ -5486,10 +5508,29 @@ export default function UserDashboardPage() {
                   const canEvaluate = !!selectedPersonaId && !!selectedObjective
                     && !!selectedFormat && stimulusText.trim().length > 0;
 
+                  // The model is called up to three times for an evaluation and five
+                  // for a rewrite. There was no limit in the browser at all, so a slow
+                  // run sat on "Evaluating..." indefinitely. The server keeps going
+                  // after this fires and stores what it finishes - hence the wording.
+                  const EVALUATOR_TIMEOUT_MS = 240000;
+                  const evaluatorErrorText = (err: any, fallback: string) =>
+                    err?.code === 'ECONNABORTED'
+                      ? 'This is taking longer than expected. It may still finish - look under Previous evaluations in a minute, or try again.'
+                      : (err?.response?.data?.detail || err?.message || fallback);
+
+                  const refreshHistory = async () => {
+                    try {
+                      const hist = await api.get<any>(`/accounts/${selectedAccountId}/widgets/message_evaluator/history`);
+                      setEvalHistory(hist.data?.evaluations || []);
+                    } catch { /* the list is a convenience */ }
+                  };
+
                   const runEvaluation = async () => {
                     if (!selectedAccountId || !canEvaluate) return;
                     setIsEvaluating(true);
                     setEvalError(null);
+                    // An error from the last rewrite belongs to the last evaluation.
+                    setRewriteError(null);
                     try {
                       const res = await api.post<any>(
                         `/accounts/${selectedAccountId}/widgets/message_evaluator/evaluate`,
@@ -5499,17 +5540,24 @@ export default function UserDashboardPage() {
                           format: selectedFormat,
                           message: stimulusText,
                           mode: evaluatorMode,
-                        }
+                        },
+                        { timeout: EVALUATOR_TIMEOUT_MS }
                       );
                       setEvaluation(res.data);
                       setSelectedRecs([]);
                       setEvaluatorStep('scores');
+                      refreshHistory();
                     } catch (err: any) {
-                      setEvalError(err?.response?.data?.detail || err?.message || 'Evaluation failed.');
+                      setEvalError(evaluatorErrorText(err, 'Evaluation failed.'));
                     } finally {
                       setIsEvaluating(false);
                     }
                   };
+
+                  // The message was edited after it was evaluated: the scores, the
+                  // suggestions and Rewrite all still describe the OLD text.
+                  const evaluationOutdated = !!evaluation
+                    && (evaluation.message_text || '').trim() !== stimulusText.trim();
 
                   const runRewrite = async () => {
                     if (!selectedAccountId || !evaluation?.fingerprint || selectedRecs.length === 0) return;
@@ -5518,11 +5566,16 @@ export default function UserDashboardPage() {
                     try {
                       const res = await api.post<any>(
                         `/accounts/${selectedAccountId}/widgets/message_evaluator/rewrite`,
-                        { fingerprint: evaluation.fingerprint, selected_recommendations: selectedRecs }
+                        { fingerprint: evaluation.fingerprint, selected_recommendations: selectedRecs },
+                        { timeout: EVALUATOR_TIMEOUT_MS }
                       );
                       setEvaluation(res.data);
                     } catch (err: any) {
-                      setRewriteError(err?.response?.data?.detail || err?.message || 'Rewrite failed.');
+                      setRewriteError(evaluatorErrorText(err, 'Rewrite failed.'));
+                      // The server has cleared the stored rewrite; so must the page.
+                      // The previous rewrite used to stay on screen under the error,
+                      // with Copy and "Evaluate the rewrite" still working on it.
+                      setEvaluation((prev: any) => (prev ? { ...prev, rewrite: null } : prev));
                     } finally {
                       setIsRewriting(false);
                     }
@@ -5534,12 +5587,21 @@ export default function UserDashboardPage() {
                       const res = await api.get<any>(
                         `/accounts/${selectedAccountId}/widgets/message_evaluator/evaluation/${fingerprint}`);
                       setStimulusText(res.data?.message_text || '');
-                      setSelectedPersonaId(res.data?.persona_contact_id || '');
+                      // A persona this account no longer offers (an older record) is
+                      // left unselected rather than pointing at a blank screen.
+                      const known = personas.some((p: any) => p.persona_id === res.data?.persona_contact_id);
+                      setSelectedPersonaId(known ? res.data.persona_contact_id : '');
                       setSelectedObjective(res.data?.objective || '');
                       setSelectedFormat(res.data?.format || '');
+                      if (res.data?.mode) setEvaluatorMode(res.data.mode);
                       setEvaluation(res.data);
+                      // Ticks and errors belong to the evaluation that was on screen.
+                      setSelectedRecs([]);
+                      setRewriteError(null);
+                      setEvalError(null);
+                      setEvaluatorStep('scores');
                     } catch {
-                      /* the list came from the server; a failure here is not worth a banner */
+                      setEvalError("That evaluation couldn't be opened. Try again.");
                     }
                   };
 
@@ -5598,8 +5660,10 @@ export default function UserDashboardPage() {
                         </div>
                         {evaluation && (
                           <div className="pl-12">
-                            <span className={`inline-block rounded-full border px-3 py-1 text-xs font-semibold ${scoreBadge(evaluation.composite)}`}>
-                              V{evaluation.version}: {evaluation.composite_available ? evaluation.composite : '—'}
+                            <span
+                              title={`Evaluation ${evaluation.version} for this persona on this account. ${evaluation.composite_available ? `Overall score ${evaluation.composite} out of 100.` : 'No overall score.'}`}
+                              className={`inline-block rounded-full border px-3 py-1 text-xs font-semibold ${scoreBadge(evaluation.composite)}`}>
+                              Evaluation {evaluation.version} &middot; {evaluation.composite_available ? `score ${evaluation.composite}` : 'no overall score'}
                             </span>
                           </div>
                         )}
@@ -5635,6 +5699,56 @@ export default function UserDashboardPage() {
                           {evalError}
                         </div>
                       )}
+
+                      {evalOptionsError && (
+                        <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs font-semibold text-rose-700">
+                          {evalOptionsError}
+                        </div>
+                      )}
+
+                      {/* What is wrong with this evaluation, said once and plainly. Every
+                          one of these used to read "No signal observed" in the place the
+                          missing thing would have been, which told the seller nothing. */}
+                      {evaluation && evaluatorStep !== 'inputs' && (() => {
+                        const notes: string[] = [];
+                        if (evaluation.ai_available === false) {
+                          notes.push('AI scoring was unavailable when this message was evaluated, so it has no scores yet.');
+                        } else if ((evaluation.dimension_problems || []).length > 0) {
+                          notes.push('AI scoring was incomplete, so there is no overall score. The scores that did come back are shown.');
+                        }
+                        if ((evaluation.dimensions_padded || []).length > 0) {
+                          notes.push(`The AI returned no score for ${evaluation.dimensions_padded.map((d: string) => MESSAGE_LABELS[d] || d.replace(/_/g, ' ')).join(', ')}. It is counted as 50 in the overall score.`);
+                        }
+                        if (evaluation.mode === 'DEEP' && evaluation.ai_available !== false
+                          && !evaluation.reaction && (evaluation.reaction_withheld || []).length > 0) {
+                          notes.push("A simulated reaction couldn't be produced for this message.");
+                        }
+                        const retryable = evaluation.ai_available === false
+                          || (evaluation.dimension_problems || []).length > 0;
+                        if (evaluationOutdated) {
+                          return (
+                            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-semibold text-amber-800 flex items-center justify-between gap-3">
+                              <span>You&apos;ve changed the message since this evaluation. The scores and suggestions below are for the earlier text.</span>
+                              <button type="button" onClick={runEvaluation} disabled={isEvaluating || !canEvaluate}
+                                className="shrink-0 rounded-lg bg-amber-600 px-3 py-1.5 text-white disabled:opacity-50">
+                                {isEvaluating ? 'Evaluating…' : 'Evaluate again'}
+                              </button>
+                            </div>
+                          );
+                        }
+                        if (notes.length === 0) return null;
+                        return (
+                          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-semibold text-amber-800 flex items-center justify-between gap-3">
+                            <span>{notes.join(' ')}</span>
+                            {retryable && (
+                              <button type="button" onClick={runEvaluation} disabled={isEvaluating || !canEvaluate}
+                                className="shrink-0 rounded-lg bg-amber-600 px-3 py-1.5 text-white disabled:opacity-50">
+                                {isEvaluating ? 'Evaluating…' : 'Try again'}
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })()}
 
                       {!evalOptions && (
                         <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-6 text-center text-xs font-semibold text-slate-500">
@@ -6004,20 +6118,24 @@ export default function UserDashboardPage() {
                                   return (
                                     <div key={k} className="space-y-1">
                                       <div className="flex items-center gap-3">
-                                      <span className="text-xs font-medium text-slate-600 w-28 text-right capitalize">
-                                        {k.replace(/_/g, ' ')}
+                                      <span className="text-xs font-medium text-slate-600 w-28 text-right">
+                                        {MESSAGE_LABELS[k] || k.replace(/_/g, ' ')}
                                       </span>
                                       <div className="flex-1 bg-slate-100 rounded-full h-4 overflow-hidden">
                                         <div
                                           className={`as-grow ${padded ? 'bg-slate-300' : scoreColor(v)} h-full rounded-full transition-all duration-500`}
-                                          style={{ width: `${padded ? 0 : v}%`, ['--as-d' as string]: `${growDelay(dimIdx)}ms` }}
+                                          style={{ width: `${v}%`, ['--as-d' as string]: `${growDelay(dimIdx)}ms` }}
                                         />
                                       </div>
                                       <span className="text-[11px] font-semibold text-slate-700 w-8 text-right">
-                                        {padded ? null : <CountUpText text={v} delay={growDelay(dimIdx)} />}
+                                        <CountUpText text={v} delay={growDelay(dimIdx)} />
                                       </span>
-                                      <span className="text-[10px] text-slate-400 w-24">
-                                        {padded ? NO_SIGNAL : scoreLabel(v)}
+                                      {/* The bar used to be drawn empty and labelled "No signal
+                                          observed" while 50 was still counted in the total and
+                                          printed in the sum beside it. It is shown as counted. */}
+                                      <span className="text-[10px] text-slate-400 w-24"
+                                        title={padded ? 'The AI returned no score for this, so 50 is used in the overall score.' : undefined}>
+                                        {padded ? 'not scored · 50 used' : scoreLabel(v)}
                                       </span>
                                       {/* A dimension outside this objective's formula is scored
                                           and shown and weighs nothing - say so, or a low bar
@@ -6248,9 +6366,6 @@ export default function UserDashboardPage() {
                                           </td>
                                           <td className="py-2 px-2 text-slate-700 italic">
                                             &ldquo;{p.chunk}&rdquo;
-                                            <span className="block text-[10px] text-slate-400 not-italic">
-                                              chars {p.start}&ndash;{p.end}
-                                            </span>
                                           </td>
                                           <td className="py-2 px-2 text-center">
                                             <span className={`inline-block rounded-full border px-2 py-0.5 text-[10px] font-semibold ${verdictChip(p.verdict)}`}>
@@ -6352,7 +6467,8 @@ export default function UserDashboardPage() {
                               <button
                                 type="button"
                                 onClick={() => { setEvaluatorStep('rewrite'); runRewrite(); }}
-                                disabled={selectedRecs.length === 0 || isRewriting}
+                                disabled={selectedRecs.length === 0 || isRewriting || evaluationOutdated}
+                                title={evaluationOutdated ? 'The message has changed since it was evaluated. Evaluate it again first.' : undefined}
                                 className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                               >
                                 <Sparkles className="w-4 h-4" />
@@ -6520,6 +6636,10 @@ export default function UserDashboardPage() {
                                     setStimulusText(evaluation.rewrite.plain_text || '');
                                     setEvaluation(null);
                                     setSelectedRecs([]);
+                                    // The rewrite is now the message being evaluated; an
+                                    // error from making it has nothing more to say.
+                                    setRewriteError(null);
+                                    setEvalError(null);
                                     setEvaluatorStep('confirm');
                                   }}
                                   className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors"

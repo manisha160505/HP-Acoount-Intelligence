@@ -677,6 +677,24 @@ def _ask(system, user):
         return {}
 
 
+def _reusable(stored: dict, text: str) -> bool:
+    """Whether a stored evaluation may answer this request without the model.
+
+    The store is a cache of GOOD answers. It also held the bad ones: an
+    evaluation made while the model was down ("AI scoring was unavailable"), or
+    one with no total, was stored under the same fingerprint and handed back on
+    every resubmission - so the seller could never get that message scored until
+    they changed a word of it. Those are scored again.
+
+    The text is compared too. The fingerprint ignores whitespace, so a draft
+    re-pasted with different line breaks matched a record whose character
+    offsets and structure checks describe the old layout.
+    """
+    return (stored.get("ai_available") is not False
+            and stored.get("composite") is not None
+            and stored.get("message_text") == text)
+
+
 def evaluate_message(account_id, persona_id, objective, fmt, message,
                      mode=MODE_DEEP, dataset_records=None):
     """Evaluate one draft. Returns the stored evaluation document."""
@@ -684,7 +702,7 @@ def evaluate_message(account_id, persona_id, objective, fmt, message,
 
     text = str(message or "").strip()
     if not text:
-        raise EvaluationError("the message is empty")
+        raise EvaluationError("Enter a message to evaluate.")
 
     objective = S.normalize_objective(objective)
     # The narrow reader: only the three formats the seller can pick. A stored
@@ -702,8 +720,11 @@ def evaluate_message(account_id, persona_id, objective, fmt, message,
     # quietly treated as missing context.
     persona = storage.resolve_persona(account_id, persona_id)
     if persona is None:
-        raise EvaluationError(
-            "persona %r does not belong to this account" % persona_id)
+        # Logged with the id; the seller is told what to do, not shown an id.
+        logger.warning("evaluator: persona %r does not belong to this account %s",
+                       persona_id, account_id)
+        raise EvaluationError("That persona isn't available for this account. "
+                              "Pick one from the list and try again.")
 
     # The scorer's version travels with the request, so a prompt change or a
     # corrected persona card re-scores rather than serving the old answer.
@@ -711,9 +732,13 @@ def evaluate_message(account_id, persona_id, objective, fmt, message,
         text, persona_id, objective, fmt, mode,
         logic_version="p%d-pack%d" % (PROMPT_VERSION, bp.PERSONA_PACK_VERSION))
     cached = storage.find_existing(account_id, fingerprint)
-    if cached:
+    if cached and _reusable(cached, text):
         logger.info("evaluator: returning stored evaluation for %s", fingerprint[:12])
         return cached
+    if cached:
+        logger.info("evaluator: stored evaluation %s is not reusable (ai_available=%s, "
+                    "composite=%s) - scoring again", fingerprint[:12],
+                    cached.get("ai_available"), cached.get("composite"))
 
     sources = SRC.build(db, account_id, persona, text, dataset_records)
     checks = F.structure_checks(text, fmt)
@@ -757,12 +782,23 @@ def evaluate_message(account_id, persona_id, objective, fmt, message,
         if retry:
             retry_scores, retry_rationales = S.split_dimension_payload(
                 retry.get("dimensions"))
-            dimensions, problems = S.validate_dimensions(retry_scores, objective)
-            if not problems:
+            retry_valid, retry_problems = S.validate_dimensions(retry_scores, objective)
+            if not retry_problems:
+                # A complete answer: take it whole, so the phrases and summary
+                # are the ones written alongside these scores.
+                dimensions, problems = retry_valid, []
                 raw, rationales = retry, retry_rationales
             else:
-                audit.append({"stage": "dimensions_retry", "problems": problems,
-                              "raw": retry.get("dimensions")})
+                # An incomplete one may only ADD to what the first answer gave.
+                # It used to replace it - a retry with no dimensions at all
+                # discarded six good scores - see `S.merge_attempts`.
+                dimensions, problems = S.merge_attempts(
+                    dimensions, problems, retry_valid, retry_problems)
+                rationales = {**retry_rationales, **rationales}
+                if not raw:
+                    raw = retry
+                audit.append({"stage": "dimensions_retry", "problems": retry_problems,
+                              "remaining": problems, "raw": retry.get("dimensions")})
 
     # T21: a dimension still missing after the round trip is padded to 50 and
     # the pad is recorded, so the request succeeds and the seller can still see
@@ -771,7 +807,7 @@ def evaluate_message(account_id, persona_id, objective, fmt, message,
     # failure and stays a problem.
     padded = []
     if problems and raw:
-        dimensions, padded, problems = S.pad_missing(dimensions, problems)
+        dimensions, padded, problems = S.pad_missing(dimensions, problems, objective)
         if padded:
             logger.warning("evaluator: padded %s to %g for account %s",
                            ", ".join(padded), S.PAD_SCORE, account_id)
@@ -834,14 +870,35 @@ def evaluate_message(account_id, persona_id, objective, fmt, message,
     reaction, reaction_faults = (None, [])
     if mode == MODE_DEEP:
         reaction, reaction_faults = verify.guard_reaction(raw.get("reaction"), sources)
-        if reaction_faults:
+        if reaction_faults and raw:
+            # Scores and chunks each get one correction round trip; the reaction
+            # had none, so one stray name or figure meant Deep mode showed no
+            # reaction at all. One retry, with the fault named, for this part only.
+            audit.append({"stage": "reaction", "withheld": reaction_faults})
+            logger.warning("evaluator: reaction withheld (%s), retrying once",
+                           "; ".join(reaction_faults))
+            retry = _ask(SYSTEM_PROMPT, prompt
+                         + "\n\nYour simulated reaction was rejected:\n"
+                         + "\n".join("  - %s" % f for f in reaction_faults)
+                         + "\nWrite it again. Describe how someone in this ROLE would "
+                         "read the message; never name the contact or say what they "
+                         "think; add no figure, link or claim that is not in the "
+                         "message or the context. You may quote the message's own "
+                         'words. Return JSON with one key: {"reaction": "..."}')
+            if retry:
+                reaction, reaction_faults = verify.guard_reaction(
+                    retry.get("reaction"), sources)
+                if reaction_faults:
+                    audit.append({"stage": "reaction_retry", "withheld": reaction_faults})
+        elif reaction_faults:
             audit.append({"stage": "reaction", "withheld": reaction_faults})
 
     ai_failed = not raw
     evaluation = {
         "account_id": account_id,
         "persona_contact_id": persona_id,
-        "version": storage.next_version(account_id, persona_id),
+        "version": ((cached or {}).get("version")
+                    or storage.next_version(account_id, persona_id)),
         "fingerprint": fingerprint,
         "prompt_version": PROMPT_VERSION,
         "objective": objective,
@@ -853,7 +910,10 @@ def evaluate_message(account_id, persona_id, objective, fmt, message,
         "persona": {k: persona.get(k) for k in
                     ("persona_id", "name", "title", "department", "seniority_band",
                      "influence_type", "is_named_person")},
-        "dimensions": dimensions if not problems else {},
+        # Every score that IS valid is shown, even when another is not and no
+        # total can publish. Hiding six good bars because the seventh came back
+        # as "excellent" told the seller nothing was scored.
+        "dimensions": dimensions,
         "dimension_problems": problems,
         "dimensions_padded": padded,
         # Spec Section 4.10 and the tuning row: "Each scored 0-100 with a
@@ -913,9 +973,20 @@ def evaluate_message(account_id, persona_id, objective, fmt, message,
 
     if ai_failed:
         # The coded checks are still a real result and still publish.
-        evaluation["summary"] = ("AI scoring was unavailable. The checks below are "
-                                 "computed in code and are unaffected.")
+        evaluation["summary"] = ("AI scoring was unavailable just now, so this message "
+                                 "has no scores yet. The format checks are unaffected. "
+                                 "Evaluate again to score it.")
         logger.warning("evaluator: publishing coded checks only for account %s", account_id)
+    elif problems:
+        # Some scores came back and some did not; there is no total, and the
+        # seller is told which rather than shown a row of blanks.
+        missing = sorted({S.DIMENSION_LABELS.get(str(p).partition(": ")[0],
+                                                 str(p).partition(": ")[0])
+                          for p in problems})
+        evaluation["summary"] = (
+            "AI scoring was incomplete: no usable score came back for %s, so there is "
+            "no overall score. Evaluate again to score it. %s"
+            % (", ".join(missing), evaluation["summary"] or "")).strip()
 
     return storage.save(evaluation)
 
@@ -1087,7 +1158,8 @@ def rewrite_message(account_id, fingerprint, selected_recommendations,
     db = get_db()
     evaluation = storage.find_existing(account_id, fingerprint)
     if not evaluation:
-        raise EvaluationError("no evaluation found for this account and message")
+        raise EvaluationError("This evaluation couldn't be found for this account. "
+                              "Evaluate the message again, then rewrite.")
 
     fmt = evaluation["format"]
     original = evaluation["message_text"]
@@ -1101,7 +1173,7 @@ def rewrite_message(account_id, fingerprint, selected_recommendations,
 
     selected = [str(s) for s in (selected_recommendations or []) if str(s).strip()]
     if not selected:
-        raise EvaluationError("select at least one recommendation to apply")
+        raise EvaluationError("Select at least one suggested change to apply.")
 
     prompt = "\n".join([
         "OBJECTIVE: %s" % evaluation["objective_label"],

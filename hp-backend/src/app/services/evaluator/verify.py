@@ -67,6 +67,11 @@ _ATTRIBUTION_RE = re.compile(
 # Third-person singular framing of a specific human ("he will", "she would").
 _PERSONAL_PRONOUN_RE = re.compile(r"\b(he|she|his|her|him|hers)\b", re.I)
 
+# A quoted span, straight or curly, and any quote character at all - the
+# second catches an unbalanced one, which cannot be matched to the draft.
+_QUOTED_RE = re.compile(r'["“]([^"“”]*)["”]')
+_QUOTE_CHARS_RE = re.compile(r'["“”]')
+
 SIMULATION_LABEL = ("Simulated reaction - how someone in this role would likely "
                     "read this message. Not a statement about the real contact.")
 
@@ -230,7 +235,15 @@ def guard_reaction(raw_reaction, sources):
                       "how a role would read the message, not what this person "
                       "thinks" % hit.group(0))
 
-    if '"' in text or "“" in text:
+    # A quotation is a problem when it puts words in the contact's mouth. The
+    # reaction quoting the SELLER'S OWN DRAFT back - 'would find "cut device
+    # downtime" too generic' - is commentary on the message, and withholding it
+    # threw away the most useful kind of reaction. So a quoted span is allowed
+    # when it is the draft's own wording, and only then.
+    draft = _text(sources.draft).lower()
+    quoted = [q.strip() for q in _QUOTED_RE.findall(text)]
+    stray = len(_QUOTE_CHARS_RE.findall(text)) != 2 * len(quoted)
+    if stray or any(_text(q).lower().strip(" .,;:!?") not in draft for q in quoted if q):
         faults.append("contains a quotation; the contact has not said anything")
 
     # Every factual assertion in the reaction is checked like any other claim.
@@ -240,7 +253,9 @@ def guard_reaction(raw_reaction, sources):
                 and not SUPERLATIVE_RE.search(sentence) \
                 and not COMPETITOR_RE.search(sentence):
             continue
-        check = sources.verify_claim(sentence, "reaction")
+        # `draft_ok`: a reaction that repeats a figure from the draft is
+        # questioning it, not asserting it.
+        check = sources.verify_claim(sentence, "reaction", draft_ok=True)
         if check["verdict"] in (VERDICT_UNSUPPORTED, VERDICT_RESTRICTED):
             unsupported.append(check)
     if unsupported:
