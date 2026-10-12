@@ -1686,7 +1686,10 @@ export default function UserDashboardPage() {
                               <span className="text-lg font-semibold text-slate-900 leading-tight">
                                 <CountUpText text={metricsData?.employee_count} />
                               </span>
+                              {/* Commented out for the demo (12 Oct): "Band · Firmographics" is our own
+                                  term, not one to put in front of the client.
                               <span className="text-[10px] text-slate-400">Band · Firmographics</span>
+                              */}
                             </div>
                           )}
 
@@ -1696,7 +1699,10 @@ export default function UserDashboardPage() {
                               <span className="text-lg font-semibold text-slate-900 leading-tight">
                                 <CountUpText text={metricsData?.revenue} />
                               </span>
+                              {/* Commented out for the demo (12 Oct): "Band · Firmographics" is our own
+                                  term, not one to put in front of the client.
                               <span className="text-[10px] text-slate-400">Band · Firmographics</span>
+                              */}
                             </div>
                           )}
 
@@ -1708,7 +1714,27 @@ export default function UserDashboardPage() {
                               <span className="text-lg font-semibold text-slate-900 leading-tight">
                                 <CountUpText text={hiringData.job_postings} />
                               </span>
-                              <span className="text-[10px] text-slate-400">Count · Job postings</span>
+                              {/* The postings behind the count are listed under Hiring
+                                  Signals, which sits in the Intent section - so the line
+                                  leads there unless that section is hidden for the account. */}
+                              {hiddenFeatures.has('intent_demand_signals') ? (
+                                <span className="text-[10px] text-slate-400">Count · Job postings</span>
+                              ) : (
+                                <div className="flex items-center gap-1 text-[10px] text-slate-400">
+                                  <span>Count ·</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setActiveFeatureKey('intent_demand_signals');
+                                      window.setTimeout(() => document.getElementById('hiring-signals')
+                                        ?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 150);
+                                    }}
+                                    className="text-slate-500 hover:text-hp-navy hover:underline transition"
+                                  >
+                                    Job postings
+                                  </button>
+                                </div>
+                              )}
                             </div>
                           )}
 
@@ -1770,6 +1796,22 @@ export default function UserDashboardPage() {
                                   <p className="text-[10px] text-slate-500 mt-2">
                                     {m.filing_label}{m.page ? `, page ${m.page}` : ''}
                                   </p>
+                                  {/* Our own copy of the filing, opened at the page the
+                                      figure was read from. `source` is "<file>.pdf p.15";
+                                      the file name is what the backend serves by. */}
+                                  {(() => {
+                                    const href = filingHref(sourceLinkCtx, {
+                                      filing_label: String(m.source || '').replace(/\s+p\.\d+.*$/, ''),
+                                      page: m.page,
+                                    });
+                                    return href ? (
+                                      <a href={href} target="_blank" rel="noopener noreferrer"
+                                        className="mt-2 inline-flex items-center gap-1 text-[10px] font-semibold text-hp-navy hover:underline">
+                                        Open filing{m.page ? `, page ${m.page}` : ''}
+                                        <ExternalLink className="w-2.5 h-2.5 flex-shrink-0" />
+                                      </a>
+                                    ) : null;
+                                  })()}
                                   {/* fallback_note / entity_note are gap reasons; they live in
                                       the backend (data_gaps) and are not shown to the client. */}
                                   {m.quote && (
@@ -3702,7 +3744,7 @@ export default function UserDashboardPage() {
                         const cardList: any[] = cards?.cards || [];
 
                         return (
-                          <div className="space-y-6 pt-6 border-t border-slate-200">
+                          <div id="hiring-signals" className="scroll-mt-6 space-y-6 pt-6 border-t border-slate-200">
 
                             {/* Header */}
                             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
