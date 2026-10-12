@@ -6228,7 +6228,10 @@ export default function UserDashboardPage() {
                                   <tbody>
                                     {(evaluation.phrases || []).map((p: any, i: number) => {
                                       const rec = p.suggestion || p.comment;
-                                      const selectable = p.verdict !== 'Keep' && !!rec;
+                                      // `actionable === false`: the suggestion carried a figure no
+                                      // source holds, so a rewrite applying it would be refused -
+                                      // it is shown as a note but cannot be ticked.
+                                      const selectable = p.verdict !== 'Keep' && !!rec && p.actionable !== false;
                                       return (
                                         <tr key={i} className="border-b border-slate-100 align-top">
                                           <td className="py-2 px-2 text-center">

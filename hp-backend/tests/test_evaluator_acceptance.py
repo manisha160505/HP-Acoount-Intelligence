@@ -350,6 +350,9 @@ class TestT20TheRewriteIsGated:
             self.hp = TestT20TheRewriteIsGated._Corpus(
                 ["HP Care Pack Services covers multi-year support."])
 
+        def offered_items(self):
+            return []
+
     def _faults(self, rewrite):
         return E._rewrite_gate_faults(rewrite, self.CARD, self.PERSONA, [],
                                       self._Sources(), "The estate is due a refresh.",

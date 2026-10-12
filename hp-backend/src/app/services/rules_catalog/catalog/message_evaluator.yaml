@@ -734,7 +734,7 @@ rules:
     - Create the request fingerprint
     result: The first 16 characters of the fingerprint.
     verified: true
-    expect: b39fda835a469451
+    expect: 2545a890213fb05c
   sources:
   - hp-backend/src/app/services/evaluator/storage.py:message_fingerprint
   - hp-backend/src/app/services/evaluator/storage.py:save
@@ -893,13 +893,76 @@ rules:
   constants:
   - label: Instruction version
     ref: py:app.services.evaluator.evaluate:PROMPT_VERSION
-    stated: 6
+    stated: 7
   sources:
   - hp-backend/src/app/services/evaluator/evaluate.py:SYSTEM_PROMPT
   - hp-backend/src/app/services/evaluator/evaluate.py:_user_prompt
   - hp-backend/src/app/core/llm.py:generate_gpt4o_json_completion
   confidence: high
   internal: true
+- id: me_rewrite_offered_proof
+  parent: me_rewrite
+  name: HP proof the evaluation showed may be cited
+  kind: guardrail
+  summary: A rewrite may quote the HP case studies and approved positioning that its own evaluation showed.
+  purpose: A rewrite may quote the HP case studies and approved positioning that its own evaluation showed.
+  logic: 'When a message is scored, the AI is shown the HP case studies and the approved HP positioning
+    for the HP lines the message names, and recommends citing them. Those same items are given to the
+    rewrite, with their exact wording, and count as a source when the rewrite is checked. A figure taken
+    from one of them is accepted only where the sentence is about that item: it names the customer, shares
+    its wording, or is a statement about an HP line. A figure about the account itself is still checked
+    against the account''s own data only, and a figure found in none of the sources is still refused.
+    The length of a meeting being asked for (''a 15-minute call'') is a request, not a claim, and is not
+    checked as a figure; a duration that is a claim (''cut downtime by 30 minutes'') still is (12 Oct).'
+  output: A rewrite that may carry a recommended case study's own figures.
+  sources:
+  - hp-backend/src/app/services/evaluator/sources.py:OFFERED_PROOF
+  - hp-backend/src/app/services/evaluator/evaluate.py:_offered_block
+  confidence: high
+- id: me_rewrite_shorten
+  parent: me_rewrite
+  name: A rewrite that is only too long is shortened
+  kind: guardrail
+  summary: When length is the only thing wrong, the same rewrite is asked for again, shorter.
+  purpose: When length is the only thing wrong, the same rewrite is asked for again, shorter.
+  logic: 'A format with a character limit (LinkedIn: 300) tells the AI how many characters its own text may
+    use, after the greeting and the blank lines between parts are taken off. If the rewrite is still too
+    long, it is told how long each part was and how much to cut. If length is then the only fault left,
+    the same rewrite is asked for shorter, up to two more times, keeping every applied change and adding
+    nothing. Each shorter version goes through all the same checks. Text is never cut off automatically.
+    If it still does not fit, the seller is told the shortest length reached and asked to select fewer
+    changes (12 Oct).'
+  constants:
+  - label: Extra shorten attempts
+    ref: py:app.services.evaluator.evaluate:SHORTEN_PASSES
+    stated: 2
+  output: A rewrite within the limit, or a clear request to select fewer changes.
+  sources:
+  - hp-backend/src/app/services/evaluator/formats.py:body_budget
+  - hp-backend/src/app/services/evaluator/formats.py:shorten_prompt
+  - hp-backend/src/app/services/evaluator/evaluate.py:rewrite_message
+  confidence: high
+- id: me_suggestions_traceable
+  parent: null
+  name: Suggestions the rewrite could not apply are not offered
+  kind: guardrail
+  summary: A suggested change is offered for ticking only if a rewrite could apply it.
+  purpose: A suggested change is offered for ticking only if a rewrite could apply it.
+  logic: 'A suggestion that contains a figure found in none of the sources (the account''s data, the
+    approved HP facts, the message itself, or the HP case studies and positioning shown) is not offered
+    for ticking, because a rewrite that used it would be refused. The phrase, its rating and its reason
+    are still shown. For a format with a character limit, the AI is told the limit and the message''s
+    current length; when the message is at 85% of the limit or more, it is told to suggest replacing or
+    cutting words rather than adding them (12 Oct).'
+  constants:
+  - label: Share of the limit that counts as near it
+    ref: py:app.services.evaluator.evaluate:NEAR_CAP_SHARE
+    stated: 0.85
+  output: A list of changes the seller can tick, each one a rewrite can apply.
+  sources:
+  - hp-backend/src/app/services/evaluator/evaluate.py:_withhold_untraceable
+  - hp-backend/src/app/services/evaluator/evaluate.py:_cap_block
+  confidence: high
 undetermined:
 - The seven dimension scores, their rationales, the chunk verdicts/comments, the summary and the reaction
   are model-judged; Python only validates, caps (severe failures) and combines them. There is no fixed
