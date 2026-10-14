@@ -198,10 +198,10 @@ FILINGS_SUPPLEMENT_FILES = [
     # account) - only its rows that add a document; row_id "N29-n". Built by
     # scripts/filings_new_to_supplement.py.
     FILINGS_INDEX_FILE.parent / "filings_client_supplement_2026-09-29.csv",
-    # The 11 Oct data-gaps sheet ("Filings to request" tab): the documents behind
-    # the links the client added for 24 accounts with no filings; row_id
-    # "N1011-n".
-    FILINGS_INDEX_FILE.parent / "filings_client_supplement_2026-10-11.csv",
+    # The client's own PDFs (14 Oct) for the 24 accounts of the 11 Oct
+    # data-gaps sheet, one row per PDF in their filings template; row_id
+    # "N1014-n". The PDFs sit in pdfs/_manual, keyed by their Drive URL.
+    FILINGS_INDEX_FILE.parent / "filings_client_supplement_2026-10-14.csv",
 ]
 # Client rulings that settle a filings row whose territory and domain disagree.
 # Checked before the conflict rule in assign_filings(), so a ruled row is filed

@@ -59,8 +59,9 @@ FILINGS_CSV = FILINGS_DIR / "filings 1.csv"
 FILINGS_SUPPLEMENTS = [FILINGS_DIR / "filings_client_supplement_2026-09-26.csv",
                       # 29 Sep list, see scripts/filings_new_to_supplement.py
                       FILINGS_DIR / "filings_client_supplement_2026-09-29.csv",
-                      # 11 Oct data-gaps sheet, "Filings to request" tab
-                      FILINGS_DIR / "filings_client_supplement_2026-10-11.csv"]
+                      # 14 Oct: the client's own PDFs for the 24 data-gaps accounts
+                      # (they replace the 11 Oct list, fetched from the client's links)
+                      FILINGS_DIR / "filings_client_supplement_2026-10-14.csv"]
 UNPLACED_DIR = FILINGS_DIR / "pdfs" / "_unplaced"
 # PDFs downloaded by hand in a browser, for hosts that refuse scripts
 # (bankmandiri.co.id hangs; investor.cimbniaga.co.id serves an AWS WAF
@@ -202,10 +203,10 @@ def decide_placement(rows: list[dict]) -> None:
     for row in rows:
         slug = row["split_account"]
         rule = FILINGS_OVERRIDES.get((slug, row["company"]))
-        # The 11 Oct data-gaps sheet names each account's document itself, so
-        # it settles what a hold above was waiting on (Charoen Pokphand's held
-        # row is Central Pattana's; its 11 Oct row is CP Foods' One Report).
-        if row.get("row_id", "").startswith("N1011-"):
+        # The client's 14 Oct PDFs name each account's document itself, so
+        # they settle what a hold above was waiting on (Charoen Pokphand's held
+        # row is Central Pattana's; its 14 Oct rows are CP Foods' reports).
+        if row.get("row_id", "").startswith("N1014-"):
             rule = None
         if not slug:
             row.update(account_slug="", placement="unassigned",
