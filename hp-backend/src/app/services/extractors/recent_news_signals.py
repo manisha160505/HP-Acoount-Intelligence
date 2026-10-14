@@ -56,6 +56,11 @@ def _s(row: dict, *keys: str) -> str:
     return ""
 
 
+def _http(url: str) -> str:
+    """url if it is an http(s) link, else blank."""
+    return url if url.lower().startswith(("http://", "https://")) else ""
+
+
 # ==============================================================================
 # CATEGORY MAPPING
 # Two source vocabularies -> the six display categories. Mapping tables only;
@@ -338,8 +343,10 @@ def _normalize_signals(gnews: list[dict], events: list[dict]) -> list[dict]:
             "_event_dt": event_dt,
             "category": NEWS_EVENTS_CATEGORY_MAP.get(raw_cat, DEFAULT_CATEGORY),
             "raw_category": raw_cat,
-            # news_events carries no URL column - never fabricate one.
-            "source_url": "",
+            # PredictLeads leaves source_url blank; the client fills it with a
+            # verified article link (14 Oct replacement-URL sheet). A blank or
+            # non-http value stays unlinked - never fabricate one.
+            "source_url": _http(_s(row, "source_url")),
             "source_publisher": "",
             "source_confidence": _s(row, "confidence"),
             "coverage_depth": "",

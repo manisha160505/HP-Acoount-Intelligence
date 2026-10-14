@@ -2657,7 +2657,8 @@ export default function UserDashboardPage() {
                                       The link prefers resolved_source_url: a google_news
                                       row's own URL is a news.google.com redirect, and the
                                       backend unwraps it to the publisher. A news_events
-                                      signal carries no URL by design and stays unlinked. */}
+                                      signal is linked only when its row carries a
+                                      source_url (the client's replacement links). */}
                                   {(() => {
                                     const acctId = sourceLinkCtx;
                                     const primaryHref = sourceHref(s, acctId);
