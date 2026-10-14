@@ -58,7 +58,9 @@ FILINGS_CSV = FILINGS_DIR / "filings 1.csv"
 # split reads the same list - FILINGS_SUPPLEMENT_FILES in split_account_data).
 FILINGS_SUPPLEMENTS = [FILINGS_DIR / "filings_client_supplement_2026-09-26.csv",
                       # 29 Sep list, see scripts/filings_new_to_supplement.py
-                      FILINGS_DIR / "filings_client_supplement_2026-09-29.csv"]
+                      FILINGS_DIR / "filings_client_supplement_2026-09-29.csv",
+                      # 11 Oct data-gaps sheet, "Filings to request" tab
+                      FILINGS_DIR / "filings_client_supplement_2026-10-11.csv"]
 UNPLACED_DIR = FILINGS_DIR / "pdfs" / "_unplaced"
 # PDFs downloaded by hand in a browser, for hosts that refuse scripts
 # (bankmandiri.co.id hangs; investor.cimbniaga.co.id serves an AWS WAF
@@ -66,6 +68,10 @@ UNPLACED_DIR = FILINGS_DIR / "pdfs" / "_unplaced"
 # segment of that URL, "+" and %-escapes decoded - which is what a browser
 # saves it as. Checked before the network, after files reused from last run.
 MANUAL_DIR = FILINGS_DIR / "pdfs" / "_manual"
+# A browser download whose URL has no .pdf name to match on (PSE EDGE's
+# downloadFile.do?file_id=, insage's loadpdf.aspx?sFileName=) is listed here:
+# columns document_url,file - file being a name in MANUAL_DIR.
+MANUAL_URLS = MANUAL_DIR / "_by_url.csv"
 REPORT_CSV = SPLIT_DIR / "_filings_download_report.csv"
 SUMMARY_JSON = SPLIT_DIR / "_filings_download_summary.json"
 ENCODING = "utf-8-sig"
@@ -196,6 +202,11 @@ def decide_placement(rows: list[dict]) -> None:
     for row in rows:
         slug = row["split_account"]
         rule = FILINGS_OVERRIDES.get((slug, row["company"]))
+        # The 11 Oct data-gaps sheet names each account's document itself, so
+        # it settles what a hold above was waiting on (Charoen Pokphand's held
+        # row is Central Pattana's; its 11 Oct row is CP Foods' One Report).
+        if row.get("row_id", "").startswith("N1011-"):
+            rule = None
         if not slug:
             row.update(account_slug="", placement="unassigned",
                        placement_reason=row["split_reason"])
@@ -345,8 +356,16 @@ def manual(url: str) -> dict | None:
     """A temp copy of a hand-downloaded PDF for url from MANUAL_DIR, else None."""
     if not MANUAL_DIR.exists():
         return None
-    names = {up.unquote_plus(seg) for seg in up.urlparse(url).path.split("/")
-             if seg.lower().endswith(".pdf")}
+    segs = [up.unquote_plus(seg) for seg in up.urlparse(url).path.split("/")]
+    names = {seg for seg in segs if seg.lower().endswith(".pdf")}
+    # SEC EDGAR serves filings as .htm, which the upload refuses: one printed
+    # to PDF in a browser is saved under the same stem (kt-20251231.pdf).
+    names |= {seg.rsplit(".", 1)[0] + ".pdf" for seg in segs
+              if seg.lower().endswith((".htm", ".html"))}
+    if MANUAL_URLS.exists():
+        with open(MANUAL_URLS, encoding=ENCODING, newline="") as fh:
+            names |= {r["file"] for r in csv.DictReader(fh)
+                      if r["document_url"].strip() == url.strip()}
     for name in names:
         path = MANUAL_DIR / name
         if path.is_file():

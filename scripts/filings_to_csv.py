@@ -131,11 +131,13 @@ CURRENCY_RULES = [
     (r"đồng|\bdong\b|\bVND\b|VNĐ", "VND"),
     (r"人民币|人民幣|\bRMB\b|\bCNY\b|元", "CNY"),
     (r"\bRM\b|RM(?=['’\d\s])|\bringgit\b|\bMYR\b", "MYR"),
-    (r"\bPHP\b|\bPhP\b|₱|\bpesos?\b", "PHP"),
+    # Philippine statements print the peso sign as "P=" (a P with two bars).
+    (r"\bPHP\b|\bPhP\b|₱|\bpesos?\b|(?<![A-Za-z])P=", "PHP"),
     (r"\bINR\b|₹|\brupees?\b|\bRs\.?", "INR"),
     (r"\bNZD\b|NZ\$", "NZD"),
     (r"\bAUD\b|A\$|\bAustralian dollars?\b", "AUD"),
-    (r"\bSGD\b|S\$|\bSingapore dollars?\b", "SGD"),
+    # Not the "S$" inside "US$": BHP's "US$M" was read as Singapore dollars.
+    (r"\bSGD\b|(?<![A-Za-z])S\$|\bSingapore dollars?\b", "SGD"),
     (r"\bHKD\b|HK\$", "HKD"),
     (r"\bTWD\b|NT\$", "TWD"),
     (r"\bUSD\b|US\$|\bU\.?S\.? dollars?\b", "USD"),
@@ -144,6 +146,7 @@ CURRENCY_RULES = [
 ]
 # A bare "$": the dollar of the filing's country, flagged.
 COUNTRY_DOLLAR = {"AU": "AUD", "NZ": "NZD", "SG": "SGD", "HK": "HKD", "US": "USD", "TW": "TWD"}
+DOLLARS = set(COUNTRY_DOLLAR.values())
 HEADCOUNT_UNIT_RE = re.compile(r"person|people|employee|staff|headcount|member|number|名|人|คน|명|orang|"
                                r"người|fte",
                                re.I)
@@ -389,7 +392,8 @@ def parse_unit(unit: str, page_text: str, currency_hint: str, country: str,
     for pattern, code in CURRENCY_RULES:
         if re.search(pattern, text, re.I):
             return code, scale, scale_name, ""
-    if "$" in text and country in COUNTRY_DOLLAR:
+    # "$" or the word ("Dollars in Millions": BNZ's disclosure statement).
+    if ("$" in text or re.search(r"\bdollars?\b", text, re.I)) and country in COUNTRY_DOLLAR:
         return COUNTRY_DOLLAR[country], scale, scale_name, "currency_from_country"
     # A caption with a scale and no currency ("in millions"): the reporting
     # currency the model named, only if the page itself names that currency.
@@ -397,6 +401,14 @@ def parse_unit(unit: str, page_text: str, currency_hint: str, country: str,
     for pattern, code in CURRENCY_RULES:
         if code == hint and re.search(pattern, page_text, re.I):
             return code, scale, scale_name, "currency_from_page"
+    # A dollar the page writes only as "$" (SEC 10-K / 10-Q tables: "in
+    # millions" over "$ 34,534"): the dollar currency the model named, when
+    # the page prints a bare "$" and names no other dollar.
+    if hint in DOLLARS and re.search(r"(?<![A-Za-z])\$", page_text):
+        named = {code for pattern, code in CURRENCY_RULES
+                 if code in DOLLARS and re.search(pattern, page_text, re.I)}
+        if not named - {hint}:
+            return hint, scale, scale_name, "currency_from_page_dollar_sign"
     return "", scale, scale_name, ""
 
 
