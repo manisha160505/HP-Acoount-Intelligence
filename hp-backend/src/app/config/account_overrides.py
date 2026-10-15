@@ -34,7 +34,7 @@ _CONFIG_DIR = os.path.dirname(os.path.abspath(__file__))
 _BACKEND_ROOT = os.path.abspath(os.path.join(_CONFIG_DIR, "..", "..", ".."))
 CONFIG_PATH = os.path.join(_BACKEND_ROOT, "config", "account_overrides.yaml")
 
-_FIELDS = {"hidden_features", "hide_parent_company"}
+_FIELDS = {"hidden_features", "hide_parent_company", "display_domain"}
 
 
 class AccountOverridesError(RuntimeError):
@@ -71,11 +71,16 @@ def _parse(config) -> dict:
         if not isinstance(parent, bool):
             raise AccountOverridesError(
                 "account overrides: %r hide_parent_company must be true or false" % name)
+        domain = entry.get("display_domain", "")
+        if not isinstance(domain, str) or ("display_domain" in entry and not domain.strip()):
+            raise AccountOverridesError(
+                "account overrides: %r display_domain must be a non-empty string" % name)
         key = _key(name)
         if key in out:
             raise AccountOverridesError("account overrides: %r is listed twice" % name)
         out[key] = {"hidden_features": frozenset(f.strip().lower() for f in hidden),
-                    "hide_parent_company": parent}
+                    "hide_parent_company": parent,
+                    "display_domain": domain.strip()}
     return out
 
 
@@ -107,6 +112,11 @@ def hides_parent(account_name) -> bool:
     return bool((OVERRIDES.get(_key(account_name)) or {}).get("hide_parent_company"))
 
 
+def display_domain(account_name) -> str:
+    """The domain the dashboard shows instead of the vendor's; '' when none."""
+    return (OVERRIDES.get(_key(account_name)) or {}).get("display_domain", "")
+
+
 PARENT_WIDGET = "exec_summary_card"
 
 
@@ -117,8 +127,18 @@ def masked(account_name, widget_key: str, data: dict) -> dict:
     YAML takes effect at once - no regeneration of 220 Executive Dashboards. The
     extractor applies the same rule when it generates, so stored data agrees
     once it next runs. Returns a copy when anything is removed, never mutates.
+
+    `display_domain` is the exception: read time only. The stored card keeps
+    the vendor domain, which the Executive priorities use to tell the
+    company's own site from other sources (client, 15 Oct: change the domain
+    on the dashboard, leave the data).
     """
-    if widget_key == PARENT_WIDGET and hides_parent(account_name) and (
+    if widget_key != PARENT_WIDGET:
+        return data
+    domain = display_domain(account_name)
+    if domain and data.get("domain") != domain:
+        data = {**data, "domain": domain}
+    if hides_parent(account_name) and (
             data.get("parent_company") or data.get("parent_company_source")
             or data.get("parent_companies")):
         # `parent_companies` is the list the card shows (an account can have
