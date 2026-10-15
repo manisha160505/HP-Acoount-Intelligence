@@ -2231,7 +2231,13 @@ export default function UserDashboardPage() {
                   const scoreWeights: Record<string, number> = scoreData.score_weights || {};
                   const isScored = Object.keys(scores).length > 0;
 
-                  const signals: any[] = feedData?.signals || [];
+                  // Only signals with a source link that opens (client, 15 Oct).
+                  // The backend drops unlinked ones; this also drops a card whose
+                  // every link the link check found dead, and covers a feed
+                  // generated before that rule.
+                  const signals: any[] = (feedData?.signals || []).filter((s: any) =>
+                    sourceHref(s, sourceLinkCtx)
+                    || (s.supporting_sources || []).some((x: any) => sourceHref(x, sourceLinkCtx)));
 
                   // Northstar thresholds: Critical 8+, High 6+, Medium 4+, else Low.
                   const urgencyOf = (score: number | null) => {
@@ -2635,7 +2641,9 @@ export default function UserDashboardPage() {
                                       The link prefers resolved_source_url: a google_news
                                       row's own URL is a news.google.com redirect, and the
                                       backend unwraps it to the publisher. A news_events
-                                      signal carries no URL by design and stays unlinked. */}
+                                      signal is linked only when its row carries a
+                                      source_url (the client's replacement links), and
+                                      a signal with no link is not shown at all. */}
                                   {(() => {
                                     const acctId = sourceLinkCtx;
                                     const primaryHref = sourceHref(s, acctId);
