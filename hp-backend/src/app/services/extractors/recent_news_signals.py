@@ -435,6 +435,24 @@ def _dedupe(signals: list[dict]) -> list[dict]:
     return groups
 
 
+def _split_unlinked(groups: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Live Signals shows only signals with a source link (client, 15 Oct).
+
+    Applied after `_dedupe`, so a card is kept when any article merged into it
+    links somewhere - `_dedupe` already lifts that link onto the card. Returns
+    (linked, rejected-with-reason). Run before scoring, so an unlinked signal
+    costs no model call and never takes a place under the cap."""
+    linked, rejected = [], []
+    for g in groups:
+        urls = [g.get("source_url")] + [x.get("url") for x in g.get("supporting_sources") or []]
+        if any(_http(str(u or "").strip()) for u in urls):
+            linked.append(g)
+        else:
+            rejected.append({**{k: v for k, v in g.items() if not k.startswith("_")},
+                             "gate_reject_reason": "no source link"})
+    return linked, rejected
+
+
 def _account_context(account_id: str) -> str:
     """What else is known about this account, for the Implication for HP.
 
@@ -1160,12 +1178,14 @@ def extract_recent_news_signals(account_id: str) -> list[dict]:
     translated = _translate_signals(passed, db)
     if translated:
         pipeline.step("translation", "%d signal(s) shown in English" % translated)
-    deduped = _dedupe(passed)
+    deduped, unlinked = _split_unlinked(_dedupe(passed))
+    rejected += unlinked
 
     pipeline.step("datasets", "", google_news=len(gnews or []),
                   news_events=len(events or []), normalised=len(raw))
-    pipeline.step("gate", "%d of %d passed, %d deduped away"
-                  % (len(passed), len(raw), len(passed) - len(deduped)))
+    pipeline.step("gate", "%d of %d passed, %d deduped away, %d without a source link"
+                  % (len(passed), len(raw),
+                     len(passed) - len(deduped) - len(unlinked), len(unlinked)))
     for reason, n in Counter(r.get("gate_reject_reason") or "unspecified"
                              for r in rejected).most_common():
         pipeline.step("rejected", "%3d  %s" % (n, reason))
