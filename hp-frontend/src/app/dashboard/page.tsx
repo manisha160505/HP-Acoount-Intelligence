@@ -318,6 +318,11 @@ function ProofPoint({ proof }: { proof: any }) {
 // code - flip it back to true and every empty state returns exactly as it was.
 const SHOW_EMPTY_STATE_NOTICES = false;
 
+// The "Data as of" date in the header, on every feature (client, 15 Oct: one
+// date, Sept 2026, for all features for now). One constant so the next data
+// refresh is a one-line change.
+const DATA_AS_OF_LABEL = 'Sept 2026';
+
 // A widget that never generated stores the reason on its payload. Showing it
 // turns an unexplained empty panel into something a reader can act on - most
 // often a missing OPENAI_API_KEY, or source files absent from this machine.
@@ -1324,49 +1329,22 @@ export default function UserDashboardPage() {
               })()}
             </div>
 
-            {/* When the ACCOUNT DATA was loaded - not when this page was opened,
-                and not when the widget was last generated. Recommendation
-                Tuning Logic section E: a dashboard opened months after
-                ingestion must still name the snapshot it is reasoning from.
+            {/* The snapshot the account data reasons from, so a dashboard
+                opened months later still names it (Recommendation Tuning
+                Logic section E).
 
-                Executive Dashboard only (client, 6 Oct). This header is shared
-                by every feature, so the tag used to sit beside each feature's
-                own dating - next to Intent's "as of", which is Bombora's
-                observation date, not an ingestion date - and the two read as a
-                contradiction. One tag, in one place, measuring one thing.
-
-                The value itself never varied by feature: the API attaches the
-                same account-wide map to every widget. This changes where it is
-                shown, not what it says. */}
-            {activeFeatureKey === 'executive_dashboard' && (() => {
-              // Client ruling, 24 Sep: show the retrieval date of the data
-              // itself, not one rolled-up date for the account. Each dataset
-              // is named with the day it was loaded; where every pipeline
-              // arrived together this collapses back to a single date.
-              const spread: Record<string, string> =
-                widgets.find(w => w.data_as_of)?.data_as_of?.by_dataset || {};
-              const days = Array.from(new Set(Object.values(spread))).sort();
-              if (!days.length) return null;
-              const byDay = days.map(day => ({
-                day,
-                sets: Object.keys(spread).filter(k => spread[k] === day).sort(),
-              }));
-              return (
-                <span
-                  className="text-[10px] font-mono text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 whitespace-nowrap"
-                  title={byDay
-                    .map(({ day, sets }) => `${day}: ${sets.join(', ')}`)
-                    .join('\n')}
-                >
-                  {days.length === 1
-                    ? `Data as of ${days[0]}`
-                    : `Data as of ${days[0]} – ${days[days.length - 1]}`}
-                  {days.length > 1 && (
-                    <span className="text-slate-400"> &middot; {Object.keys(spread).length} sources</span>
-                  )}
-                </span>
-              );
-            })()}
+                On every feature, with one stated date (client, 15 Oct: Sahaj
+                wants it on every feature, Sept 2026 for all for now). It was
+                the Executive Dashboard only from 6 Oct, because it read as
+                contradicting Intent's "as of" chip; that chip has since been
+                removed. The per-dataset load dates it showed before are no
+                longer shown - they are October upload days and would contradict
+                the stated date. */}
+            {selectedAccount && (
+              <span className="text-[10px] font-mono text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 whitespace-nowrap">
+                Data as of: {DATA_AS_OF_LABEL}
+              </span>
+            )}
 
             {/* My Activity: the seller's own usage. Admin activity is not
                 tracked, so there is nothing to show an admin here. */}
