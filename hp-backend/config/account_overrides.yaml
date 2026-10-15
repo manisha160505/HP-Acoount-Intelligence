@@ -14,6 +14,10 @@
 #   hide_parent_company  true = no "Parent Company" line on the Executive
 #                        Dashboard (and none in Strategy Chat). Regenerate the
 #                        Executive Dashboard after changing it.
+#   display_domain       the domain (or URL) the Executive Dashboard shows for
+#                        the account in place of the vendor's. Display only:
+#                        the stored data keeps the vendor domain. Takes effect
+#                        on restart, no regeneration.
 #
 # An unknown field or feature key stops the backend at startup, on purpose: a
 # typo here would otherwise silently show what the client asked us to hide.
@@ -59,6 +63,9 @@ accounts:
     hidden_features: [stakeholder_map]
   "SHISEIDO COMPANY, LIMITED - JP":
     hide_parent_company: true
+  # Client, 15 Oct: show this as the domain; the data stays as it is.
+  "STANLEY ELECTRIC CO.,LTD. - JP":
+    display_domain: "https://www.stanley-electric.com/jp/"
   "SUMITOMO MITSUI FINANCIAL GROUP, INC. - JP":
     hide_parent_company: true
   "T&D HOLDINGS, INC. - JP":

@@ -58,6 +58,8 @@ def test_names_match_ignoring_case_and_spacing():
     ({"accounts": {"A": {"hide_parent": True}}}, "unknown field"),
     ({"accounts": {"A": {"hidden_features": "intent_demand_signals"}}}, "list of feature keys"),
     ({"accounts": {"A": {"hide_parent_company": "yes"}}}, "true or false"),
+    ({"accounts": {"A": {"display_domain": ["a.com"]}}}, "non-empty string"),
+    ({"accounts": {"A": {"display_domain": " "}}}, "non-empty string"),
     ({"accounts": {"A": {}, " a ": {}}}, "listed twice"),
     ({"accounts": ["A"]}, "not a mapping"),
 ])
@@ -106,6 +108,38 @@ def test_other_accounts_and_widgets_are_untouched(bhp_hidden):
     data = {"parent_company": "wesfarmers"}
     assert ao.masked("ACCENTURE INC - PH", "exec_summary_card", data) is data
     assert ao.masked("BHP BILLITON - AU", "exec_key_metrics", data) is data
+
+
+# --- the domain, shown on read (client, 15 Oct) -------------------------------
+
+STANLEY = "STANLEY ELECTRIC CO.,LTD. - JP"
+STANLEY_URL = "https://www.stanley-electric.com/jp/"
+
+
+def test_the_stanley_domain_is_in_the_shipped_file():
+    assert ao.display_domain(STANLEY) == STANLEY_URL
+    assert ao.display_domain("ACCENTURE INC - PH") == ""
+
+
+def test_the_domain_is_replaced_on_read_only():
+    data = {"company_name": STANLEY, "domain": "stanley.co.jp", "parent_company": "x"}
+    out = ao.masked(STANLEY, "exec_summary_card", data)
+    assert out["domain"] == STANLEY_URL and out["parent_company"] == "x"
+    assert data["domain"] == "stanley.co.jp", "the stored copy is never mutated"
+
+
+def test_the_domain_leaves_other_accounts_and_widgets_alone():
+    data = {"domain": "stanley.co.jp"}
+    assert ao.masked("ACCENTURE INC - PH", "exec_summary_card", data) is data
+    assert ao.masked(STANLEY, "exec_key_metrics", data) is data
+
+
+def test_a_domain_and_a_hidden_parent_apply_together(monkeypatch):
+    monkeypatch.setattr(ao, "OVERRIDES", ao._parse({"accounts": {
+        "A": {"hide_parent_company": True, "display_domain": "a.com"}}}))
+    out = ao.masked("A", "exec_summary_card",
+                    {"domain": "b.com", "parent_company": "p", "parent_companies": ["p"]})
+    assert out["domain"] == "a.com" and out["parent_companies"] == []
 
 
 # --- the API ------------------------------------------------------------------
