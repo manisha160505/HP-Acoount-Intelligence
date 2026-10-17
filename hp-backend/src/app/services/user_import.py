@@ -28,11 +28,16 @@ from app.services import user_audit
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 # Sheet name -> our account name, for the rows whose names differ from ours.
-# Checked by hand against the 220 split folders on 17 Oct 2026.
+# Checked by hand against the 220 split folders on 17 Oct 2026. Used only when
+# the sheet name has no exact match, so a database that does carry the sheet's
+# name still matches it directly.
 ALIASES = {
     "BUNNINGS GROUP LIMITED- AU": "BUNNINGS GROUP LIMITED",
     "INDONESIA FINANCIAL GROUP - ID": "INDONESIA FINANCIAL GROUP - CATEGORY1 - PARTIAL - ID",
     "TIARA MARGA TRAKINDO - ID": "PT TIARA MARGA TRAKINDO - CATEGORY1 - PARTIAL - ID",
+    # Production keeps the pilot account under its original name (17 Oct load:
+    # this row was the one unmatched; its seller was given Astra by hand).
+    "PT ASTRA INTERNATIONAL TBK - ID": "Astra",
 }
 
 ACTOR = {"id": None, "email": "load_sna_users script"}

@@ -176,3 +176,26 @@ def test_apply_needs_the_super_admin_password_the_first_time(db, sheet):
     with pytest.raises(ValueError, match="SUPER_ADMIN_PASSWORD"):
         user_import.apply(db, plan, pw, super_admin_email="bridge@gmail.com",
                           super_admin_password=None)
+
+
+def test_the_astra_row_matches_the_pilot_account_name(tmp_path):
+    d = FakeDb()
+    d["accounts"].insert_one({"name": "Astra", "status": "active"})
+    sheet = user_import.read_sheet(_sheet(tmp_path, [
+        ("ID", 109424, "PT ASTRA INTERNATIONAL TBK - ID", "seller.six@example.com", "-"),
+    ], []))
+    plan = user_import.build_plan(sheet, _accounts(d), {})
+    assert plan.unmatched == []
+    assert plan.matched == [("PT ASTRA INTERNATIONAL TBK - ID", "Astra", "alias")]
+    assert _by_email(plan)["seller.six@example.com"].account_names == ["Astra"]
+
+
+def test_an_exact_name_still_wins_over_the_alias(tmp_path):
+    d = FakeDb()
+    for name in ("Astra", "PT ASTRA INTERNATIONAL TBK - ID"):
+        d["accounts"].insert_one({"name": name, "status": "active"})
+    sheet = user_import.read_sheet(_sheet(tmp_path, [
+        ("ID", 109424, "PT ASTRA INTERNATIONAL TBK - ID", "seller.six@example.com", "-"),
+    ], []))
+    plan = user_import.build_plan(sheet, _accounts(d), {})
+    assert plan.matched == [("PT ASTRA INTERNATIONAL TBK - ID", "PT ASTRA INTERNATIONAL TBK - ID", "exact")]

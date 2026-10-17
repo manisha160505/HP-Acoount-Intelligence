@@ -5,10 +5,13 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useAuth } from '@/providers/AuthProvider';
 import { isAdminRole } from '@/types/auth';
-import { LogOut, User as UserIcon, Shield, Building2, Users, BarChart3, BookOpen, KeyRound } from 'lucide-react';
+import { LogOut, User as UserIcon, Shield, Building2, Users, BarChart3, BookOpen, KeyRound, LayoutGrid } from 'lucide-react';
 import HpLogo from '@/components/common/HpLogo';
 
 const ADMIN_LINKS = [
+  // The seller view: every account, searchable, each opening its dashboard.
+  // Admins see all 220 here; sellers reach the same page as their home.
+  { href: '/accounts', label: 'Accounts', Icon: LayoutGrid },
   { href: '/admin/platform', label: 'Platform', Icon: Building2 },
   { href: '/admin/users', label: 'Users', Icon: Users },
   { href: '/admin/analytics', label: 'Analytics', Icon: BarChart3 },
