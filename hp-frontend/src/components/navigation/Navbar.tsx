@@ -7,6 +7,7 @@ import { useAuth } from '@/providers/AuthProvider';
 import { isAdminRole } from '@/types/auth';
 import { LogOut, User as UserIcon, Shield, Building2, Users, BarChart3, BookOpen, KeyRound, LayoutGrid } from 'lucide-react';
 import HpLogo from '@/components/common/HpLogo';
+import { AdminTour } from '@/components/tour/AdminTour';
 
 const ADMIN_LINKS = [
   // The seller view: every account, searchable, each opening its dashboard.
@@ -47,7 +48,7 @@ export const Navbar: React.FC = () => {
           </div>
 
           {isAdminRole(user.role) && (
-            <div className="hidden md:flex items-center space-x-1">
+            <div data-tour="admin-nav" className="hidden md:flex items-center space-x-1">
               {ADMIN_LINKS.map(({ href, label, Icon }) => {
                 const active = pathname?.startsWith(href);
                 return (
@@ -80,6 +81,8 @@ export const Navbar: React.FC = () => {
                 )}
               </div>
             </div>
+
+            <AdminTour />
 
             <Link
               href="/change-password"

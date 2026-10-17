@@ -12,6 +12,7 @@ import {
 } from '@/components/analytics/AnalyticsParts';
 import { ParallaxBand } from '@/components/common/motion';
 import { Loader2, AlertCircle, RefreshCw, Users, Activity, LogIn, Eye, Clock } from 'lucide-react';
+import { AdminHelpButton } from '@/components/tour/AdminTour';
 
 type FeatureMeasure = 'users' | 'views' | 'time';
 type CellMeasure = 'views' | 'time';
@@ -120,8 +121,8 @@ export default function AdminAnalyticsPage() {
     <ProtectedRoute allowedRoles={['admin']}>
       <div className="as-page">
       <ParallaxBand>
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-10 pb-20 sm:pt-12 sm:pb-24">
-          <h1 className="as-rise text-2xl sm:text-3xl font-extrabold text-white tracking-tight">Usage Analytics</h1>
+        <div data-tour="admin-analytics-header" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-10 pb-20 sm:pt-12 sm:pb-24">
+          <h1 className="as-rise text-2xl sm:text-3xl font-extrabold text-white tracking-tight">Usage Analytics <AdminHelpButton page="analytics" /></h1>
           <p className="as-rise mt-2 text-sm text-slate-300/90 max-w-2xl" style={{ ['--as-delay' as string]: '70ms' }}>
             Which features sellers use. Admin activity is excluded. Dates are UTC and inclusive.
           </p>
@@ -129,7 +130,7 @@ export default function AdminAnalyticsPage() {
       </ParallaxBand>
 
       <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 -mt-12 sm:-mt-14 pb-12">
-        <div
+        <div data-tour="admin-analytics-range"
           className="as-rise as-glass relative z-10 mb-6 p-3 rounded-2xl flex flex-wrap items-center justify-between gap-2"
           style={{ ['--as-delay' as string]: '120ms' }}
         >
@@ -160,7 +161,7 @@ export default function AdminAnalyticsPage() {
           </div>
         ) : data && (
           <div className={`space-y-6 transition-opacity duration-300 ${isLoading ? 'opacity-60' : ''}`}>
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+            <div data-tour="admin-analytics-tiles" className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
               <StatTile index={0} label="Total users" value={data.totals.total_users} hint="Non-admin users, active or not" Icon={Users}
                 onClick={() => setDrill(d!.total())} />
               <StatTile index={1} label="Active, last 7 days" value={data.totals.active_users_7d} hint="Signed in or opened a feature" Icon={Activity}
@@ -179,7 +180,7 @@ export default function AdminAnalyticsPage() {
               </div>
             )}
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div data-tour="admin-analytics-charts" className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <Card
                 title={featureMeasure === 'users' ? 'Unique users per feature' : featureMeasure === 'views' ? 'Views per feature' : 'Time spent per feature'}
                 subtitle="Every feature is listed; a grey zero means nobody used it in this range. Click a bar to see who."
@@ -230,6 +231,7 @@ export default function AdminAnalyticsPage() {
               </Card>
             </div>
 
+            <div data-tour="admin-analytics-users">
             <Card
               title={cellMeasure === 'views' ? 'Views by user and feature' : 'Time by user and feature'}
               subtitle="In the selected range. A grey 0 is a feature this user did not use; the outlined cell is their top feature."
@@ -244,6 +246,7 @@ export default function AdminAnalyticsPage() {
                 <UserFeatureTable data={data} measure={cellMeasure} />
               )}
             </Card>
+            </div>
           </div>
         )}
       </div>

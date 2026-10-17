@@ -292,16 +292,18 @@ export function Reveal({ children, className = '' }: { children: React.ReactNode
  * page's first card meant to overlap its lower edge (give the content that
  * follows a negative top margin).
  */
-export function PageHero({ title, subtitle, actions, width = 'max-w-7xl', children }: {
+export function PageHero({ title, subtitle, actions, width = 'max-w-7xl', children, tourId }: {
   title: React.ReactNode;
   subtitle?: React.ReactNode;
   actions?: React.ReactNode;
   width?: string;
+  /** A `data-tour` name for the product tour to point at. */
+  tourId?: string;
   children?: React.ReactNode;
 }) {
   return (
     <ParallaxBand>
-      <div className={`${width} mx-auto px-4 sm:px-6 lg:px-8 pt-10 pb-20 sm:pt-12 sm:pb-24`}>
+      <div data-tour={tourId} className={`${width} mx-auto px-4 sm:px-6 lg:px-8 pt-10 pb-20 sm:pt-12 sm:pb-24`}>
         {children}
         <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
           <div className="min-w-0">

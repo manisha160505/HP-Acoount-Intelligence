@@ -647,7 +647,14 @@ export default function UserDashboardPage() {
   const [activeFeatureKey, setActiveFeatureKey] = useState<string>('executive_dashboard');
   // The product tour (client, 17 Oct): runs once, on a user's first visit to
   // the dashboard, and each feature's ? button replays that feature's part.
-  const tour = useTour({ activeFeatureKey, setActiveFeatureKey, onTourDone: markTourCompleted });
+  // Cards can open a screen (an Evaluator step); the handlers are set further
+  // down, where that state is declared.
+  const tourHooks = useRef({ action: (_action: string) => {}, end: () => {} });
+  const tour = useTour({
+    activeFeatureKey, setActiveFeatureKey, onTourDone: markTourCompleted,
+    onCardAction: (action) => tourHooks.current.action(action),
+    onEnd: () => tourHooks.current.end(),
+  });
   
   const [widgets, setWidgets] = useState<WidgetResponse[]>([]);
   const [isLoadingAccounts, setIsLoadingAccounts] = useState(true);
@@ -803,6 +810,29 @@ export default function UserDashboardPage() {
     setEvalOptions(null);
   }, [selectedAccountId]);
   const [evaluatorStep, setEvaluatorStep] = useState<string>('inputs');
+
+  // The tour's Message Evaluator cards open each step - only a step the user
+  // could open themselves right now, so it never runs an evaluation or a
+  // rewrite or touches what they typed - and the step they were on comes back
+  // when the tour ends.
+  const evaluatorStepBeforeTour = useRef<string | null>(null);
+  tourHooks.current = {
+    action: (action: string) => {
+      if (!action.startsWith('evaluator:')) return;
+      const key = action.slice('evaluator:'.length);
+      if (evaluatorStepBeforeTour.current === null) evaluatorStepBeforeTour.current = evaluatorStep;
+      const personaChosen = !!(evalOptions?.personas || []).find((p: any) => p.persona_id === selectedPersonaId);
+      const canOpen = key === 'inputs'
+        || ((key === 'persona' || key === 'confirm') && personaChosen)
+        || (['scores', 'phrases', 'summary'].includes(key) && !!evaluation)
+        || (key === 'rewrite' && !!evaluation?.rewrite);
+      if (canOpen) setEvaluatorStep(key);
+    },
+    end: () => {
+      if (evaluatorStepBeforeTour.current !== null) setEvaluatorStep(evaluatorStepBeforeTour.current);
+      evaluatorStepBeforeTour.current = null;
+    },
+  };
 
   // Content Messaging
   const [expandedPillar, setExpandedPillar] = useState<string | null>(null);
@@ -5701,6 +5731,7 @@ export default function UserDashboardPage() {
                           return (
                             <React.Fragment key={st.key}>
                               <button
+                                data-tour={`evaluator-step-${st.key}`}
                                 type="button"
                                 onClick={() => reachable && setEvaluatorStep(st.key)}
                                 disabled={!reachable}
@@ -5782,7 +5813,7 @@ export default function UserDashboardPage() {
 
                       {/* ------------------------------------------------ STEP A — INPUTS */}
                       {evalOptions && evaluatorStep === 'inputs' && (
-                        <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-5">
+                        <div data-tour="evaluator-panel-inputs" className="bg-white rounded-xl border border-slate-200 p-5 space-y-5">
                           <h3 className="text-sm font-semibold text-slate-800">
                             Step A &mdash; Configure Evaluation
                           </h3>
@@ -5924,7 +5955,7 @@ export default function UserDashboardPage() {
                       {/* ----------------------------------------------- STEP B — PERSONA */}
                       {evalOptions && ['persona', 'confirm'].includes(evaluatorStep) && chosenPersona && (
                         <div className="space-y-4">
-                          <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-5">
+                          <div data-tour="evaluator-panel-persona" className="bg-white rounded-xl border border-slate-200 p-5 space-y-5">
                             <h3 className="text-sm font-semibold text-slate-800 flex items-center gap-2">
                               <User className="w-4 h-4 text-indigo-500" />
                               Persona: {chosenPersona.name || chosenPersona.title}
@@ -6094,7 +6125,7 @@ export default function UserDashboardPage() {
                           </div>
 
                           <div className="flex flex-wrap gap-3">
-                            <button
+                            <button data-tour="evaluator-panel-confirm"
                               type="button"
                               disabled={isEvaluating}
                               onClick={runEvaluation}
@@ -6127,7 +6158,7 @@ export default function UserDashboardPage() {
                               the client sees neutral wording, never a placeholder 50. */}
 
                           {/* Step D - dimension scores */}
-                          <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-4">
+                          <div data-tour="evaluator-panel-scores" className="bg-white rounded-xl border border-slate-200 p-5 space-y-4">
                             <h3 className="text-sm font-semibold text-slate-800">
                               Step D &mdash; Dimension Scores
                             </h3>
@@ -6344,7 +6375,7 @@ export default function UserDashboardPage() {
                           )}
 
                           {/* Step E - phrase table, with the recommendation checkboxes inline. */}
-                          <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-3">
+                          <div data-tour="evaluator-panel-phrases" className="bg-white rounded-xl border border-slate-200 p-5 space-y-3">
                             <h3 className="text-sm font-semibold text-slate-800">
                               Step E &mdash; Phrase-Level Analysis
                             </h3>
@@ -6444,7 +6475,7 @@ export default function UserDashboardPage() {
                           </div>
 
                           {/* Step F - summary */}
-                          <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-4">
+                          <div data-tour="evaluator-panel-summary" className="bg-white rounded-xl border border-slate-200 p-5 space-y-4">
                             <h3 className="text-sm font-semibold text-slate-800">
                               Step F &mdash; Summary
                             </h3>
@@ -6548,7 +6579,7 @@ export default function UserDashboardPage() {
 
                       {/* ------------------------------------------------------- 7. REWRITE */}
                       {evaluation && evaluatorStep === 'rewrite' && (
-                        <div className="space-y-5">
+                        <div data-tour="evaluator-panel-rewrite" className="space-y-5">
                           {isRewriting && (
                             <div className="flex flex-col items-center justify-center py-16 space-y-4">
                               <div className="w-16 h-16 rounded-full border-4 border-slate-200 border-t-indigo-500 animate-spin" />

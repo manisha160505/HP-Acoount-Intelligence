@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ProtectedRoute } from '@/components/common/ProtectedRoute';
 import { PageHero } from '@/components/common/motion';
+import { AdminHelpButton } from '@/components/tour/AdminTour';
 import { useAuth } from '@/providers/AuthProvider';
 import { isAdminRole } from '@/types/auth';
 import api from '@/services/api';
@@ -94,14 +95,16 @@ export default function AdminUsersPage() {
       return true;
     });
   }, [users, query, roleFilter]);
+  // The tour points at the first row whose actions this admin can use.
+  const firstManageableId = shown.find((u) => u.id !== me?.id && canManage(u))?.id;
 
   const sellersWithoutAccounts = users.filter((u) => u.role === 'user' && u.is_active && u.account_ids.length === 0).length;
 
   return (
     <ProtectedRoute allowedRoles={['admin']}>
       <div className="as-page">
-        <PageHero
-          title="Users"
+        <PageHero tourId="admin-users-header"
+          title={<>Users <AdminHelpButton page="users" /></>}
           subtitle="Add people, choose which accounts each seller can open, and reset passwords. Admins see every account."
           actions={
             <>
@@ -115,7 +118,7 @@ export default function AdminUsersPage() {
                   <LogOut className="w-4 h-4 mr-2" /> Sign out everyone
                 </button>
               )}
-              <button type="button" onClick={() => setDialog({ kind: 'create' })}
+              <button data-tour="admin-users-add" type="button" onClick={() => setDialog({ kind: 'create' })}
                       className="inline-flex items-center justify-center px-4 py-2.5 rounded-lg shadow-md text-sm font-bold text-white bg-hp-navy hover:bg-hp-blue transition">
                 <UserPlus className="w-4 h-4 mr-2" /> Add user
               </button>
@@ -137,7 +140,7 @@ export default function AdminUsersPage() {
             </div>
           )}
 
-          <div className="flex gap-1 bg-white rounded-xl border border-gray-200 p-1 w-fit shadow-sm" role="tablist">
+          <div data-tour="admin-users-tabs" className="flex gap-1 bg-white rounded-xl border border-gray-200 p-1 w-fit shadow-sm" role="tablist">
             {(['users', 'activity'] as const).map((t) => (
               <button key={t} type="button" role="tab" aria-selected={tab === t} onClick={() => setTab(t)}
                       className={`px-4 py-1.5 rounded-lg text-xs font-bold transition ${tab === t ? 'bg-hp-navy text-white' : 'text-gray-600 hover:bg-gray-100'}`}>
@@ -149,8 +152,8 @@ export default function AdminUsersPage() {
           {tab === 'activity' ? (
             <AuditLog users={users} />
           ) : (
-            <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
-              <div className="flex flex-col md:flex-row md:items-center gap-3 justify-between px-5 py-3.5 border-b border-gray-200 bg-gray-50">
+            <div data-tour="admin-users-table" className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+              <div data-tour="admin-users-filters" className="flex flex-col md:flex-row md:items-center gap-3 justify-between px-5 py-3.5 border-b border-gray-200 bg-gray-50">
                 <div className="relative md:w-80">
                   <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
                   <input type="search" value={query} onChange={(e) => setQuery(e.target.value)}
@@ -243,7 +246,7 @@ export default function AdminUsersPage() {
                                   {u.role === 'super_admin' ? '—' : 'Super admin only'}
                                 </div>
                               ) : (
-                                <div className="flex items-center justify-end gap-2">
+                                <div data-tour={u.id === firstManageableId ? 'admin-users-actions' : undefined} className="flex items-center justify-end gap-2">
                                   {u.role === 'user' && (
                                     <button type="button" onClick={() => setDialog({ kind: 'accounts', user: u })}
                                             className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-gray-200 text-[11px] font-bold text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition">

@@ -4,6 +4,7 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { ProtectedRoute } from '@/components/common/ProtectedRoute';
 import { PageHero } from '@/components/common/motion';
+import { AdminHelpButton } from '@/components/tour/AdminTour';
 import api from '@/services/api';
 import { CompanyAccount, AccountStatus } from '@/types/account';
 import { 
@@ -270,11 +271,11 @@ export default function ManagePlatformPage() {
   return (
     <ProtectedRoute allowedRoles={['admin']}>
       <div className="as-page">
-      <PageHero
-        title="Manage Platform"
+      <PageHero tourId="admin-platform-header"
+        title={<>Manage Platform <AdminHelpButton page="platform" /></>}
         subtitle="Enterprise account portfolio management & entity status control"
         actions={
-          <button
+          <button data-tour="admin-platform-create"
             type="button"
             onClick={() => {
               setIsModalOpen(true);
@@ -316,7 +317,7 @@ export default function ManagePlatformPage() {
         )}
 
         {/* Search Bar */}
-        <div className="as-glass as-rise relative z-10 p-4 rounded-2xl mb-6 flex items-center gap-3" style={{ ['--as-delay' as string]: '120ms' }}>
+        <div data-tour="admin-platform-search" className="as-glass as-rise relative z-10 p-4 rounded-2xl mb-6 flex items-center gap-3" style={{ ['--as-delay' as string]: '120ms' }}>
           <div className="relative flex-1">
             <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
               <Search className="h-4 w-4 text-gray-400" />
@@ -347,7 +348,7 @@ export default function ManagePlatformPage() {
         </div>
 
         {/* Account Table */}
-        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+        <div data-tour="admin-platform-table" className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
           {isLoading ? (
             <div className="p-12 flex flex-col items-center justify-center space-y-3">
               <Loader2 className="w-8 h-8 text-hp-navy animate-spin" />
@@ -396,7 +397,7 @@ export default function ManagePlatformPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200 text-xs font-medium">
-                  {accounts.map((account) => (
+                  {accounts.map((account, ai) => (
                     <tr key={account.id} className="hover:bg-slate-50/80 transition duration-150">
                       <td className="py-4 px-6 font-semibold text-gray-900">
                         <div className="flex items-center space-x-2.5">
@@ -430,7 +431,7 @@ export default function ManagePlatformPage() {
                       </td>
 
                       <td className="py-4 px-6 text-right space-x-2">
-                        <button
+                        <button data-tour={ai === 0 ? 'admin-platform-manage' : undefined}
                           type="button"
                           onClick={() => router.push(`/admin/accounts/${account.id}`)}
                           className="inline-flex items-center space-x-1 px-3 py-1.5 bg-gray-100 hover:bg-hp-navy hover:text-white text-gray-700 rounded-lg transition text-xs font-bold"
@@ -439,7 +440,7 @@ export default function ManagePlatformPage() {
                           <span>Manage</span>
                         </button>
 
-                        <button
+                        <button data-tour={ai === 0 ? 'admin-platform-hide' : undefined}
                           type="button"
                           disabled={togglingId === account.id}
                           onClick={() => handleStatusToggle(account)}

@@ -20,8 +20,9 @@ interface AuthContextType extends AuthState {
   logout: () => Promise<void>;
   /** Ends every session of this user; they sign in again with the new password. */
   changePassword: (current: string, next: string) => Promise<{ success: boolean; error?: string }>;
-  /** The product tour was finished or closed: do not start it again. */
-  markTourCompleted: () => Promise<void>;
+  /** A product tour - the dashboard's, or the admin pages' - was finished or
+   *  closed: do not start it again. */
+  markTourCompleted: (tour?: 'dashboard' | 'admin') => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -83,12 +84,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const markTourCompleted = useCallback(async () => {
+  const markTourCompleted = useCallback(async (tour: 'dashboard' | 'admin' = 'dashboard') => {
+    const field = tour === 'admin' ? 'admin_tour_completed_at' : 'tour_completed_at';
     // Set here first so the tour does not restart before the server answers.
-    updateSessionUser({ tour_completed_at: new Date().toISOString() });
+    updateSessionUser({ [field]: new Date().toISOString() });
     try {
-      const res = await api.post<{ tour_completed_at: string }>('/auth/me/tour-completed');
-      updateSessionUser({ tour_completed_at: res.data.tour_completed_at });
+      const res = await api.post<{ tour_completed_at: string }>(`/auth/me/tour-completed?tour=${tour}`);
+      updateSessionUser({ [field]: res.data.tour_completed_at });
     } catch {
       // Not recorded: the tour offers itself again at the next sign-in.
     }

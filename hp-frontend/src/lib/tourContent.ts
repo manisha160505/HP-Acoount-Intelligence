@@ -17,7 +17,14 @@ export interface TourCard {
   body: string;
   /** Short tips shown as a list under the body. */
   points?: string[];
-  target?: string;
+  /** One target, or several in order of preference: the first one on screen
+   *  is lit, and a later one only once the first has had time to appear. */
+  target?: string | string[];
+  /** Asked of the dashboard when the card shows, e.g. open an Evaluator step. */
+  action?: string;
+  /** Added under the body when the card fell back past its first target -
+   *  the screen it describes is not open yet. */
+  notYet?: string;
 }
 
 export interface FeatureTour {
@@ -44,6 +51,16 @@ export const TOUR_FINISH: TourCard = {
     'or use Take the tour to start this tour from the beginning.',
   target: 'tour-button',
 };
+
+const EVALUATE_FIRST = 'You will see this after you evaluate a message.';
+
+function evaluatorStep(key: string, title: string, body: string, notYet?: string): TourCard {
+  return {
+    title, body, notYet,
+    action: `evaluator:${key}`,
+    target: [`evaluator-panel-${key}`, `evaluator-step-${key}`],
+  };
+}
 
 export const FEATURE_TOURS: Record<string, FeatureTour> = {
   executive_dashboard: {
@@ -292,13 +309,189 @@ export const FEATURE_TOURS: Record<string, FeatureTour> = {
         'It can also improve the message for you.',
       target: 'evaluator-header',
     },
+    // One card per step of the Evaluator. Each opens its step when the user
+    // could open it themselves; otherwise it points at the step's name. The
+    // tour never runs an evaluation or a rewrite.
+    details: [
+      evaluatorStep('inputs', 'Step 1: Inputs',
+        'Choose Lite (quick) or Deep (more detail), who you are writing to, your goal and the format, ' +
+        'then paste your message. You can also load a message you checked before.'),
+      evaluatorStep('persona', 'Step 2: Persona',
+        'See who you are writing to: their role, goals, pain points and what they care about.',
+        'You will see this after you fill in step 1.'),
+      evaluatorStep('confirm', 'Step 3: Confirm',
+        'Check it is the right person, then click Confirm Persona & Evaluate. Scoring takes a few seconds.',
+        'You will see this after you fill in step 1.'),
+      evaluatorStep('scores', 'Step 4: Scores',
+        'A total score out of 100, plus seven scores with a reason for each, and format checks.',
+        EVALUATE_FIRST),
+      evaluatorStep('phrases', 'Step 5: Phrases',
+        'Your message line by line, marked Keep, Improve or Change. Tick the changes you want.',
+        EVALUATE_FIRST),
+      evaluatorStep('summary', 'Step 6: Summary',
+        'Strengths and weaknesses in short. Deep mode also shows how the reader might react.',
+        EVALUATE_FIRST),
+      evaluatorStep('rewrite', 'Step 7: Rewrite',
+        'Rewrites your message using only the changes you ticked, and shows what changed.',
+        'You will see this after you evaluate a message, tick changes and click Rewrite.'),
+    ],
+  },
+};
+
+// ---------------------------------------------------------------------------
+// The admin pages' tour (client, 17 Oct): Accounts, Platform, Users and
+// Analytics, in the order of the admin menu. Rules is left out. Remembered
+// apart from the dashboard's tour, so an admin sees each once.
+
+export const ADMIN_TOUR_WELCOME: TourCard = {
+  title: 'Welcome to the admin pages',
+  body:
+    'This short tour shows the four admin pages: Accounts, Platform, Users and Analytics. ' +
+    'For each page, choose Dive in to see more, or Skip to move on.',
+  target: 'admin-nav',
+};
+
+export const ADMIN_TOUR_FINISH: TourCard = {
+  title: "You're all set",
+  body:
+    'Click the ? next to a page title to see that page again, or Take the tour to replay all of it. ' +
+    "Each account's dashboard has its own tour too.",
+  target: 'admin-tour-button',
+};
+
+export const ADMIN_TOURS: Record<string, FeatureTour> = {
+  accounts: {
+    overview: {
+      title: 'Accounts',
+      body:
+        'The same list sellers see. As an admin you see every account here. ' +
+        "Click an account to open its dashboard.",
+      target: 'admin-accounts-header',
+    },
     details: [
       {
-        title: 'Step by step',
+        title: 'Search and filter',
+        body: 'Search by company name, or filter by Urgency Score to find the accounts most ready to buy.',
+        target: 'admin-accounts-controls',
+      },
+      {
+        title: 'The account list',
         body:
-          'Follow the steps from left to right: add your message, choose who it is for, then see ' +
-          'the scores, feedback on each phrase, a summary and an optional rewrite.',
-        target: 'evaluator-steps',
+          'Each row is one account with its Urgency Score out of 100. ' +
+          "Click a row to open that account's dashboard.",
+        target: 'admin-accounts-list',
+      },
+    ],
+  },
+
+  platform: {
+    overview: {
+      title: 'Platform',
+      body:
+        'Where you look after the accounts themselves: add new ones, update their data, ' +
+        'and choose which ones sellers can see.',
+      target: 'admin-platform-header',
+    },
+    details: [
+      {
+        title: 'Create New Account',
+        body: 'Adds a new company. Then use Manage to upload its data.',
+        target: 'admin-platform-create',
+      },
+      {
+        title: 'Search',
+        body: 'Find an account by name.',
+        target: 'admin-platform-search',
+      },
+      {
+        title: 'The account table',
+        body:
+          'Status shows if sellers can see the account (Active) or not (Hidden). ' +
+          'Pipeline shows if its data is being updated right now. Last Updated shows when it last changed.',
+        target: 'admin-platform-table',
+      },
+      {
+        title: 'Manage',
+        body: "Opens the account's own page. There you upload its data files, which updates its features.",
+        target: 'admin-platform-manage',
+      },
+      {
+        title: 'Hide and Show',
+        body: "Hide takes the account off sellers' lists without deleting anything. Show brings it back.",
+        target: 'admin-platform-hide',
+      },
+    ],
+  },
+
+  users: {
+    overview: {
+      title: 'Users',
+      body:
+        'Add people, choose which accounts each seller can open, and reset passwords. ' +
+        'Admins can see every account.',
+      target: 'admin-users-header',
+    },
+    details: [
+      {
+        title: 'Add user',
+        body:
+          'Enter their email and role and pick their accounts. You get a temporary password to give them; ' +
+          'they choose their own when they first sign in.',
+        target: 'admin-users-add',
+      },
+      {
+        title: 'Search and filter',
+        body: 'Search by email or name, or show only sellers, only admins, or sellers with no accounts yet.',
+        target: 'admin-users-filters',
+      },
+      {
+        title: 'The people list',
+        body: 'Each person\'s role, the accounts they can open, whether they are active, and when they last signed in.',
+        target: 'admin-users-table',
+      },
+      {
+        title: 'Change a user',
+        body:
+          'Accounts changes which accounts a seller can open. The menu next to it resets a password ' +
+          'or deactivates someone. Their history is kept.',
+        target: 'admin-users-actions',
+      },
+      {
+        title: 'Activity log',
+        body: 'Every change made to users: who made it, to whom, and when.',
+        target: 'admin-users-tabs',
+      },
+    ],
+  },
+
+  analytics: {
+    overview: {
+      title: 'Analytics',
+      body: 'How sellers use the platform. Admin activity is not counted.',
+      target: 'admin-analytics-header',
+    },
+    details: [
+      {
+        title: 'Dates',
+        body: 'Pick the dates to look at. Dates are in UTC.',
+        target: 'admin-analytics-range',
+      },
+      {
+        title: 'Totals',
+        body: 'For those dates: how many users, who was active in the last 7 days, logins, feature views and time spent.',
+        target: 'admin-analytics-tiles',
+      },
+      {
+        title: 'Features and days',
+        body:
+          'Which features are used most, how many sellers were active each day, and the most viewed accounts. ' +
+          'Click a bar to see who.',
+        target: 'admin-analytics-charts',
+      },
+      {
+        title: 'Each seller',
+        body: 'Every seller with their logins, last login, and how much they used each feature.',
+        target: 'admin-analytics-users',
       },
     ],
   },
