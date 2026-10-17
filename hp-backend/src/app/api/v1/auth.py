@@ -4,6 +4,7 @@ from fastapi.security import HTTPAuthorizationCredentials
 from app.config.settings import settings
 from app.core.deps import (
     ACCESS_COOKIE,
+    get_current_user,
     get_signed_in_user,
     require_super_admin,
     security_bearer,
@@ -11,7 +12,13 @@ from app.core.deps import (
 from app.core.security import decode_access_token
 from app.database.mongodb import get_db
 from app.schemas.auth import MessageResponse
-from app.schemas.user import ChangePasswordRequest, TokenResponse, UserLogin, UserResponse
+from app.schemas.user import (
+    ChangePasswordRequest,
+    TokenResponse,
+    TourCompletedResponse,
+    UserLogin,
+    UserResponse,
+)
 from app.services import auth as auth_service, sessions, user_audit
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
@@ -63,6 +70,14 @@ def refresh(response: Response, hp_refresh: str | None = Cookie(None)):
 @router.get("/me", response_model=UserResponse)
 def get_me(current_user: dict = Depends(get_signed_in_user)):
     return current_user
+
+
+@router.post("/me/tour-completed", response_model=TourCompletedResponse)
+def tour_completed(current_user: dict = Depends(get_current_user)):
+    """The product tour has been finished or closed: do not start it again on
+    any device. Safe to call more than once."""
+    return TourCompletedResponse(
+        tour_completed_at=auth_service.mark_tour_completed(current_user))
 
 
 @router.post("/logout", response_model=MessageResponse)

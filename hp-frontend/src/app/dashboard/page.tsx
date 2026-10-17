@@ -16,6 +16,8 @@ import { NO_SIGNAL, NOT_DISCLOSED } from '@/lib/placeholders';
 import { displayCase, displayPlace, fmtDate as formatDate } from '@/lib/format';
 import { track, stopFeatureTime } from '@/lib/track';
 import { MyActivityPanel } from '@/components/analytics/MyActivityPanel';
+import { useTour } from '@/components/tour/useTour';
+import HelpButton from '@/components/tour/HelpButton';
 import { CountUpText, ScoreRing, growDelay, useParallax } from '@/components/common/motion';
 import { Activity as ActivityIcon } from 'lucide-react';
 import { 
@@ -633,7 +635,7 @@ function HpRecommendationCard({ rec, xray }: { rec: any; xray?: boolean }) {
 }
 
 export default function UserDashboardPage() {
-  const { user, logout } = useAuth();
+  const { user, logout, markTourCompleted } = useAuth();
   const router = useRouter();
   // The sidebar's light layer drifts with the pointer, like the header bands.
   const sidebarRef = useRef<HTMLElement>(null);
@@ -643,6 +645,9 @@ export default function UserDashboardPage() {
   const [selectedAccountId, setSelectedAccountId] = useState<string>('');
   const [selectedAccount, setSelectedAccount] = useState<CompanyAccount | null>(null);
   const [activeFeatureKey, setActiveFeatureKey] = useState<string>('executive_dashboard');
+  // The product tour (client, 17 Oct): runs once, on a user's first visit to
+  // the dashboard, and each feature's ? button replays that feature's part.
+  const tour = useTour({ activeFeatureKey, setActiveFeatureKey, onTourDone: markTourCompleted });
   
   const [widgets, setWidgets] = useState<WidgetResponse[]>([]);
   const [isLoadingAccounts, setIsLoadingAccounts] = useState(true);
@@ -960,11 +965,13 @@ export default function UserDashboardPage() {
     // No account means the page is on its way back to Account Selection; a
     // view recorded now would count a dashboard the seller never saw.
     if (isLoadingAccounts || !selectedAccountId) return;
+    // The tour switches features by itself; those are not visits.
+    if (tour.active) return;
     const key = `${activeFeatureKey}|${selectedAccountId}`;
     if (key === lastTrackedView.current) return;
     lastTrackedView.current = key;
     track({ event: 'feature_view', feature_key: activeFeatureKey, account_id: selectedAccountId || null });
-  }, [activeFeatureKey, selectedAccountId, isLoadingAccounts]);
+  }, [activeFeatureKey, selectedAccountId, isLoadingAccounts, tour.active]);
   // Time on a feature stops counting once the dashboard is gone.
   useEffect(() => () => stopFeatureTime(), []);
 
@@ -1027,6 +1034,18 @@ export default function UserDashboardPage() {
 
   const allItems = sidebarGroups.flatMap(g => g.items);
   const activeFeatureDef = allItems.find(f => f.key === activeFeatureKey) || allItems[0];
+
+  // First visit: start the tour once an account is on screen. The server keeps
+  // tour_completed_at, so finishing or closing it on one laptop is enough.
+  const tourFeatureKeys = allItems.map(i => i.key);
+  const tourAutoStarted = useRef(false);
+  useEffect(() => {
+    if (tourAutoStarted.current || !user || user.tour_completed_at) return;
+    if (isLoadingAccounts || !selectedAccount) return;
+    tourAutoStarted.current = true;
+    tour.start(tourFeatureKeys);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, isLoadingAccounts, selectedAccount]);
 
   const getClassificationBadge = (cls: WidgetClassification) => {
     switch (cls) {
@@ -1206,7 +1225,7 @@ export default function UserDashboardPage() {
             )}
 
             {/* Vertical Navigation Groups (INTELLIGENCE, ACTION, SIMULATION & PLANNING) */}
-            <div className="flex-1 overflow-y-auto p-2 space-y-4 no-scrollbar">
+            <div data-tour="sidebar" className="flex-1 overflow-y-auto p-2 space-y-4 no-scrollbar">
               {sidebarGroups.map((group) => (
                 <div key={group.sectionTitle} className="space-y-1">
                   {!isSidebarCollapsed && (
@@ -1343,6 +1362,19 @@ export default function UserDashboardPage() {
               <span className="text-[10px] font-mono text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 whitespace-nowrap">
                 Data as of: {DATA_AS_OF_LABEL}
               </span>
+            )}
+
+            {/* Replays the whole product tour (the first-visit one). */}
+            {selectedAccount && (
+              <button
+                type="button"
+                data-tour="tour-button"
+                onClick={() => tour.start(tourFeatureKeys)}
+                className="inline-flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl border text-xs font-bold transition shadow-xs bg-white text-slate-700 border-slate-300 hover:bg-slate-50"
+              >
+                <Compass className="w-3.5 h-3.5 text-hp-navy" />
+                <span>Take the tour</span>
+              </button>
             )}
 
             {/* My Activity: the seller's own usage. Admin activity is not
@@ -1544,7 +1576,7 @@ export default function UserDashboardPage() {
                     <div className="space-y-6">
                       
                       {/* Section 1: Executive Summary Company Profile Card */}
-                      <div className="bg-white rounded-2xl p-8 border border-slate-200 shadow-sm">
+                      <div data-tour="exec-profile" className="bg-white rounded-2xl p-8 border border-slate-200 shadow-sm">
                         <div className="flex items-start space-x-5">
                           {/* Clean Building SVG Icon Box (Matching Northstar Image 1) */}
                           <div className="w-16 h-16 bg-slate-100 border border-slate-200 text-slate-600 rounded-2xl flex items-center justify-center flex-shrink-0">
@@ -1556,6 +1588,7 @@ export default function UserDashboardPage() {
                               <h2 className="text-2xl font-extrabold text-slate-900 tracking-tight">
                                 {displayName}
                               </h2>
+                              <HelpButton onClick={() => tour.help('executive_dashboard')} />
                             </div>
 
                             {/* The profile, as bullets where we have them. */}
@@ -1658,7 +1691,7 @@ export default function UserDashboardPage() {
                           assigned. Presenting a band as though it were a filed
                           figure is exactly the confusion ABX's pre-display check
                           exists to prevent, so the badge names which it is. */}
-                      <div className="space-y-3">
+                      <div data-tour="exec-metrics" className="space-y-3">
                         <div className="flex items-center space-x-3">
                           <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700">
                             KEY METRICS
@@ -1845,7 +1878,7 @@ export default function UserDashboardPage() {
                           together for all accounts"), so the card is now the
                           full width rather than two thirds of a row with a
                           hole in it. */}
-                        <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-4">
+                        <div data-tour="exec-urgency" className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-4">
                           <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                             <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700 flex items-center gap-2">
                               <Flame className="w-4 h-4 text-amber-500" />
@@ -1967,7 +2000,7 @@ export default function UserDashboardPage() {
                           specification. So the same four measures are shown as
                           the counts they actually are, and the composite says
                           it is undefined. */}
-                      <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-5">
+                      <div data-tour="exec-priorities" className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-5">
                         <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                           <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700 flex items-center gap-2">
                             <Target className="w-4 h-4 text-hp-navy" />
@@ -2368,17 +2401,18 @@ export default function UserDashboardPage() {
                       <PendingNotice widget={scoreWidget} title="Signal scoring unavailable" />
 
                       {/* Header */}
-                      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+                      <div data-tour="signals-header" className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
                         <div>
                           <h3 className="text-xl font-bold text-slate-900 flex items-center gap-2">
                             <Newspaper className="w-5 h-5 text-hp-navy" />
                             <span>Live Signals</span>
+                            <HelpButton onClick={() => tour.help('recent_news_signals')} />
                           </h3>
                           <p className="text-sm text-slate-500 mt-0.5">
                             Real-time intelligence triggers for {selectedAccount?.name}
                           </p>
                         </div>
-                        <button
+                        <button data-tour="signals-filters"
                           type="button"
                           onClick={() => setIsFilterDrawerOpen(!isFilterDrawerOpen)}
                           className={`flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg border transition ${
@@ -2511,13 +2545,14 @@ export default function UserDashboardPage() {
                         </div>
                       ) : (
                         <div className="space-y-3">
-                          {filteredSignals.map((s: any) => {
+                          {filteredSignals.map((s: any, si: number) => {
                             const sc = scores[s.signal_id];
                             const urgency = urgencyOf(s.confidence);
                             const isOpen = expandedSignalId === s.signal_id;
                             return (
                               <div
                                 key={s.signal_id}
+                                data-tour={si === 0 ? 'signals-first' : undefined}
                                 className={`bg-white rounded-xl border shadow-xs overflow-hidden ${
                                   s.confidence !== null && s.confidence >= 8.0 ? 'border-red-200' : 'border-slate-200'
                                 }`}
@@ -2964,11 +2999,12 @@ export default function UserDashboardPage() {
                     <div className="space-y-6">
 
                       {/* Header */}
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                      <div data-tour="intent-header" className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                         <div>
                           <h2 className="text-xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
                             <TrendingUp className="w-5 h-5 text-hp-navy" />
                             <span>Intent & Demand Signals</span>
+                            <HelpButton onClick={() => tour.help('intent_demand_signals')} />
                           </h2>
                           {/* Sahaj, 27 Sep: replace the counts line with the source. */}
                           <p className="text-xs text-slate-500 mt-0.5">
@@ -2998,7 +3034,7 @@ export default function UserDashboardPage() {
                           box to the top in intent n demand"). It is the answer;
                           the unit summary and the topics below are the working. */}
                       {summaryData && (
-                      <div className="bg-blue-50/80 border border-blue-200/90 rounded-2xl p-6 text-xs text-blue-950 space-y-3 shadow-xs">
+                      <div data-tour="intent-sowhat" className="bg-blue-50/80 border border-blue-200/90 rounded-2xl p-6 text-xs text-blue-950 space-y-3 shadow-xs">
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <h3 className="text-xs font-black uppercase tracking-wider text-hp-navy flex flex-wrap items-center gap-2">
                             <Lightbulb className="w-4 h-4 text-hp-navy" />
@@ -3065,7 +3101,7 @@ export default function UserDashboardPage() {
                             ? 'From buying-interest data · none of this account’s research topics relate to an HP area'
                             : 'From buying-interest data for each HP area';
                         return (
-                          <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm space-y-4">
+                          <div data-tour="intent-units" className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm space-y-4">
                             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
                               <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700">
                                 Intent across HP business units <ScoreInfo topic="intentHpCategory" />
@@ -3751,7 +3787,7 @@ export default function UserDashboardPage() {
                         const cardList: any[] = cards?.cards || [];
 
                         return (
-                          <div id="hiring-signals" className="scroll-mt-6 space-y-6 pt-6 border-t border-slate-200">
+                          <div id="hiring-signals" data-tour="intent-hiring" className="scroll-mt-6 space-y-6 pt-6 border-t border-slate-200">
 
                             {/* Header */}
                             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -3920,11 +3956,12 @@ export default function UserDashboardPage() {
                       <PendingNotice widget={playsWidget} title="Opportunity plays unavailable" />
                       
                       {/* Header Banner */}
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 pb-4">
+                      <div data-tour="opportunity-header" className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 pb-4">
                         <div>
                           <h2 className="text-xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
                             <Lightbulb className="w-6 h-6 text-hp-navy" />
                             <span>Opportunity Map</span>
+                            <HelpButton onClick={() => tour.help('solution_narrative_opportunity_map')} />
                           </h2>
                           <p className="text-xs text-slate-500 mt-0.5">
                             {isAvailable ? generatedPlays.length : 0} HP {isAvailable && generatedPlays.length === 1 ? 'opportunity' : 'opportunities'} mapped for {selectedAccount?.name} &mdash; business outcome, HP products, entry path, and evidence in one view.
@@ -3962,7 +3999,7 @@ export default function UserDashboardPage() {
                       </div>
 
                       {/* Opportunity Plays List */}
-                      <div className="space-y-5">
+                      <div data-tour="opportunity-plays" className="space-y-5">
                         <div className="flex items-center justify-between">
                           <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700 flex items-center gap-2">
                             <span>HP OPPORTUNITY PLAYS</span>
@@ -4640,17 +4677,18 @@ export default function UserDashboardPage() {
                       <PendingNotice widget={talkingWidget} title="Talking points unavailable" />
 
                       {/* Header */}
-                      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 border-b border-slate-200 pb-4">
+                      <div data-tour="stakeholder-header" className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 border-b border-slate-200 pb-4">
                         <div>
                           <h3 className="text-xl font-bold text-slate-900 flex items-center gap-2">
                             <Users className="w-5 h-5 text-hp-navy" />
                             <span>Stakeholder Map</span>
+                            <HelpButton onClick={() => tour.help('stakeholder_map')} />
                           </h3>
                           <p className="text-sm text-slate-500 mt-0.5">
                             {contactsList.length} contact{contactsList.length === 1 ? '' : 's'} identified for {selectedAccount?.name}
                           </p>
                         </div>
-                        <button
+                        <button data-tour="stakeholder-export"
                           type="button"
                           onClick={handleExportCsv}
                           disabled={filteredContacts.length === 0}
@@ -4662,7 +4700,7 @@ export default function UserDashboardPage() {
                       </div>
 
                       {/* Filters */}
-                      <div className="flex flex-wrap items-center gap-2">
+                      <div data-tour="stakeholder-filters" className="flex flex-wrap items-center gap-2">
                         <div className="relative flex-1 min-w-[220px]">
                           <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
                           <input
@@ -4690,7 +4728,7 @@ export default function UserDashboardPage() {
 
                           {/* Senior contacts - three across */}
                           {seniorContacts.length > 0 && (
-                          <div className="space-y-3">
+                          <div data-tour="stakeholder-senior" className="space-y-3">
                             <div className="flex items-center gap-2 flex-wrap">
                               <h4 className="text-base font-bold text-slate-900">Senior contacts</h4>
                               <span className="text-[10px] font-semibold text-hp-navy bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-full">
@@ -4848,11 +4886,12 @@ export default function UserDashboardPage() {
                     <div className="space-y-6 animate-fade-in">
 
                       {/* Top Header & Opportunities Toggle */}
-                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200 pb-4">
+                      <div data-tour="tech-header" className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200 pb-4">
                         <div>
                           <h3 className="text-xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
                             <Cpu className="w-6 h-6 text-hp-navy" />
                             <span>Technographic Map</span>
+                            <HelpButton onClick={() => tour.help('tech_landscape')} />
                           </h3>
                           <p className="text-xs text-slate-500 mt-0.5">
                             {/* Two different counts: the full technographics export, and the
@@ -4868,7 +4907,7 @@ export default function UserDashboardPage() {
 
                         {/* Top Action Toggle */}
                         <div className="flex items-center gap-2 self-start md:self-auto">
-                          <button
+                          <button data-tour="tech-toggle"
                             onClick={() => setOpportunitiesOnly(!opportunitiesOnly)}
                             className={`px-3.5 py-1.5 rounded-xl text-xs font-extrabold transition flex items-center gap-1.5 shadow-sm ${
                               opportunitiesOnly
@@ -4885,7 +4924,7 @@ export default function UserDashboardPage() {
                       {/* Technographic Map Content View */}
                       <div className="space-y-6">
                           {/* STRATEGIC READ Banner */}
-                          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
+                          <div data-tour="tech-read" className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
                             <div className="flex items-center justify-between">
                               <span className="text-[10px] font-mono font-extrabold uppercase tracking-widest text-slate-400">
                                 STRATEGIC READ
@@ -4960,7 +4999,7 @@ export default function UserDashboardPage() {
                           </div>
 
                           {/* Category Blocks List */}
-                          <div className="space-y-6">
+                          <div data-tour="tech-categories" className="space-y-6">
                             {displayedCategories.map((cat: any) => (
                               <div key={cat.category_key} className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4 hover:border-slate-300 transition">
                                 
@@ -5629,14 +5668,14 @@ export default function UserDashboardPage() {
                     <div className="space-y-5">
 
                       {/* Header */}
-                      <div className="space-y-2">
+                      <div data-tour="evaluator-header" className="space-y-2">
                         <div className="flex items-start space-x-3">
                           <div className="w-9 h-9 rounded-xl bg-indigo-50 border border-indigo-200 text-indigo-600 flex items-center justify-center flex-shrink-0">
                             <MessageSquare className="w-5 h-5 text-indigo-600" />
                           </div>
                           <div>
                             <h2 className="text-xl font-extrabold text-slate-900 tracking-tight">
-                              Message Evaluator
+                              Message Evaluator <HelpButton onClick={() => tour.help('message_evaluator')} />
                             </h2>
                             <p className="text-xs text-slate-500 font-medium">
                               Persona-aware message scoring for {evalOptions?.company_name || selectedAccount?.name || 'this account'}.
@@ -5655,7 +5694,7 @@ export default function UserDashboardPage() {
                       </div>
 
                       {/* Stepper */}
-                      <div className="flex items-center flex-wrap gap-2 text-xs font-medium text-slate-400">
+                      <div data-tour="evaluator-steps" className="flex items-center flex-wrap gap-2 text-xs font-medium text-slate-400">
                         {stepsList.map((st, i) => {
                           const isActive = st.key === evaluatorStep;
                           const reachable = i <= currentStepIdx || (!!evaluation && i >= 3);
@@ -6684,11 +6723,12 @@ export default function UserDashboardPage() {
                   return (
                     <div className="space-y-6 animate-fade-in">
                       {/* Top Header */}
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 pb-4">
+                      <div data-tour="objection-header" className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 pb-4">
                         <div>
                           <h3 className="text-xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
                             <ShieldAlert className="w-6 h-6 text-hp-navy" />
                             <span>Objection Playbook</span>
+                            <HelpButton onClick={() => tour.help('objection_playbook')} />
                           </h3>
                           <p className="text-xs text-slate-500 mt-0.5">
                             {objectionCards.length} objection reframes for {selectedAccount?.name || 'Target Account'}
@@ -6716,7 +6756,7 @@ export default function UserDashboardPage() {
                           <p className="text-xs text-slate-400">{NO_SIGNAL}</p>
                         </div>
                       ) : (
-                        <div className="space-y-3">
+                        <div data-tour="objection-cards" className="space-y-3">
                           {objectionCards.map((card: any) => {
                             const isOpen = expandedObjectionId === card.card_id;
                             const raiserIsContact = card.likely_raiser_source === 'prospect_contacts';
@@ -7290,10 +7330,11 @@ export default function UserDashboardPage() {
                   return (
                     <div className="space-y-6 animate-fade-in">
                       {/* Top Header */}
-                      <div className="border-b border-slate-200 pb-4">
+                      <div data-tour="studio-header" className="border-b border-slate-200 pb-4">
                         <h3 className="text-xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
                           <FileText className="w-6 h-6 text-hp-navy" />
                           <span>Content Studio</span>
+                          <HelpButton onClick={() => tour.help('content_studio')} />
                         </h3>
                         <p className="text-xs text-slate-500 mt-0.5">
                           Generate persona-targeted ABM content for {selectedAccount?.name || 'Target Account'} - grounded in the account&apos;s own data
@@ -7304,7 +7345,7 @@ export default function UserDashboardPage() {
                       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
                         
                         {/* Left Control Panel (5 Cols) */}
-                        <div className="lg:col-span-5 bg-white rounded-2xl border border-slate-200 shadow-sm p-5 space-y-6">
+                        <div data-tour="studio-controls" className="lg:col-span-5 bg-white rounded-2xl border border-slate-200 shadow-sm p-5 space-y-6">
                           
                           {/* 1. Target Persona Section */}
                           <div className="space-y-2">
@@ -7452,7 +7493,7 @@ export default function UserDashboardPage() {
                         </div>
 
                         {/* Right Output Canvas (7 Cols) */}
-                        <div className={`lg:col-span-7 bg-white rounded-2xl border shadow-sm transition-colors ${
+                        <div data-tour="studio-output" className={`lg:col-span-7 bg-white rounded-2xl border shadow-sm transition-colors ${
                           isGeneratingContent
                             ? 'border-sky-200 p-5 text-left'
                             : 'border-slate-200 p-8 min-h-[320px] flex flex-col justify-center items-center text-center'
@@ -8064,10 +8105,11 @@ export default function UserDashboardPage() {
                   return (
                     <div className="space-y-6 animate-fade-in">
                       {/* Top Header */}
-                      <div className="border-b border-slate-200 pb-4">
+                      <div data-tour="chat-header" className="border-b border-slate-200 pb-4">
                         <h3 className="text-xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
                           <MessageSquare className="w-6 h-6 text-hp-navy" />
                           <span>AI Strategy Chat</span>
+                          <HelpButton onClick={() => tour.help('strategy_chat')} />
                         </h3>
                         <p className="text-xs text-slate-500 mt-0.5">
                           Brainstorm GTM &amp; ABM strategy for {companyName} - grounded in account intelligence
@@ -8116,7 +8158,7 @@ export default function UserDashboardPage() {
                         
                         {chatMessages.length === 0 ? (
                           /* Welcome / Suggested Prompts View */
-                          <div className="space-y-8 my-auto animate-fade-in">
+                          <div data-tour="chat-welcome" className="space-y-8 my-auto animate-fade-in">
                             <div className="text-center max-w-2xl mx-auto space-y-3">
                               <div className="w-14 h-14 rounded-2xl bg-blue-50 border border-blue-200 flex items-center justify-center mx-auto text-hp-navy shadow-xs">
                                 <MessageSquare className="w-7 h-7 text-hp-navy" />
@@ -8140,14 +8182,25 @@ export default function UserDashboardPage() {
                                   </span>
                                 </p>
                               ) : (
+                                <>
                                 <p className="text-xs text-slate-600 leading-relaxed font-medium">
                                   Ask me anything about {companyName}, HP Inc. positioning, competitive strategy, or ABM campaign planning. I&apos;m grounded in {companyName}&apos;s actual data and strategic priorities.
                                 </p>
+                                {/* How to ask (client, 17 Oct): kept on screen, not only in the tour. */}
+                                <div className="text-left max-w-xl mx-auto mt-3 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3">
+                                  <p className="text-[10px] font-extrabold uppercase tracking-wider text-hp-navy mb-1.5">How to ask</p>
+                                  <ul className="space-y-1 text-xs text-slate-600 leading-relaxed">
+                                    <li className="flex gap-2"><span className="text-hp-navy">&bull;</span><span>Ask about {companyName} only - not other accounts or general topics.</span></li>
+                                    <li className="flex gap-2"><span className="text-hp-navy">&bull;</span><span>Ask one clear question at a time, and name the person, product or topic.</span></li>
+                                    <li className="flex gap-2"><span className="text-hp-navy">&bull;</span><span>Answers come only from this account&apos;s data, with sources. If the data does not have it, the chat says so.</span></li>
+                                  </ul>
+                                </div>
+                                </>
                               )}
                             </div>
 
                             {/* 6 Suggested Prompt Cards Grid */}
-                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 max-w-4xl mx-auto">
+                            <div data-tour="chat-suggestions" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 max-w-4xl mx-auto">
                               {suggestedPrompts.map((p) => (
                                 <button
                                   key={p.id}
@@ -8340,7 +8393,7 @@ export default function UserDashboardPage() {
                         )}
 
                         {/* Bottom Input Controls */}
-                        <div className="pt-4 border-t border-slate-100 w-full mt-4">
+                        <div data-tour="chat-input" className="pt-4 border-t border-slate-100 w-full mt-4">
                           <form
                             onSubmit={(e) => {
                               e.preventDefault();
@@ -8476,6 +8529,7 @@ export default function UserDashboardPage() {
 
       </div>
       <MyActivityPanel open={isMyActivityOpen} onClose={closeMyActivity} userName={user?.full_name} />
+      {tour.overlay}
       </AccountIdContext.Provider>
     </ProtectedRoute>
   );

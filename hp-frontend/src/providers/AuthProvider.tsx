@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { User, AuthState } from '@/types/auth';
 import api from '@/services/api';
 import { flushOnExit } from '@/lib/track';
@@ -11,6 +11,7 @@ import {
   onSessionChange,
   refreshSession,
   setSession,
+  updateSessionUser,
   type TokenBody,
 } from '@/lib/session';
 
@@ -19,6 +20,8 @@ interface AuthContextType extends AuthState {
   logout: () => Promise<void>;
   /** Ends every session of this user; they sign in again with the new password. */
   changePassword: (current: string, next: string) => Promise<{ success: boolean; error?: string }>;
+  /** The product tour was finished or closed: do not start it again. */
+  markTourCompleted: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -80,6 +83,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const markTourCompleted = useCallback(async () => {
+    // Set here first so the tour does not restart before the server answers.
+    updateSessionUser({ tour_completed_at: new Date().toISOString() });
+    try {
+      const res = await api.post<{ tour_completed_at: string }>('/auth/me/tour-completed');
+      updateSessionUser({ tour_completed_at: res.data.tour_completed_at });
+    } catch {
+      // Not recorded: the tour offers itself again at the next sign-in.
+    }
+  }, []);
+
   return (
     <AuthContext.Provider
       value={{
@@ -90,6 +104,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         login,
         logout,
         changePassword,
+        markTourCompleted,
       }}
     >
       {children}
