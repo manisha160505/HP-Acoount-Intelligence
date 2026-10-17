@@ -13,7 +13,7 @@ import { Modal, ModalActions, dangerButton, primaryButton, secondaryButton } fro
 import { AccountPicker } from '@/components/users/AccountPicker';
 import { OneTimePassword } from '@/components/users/OneTimePassword';
 import { AuditLog, formatDateTime } from '@/components/users/AuditLog';
-import { RowMenu } from '@/components/users/RowMenu';
+import { ROW_BUTTON, RowMenu } from '@/components/common/RowMenu';
 import {
   AlertCircle,
   Building2,
@@ -246,7 +246,7 @@ export default function AdminUsersPage() {
                                 <div className="flex items-center justify-end gap-2">
                                   {u.role === 'user' && (
                                     <button type="button" onClick={() => setDialog({ kind: 'accounts', user: u })}
-                                            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-gray-200 text-[11px] font-bold text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition">
+                                            className={ROW_BUTTON}>
                                       <Building2 className="w-3.5 h-3.5 text-gray-400" />
                                       Accounts
                                     </button>
@@ -399,8 +399,6 @@ function CreateUserDialog({ isSuper, accounts, onClose, onCreated }: {
   const [name, setName] = useState('');
   const [role, setRole] = useState<'user' | 'admin'>('user');
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [ownPassword, setOwnPassword] = useState(false);
-  const [password, setPassword] = useState('');
   const [fields, setFields] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -409,7 +407,6 @@ function CreateUserDialog({ isSuper, accounts, onClose, onCreated }: {
     e.preventDefault();
     const local: Record<string, string> = {};
     if (!/^\S+@\S+\.\S+$/.test(email.trim())) local.email = 'Enter a valid email address.';
-    if (ownPassword && password.length < 8) local.password = 'At least 8 characters.';
     setFields(local);
     setError(null);
     if (Object.keys(local).length) return;
@@ -420,7 +417,6 @@ function CreateUserDialog({ isSuper, accounts, onClose, onCreated }: {
         ...(name.trim() ? { full_name: name.trim() } : {}),
         role,
         account_ids: role === 'user' ? Array.from(selected) : [],
-        ...(ownPassword ? { password } : {}),
       });
       onCreated(res.data);
     } catch (err) {
@@ -475,24 +471,12 @@ function CreateUserDialog({ isSuper, accounts, onClose, onCreated }: {
           </div>
         )}
 
-        <div>
-          <FieldLabel>Password</FieldLabel>
-          <label className="flex items-center gap-2 text-xs text-gray-700">
-            <input type="radio" checked={!ownPassword} onChange={() => setOwnPassword(false)} />
-            Generate a temporary password (shown once, after creating)
-          </label>
-          <label className="flex items-center gap-2 text-xs text-gray-700 mt-1.5">
-            <input type="radio" checked={ownPassword} onChange={() => setOwnPassword(true)} />
-            Set one myself
-          </label>
-          {ownPassword && (
-            <div className="mt-2">
-              <input type="password" autoComplete="new-password" value={password}
-                     onChange={(e) => setPassword(e.target.value)} className={inputClass(fields.password)} />
-              {fields.password && <p className="text-[11px] text-red-600 mt-1">{fields.password}</p>}
-            </div>
-          )}
-          <p className="text-[11px] text-gray-500 mt-1.5">No email is sent. They must set their own password at first sign-in.</p>
+        <div className="flex items-start gap-2.5 rounded-xl bg-slate-50 border border-slate-200 p-3">
+          <KeyRound className="w-4 h-4 text-hp-navy mt-0.5 flex-shrink-0" />
+          <p className="text-[11px] text-gray-600 leading-relaxed">
+            A temporary password is generated and shown once, after you create the user, for you to
+            copy and share. No email is sent; they set their own password at first sign-in.
+          </p>
         </div>
 
         <ModalActions>

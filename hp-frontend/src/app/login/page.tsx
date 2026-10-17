@@ -5,7 +5,8 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/providers/AuthProvider';
 import { landingRouteFor } from '@/lib/accountSelection';
 import { ParallaxBand } from '@/components/common/motion';
-import { Lock, Mail, AlertCircle, Loader2 } from 'lucide-react';
+import { Mail, AlertCircle, Loader2 } from 'lucide-react';
+import { PasswordInput } from '@/components/common/PasswordInput';
 import HpLogo from '@/components/common/HpLogo';
 
 export default function LoginPage() {
@@ -108,20 +109,8 @@ export default function LoginPage() {
               <label className="block text-[10px] font-bold text-gray-300 uppercase tracking-wider mb-1">
                 Password
               </label>
-              <div className="relative rounded-md shadow-sm">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <Lock className="h-4 w-4 text-gray-400" />
-                </div>
-                <input
-                  type="password"
-                  required
-                  autoComplete="current-password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="block w-full pl-10 pr-3 py-2.5 bg-[#0B132B] border border-slate-700 rounded-lg text-xs text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-hp-navy focus:border-transparent transition"
-                  placeholder="••••••••••••"
-                />
-              </div>
+              <PasswordInput value={password} onChange={setPassword}
+                             autoComplete="current-password" placeholder="••••••••••••" />
             </div>
 
             <button

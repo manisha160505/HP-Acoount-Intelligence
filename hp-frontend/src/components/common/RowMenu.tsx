@@ -13,8 +13,17 @@ export interface RowMenuItem {
 
 const MENU_WIDTH = 208;
 
+/** The bordered button that sits beside a RowMenu in a table row. */
+export const ROW_BUTTON =
+  'inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-gray-200 bg-white text-[11px] '
+  + 'font-bold text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition disabled:opacity-50 whitespace-nowrap';
+/** Its icon-only, destructive sibling (delete). */
+export const ROW_ICON_BUTTON_DANGER =
+  'inline-flex items-center justify-center w-8 h-8 rounded-lg border border-gray-200 bg-white text-gray-400 '
+  + 'hover:text-red-600 hover:border-red-200 hover:bg-red-50 transition disabled:opacity-50';
+
 /**
- * The "..." menu at the end of a Users row. Placed with fixed positioning
+ * The "..." menu at the end of a table row (Users, Platform). Placed with fixed positioning
  * from the button's own rectangle, so the table's horizontal scroll area
  * cannot clip it; it opens upward when there is no room below. Closes on
  * Escape, an outside click, a scroll or a resize.
