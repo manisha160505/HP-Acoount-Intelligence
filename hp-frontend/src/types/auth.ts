@@ -12,6 +12,8 @@ export interface User {
   role: UserRole;
   /** True until the user replaces the password they were given. */
   must_change_password?: boolean;
+  /** When the product tour was finished or closed; null until then. */
+  tour_completed_at?: string | null;
 }
 
 export interface AuthState {

@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import BaseModel, EmailStr, Field
 
 
@@ -11,6 +13,9 @@ class UserResponse(UserBase):
     # True until the user replaces the password an admin gave them; the
     # frontend sends them to the change-password page and nowhere else.
     must_change_password: bool = False
+    # When the user finished or closed the first-sign-in tour; None until
+    # then, and the dashboard starts the tour while it is None.
+    tour_completed_at: datetime | None = None
 
 class UserLogin(BaseModel):
     email: EmailStr
@@ -26,3 +31,6 @@ class TokenResponse(BaseModel):
 class ChangePasswordRequest(BaseModel):
     current_password: str = Field(min_length=1, max_length=128)
     new_password: str = Field(min_length=1, max_length=128)
+
+class TourCompletedResponse(BaseModel):
+    tour_completed_at: datetime

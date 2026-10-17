@@ -61,6 +61,13 @@ export function setSession(body: TokenBody): void {
   emit();
 }
 
+/** A change to the signed-in user the server has already made. */
+export function updateSessionUser(patch: Partial<User>): void {
+  if (!currentUser) return;
+  currentUser = { ...currentUser, ...patch };
+  emit();
+}
+
 export function clearSession(): void {
   accessToken = null;
   expiresAt = 0;

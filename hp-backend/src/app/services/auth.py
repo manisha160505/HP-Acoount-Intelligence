@@ -34,6 +34,7 @@ def _user_response(user: dict) -> UserResponse:
         full_name=user.get("full_name") or user["email"],
         role=user["role"],
         must_change_password=bool(user.get("must_change_password")),
+        tour_completed_at=user.get("tour_completed_at"),
     )
 
 
@@ -128,3 +129,17 @@ def change_password(current_user: dict, body: ChangePasswordRequest) -> None:
     user_audit.record(db, current_user, user_audit.PASSWORD_CHANGED, user,
                       {"first_sign_in": bool(user.get("must_change_password"))})
     logger.info("auth: user %s changed their password", current_user["id"])
+
+
+def mark_tour_completed(current_user: dict) -> datetime:
+    """Record that the user has been through the product tour, finished or
+    closed. The first time is kept: replaying a feature's help later does not
+    move it."""
+    db = get_db()
+    oid = ObjectId(current_user["id"])
+    user = db["users"].find_one({"_id": oid}) or {}
+    if user.get("tour_completed_at"):
+        return user["tour_completed_at"]
+    now = datetime.now(UTC)
+    db["users"].update_one({"_id": oid}, {"$set": {"tour_completed_at": now}})
+    return now
