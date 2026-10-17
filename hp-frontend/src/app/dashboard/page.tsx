@@ -7,7 +7,8 @@ import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation';
 import { ProtectedRoute } from '@/components/common/ProtectedRoute';
 import { useAuth } from '@/providers/AuthProvider';
-import api, { postStream } from '@/services/api';
+import { isAdminRole } from '@/types/auth';
+import api, { API_URL, postStream } from '@/services/api';
 import { CompanyAccount } from '@/types/account';
 import { NORTHSTAR_SIDEBAR_GROUPS } from '@/lib/features';
 import { activeAccountFrom, dashboardHref } from '@/lib/accountSelection';
@@ -409,11 +410,10 @@ function filingHref(ctx: SourceLinkContext, s: any): string {
   // opened a tab containing a 404 in both cases.
   if (!ctx.accountId || !name || !ctx.filings.has(name)) return '';
   const accountId = ctx.accountId;
-  const base = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-  const token = typeof window !== 'undefined'
-    ? (localStorage.getItem('hp_token') || '') : '';
-  const url = `${base}/api/v1/accounts/${accountId}/data/filing`
-    + `?name=${encodeURIComponent(name)}&token=${encodeURIComponent(token)}`;
+  // Authenticated by the httpOnly hp_access cookie the browser sends with the
+  // link; a token in the URL would land in logs and browser history.
+  const url = `${API_URL}/api/v1/accounts/${accountId}/data/filing`
+    + `?name=${encodeURIComponent(name)}`;
   const page = Number(s?.page);
   return Number.isFinite(page) && page > 0 ? `${url}#page=${page}` : url;
 }
@@ -1006,9 +1006,8 @@ export default function UserDashboardPage() {
   };
 
   const getDownloadUrl = (datasetKey: string) => {
-    const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-    const token = typeof window !== 'undefined' ? (localStorage.getItem('hp_token') || '') : '';
-    return `${baseUrl}/api/v1/accounts/${selectedAccount?.id}/data/download/${datasetKey}?token=${encodeURIComponent(token)}`;
+    // Authenticated by the hp_access cookie, like filing links.
+    return `${API_URL}/api/v1/accounts/${selectedAccount?.id}/data/download/${datasetKey}`;
   };
 
   // Features the client asked not to show for this account (backend
@@ -1348,7 +1347,7 @@ export default function UserDashboardPage() {
 
             {/* My Activity: the seller's own usage. Admin activity is not
                 tracked, so there is nothing to show an admin here. */}
-            {user?.role !== 'admin' && (
+            {!isAdminRole(user?.role) && (
               <button
                 type="button"
                 onClick={() => setIsMyActivityOpen(true)}

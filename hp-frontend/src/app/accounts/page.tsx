@@ -6,6 +6,8 @@ import { ProtectedRoute } from '@/components/common/ProtectedRoute';
 import ScoreInfo from '@/components/common/ScoreInfo';
 import { CountUpText, ParallaxBand, SlidingSegments, growDelay } from '@/components/common/motion';
 import api from '@/services/api';
+import { useAuth } from '@/providers/AuthProvider';
+import { isAdminRole } from '@/types/auth';
 import { CompanyAccount } from '@/types/account';
 import {
   URGENCY_FILTERS,
@@ -27,6 +29,7 @@ import { AlertCircle, ArrowRight, Building2, ChevronLeft, ChevronRight, Loader2,
  */
 export default function AccountSelectionPage() {
   const router = useRouter();
+  const { user } = useAuth();
   const [accounts, setAccounts] = useState<CompanyAccount[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -190,8 +193,15 @@ export default function AccountSelectionPage() {
                   <Building2 className="w-6 h-6 text-slate-400" />
                 </div>
                 <p className="text-sm font-bold text-slate-800">
-                  {isFiltering ? 'No accounts found matching your search and filter.' : 'No accounts are available yet.'}
+                  {isFiltering
+                    ? 'No accounts found matching your search and filter.'
+                    : isAdminRole(user?.role)
+                      ? 'No accounts are available yet.'
+                      : 'You don\'t have any accounts assigned to you.'}
                 </p>
+                {!isFiltering && !isAdminRole(user?.role) && (
+                  <p className="mt-1 text-xs text-slate-500">Please contact your admin to get access.</p>
+                )}
                 {isFiltering && (
                   <button
                     type="button"

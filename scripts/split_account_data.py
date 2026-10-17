@@ -3471,8 +3471,34 @@ def print_refresh_summary(summary: dict):
 #
 # Credentials come from the environment, never from an argument, the same way
 # scripts/regenerate_features.py takes them:
-#     HP_TOKEN                 a bearer token from a browser session
-#     HP_EMAIL + HP_PASSWORD   a dashboard login, exchanged for a token here
+#     HP_TOKEN                 a bearer token from a browser session (valid 15
+#                              minutes - fine for one quick call, not a load)
+#     HP_EMAIL + HP_PASSWORD   a dashboard login, exchanged for a token here and
+#                              exchanged again whenever it lapses mid-run
+#
+# Access tokens last 15 minutes and a load runs for hours. With a password,
+# a 401 signs in again and the call is retried once; callers keep the token
+# they were handed and `_current` swaps in the newest one, so no call site
+# had to change.
+_LOGIN: dict[str, str] = {}      # {"base": base_url} after a password sign-in
+_NEWER: dict[str, str] = {}      # lapsed token -> the one that replaced it
+
+
+def _current(token: str) -> str:
+    while token in _NEWER:
+        token = _NEWER[token]
+    return token
+
+
+def _relogin(lapsed: str) -> str:
+    """A new token for `lapsed`, or "" when there is no password to sign in with."""
+    base = _LOGIN.get("base")
+    if not base or not lapsed:
+        return ""
+    fresh = _login(base)
+    _NEWER[lapsed] = fresh
+    print("  (signed in again: the access token had lapsed)")
+    return fresh
 
 def _unwrap(body):
     """The API wraps every response as {"success": true, "data": ...}.
@@ -3488,6 +3514,15 @@ def _unwrap(body):
 
 def _api(url: str, token: str = "", payload=None, method: str = "",
          timeout: int = 600):
+    token = _current(token)
+    status, body = _api_once(url, token, payload, method, timeout)
+    if status == 401 and (fresh := _relogin(token)):
+        status, body = _api_once(url, fresh, payload, method, timeout)
+    return status, body
+
+
+def _api_once(url: str, token: str = "", payload=None, method: str = "",
+              timeout: int = 600):
     import urllib.error
     import urllib.request
     data = json.dumps(payload).encode() if payload is not None else None
@@ -3511,6 +3546,15 @@ def _api(url: str, token: str = "", payload=None, method: str = "",
 
 def _api_upload(url: str, token: str, dataset_key: str, path: Path,
                 defer: bool = True, timeout: int = 900):
+    token = _current(token)
+    status, body = _api_upload_once(url, token, dataset_key, path, defer, timeout)
+    if status == 401 and (fresh := _relogin(token)):
+        status, body = _api_upload_once(url, fresh, dataset_key, path, defer, timeout)
+    return status, body
+
+
+def _api_upload_once(url: str, token: str, dataset_key: str, path: Path,
+                     defer: bool = True, timeout: int = 900):
     """One multipart POST of one file. Written out rather than pulled from
     requests, which is not a dependency of this script.
 
@@ -3556,13 +3600,22 @@ def _api_upload(url: str, token: str, dataset_key: str, path: Path,
 def _api_token(base_url: str) -> str:
     import os
     token = (os.getenv("HP_TOKEN") or "").strip()
+    email, password = os.getenv("HP_EMAIL"), os.getenv("HP_PASSWORD")
+    if email and password:
+        _LOGIN["base"] = base_url      # lets a lapsed HP_TOKEN be replaced too
     if token:
         return token
-    email, password = os.getenv("HP_EMAIL"), os.getenv("HP_PASSWORD")
     if not email or not password:
         sys.exit("set HP_TOKEN, or HP_EMAIL and HP_PASSWORD, in the environment")
-    status, body = _api(f"{base_url}/api/v1/auth/login",
-                        payload={"email": email, "password": password})
+    _LOGIN["base"] = base_url
+    return _login(base_url)
+
+
+def _login(base_url: str) -> str:
+    import os
+    status, body = _api_once(f"{base_url}/api/v1/auth/login",
+                             payload={"email": os.getenv("HP_EMAIL"),
+                                      "password": os.getenv("HP_PASSWORD")})
     if status != 200 or not body or "access_token" not in body:
         sys.exit(f"login failed (HTTP {status})")
     return body["access_token"]

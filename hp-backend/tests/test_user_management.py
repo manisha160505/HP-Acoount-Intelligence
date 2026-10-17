@@ -26,17 +26,18 @@ def _login(client, email, password=PASSWORD):
 
 def test_admin_can_create_user_defaults_active_and_role_user(db, client):
     admin, _ = _admin_and_user(db)
-    r = client.post("/api/v1/admin/users", json={**NEW_USER, "role": "admin"},
-                    headers=auth(admin))
+    r = client.post("/api/v1/admin/users", json=NEW_USER, headers=auth(admin))
     assert r.status_code == 201, r.text
     created = body(r)
     assert created["email"] == "new.seller@example.com"
-    # A role in the body is ignored: this endpoint cannot create an admin.
     assert created["role"] == "user"
+    # The admin chose the password, so none is echoed back.
+    assert created["temporary_password"] is None
     assert created["is_active"] is True
     assert created["last_login_at"] is None
     assert created["created_at"]
-    assert "password" not in r.text and "password_hash" not in r.text
+    # Neither the hash nor the password the admin chose comes back.
+    assert "password_hash" not in r.text and NEW_USER["password"] not in r.text
     stored = db["users"].find_one({"email": "new.seller@example.com"})
     assert stored["role"] == "user"
     assert stored["password_hash"] != NEW_USER["password"]
@@ -83,10 +84,11 @@ def test_list_never_returns_password_hash(db, client):
     assert r.status_code == 200
     rows = body(r)
     assert {u["email"] for u in rows} == {"admin@example.com", "user@example.com"}
-    assert "password" not in r.text
+    assert "password_hash" not in r.text and "$2b$" not in r.text
     for u in rows:
         assert set(u) == {"id", "email", "full_name", "role", "is_active",
-                          "created_at", "last_login_at"}
+                          "must_change_password", "account_ids", "created_at",
+                          "last_login_at"}
         # Seeded before activation existed: no field, reported active.
         assert u["is_active"] is True
 
@@ -224,10 +226,11 @@ def test_unauthenticated_events_rejected(db, client):
 
 
 def test_beacon_style_submission(db, client):
-    """sendBeacon: token in the query string, JSON body sent as text/plain."""
+    """sendBeacon: token in the hp_access cookie, JSON body sent as text/plain."""
     _, user = _admin_and_user(db)
     import json
-    r = client.post("/api/v1/events?token=%s" % token(user),
+    client.cookies.set("hp_access", token(user))
+    r = client.post("/api/v1/events",
                     content=json.dumps({"events": [_view()]}),
                     headers={"Content-Type": "text/plain;charset=UTF-8"})
     assert r.status_code == 200 and body(r) == {"accepted": 1}

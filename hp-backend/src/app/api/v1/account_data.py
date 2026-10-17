@@ -15,10 +15,9 @@ from fastapi.responses import FileResponse
 from app.api.v1.feature_mapping import FEATURE_MAPPINGS
 from app.config.settings import settings
 from app.core.deps import (
-    get_current_user_flexible,
+    require_account_access,
+    require_account_access_flexible,
     require_admin_role,
-    require_user_role,
-    require_user_role_flexible,
 )
 from app.database.mongodb import get_db
 from app.schemas.account_data import DATASET_REGISTRY, AccountDataFileResponse
@@ -400,7 +399,7 @@ def delete_account_data_file(
 def download_account_data_file(
     account_id: str,
     dataset_key: str,
-    current_user: dict = Depends(get_current_user_flexible)
+    current_user: dict = Depends(require_account_access_flexible)
 ):
     if not ObjectId.is_valid(account_id):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid account ID format")
@@ -494,7 +493,7 @@ def _viewable_filings(db, account_id: str) -> dict:
 @router.get("/filings")
 def list_account_filings(
     account_id: str,
-    current_user: dict = Depends(require_user_role),
+    current_user: dict = Depends(require_account_access),
 ):
     """Which filings this account has an openable copy of.
 
@@ -544,7 +543,7 @@ def list_account_filings(
 @router.get("/unreachable-links")
 def list_unreachable_links(
     account_id: str,
-    current_user: dict = Depends(require_user_role),
+    current_user: dict = Depends(require_account_access),
 ):
     """This account's evidence links that are known not to open.
 
@@ -571,7 +570,7 @@ def list_unreachable_links(
 def view_account_filing(
     account_id: str,
     name: str,
-    current_user: dict = Depends(require_user_role_flexible),
+    current_user: dict = Depends(require_account_access_flexible),
 ):
     """One of this account's filing PDFs, inline, addressed by its own filename.
 

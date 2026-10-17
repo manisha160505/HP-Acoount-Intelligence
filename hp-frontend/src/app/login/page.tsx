@@ -3,16 +3,16 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/providers/AuthProvider';
-import { homeRouteFor } from '@/lib/accountSelection';
+import { landingRouteFor } from '@/lib/accountSelection';
 import { ParallaxBand } from '@/components/common/motion';
-import { Shield, User as UserIcon, Lock, Mail, AlertCircle, Loader2 } from 'lucide-react';
+import { Lock, Mail, AlertCircle, Loader2 } from 'lucide-react';
 import HpLogo from '@/components/common/HpLogo';
 
 export default function LoginPage() {
-  const [activeTab, setActiveTab] = useState<'user' | 'admin'>('user');
-  const [email, setEmail] = useState('user@hp.com');
-  const [password, setPassword] = useState('UserPassword123!');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const { login, isAuthenticated, user } = useAuth();
@@ -20,7 +20,7 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (isAuthenticated && user) {
-      router.push(homeRouteFor(user.role));
+      router.push(landingRouteFor(user));
     }
   }, [isAuthenticated, user, router]);
 
@@ -33,19 +33,11 @@ export default function LoginPage() {
         && new URLSearchParams(window.location.search).get('expired') === '1') {
       setError('Your session expired. Please sign in again.');
     }
-  }, []);
-
-  const handleTabSwitch = (tab: 'user' | 'admin') => {
-    setActiveTab(tab);
-    setError(null);
-    if (tab === 'admin') {
-      setEmail('admin@hp.com');
-      setPassword('AdminPassword123!');
-    } else {
-      setEmail('user@hp.com');
-      setPassword('UserPassword123!');
+    if (typeof window !== 'undefined'
+        && new URLSearchParams(window.location.search).get('changed') === '1') {
+      setNotice('Password changed. Sign in with your new password.');
     }
-  };
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -56,7 +48,7 @@ export default function LoginPage() {
     setIsSubmitting(false);
 
     if (result.success) {
-      router.push(homeRouteFor(result.role));
+      router.push(landingRouteFor(result.user));
     } else {
       setError(result.error || 'Authentication failed. Please check credentials.');
     }
@@ -77,33 +69,11 @@ export default function LoginPage() {
       <div className="as-rise mt-8 sm:mx-auto sm:w-full sm:max-w-md" style={{ ['--as-delay' as string]: '90ms' }}>
         <div className="as-glass-dark py-8 px-4 rounded-2xl sm:px-10">
           
-          {/* Role Selector Tabs */}
-          <div className="flex bg-[#0B132B] p-1 rounded-xl mb-6 border border-slate-800">
-            <button
-              type="button"
-              onClick={() => handleTabSwitch('user')}
-              className={`flex-1 flex items-center justify-center space-x-2 py-2.5 rounded-lg text-xs font-bold transition duration-200 ${
-                activeTab === 'user'
-                  ? 'bg-hp-navy text-white shadow-md'
-                  : 'text-gray-400 hover:text-white'
-              }`}
-            >
-              <UserIcon className="w-4 h-4 text-hp-accent" />
-              <span>Sales User</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => handleTabSwitch('admin')}
-              className={`flex-1 flex items-center justify-center space-x-2 py-2.5 rounded-lg text-xs font-bold transition duration-200 ${
-                activeTab === 'admin'
-                  ? 'bg-emerald-600 text-white shadow-md'
-                  : 'text-gray-400 hover:text-white'
-              }`}
-            >
-              <Shield className="w-4 h-4 text-emerald-400" />
-              <span>Administrator</span>
-            </button>
-          </div>
+          {notice && !error && (
+            <div className="mb-4 bg-emerald-950/70 as-fade border border-emerald-500/40 p-3.5 rounded-xl">
+              <p className="text-xs text-emerald-200 font-medium">{notice}</p>
+            </div>
+          )}
 
           {/* Error Banner */}
           {error && (
@@ -125,6 +95,7 @@ export default function LoginPage() {
                 <input
                   type="email"
                   required
+                  autoComplete="username"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="block w-full pl-10 pr-3 py-2.5 bg-[#0B132B] border border-slate-700 rounded-lg text-xs text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-hp-navy focus:border-transparent transition"
@@ -144,6 +115,7 @@ export default function LoginPage() {
                 <input
                   type="password"
                   required
+                  autoComplete="current-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="block w-full pl-10 pr-3 py-2.5 bg-[#0B132B] border border-slate-700 rounded-lg text-xs text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-hp-navy focus:border-transparent transition"
@@ -163,19 +135,10 @@ export default function LoginPage() {
                   <span>Authenticating...</span>
                 </div>
               ) : (
-                <span>Sign In as {activeTab === 'admin' ? 'Administrator' : 'Sales User'}</span>
+                <span>Sign In</span>
               )}
             </button>
           </form>
-
-          {/* Test Credentials Helper */}
-          <div className="mt-6 pt-5 border-t border-slate-800 text-[11px] text-gray-400">
-            <p className="font-semibold text-gray-300 mb-1.5">Test Credentials Quick Reference:</p>
-            <div className="bg-[#0B132B] p-2.5 rounded-lg border border-slate-800 font-mono space-y-0.5 text-[10px]">
-              <div><span className="font-bold text-gray-300">User:</span> user@hp.com / UserPassword123!</div>
-              <div><span className="font-bold text-gray-300">Admin:</span> admin@hp.com / AdminPassword123!</div>
-            </div>
-          </div>
 
         </div>
       </div>

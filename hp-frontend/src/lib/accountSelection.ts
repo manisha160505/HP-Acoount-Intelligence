@@ -25,7 +25,15 @@ export function dashboardHref(accountId: string): string {
 
 /** Where a signed-in user lands: sellers choose an account first. */
 export function homeRouteFor(role: string | undefined): string {
-  return role === 'admin' ? '/admin/platform' : '/accounts';
+  return role === 'admin' || role === 'super_admin' ? '/admin/platform' : '/accounts';
+}
+
+/** Where to send a user straight after sign-in: a new account sets its own
+ *  password before anything else. */
+export function landingRouteFor(
+  user: { role?: string; must_change_password?: boolean } | null | undefined,
+): string {
+  return user?.must_change_password ? '/change-password' : homeRouteFor(user?.role);
 }
 
 /** The account id in a `?account=` query string, or null. */

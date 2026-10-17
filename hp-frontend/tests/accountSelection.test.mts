@@ -13,6 +13,7 @@ import {
   dashboardHref,
   filterAccounts,
   homeRouteFor,
+  landingRouteFor,
   matchesUrgency,
   pageNumbers,
   paginate,
@@ -41,6 +42,15 @@ test('successful login lands a seller on Account Selection, an admin on the plat
   assert.equal(homeRouteFor('user'), '/accounts');
   assert.equal(homeRouteFor(undefined), '/accounts');
   assert.equal(homeRouteFor('admin'), '/admin/platform');
+  assert.equal(homeRouteFor('super_admin'), '/admin/platform');
+});
+
+test('a new account is sent to change its password before anything else', () => {
+  assert.equal(landingRouteFor({ role: 'user', must_change_password: true }), '/change-password');
+  assert.equal(landingRouteFor({ role: 'admin', must_change_password: true }), '/change-password');
+  assert.equal(landingRouteFor({ role: 'user', must_change_password: false }), '/accounts');
+  assert.equal(landingRouteFor({ role: 'super_admin' }), '/admin/platform');
+  assert.equal(landingRouteFor(null), '/accounts');
 });
 
 test('selecting an account opens the dashboard with that account active', () => {

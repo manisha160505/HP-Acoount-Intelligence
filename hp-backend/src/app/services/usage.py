@@ -57,7 +57,7 @@ def ensure_indexes(db) -> None:
 
 
 def is_tracked(user: dict) -> bool:
-    return user.get("role") != "admin"
+    return user.get("role") not in ("admin", "super_admin")
 
 
 def record_login(db, user: dict) -> None:

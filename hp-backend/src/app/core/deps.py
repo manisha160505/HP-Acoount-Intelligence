@@ -1,133 +1,160 @@
+"""Who is calling, and may they.
+
+Every request is authenticated by an access token (see `app.core.security`):
+the Bearer header for API calls, or the `hp_access` cookie for the few routes a
+browser reaches by a plain link or a page-close beacon, which cannot set a
+header. Either way the token's session must still be live and its user active.
+
+A user flagged `must_change_password` - every new account until its first
+password change - may only reach the routes that use `get_signed_in_user`
+(who am I, change password, sign out). Every other dependency refuses them.
+
+Account access: a seller sees only the accounts listed in their
+`account_ids`; admins see every account. Every route with an `{account_id}` in
+its path that a seller can reach depends on `require_account_access` (or its
+`_flexible` twin), and tests/test_account_access.py fails if one does not.
+"""
+
 from bson import ObjectId
-from fastapi import Depends, HTTPException, Query, status
+from bson.errors import InvalidId
+from fastapi import Cookie, Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.core.security import decode_access_token
 from app.database.mongodb import get_db
+from app.errors import APIError, ErrorCode
+from app.services import sessions
 
-security_bearer = HTTPBearer()
-security_bearer_optional = HTTPBearer(auto_error=False)
+ACCESS_COOKIE = "hp_access"
 
-def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security_bearer)):
-    token = credentials.credentials
-    payload = decode_access_token(token)
-    if not payload:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired authentication token",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    user_id = payload.get("sub")
-    if not user_id:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token payload",
-        )
+SUPER_ADMIN = "super_admin"
+ADMIN = "admin"
+USER = "user"
+ADMIN_ROLES = frozenset({SUPER_ADMIN, ADMIN})
+ALL_ROLES = frozenset({SUPER_ADMIN, ADMIN, USER})
 
+security_bearer = HTTPBearer(auto_error=False)
+
+
+def is_admin(role: str | None) -> bool:
+    return role in ADMIN_ROLES
+
+
+def _unauthenticated(message: str | None = None) -> APIError:
+    return APIError(ErrorCode.UNAUTHENTICATED, message,
+                    headers={"WWW-Authenticate": "Bearer"})
+
+
+def _principal(raw_token: str | None) -> dict:
+    if not raw_token:
+        raise _unauthenticated()
+    claims = decode_access_token(raw_token)
+    if not claims:
+        raise APIError(ErrorCode.TOKEN_EXPIRED, headers={"WWW-Authenticate": "Bearer"})
     db = get_db()
-    user = db["users"].find_one({"_id": ObjectId(user_id)})
+    user_id, sid = claims["sub"], claims["sid"]
+    try:
+        user = db["users"].find_one({"_id": ObjectId(user_id)})
+    except (InvalidId, TypeError):
+        user = None
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found",
-        )
-    # A token outlives a deactivation by up to ACCESS_TOKEN_EXPIRE_MINUTES;
-    # without this check a deactivated user keeps working until it expires.
+        raise _unauthenticated()
     # A missing field predates activation and means active.
     if user.get("is_active", True) is False:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="This account has been deactivated",
-        )
-
+        raise _unauthenticated("This account has been deactivated.")
+    if not sessions.is_live(db, sid, user_id):
+        raise APIError(ErrorCode.TOKEN_EXPIRED, headers={"WWW-Authenticate": "Bearer"})
     return {
-        "id": str(user["_id"]),
+        "id": user_id,
         "email": user["email"],
-        "full_name": user["full_name"],
-        "role": user["role"]
+        "full_name": user.get("full_name") or user["email"],
+        # From the database, not the token: a demotion applies at once.
+        "role": user["role"],
+        "session_id": sid,
+        "must_change_password": bool(user.get("must_change_password")),
+        "account_ids": [str(a) for a in user.get("account_ids") or []],
     }
+
+
+def _bearer(credentials: HTTPAuthorizationCredentials | None) -> str | None:
+    return credentials.credentials if credentials else None
+
+
+def _ready(user: dict) -> dict:
+    if user["must_change_password"]:
+        raise APIError(ErrorCode.PASSWORD_CHANGE_REQUIRED)
+    return user
+
+
+def get_signed_in_user(credentials: HTTPAuthorizationCredentials | None = Depends(security_bearer)):
+    """Signed in, password change or not. Only for /auth/me, /auth/logout and
+    /auth/change-password."""
+    return _principal(_bearer(credentials))
+
+
+def get_current_user(credentials: HTTPAuthorizationCredentials | None = Depends(security_bearer)):
+    return _ready(_principal(_bearer(credentials)))
+
 
 def get_current_user_flexible(
-    credentials: HTTPAuthorizationCredentials | None = Depends(security_bearer_optional),
-    token: str | None = Query(None)
+    credentials: HTTPAuthorizationCredentials | None = Depends(security_bearer),
+    hp_access: str | None = Cookie(None),
 ):
-    raw_token = None
-    if credentials:
-        raw_token = credentials.credentials
-    elif token and token.strip():
-        raw_token = token.strip()
+    """`get_current_user`, also accepting the `hp_access` cookie.
 
-    if not raw_token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication token required via Bearer header or ?token= query parameter",
-        )
+    For a PDF opened in a new tab, a download link, or the page-close beacon:
+    none can carry a header. The token used to ride in `?token=`, where it was
+    written into server logs and browser history.
+    """
+    return _ready(_principal(_bearer(credentials) or hp_access))
 
-    payload = decode_access_token(raw_token)
-    if not payload:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired authentication token",
-        )
-    user_id = payload.get("sub")
-    if not user_id:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token payload",
-        )
 
-    db = get_db()
-    user = db["users"].find_one({"_id": ObjectId(user_id)})
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found",
-        )
-    # A token outlives a deactivation by up to ACCESS_TOKEN_EXPIRE_MINUTES;
-    # without this check a deactivated user keeps working until it expires.
-    # A missing field predates activation and means active.
-    if user.get("is_active", True) is False:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="This account has been deactivated",
-        )
+def _role_in(user: dict, roles: frozenset) -> dict:
+    if user["role"] not in roles:
+        raise APIError(ErrorCode.FORBIDDEN)
+    return user
 
-    return {
-        "id": str(user["_id"]),
-        "email": user["email"],
-        "full_name": user["full_name"],
-        "role": user["role"]
-    }
 
 def require_user_role(current_user: dict = Depends(get_current_user)):
-    if current_user["role"] not in ["user", "admin"]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access forbidden: Invalid role",
-        )
-    return current_user
+    return _role_in(current_user, ALL_ROLES)
 
-def require_user_role_flexible(
-    current_user: dict = Depends(get_current_user_flexible),
-):
+
+def require_user_role_flexible(current_user: dict = Depends(get_current_user_flexible)):
     """`require_user_role`, for a route reached by a plain link.
 
-    `get_current_user_flexible` accepts the token in the query string, which is
-    what lets an `<a href>` work at all - but it carries no role check, so on its
-    own it admits any authenticated principal whatever their role. A route that
-    serves a document needs both.
+    `get_current_user_flexible` carries no role check, so on its own it admits
+    any authenticated principal whatever their role. A route that serves a
+    document needs both.
     """
-    if current_user["role"] not in ["user", "admin"]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access forbidden: Invalid role",
-        )
-    return current_user
+    return _role_in(current_user, ALL_ROLES)
+
 
 def require_admin_role(current_user: dict = Depends(get_current_user)):
-    if current_user["role"] != "admin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access forbidden: Administrator privileges required",
-        )
-    return current_user
+    return _role_in(current_user, ADMIN_ROLES)
+
+
+def require_super_admin(current_user: dict = Depends(get_current_user)):
+    return _role_in(current_user, frozenset({SUPER_ADMIN}))
+
+
+def can_see_account(user: dict, account_id: str) -> bool:
+    return is_admin(user["role"]) or account_id in user.get("account_ids", ())
+
+
+def _account_allowed(user: dict, account_id: str) -> dict:
+    # Not found rather than forbidden: a seller learns nothing about accounts
+    # that are not theirs, not even that the id exists.
+    if not can_see_account(user, account_id):
+        raise APIError(ErrorCode.ACCOUNT_NOT_FOUND)
+    return user
+
+
+def require_account_access(account_id: str, current_user: dict = Depends(require_user_role)):
+    """`require_user_role`, and the `{account_id}` in the path is one of theirs."""
+    return _account_allowed(current_user, account_id)
+
+
+def require_account_access_flexible(account_id: str,
+                                    current_user: dict = Depends(require_user_role_flexible)):
+    """`require_account_access` for a route reached by a plain link."""
+    return _account_allowed(current_user, account_id)

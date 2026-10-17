@@ -32,6 +32,7 @@ class ErrorCode(StrEnum):
     INVALID_CREDENTIALS = "INVALID_CREDENTIALS"
     TOKEN_EXPIRED = "TOKEN_EXPIRED"
     FORBIDDEN = "FORBIDDEN"
+    PASSWORD_CHANGE_REQUIRED = "PASSWORD_CHANGE_REQUIRED"
 
     # --- Resources ---------------------------------------------------------
     ACCOUNT_NOT_FOUND = "ACCOUNT_NOT_FOUND"
@@ -79,6 +80,7 @@ STATUS_BY_CODE: dict[ErrorCode, int] = {
     ErrorCode.INVALID_CREDENTIALS: HTTPStatus.UNAUTHORIZED,
     ErrorCode.TOKEN_EXPIRED: HTTPStatus.UNAUTHORIZED,
     ErrorCode.FORBIDDEN: HTTPStatus.FORBIDDEN,
+    ErrorCode.PASSWORD_CHANGE_REQUIRED: HTTPStatus.FORBIDDEN,
 
     ErrorCode.ACCOUNT_NOT_FOUND: HTTPStatus.NOT_FOUND,
     ErrorCode.USER_NOT_FOUND: HTTPStatus.NOT_FOUND,
@@ -121,6 +123,7 @@ DEFAULT_MESSAGE: dict[ErrorCode, str] = {
     ErrorCode.INVALID_CREDENTIALS: "That email and password combination is not correct.",
     ErrorCode.TOKEN_EXPIRED: "Your session has expired. Please sign in again.",
     ErrorCode.FORBIDDEN: "You do not have access to this.",
+    ErrorCode.PASSWORD_CHANGE_REQUIRED: "Please set a new password to continue.",
 
     ErrorCode.ACCOUNT_NOT_FOUND: "That account could not be found.",
     ErrorCode.USER_NOT_FOUND: "That user could not be found.",

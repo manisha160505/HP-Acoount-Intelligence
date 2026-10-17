@@ -28,13 +28,24 @@ ENV_FILES = (
 class Settings(BaseSettings):
     MONGODB_URI: str = "mongodb://localhost:27017"
     DB_NAME: str = "hp_account_db"
-    JWT_SECRET: str = "hp-account-intelligence-platform-secret-key-2026-enterprise"
-    JWT_ALGORITHM: str = "HS256"
-    # A working day. Two hours was shorter than a working session on this app -
-    # one index build runs about 40 minutes - so sellers were being signed out
-    # mid-task. Mirrored in both .env files; they are loaded as a sequence with
-    # the backend one last, so a stale value there would silently override this.
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440
+    # The ES256 private key (PEM) every access token is signed with; the public
+    # half is derived from it. No default on purpose: a key in the source is a
+    # key everyone with the repo holds. `python scripts/generate_jwt_key.py`
+    # prints a line to paste into .env; newlines may be written as \n.
+    # Changing it signs every access token out; sessions refresh onto the new key.
+    JWT_PRIVATE_KEY: str = ""
+    # Access tokens are short because they cannot be recalled once issued; the
+    # session behind them (SESSION_*) is what keeps a seller signed in. Named
+    # apart from the old ACCESS_TOKEN_EXPIRE_MINUTES, which both .env files still
+    # set to a day and would otherwise silently override this.
+    ACCESS_TOKEN_MINUTES: int = 15
+    # A session ends after this many days without use, and in any case this
+    # many days after sign-in.
+    SESSION_IDLE_DAYS: int = 7
+    SESSION_MAX_DAYS: int = 30
+    # Off only for local http development; browsers drop a Secure cookie sent
+    # over plain http on anything but localhost.
+    AUTH_COOKIE_SECURE: bool = True
     CORS_ORIGINS: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
     DATA_STORAGE_DIR: str = "data/accounts"
     # A contact email for scripts/check_evidence_links.py. sec.gov answers 403

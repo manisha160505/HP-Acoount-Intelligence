@@ -55,7 +55,8 @@ def env(monkeypatch, tmp_path):
     # in the running app while the test said it did.
     app.add_middleware(ResponseEnvelopeMiddleware)
     for dep in (deps.require_admin_role, deps.get_current_user_flexible,
-                deps.require_user_role, deps.require_user_role_flexible):
+                deps.require_user_role, deps.require_user_role_flexible,
+                deps.require_account_access, deps.require_account_access_flexible):
         app.dependency_overrides[dep] = lambda: USER
 
     account_id = str(ObjectId())
@@ -284,8 +285,8 @@ class TestWhatItRefuses:
 class TestItIsNotOpenToAnySignedInPrincipal:
 
     def test_a_role_outside_user_and_admin_is_refused(self, env, monkeypatch):
-        """The token may ride in the query string, which is what makes a plain
-        link work - and `get_current_user_flexible` alone checks no role at all.
+        """The token may ride in a cookie, which is what makes a plain link
+        work - and `get_current_user_flexible` alone checks no role at all.
         The older download route still has that gap."""
         client, db, acct, root = env
         _register(db, acct, root, AR)
@@ -293,8 +294,9 @@ class TestItIsNotOpenToAnySignedInPrincipal:
         # Call the real check directly: the override above only proves the
         # dependency is wired, not what it decides.
         import pytest as _pytest
-        from fastapi import HTTPException
-        with _pytest.raises(HTTPException) as exc:
+
+        from app.errors import APIError
+        with _pytest.raises(APIError) as exc:
             deps.require_user_role_flexible({"id": "x", "role": "viewer"})
         assert exc.value.status_code == 403
 
@@ -305,7 +307,8 @@ class TestItIsNotOpenToAnySignedInPrincipal:
         route = next(r for r in mod.router.routes
                      if getattr(r, "path", "").endswith("/filing"))
         names = [d.call.__name__ for d in route.dependant.dependencies]
-        assert "require_user_role_flexible" in names
+        # Role-checked and limited to the seller's own accounts.
+        assert "require_account_access_flexible" in names
 
 
 class TestWhichFileWhenTwoShareAName:
@@ -479,12 +482,12 @@ class TestTheTwoRoutesCannotDisagree:
 class TestTheManifestNeedsNoTokenInAUrl:
 
     def test_it_uses_the_ordinary_bearer_dependency(self, env):
-        """Unlike the document route, this is fetched by the API client, so no
-        JWT is put in a URL where it would reach browser history."""
+        """Unlike the document route, this is fetched by the API client, so it
+        takes the Bearer header and never the hp_access cookie."""
         from app.api.v1 import account_data as mod
         route = next(r for r in mod.router.routes
                      if getattr(r, "path", "").endswith("/filings"))
         names = [d.call.__name__ for d in route.dependant.dependencies]
-        assert "require_user_role" in names
-        assert "require_user_role_flexible" not in names
+        assert "require_account_access" in names
+        assert "require_account_access_flexible" not in names
         assert "get_current_user_flexible" not in names

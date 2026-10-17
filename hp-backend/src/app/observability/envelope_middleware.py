@@ -118,31 +118,40 @@ class ResponseEnvelopeMiddleware(BaseHTTPMiddleware):
             "meta": Meta(request_id=get_request_id()).model_dump(),
         }
 
-        return JSONResponse(
+        return _with_cookies(JSONResponse(
             content=enveloped,
             status_code=response.status_code,
             headers=_headers_without_length(response),
-        )
+        ), response)
 
 
 def _headers_without_length(response: Response) -> dict[str, str]:
     """Every header except content-length.
 
     The body changes size here, and a stale content-length truncates the
-    response at the old length.
+    response at the old length. Set-Cookie is left to `_with_cookies`: a dict
+    holds one value per name, and sign-in sets two cookies.
     """
     return {
-        k: v for k, v in response.headers.items() if k.lower() != "content-length"
+        k: v for k, v in response.headers.items()
+        if k.lower() not in ("content-length", "set-cookie")
     }
+
+
+def _with_cookies(rebuilt: JSONResponse, original: Response) -> JSONResponse:
+    """Every Set-Cookie of `original`, copied onto `rebuilt` one by one."""
+    for value in original.headers.getlist("set-cookie"):
+        rebuilt.headers.append("set-cookie", value)
+    return rebuilt
 
 
 def _rebuild(response: Response, payload: object) -> JSONResponse:
     """Re-send an already-enveloped body after its stream has been read."""
-    return JSONResponse(
+    return _with_cookies(JSONResponse(
         content=payload,
         status_code=response.status_code,
         headers=_headers_without_length(response),
-    )
+    ), response)
 
 
 async def _read_body(response: Response) -> bytes | None:

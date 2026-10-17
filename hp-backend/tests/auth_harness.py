@@ -19,7 +19,7 @@ from fastapi.testclient import TestClient
 from app.core.security import create_access_token, get_password_hash
 from app.database import mongodb
 from app.errors import register_error_handlers
-from app.services import usage, users_admin
+from app.services import sessions, usage, users_admin
 from regen_fakes import FakeDb
 
 PASSWORD = "Password123!"
@@ -40,6 +40,7 @@ def mongo_db():
 def install(monkeypatch, db):
     monkeypatch.setattr(mongodb.db_instance, "db", db)
     users_admin.ensure_indexes(db)
+    sessions.ensure_indexes(db)
     usage.ensure_indexes(db)
     return db
 
@@ -79,13 +80,14 @@ def add_user(db, email, role="user", **extra):
     return doc
 
 
-def auth(user) -> dict:
-    token = create_access_token({"sub": str(user["_id"]), "role": user["role"]})
-    return {"Authorization": "Bearer %s" % token}
-
-
 def token(user) -> str:
-    return create_access_token({"sub": str(user["_id"]), "role": user["role"]})
+    """An access token on a real, live session - as a sign-in would issue."""
+    sid, _refresh = sessions.create(mongodb.db_instance.db, str(user["_id"]))
+    return create_access_token(str(user["_id"]), user["role"], sid)
+
+
+def auth(user) -> dict:
+    return {"Authorization": "Bearer %s" % token(user)}
 
 
 def body(response):
