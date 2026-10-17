@@ -4,6 +4,8 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { ProtectedRoute } from '@/components/common/ProtectedRoute';
 import { PageHero } from '@/components/common/motion';
+import { ROW_BUTTON, RowMenu } from '@/components/common/RowMenu';
+import { dashboardHref } from '@/lib/accountSelection';
 import api from '@/services/api';
 import { CompanyAccount, AccountStatus } from '@/types/account';
 import { 
@@ -17,6 +19,7 @@ import {
   AlertCircle, 
   CheckCircle2, 
   X,
+  ExternalLink,
   RefreshCw
 } from 'lucide-react';
 
@@ -391,7 +394,7 @@ export default function ManagePlatformPage() {
                         {pipelineError && <span className="normal-case text-red-700" title={pipelineError}>· status failed to load</span>}
                       </span>
                     </th>
-                    <th className="py-3.5 px-6">Last Updated</th>
+                    <th className="py-3.5 px-6 whitespace-nowrap">Last Updated</th>
                     <th className="py-3.5 px-6 text-right">Actions</th>
                   </tr>
                 </thead>
@@ -429,40 +432,35 @@ export default function ManagePlatformPage() {
                         {formatDate(account.updated_at)}
                       </td>
 
-                      <td className="py-4 px-6 text-right space-x-2">
-                        <button
-                          type="button"
-                          onClick={() => router.push(`/admin/accounts/${account.id}`)}
-                          className="inline-flex items-center space-x-1 px-3 py-1.5 bg-gray-100 hover:bg-hp-navy hover:text-white text-gray-700 rounded-lg transition text-xs font-bold"
-                        >
-                          <Settings2 className="w-3.5 h-3.5" />
-                          <span>Manage</span>
-                        </button>
-
-                        <button
-                          type="button"
-                          disabled={togglingId === account.id}
-                          onClick={() => handleStatusToggle(account)}
-                          className={`inline-flex items-center space-x-1 px-3 py-1.5 rounded-lg text-xs font-bold transition ${
-                            account.status === 'active'
-                              ? 'bg-amber-50 text-amber-700 hover:bg-amber-600 hover:text-white border border-amber-200'
-                              : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-600 hover:text-white border border-emerald-200'
-                          }`}
-                        >
+                      <td className="py-4 px-6">
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() => router.push(`/admin/accounts/${account.id}`)}
+                            className={ROW_BUTTON}
+                          >
+                            <Settings2 className="w-3.5 h-3.5 text-gray-400" />
+                            Manage
+                          </button>
                           {togglingId === account.id ? (
-                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          ) : account.status === 'active' ? (
-                            <>
-                              <EyeOff className="w-3.5 h-3.5" />
-                              <span>Hide</span>
-                            </>
+                            <span className="inline-flex items-center justify-center w-8 h-8">
+                              <Loader2 className="w-4 h-4 text-hp-navy animate-spin" />
+                            </span>
                           ) : (
-                            <>
-                              <Eye className="w-3.5 h-3.5" />
-                              <span>Show</span>
-                            </>
+                            <RowMenu
+                              label={`Actions for ${account.name}`}
+                              items={[
+                                { label: 'Open dashboard', icon: <ExternalLink className="w-3.5 h-3.5" />,
+                                  onSelect: () => router.push(dashboardHref(account.id)) },
+                                account.status === 'active'
+                                  ? { label: 'Hide from sellers', icon: <EyeOff className="w-3.5 h-3.5" />, danger: true,
+                                      onSelect: () => handleStatusToggle(account) }
+                                  : { label: 'Show to sellers', icon: <Eye className="w-3.5 h-3.5" />,
+                                      onSelect: () => handleStatusToggle(account) },
+                              ]}
+                            />
                           )}
-                        </button>
+                        </div>
                       </td>
                     </tr>
                   ))}

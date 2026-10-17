@@ -6,6 +6,7 @@ import { ProtectedRoute } from '@/components/common/ProtectedRoute';
 import { ParallaxBand } from '@/components/common/motion';
 import PipelinePanel from '@/components/admin/PipelinePanel';
 import { AccountSellersPanel } from '@/components/users/AccountSellersPanel';
+import { ROW_BUTTON, ROW_ICON_BUTTON_DANGER } from '@/components/common/RowMenu';
 import api from '@/services/api';
 import { 
   CompanyAccount, 
@@ -843,18 +844,18 @@ export default function ManageAccountPage() {
                                           <button
                                             type="button"
                                             onClick={() => openUploadForDataset(item)}
-                                            className="px-3.5 py-1.5 bg-hp-navy/10 hover:bg-hp-navy hover:text-white text-hp-navy rounded-lg text-xs font-bold transition flex items-center space-x-1"
+                                            className={ROW_BUTTON}
                                           >
-                                            <RefreshCw className="w-3.5 h-3.5 mr-1" />
+                                            <RefreshCw className="w-3.5 h-3.5 text-gray-400" />
                                             <span>Replace</span>
                                           </button>
                                         ) : (
                                           <button
                                             type="button"
                                             onClick={() => openUploadForDataset(item)}
-                                            className="px-3.5 py-1.5 bg-gray-100 hover:bg-hp-navy hover:text-white text-gray-700 rounded-lg text-xs font-bold transition flex items-center space-x-1"
+                                            className={ROW_BUTTON}
                                           >
-                                            <Plus className="w-3.5 h-3.5 mr-1" />
+                                            <Plus className="w-3.5 h-3.5 text-gray-400" />
                                             <span>Upload</span>
                                           </button>
                                         )
@@ -862,9 +863,9 @@ export default function ManageAccountPage() {
                                         <button
                                           type="button"
                                           onClick={() => openUploadForDataset(item)}
-                                          className="px-3.5 py-1.5 bg-purple-50 hover:bg-purple-600 hover:text-white text-purple-700 border border-purple-200 rounded-lg text-xs font-bold transition flex items-center space-x-1"
+                                          className={ROW_BUTTON}
                                         >
-                                          <Plus className="w-3.5 h-3.5 mr-1" />
+                                          <Plus className="w-3.5 h-3.5 text-gray-400" />
                                           <span>Add File</span>
                                         </button>
                                       )}
@@ -910,16 +911,18 @@ export default function ManageAccountPage() {
                                                 <button
                                                   type="button"
                                                   onClick={() => openUploadForDataset(item, file.id)}
-                                                  className="px-2.5 py-1 bg-gray-200 hover:bg-hp-navy hover:text-white text-gray-700 rounded text-[11px] font-bold transition"
+                                                  className={ROW_BUTTON}
                                                 >
+                                                  <RefreshCw className="w-3.5 h-3.5 text-gray-400" />
                                                   Replace
                                                 </button>
                                                 <button
                                                   type="button"
                                                   disabled={deletingFileId === file.id}
                                                   onClick={() => handleDeleteFile(file.id, file.original_filename)}
-                                                  className="p-1 bg-red-50 hover:bg-red-600 text-red-600 hover:text-white border border-red-200 rounded transition"
+                                                  className={ROW_ICON_BUTTON_DANGER}
                                                   title="Delete this file"
+                                                  aria-label={`Delete ${file.original_filename}`}
                                                 >
                                                   {deletingFileId === file.id ? (
                                                     <Loader2 className="w-3.5 h-3.5 animate-spin" />

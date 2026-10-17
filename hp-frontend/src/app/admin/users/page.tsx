@@ -13,7 +13,7 @@ import { Modal, ModalActions, dangerButton, primaryButton, secondaryButton } fro
 import { AccountPicker } from '@/components/users/AccountPicker';
 import { OneTimePassword } from '@/components/users/OneTimePassword';
 import { AuditLog, formatDateTime } from '@/components/users/AuditLog';
-import { RowMenu } from '@/components/users/RowMenu';
+import { ROW_BUTTON, RowMenu } from '@/components/common/RowMenu';
 import {
   AlertCircle,
   Building2,
@@ -246,7 +246,7 @@ export default function AdminUsersPage() {
                                 <div className="flex items-center justify-end gap-2">
                                   {u.role === 'user' && (
                                     <button type="button" onClick={() => setDialog({ kind: 'accounts', user: u })}
-                                            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-gray-200 text-[11px] font-bold text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition">
+                                            className={ROW_BUTTON}>
                                       <Building2 className="w-3.5 h-3.5 text-gray-400" />
                                       Accounts
                                     </button>
