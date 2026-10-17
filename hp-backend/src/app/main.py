@@ -8,7 +8,6 @@ from app.api.v1.router import api_v1_router
 from app.config.settings import settings
 from app.core.seeder import seed_database_if_empty
 from app.database.mongodb import close_mongo_connection, connect_to_mongo, get_db
-from app.database.seed import seed_users
 from app.errors import register_error_handlers
 from app.observability import setup_observability, shutdown_observability
 from app.observability.envelope_middleware import ResponseEnvelopeMiddleware
@@ -72,11 +71,14 @@ async def lifespan(app: FastAPI):
     # printed a notice, and left the UI blank with no working explanation.
     connect_to_mongo()
 
-    seed_users()
+    # Refuse to start without a signing key rather than fail every sign-in.
+    from app.core.security import ensure_signing_key
+    ensure_signing_key()
     # Each logs and returns on failure: a missing index slows a query or
     # weakens a guarantee, which is no reason to refuse to start.
-    from app.services import usage, users_admin
+    from app.services import sessions, usage, users_admin
     users_admin.ensure_indexes(get_db())
+    sessions.ensure_indexes(get_db())
     usage.ensure_indexes(get_db())
     try:
         seed_database_if_empty()

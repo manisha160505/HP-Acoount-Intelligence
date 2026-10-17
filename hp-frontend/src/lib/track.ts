@@ -24,7 +24,7 @@
  * identity is never sent: the server takes it from the token.
  */
 
-import { API_URL } from '@/services/api';
+import { API_URL, getAccessToken, getSessionUser } from '@/lib/session';
 import logger from '@/lib/logger';
 
 export interface TrackEvent {
@@ -59,21 +59,12 @@ let lastInteraction = Date.now();
 let interactionHandlersInstalled = false;
 
 function readToken(): string | null {
-  try {
-    return localStorage.getItem('hp_token');
-  } catch {
-    return null;
-  }
+  return getAccessToken();
 }
 
 function isTrackedUser(): boolean {
-  try {
-    const raw = localStorage.getItem('hp_user');
-    if (!raw || !readToken()) return false;
-    return JSON.parse(raw)?.role !== 'admin';
-  } catch {
-    return false;
-  }
+  const role = getSessionUser()?.role;
+  return !!role && !!readToken() && role !== 'admin' && role !== 'super_admin';
 }
 
 /** One id per browser tab, kept for the life of the tab. */
@@ -159,22 +150,22 @@ function requeue(batch: QueuedEvent[]): void {
 
 /**
  * Last-chance send while the page is going away. sendBeacon cannot set an
- * Authorization header, so the token goes in the query string (the endpoint
- * accepts either, as the file-download endpoint already does), and the body
- * goes as text/plain so the beacon needs no CORS preflight.
+ * Authorization header; it is authenticated by the httpOnly hp_access cookie
+ * the browser sends with it. The body goes as text/plain so the beacon needs
+ * no CORS preflight.
  */
 export function flushOnExit(): void {
   const token = readToken();
   if (!queue.length || !token) return;
   const batch = queue.splice(0, MAX_BATCH);
-  const url = `${EVENTS_URL}?token=${encodeURIComponent(token)}`;
+  const url = EVENTS_URL;
   const body = JSON.stringify({ events: batch });
   try {
     if (typeof navigator !== 'undefined' && typeof navigator.sendBeacon === 'function'
         && navigator.sendBeacon(url, new Blob([body], { type: 'text/plain;charset=UTF-8' }))) {
       return;
     }
-    fetch(url, { method: 'POST', body, keepalive: true,
+    fetch(url, { method: 'POST', body, keepalive: true, credentials: 'include',
                  headers: { 'Content-Type': 'text/plain;charset=UTF-8' } }).catch(() => {});
   } catch {
     // Unloading; nothing more can be done.

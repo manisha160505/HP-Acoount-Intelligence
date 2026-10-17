@@ -151,6 +151,7 @@ def client(monkeypatch):
     app = FastAPI()
     app.include_router(data_router, prefix="/api/v1")
     app.dependency_overrides[deps.require_user_role] = lambda: USER
+    app.dependency_overrides[deps.require_account_access] = lambda: USER
     return TestClient(app), db
 
 

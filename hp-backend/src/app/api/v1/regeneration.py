@@ -29,7 +29,7 @@ from datetime import UTC, date, datetime
 from bson import ObjectId
 from fastapi import APIRouter, Body, Depends, HTTPException, status
 
-from app.core.deps import require_admin_role, require_user_role
+from app.core.deps import require_account_access, require_admin_role
 from app.database.mongodb import get_db
 from app.services.regen import jobs as regen_jobs, planner, reasons, runs
 from app.services.regen.engine import get_engine
@@ -286,7 +286,7 @@ def index_rebuild(body: dict = Body(...), current_user: dict = Depends(require_a
 @router.post("/accounts/{account_id}/features/{feature_id}/regenerate",
              status_code=status.HTTP_202_ACCEPTED)
 def regenerate_feature(account_id: str, feature_id: str, force: bool = False,
-                       current_user: dict = Depends(require_user_role)):
+                       current_user: dict = Depends(require_account_access)):
     """One feature of one account, as an explicit run. Sections that are
     current are skipped unless `force=true`."""
     _check_account(account_id)
@@ -297,7 +297,7 @@ def regenerate_feature(account_id: str, feature_id: str, force: bool = False,
 
 
 @router.get("/accounts/{account_id}/features/status")
-def feature_status(account_id: str, current_user: dict = Depends(require_user_role)):
+def feature_status(account_id: str, current_user: dict = Depends(require_account_access)):
     """Every feature's lifecycle - CURRENT, STALE, GENERATING, FAILED or
     NEVER_GENERATED - with the producers underneath and why each is stale."""
     _check_account(account_id)
@@ -306,7 +306,7 @@ def feature_status(account_id: str, current_user: dict = Depends(require_user_ro
 
 @router.get("/accounts/{account_id}/regeneration/jobs")
 def regeneration_jobs(account_id: str, limit: int = 20,
-                      current_user: dict = Depends(require_user_role)):
+                      current_user: dict = Depends(require_account_access)):
     """Recent jobs: which run asked, which inputs changed, the outcome."""
     _check_account(account_id)
     rows = regen_jobs.history(get_db(), account_id, limit)

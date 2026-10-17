@@ -3,7 +3,7 @@
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/providers/AuthProvider';
-import { homeRouteFor } from '@/lib/accountSelection';
+import { landingRouteFor } from '@/lib/accountSelection';
 
 export default function RootPage() {
   const { user, isAuthenticated, isLoading } = useAuth();
@@ -14,7 +14,7 @@ export default function RootPage() {
       if (!isAuthenticated) {
         router.push('/login');
       } else {
-        router.push(homeRouteFor(user?.role));
+        router.push(landingRouteFor(user));
       }
     }
   }, [isLoading, isAuthenticated, user, router]);

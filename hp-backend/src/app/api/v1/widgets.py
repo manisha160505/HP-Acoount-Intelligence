@@ -15,7 +15,7 @@ from app.services.extractors.datasets import account_data_as_of
 from app.services.regen import store as widget_store
 
 logger = logging.getLogger(__name__)
-from app.core.deps import require_admin_role, require_user_role
+from app.core.deps import require_account_access, require_admin_role, require_user_role
 from app.schemas.widget import (
     ContentGenerateRequest,
     MessageEvaluateRequest,
@@ -569,7 +569,7 @@ def get_feature_widgets(feature_key: str, current_user: dict = Depends(require_u
 def get_account_feature_widgets(
     account_id: str,
     feature_key: str,
-    current_user: dict = Depends(require_user_role)
+    current_user: dict = Depends(require_account_access)
 ):
     if not ObjectId.is_valid(account_id):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid account ID format")
@@ -693,7 +693,7 @@ def get_account_feature_widgets(
 def regenerate_account_feature_widgets(
     account_id: str,
     feature_key: str,
-    current_user: dict = Depends(require_user_role)
+    current_user: dict = Depends(require_account_access)
 ):
     """Regenerate one feature as an explicit run.
 
@@ -727,7 +727,7 @@ def regenerate_account_feature_widgets(
 @router.post("/accounts/{account_id}/widgets/solution_narrative_opportunity_map/generate", response_model=WidgetResponse)
 def generate_opportunity_map_endpoint(
     account_id: str,
-    current_user: dict = Depends(require_user_role)
+    current_user: dict = Depends(require_account_access)
 ):
     if not ObjectId.is_valid(account_id):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid account ID format")
@@ -768,7 +768,7 @@ def generate_opportunity_map_endpoint(
 def generate_content_studio_endpoint(
     account_id: str,
     body: ContentGenerateRequest,
-    current_user: dict = Depends(require_user_role)
+    current_user: dict = Depends(require_account_access)
 ):
     if not ObjectId.is_valid(account_id):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid account ID format")
@@ -815,7 +815,7 @@ def generate_content_studio_endpoint(
 def suggest_content_angles_endpoint(
     account_id: str,
     body: ContentGenerateRequest,
-    current_user: dict = Depends(require_user_role)
+    current_user: dict = Depends(require_account_access)
 ):
     """Co-creation step 2: propose angles for the seller to choose between.
 
@@ -871,7 +871,7 @@ def suggest_content_angles_endpoint(
 @router.get("/accounts/{account_id}/widgets/message_evaluator/options")
 def message_evaluator_options(
     account_id: str,
-    current_user: dict = Depends(require_user_role)
+    current_user: dict = Depends(require_account_access)
 ):
     """The objectives, formats and personas this account may evaluate against.
 
@@ -970,7 +970,7 @@ def message_evaluator_options(
 def evaluate_message_endpoint(
     account_id: str,
     body: MessageEvaluateRequest,
-    current_user: dict = Depends(require_user_role)
+    current_user: dict = Depends(require_account_access)
 ):
     if not ObjectId.is_valid(account_id):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
@@ -1000,7 +1000,7 @@ def evaluate_message_endpoint(
 def rewrite_message_endpoint(
     account_id: str,
     body: MessageRewriteRequest,
-    current_user: dict = Depends(require_user_role)
+    current_user: dict = Depends(require_account_access)
 ):
     if not ObjectId.is_valid(account_id):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
@@ -1020,7 +1020,7 @@ def message_evaluator_history(
     account_id: str,
     persona_contact_id: str | None = None,
     limit: int = 20,
-    current_user: dict = Depends(require_user_role)
+    current_user: dict = Depends(require_account_access)
 ):
     """Past evaluations for this account, newest first.
 
@@ -1038,7 +1038,7 @@ def message_evaluator_history(
 def message_evaluation_detail(
     account_id: str,
     fingerprint: str,
-    current_user: dict = Depends(require_user_role)
+    current_user: dict = Depends(require_account_access)
 ):
     """One stored evaluation, including its original message text."""
     if not ObjectId.is_valid(account_id):
@@ -1062,7 +1062,7 @@ def message_evaluation_detail(
 @router.get("/accounts/{account_id}/retrieval/status")
 def retrieval_status(
     account_id: str,
-    current_user: dict = Depends(require_user_role)
+    current_user: dict = Depends(require_account_access)
 ):
     """State of every declared index for this account."""
     if not ObjectId.is_valid(account_id):
@@ -1205,7 +1205,7 @@ def retrieval_run_now(
 @router.get("/accounts/{account_id}/widgets/strategy_chat/personas")
 def strategy_chat_personas(
     account_id: str,
-    current_user: dict = Depends(require_user_role)
+    current_user: dict = Depends(require_account_access)
 ):
     """Who this account's seller can rehearse against.
 
@@ -1278,7 +1278,7 @@ def _check_chat_mode(account_id: str, body: StrategyChatRequest) -> None:
 def strategy_chat_ask(
     account_id: str,
     body: StrategyChatRequest,
-    current_user: dict = Depends(require_user_role)
+    current_user: dict = Depends(require_account_access)
 ):
     """Ask Strategy Chat one question about one account.
 
@@ -1318,7 +1318,7 @@ def strategy_chat_ask(
 def strategy_chat_ask_stream(
     account_id: str,
     body: StrategyChatRequest,
-    current_user: dict = Depends(require_user_role)
+    current_user: dict = Depends(require_account_access)
 ):
     """The same answer as `/ask`, sent as it is written.
 

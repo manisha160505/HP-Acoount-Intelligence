@@ -10,6 +10,8 @@ pydantic-settings>=2.2.0
 python-multipart>=0.0.9
 python-dotenv>=1.0.0
 pandas>=2.2.0
+# scripts/load_sna_users.py reads the client's user sheet and writes the credentials workbook.
+openpyxl>=3.1.0
 openai>=1.99.0
 
 # The retrieval layer. Pinned exactly, not floated: LightRAG's storage

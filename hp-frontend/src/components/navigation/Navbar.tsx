@@ -4,7 +4,8 @@ import React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useAuth } from '@/providers/AuthProvider';
-import { LogOut, User as UserIcon, Shield, Building2, Users, BarChart3, BookOpen } from 'lucide-react';
+import { isAdminRole } from '@/types/auth';
+import { LogOut, User as UserIcon, Shield, Building2, Users, BarChart3, BookOpen, KeyRound } from 'lucide-react';
 import HpLogo from '@/components/common/HpLogo';
 
 const ADMIN_LINKS = [
@@ -41,7 +42,7 @@ export const Navbar: React.FC = () => {
             </div>
           </div>
 
-          {user.role === 'admin' && (
+          {isAdminRole(user.role) && (
             <div className="hidden md:flex items-center space-x-1">
               {ADMIN_LINKS.map(({ href, label, Icon }) => {
                 const active = pathname?.startsWith(href);
@@ -63,16 +64,26 @@ export const Navbar: React.FC = () => {
 
           <div className="flex items-center space-x-4">
             <div className="flex items-center space-x-2 bg-slate-800 px-3 py-1.5 rounded-full border border-slate-700">
-              {user.role === 'admin' ? (
+              {isAdminRole(user.role) ? (
                 <Shield className="w-4 h-4 text-emerald-400" />
               ) : (
                 <UserIcon className="w-4 h-4 text-hp-accent" />
               )}
               <div className="text-xs">
                 <span className="font-bold text-gray-200">{user.full_name}</span>
-                <span className="ml-1 text-[10px] text-gray-400 capitalize">({user.role})</span>
+                {isAdminRole(user.role) && (
+                  <span className="ml-1 text-[10px] text-gray-400 capitalize">({user.role.replace('_', ' ')})</span>
+                )}
               </div>
             </div>
+
+            <Link
+              href="/change-password"
+              className="flex items-center space-x-1 text-gray-300 hover:text-white text-xs font-bold px-2 py-1.5 rounded-lg transition duration-150"
+            >
+              <KeyRound className="w-3.5 h-3.5" />
+              <span>Change password</span>
+            </Link>
 
             <button
               onClick={logout}

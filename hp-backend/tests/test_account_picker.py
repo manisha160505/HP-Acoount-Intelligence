@@ -13,6 +13,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from app.database import mongodb
 from app.errors import register_error_handlers
 from app.services.regen import store as widget_store
 from app.services.regen.graph import DEFAULT
@@ -55,7 +56,15 @@ def _committed(db, acct, score, status="available"):
             KEY: {"status": status, "data": {"score": score, "max_score": 100}}}}})
 
 
+def _assign_all(user):
+    """Give the seller every account, so these tests see the whole list."""
+    db = mongodb.db_instance.db
+    ids = [str(d["_id"]) for d in db["accounts"].find({})]
+    db["users"].update_one({"_id": user["_id"]}, {"$set": {"account_ids": ids}})
+
+
 def _scores(client, user):
+    _assign_all(user)
     r = client.get("/api/v1/accounts/user-list", headers=auth(user))
     assert r.status_code == 200
     return {a["name"]: a["urgency_score"] for a in body(r)}
@@ -69,6 +78,7 @@ def test_user_list_returns_every_active_account_sorted_with_its_score(db, client
     _legacy(db, a, 72)
     _committed(db, b, 85)
 
+    _assign_all(user)
     r = client.get("/api/v1/accounts/user-list", headers=auth(user))
     rows = body(r)
     assert [x["name"] for x in rows] == ["Astra", "Jabil"]

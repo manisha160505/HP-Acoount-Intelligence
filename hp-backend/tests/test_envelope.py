@@ -208,3 +208,23 @@ def test_ok_and_fail_build_consistent_shapes():
     bad = Envelope[Account].fail("X_CODE", "went wrong", request_id="r2")
     assert bad.success is False and bad.data is None
     assert bad.error.code == "X_CODE" and bad.meta.request_id == "r2"
+
+
+def test_every_set_cookie_survives_enveloping():
+    """Sign-in sets two cookies. The envelope rebuilds the response, and copying
+    its headers through a dict kept only the last Set-Cookie."""
+    from fastapi import Response as FastAPIResponse
+    app = FastAPI()
+    app.add_middleware(ResponseEnvelopeMiddleware)
+
+    @app.post("/two-cookies")
+    def two_cookies(response: FastAPIResponse):
+        response.set_cookie("first", "1", path="/a")
+        response.set_cookie("second", "2", path="/b")
+        return {"ok": True}
+
+    r = TestClient(app).post("/two-cookies")
+    cookies = r.headers.get_list("set-cookie")
+    assert any(c.startswith("first=1") for c in cookies)
+    assert any(c.startswith("second=2") for c in cookies)
+    assert r.json()["data"] == {"ok": True}

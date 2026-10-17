@@ -5,7 +5,7 @@ from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.config import account_overrides
-from app.core.deps import require_admin_role, require_user_role
+from app.core.deps import is_admin, require_admin_role, require_user_role
 from app.database.mongodb import get_db
 from app.schemas.account import (
     AccountCreate,
@@ -43,7 +43,13 @@ def list_active_accounts_for_user(
     current_user: dict = Depends(require_user_role)
 ):
     db = get_db()
-    docs = list(db["accounts"].find({"status": "active"}).sort("name", 1))
+    query = {"status": "active"}
+    if not is_admin(current_user["role"]):
+        # A seller sees only the accounts assigned to them. None assigned is an
+        # empty list, which the picker shows as "no accounts assigned".
+        query["_id"] = {"$in": [ObjectId(a) for a in current_user["account_ids"]
+                                if ObjectId.is_valid(a)]}
+    docs = list(db["accounts"].find(query).sort("name", 1))
     # Read, never computed: the score is whatever the last generation
     # committed, so the picker and the dashboard cannot disagree.
     widgets = widget_store.committed_many(

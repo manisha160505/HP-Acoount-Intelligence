@@ -1,22 +1,23 @@
 import axios from 'axios';
 import logger, { toErrorField } from '@/lib/logger';
+import { API_URL, clearSession, getAccessToken, refreshSession } from '@/lib/session';
 
-export const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
+export { API_URL };
 
 const api = axios.create({
   baseURL: `${API_URL}/api/v1`,
+  // The sign-in cookies ride along; the access token itself goes in the header.
+  withCredentials: true,
   headers: {
     'Content-Type': 'application/json',
   },
 });
 
-// Interceptor to attach Authorization Bearer token from localStorage
+// The access token lives in memory (lib/session), never in localStorage.
 api.interceptors.request.use((config) => {
-  if (typeof window !== 'undefined') {
-    const token = localStorage.getItem('hp_token');
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
+  const token = getAccessToken();
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
   }
   // Stamped here so the response interceptor can report how long the call
   // actually took. performance.now() rather than Date.now(): it is monotonic,
@@ -28,10 +29,8 @@ api.interceptors.request.use((config) => {
 // An expired token used to fail silently. Every call 401'd, each caller showed
 // its own empty state, and the dashboard simply went blank - indistinguishable
 // from a broken feature, with nothing telling anyone to sign in again. So a 401
-// is handled once, here, rather than eleven times in the features.
-//
-// The two keys cleared are the ones AuthProvider.logout clears; leaving a stale
-// token behind would re-send it on the next call and 401 again.
+// is handled once, here, rather than eleven times in the features: refresh the
+// session and retry once; only if that fails, send the user to sign in.
 /** Milliseconds since the request interceptor stamped this config. */
 function elapsed(config: unknown): number | undefined {
   const start = (config as { metadata?: { start: number } })?.metadata?.start;
@@ -87,7 +86,7 @@ api.interceptors.response.use(
     });
     return response;
   },
-  (error) => {
+  async (error) => {
     const onLoginPage =
       typeof window !== 'undefined' && window.location.pathname.startsWith('/login');
 
@@ -119,15 +118,40 @@ api.interceptors.response.use(
       logger.warn(`${fields.method} ${fields.path} ${label}`, fields);
     }
 
+    const config = error?.config as (Record<string, unknown> & { headers?: Record<string, string> }) | undefined;
+    const url = String(config?.url || '');
+    const isAuthCall = url.startsWith('/auth/login') || url.startsWith('/auth/refresh')
+      || url.startsWith('/auth/logout');
+
     // Not on the login page: a 401 there is a wrong password, which the form
     // already reports, and redirecting would loop.
-    if (status === 401 && typeof window !== 'undefined' && !onLoginPage) {
-      logger.info('Token rejected - clearing session and redirecting to login.', {
-        request_id: fields.request_id,
-      });
-      localStorage.removeItem('hp_token');
-      localStorage.removeItem('hp_user');
+    if (status === 401 && typeof window !== 'undefined' && !onLoginPage && !isAuthCall) {
+      if (config && !config._retried) {
+        config._retried = true;
+        const user = await refreshSession();
+        const token = getAccessToken();
+        if (user && token) {
+          config.headers = { ...(config.headers || {}), Authorization: `Bearer ${token}` };
+          return api.request(config);
+        }
+      }
+      logger.info('Session ended - redirecting to login.', { request_id: fields.request_id });
+      clearSession();
       window.location.href = '/login?expired=1';
+    }
+
+    // Access to the open account was removed (or the link was never theirs):
+    // back to the accounts this user does have, rather than a dashboard of
+    // empty panels.
+    if (status === 404 && errorCode === 'ACCOUNT_NOT_FOUND' && typeof window !== 'undefined'
+        && window.location.pathname.startsWith('/dashboard')) {
+      window.location.href = '/accounts';
+    }
+
+    // A new account must set its own password before anything else works.
+    if (status === 403 && errorCode === 'PASSWORD_CHANGE_REQUIRED' && typeof window !== 'undefined'
+        && !window.location.pathname.startsWith('/change-password')) {
+      window.location.href = '/change-password';
     }
     return Promise.reject(error);
   }
@@ -159,16 +183,24 @@ export async function postStream(
   onEvent: (event: StreamEvent) => void,
   signal?: AbortSignal,
 ): Promise<void> {
-  const token = typeof window !== 'undefined' ? localStorage.getItem('hp_token') : null;
-  const res = await fetch(`${API_URL}/api/v1${path}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: JSON.stringify(body),
-    signal,
-  });
+  const send = () => {
+    const token = getAccessToken();
+    return fetch(`${API_URL}/api/v1${path}`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(body),
+      signal,
+    });
+  };
+  let res = await send();
+  // Same one-retry rule as the axios client: an expired token is refreshed.
+  if (res.status === 401 && await refreshSession()) {
+    res = await send();
+  }
 
   if (!res.ok || !res.body) {
     throw new Error(`stream request failed: ${res.status}`);

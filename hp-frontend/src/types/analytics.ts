@@ -7,8 +7,36 @@ export interface ManagedUser {
   full_name: string;
   role: UserRole;
   is_active: boolean;
+  /** Still on the password an admin handed out. */
+  must_change_password: boolean;
+  /** Accounts a seller can open; empty for admins, who see every account. */
+  account_ids: string[];
   created_at: string | null;
   last_login_at: string | null;
+}
+
+/** POST /admin/users: the generated password, when the server made one, once. */
+export interface CreatedUser extends ManagedUser {
+  temporary_password: string | null;
+}
+
+/** GET /admin/accounts/{id}/users row. */
+export interface AccountUser {
+  id: string;
+  email: string;
+  full_name: string;
+  role: UserRole;
+  is_active: boolean;
+}
+
+/** GET /admin/audit row: one change to a user or their access. */
+export interface AuditEntry {
+  id: string;
+  ts: string;
+  actor_email: string | null;
+  action: string;
+  target_email: string | null;
+  details: Record<string, unknown>;
 }
 
 export interface FeatureUsage {

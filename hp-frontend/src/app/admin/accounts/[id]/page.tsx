@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { ProtectedRoute } from '@/components/common/ProtectedRoute';
 import { ParallaxBand } from '@/components/common/motion';
 import PipelinePanel from '@/components/admin/PipelinePanel';
+import { AccountSellersPanel } from '@/components/users/AccountSellersPanel';
 import api from '@/services/api';
 import { 
   CompanyAccount, 
@@ -620,6 +621,7 @@ export default function ManageAccountPage() {
                         </button>
                       </div>
                     </form>
+                    <AccountSellersPanel accountId={accountId} />
                   </div>
                 )}
 

@@ -31,7 +31,7 @@ services:
       # in the repository.
       - key: MONGODB_URI
         sync: false
-      - key: JWT_SECRET
+      - key: JWT_PRIVATE_KEY
         sync: false
       - key: OPENAI_API_KEY
         sync: false

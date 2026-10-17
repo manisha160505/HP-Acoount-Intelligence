@@ -29,9 +29,11 @@ Usage:
 Credentials come from the environment, never from arguments (an argument would
 land in your shell history). Either:
     HP_TOKEN                    a bearer token copied from a browser session
+                                (valid 15 minutes: prefer HP_EMAIL + HP_PASSWORD,
+                                which signs in again whenever the token lapses)
     HP_EMAIL + HP_PASSWORD      a dashboard login, exchanged for a token here
 
-HP_TOKEN wins when both are set. A token expires (typically 24h), so a failure
+HP_TOKEN wins when both are set. A token expires (15 minutes), so a failure
 with HTTP 401 usually means it needs copying again rather than anything broken.
 """
 import argparse
@@ -84,6 +86,9 @@ def token_expiry(token):
 def login(base_url, email, password):
     status, body = _call(f"{base_url}/api/v1/auth/login",
                          payload={"email": email, "password": password})
+    # The API wraps JSON bodies as {"success", "data", "meta"}.
+    if isinstance(body, dict) and "success" in body and "data" in body:
+        body = body["data"]
     if status != 200 or not body or "access_token" not in body:
         raise SystemExit(f"login failed (HTTP {status})")
     return body["access_token"]
@@ -118,6 +123,7 @@ def main():
         print("\nDry run - nothing was changed.")
         return 0
 
+    email, password = os.getenv("HP_EMAIL"), os.getenv("HP_PASSWORD")
     token = os.getenv("HP_TOKEN")
     if token:
         token = token.strip()
@@ -129,7 +135,6 @@ def main():
         else:
             print("\nUsing HP_TOKEN.")
     else:
-        email, password = os.getenv("HP_EMAIL"), os.getenv("HP_PASSWORD")
         if not email or not password:
             raise SystemExit(
                 "set HP_TOKEN, or HP_EMAIL and HP_PASSWORD, in the environment")
@@ -144,7 +149,15 @@ def main():
             url = (f"{base_url}/api/v1/accounts/{account_id}"
                    f"/widgets/{feature}/regenerate")
             try:
-                _status, body = _call(url, token=token, payload={})
+                try:
+                    _status, body = _call(url, token=token, payload={})
+                except urllib.error.HTTPError as exc:
+                    # Access tokens last 15 minutes and a run takes longer:
+                    # sign in again and retry once, when we have a password.
+                    if exc.code != 401 or not (email and password):
+                        raise
+                    token = login(base_url, email, password)
+                    _status, body = _call(url, token=token, payload={})
                 count = len(body) if isinstance(body, list) else "?"
                 print(f"  OK       {feature} ({count} widget(s))")
             except urllib.error.HTTPError as exc:
