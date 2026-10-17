@@ -17,7 +17,7 @@ import { displayCase, displayPlace, fmtDate as formatDate } from '@/lib/format';
 import { track, stopFeatureTime } from '@/lib/track';
 import { MyActivityPanel } from '@/components/analytics/MyActivityPanel';
 import { useTour } from '@/components/tour/useTour';
-import HelpButton from '@/components/tour/HelpButton';
+import { CHAT_TIPS, MY_ACTIVITY_CARD } from '@/lib/tourContent';
 import { CountUpText, ScoreRing, growDelay, useParallax } from '@/components/common/motion';
 import { Activity as ActivityIcon } from 'lucide-react';
 import { 
@@ -646,8 +646,18 @@ export default function UserDashboardPage() {
   const [selectedAccount, setSelectedAccount] = useState<CompanyAccount | null>(null);
   const [activeFeatureKey, setActiveFeatureKey] = useState<string>('executive_dashboard');
   // The product tour (client, 17 Oct): runs once, on a user's first visit to
-  // the dashboard, and each feature's ? button replays that feature's part.
-  const tour = useTour({ activeFeatureKey, setActiveFeatureKey, onTourDone: markTourCompleted });
+  // the dashboard, and Take the tour replays the part for the feature on screen.
+  const tourOutro = useMemo(() => (isAdminRole(user?.role) ? [] : [MY_ACTIVITY_CARD]), [user?.role]);
+  // Cards can open a screen (an Evaluator step); the handlers are set further
+  // down, where that state is declared.
+  const tourHooks = useRef({ action: (_action: string) => {}, end: () => {} });
+  const tour = useTour({
+    activeFeatureKey, setActiveFeatureKey, onTourDone: markTourCompleted,
+    // Sellers end on My Activity; admins have no such button.
+    outro: tourOutro,
+    onCardAction: (action) => tourHooks.current.action(action),
+    onEnd: () => tourHooks.current.end(),
+  });
   
   const [widgets, setWidgets] = useState<WidgetResponse[]>([]);
   const [isLoadingAccounts, setIsLoadingAccounts] = useState(true);
@@ -803,6 +813,29 @@ export default function UserDashboardPage() {
     setEvalOptions(null);
   }, [selectedAccountId]);
   const [evaluatorStep, setEvaluatorStep] = useState<string>('inputs');
+
+  // The tour's Message Evaluator cards open each step - only a step the user
+  // could open themselves right now, so it never runs an evaluation or a
+  // rewrite or touches what they typed - and the step they were on comes back
+  // when the tour ends.
+  const evaluatorStepBeforeTour = useRef<string | null>(null);
+  tourHooks.current = {
+    action: (action: string) => {
+      if (!action.startsWith('evaluator:')) return;
+      const key = action.slice('evaluator:'.length);
+      if (evaluatorStepBeforeTour.current === null) evaluatorStepBeforeTour.current = evaluatorStep;
+      const personaChosen = !!(evalOptions?.personas || []).find((p: any) => p.persona_id === selectedPersonaId);
+      const canOpen = key === 'inputs'
+        || ((key === 'persona' || key === 'confirm') && personaChosen)
+        || (['scores', 'phrases', 'summary'].includes(key) && !!evaluation)
+        || (key === 'rewrite' && !!evaluation?.rewrite);
+      if (canOpen) setEvaluatorStep(key);
+    },
+    end: () => {
+      if (evaluatorStepBeforeTour.current !== null) setEvaluatorStep(evaluatorStepBeforeTour.current);
+      evaluatorStepBeforeTour.current = null;
+    },
+  };
 
   // Content Messaging
   const [expandedPillar, setExpandedPillar] = useState<string | null>(null);
@@ -1364,12 +1397,14 @@ export default function UserDashboardPage() {
               </span>
             )}
 
-            {/* Replays the whole product tour (the first-visit one). */}
+            {/* The tour of the feature on screen. The whole tour runs once, on
+                the first visit; this is the one way back into it after that. */}
             {selectedAccount && (
               <button
                 type="button"
                 data-tour="tour-button"
-                onClick={() => tour.start(tourFeatureKeys)}
+                onClick={() => tour.help(activeFeatureKey)}
+                title={`How ${activeFeatureDef?.label ?? 'this feature'} works`}
                 className="inline-flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl border text-xs font-bold transition shadow-xs bg-white text-slate-700 border-slate-300 hover:bg-slate-50"
               >
                 <Compass className="w-3.5 h-3.5 text-hp-navy" />
@@ -1382,6 +1417,7 @@ export default function UserDashboardPage() {
             {!isAdminRole(user?.role) && (
               <button
                 type="button"
+                data-tour="my-activity"
                 onClick={() => setIsMyActivityOpen(true)}
                 className="inline-flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl border text-xs font-bold transition shadow-xs bg-white text-slate-700 border-slate-300 hover:bg-slate-50"
               >
@@ -1588,7 +1624,6 @@ export default function UserDashboardPage() {
                               <h2 className="text-2xl font-extrabold text-slate-900 tracking-tight">
                                 {displayName}
                               </h2>
-                              <HelpButton onClick={() => tour.help('executive_dashboard')} />
                             </div>
 
                             {/* The profile, as bullets where we have them. */}
@@ -2406,7 +2441,6 @@ export default function UserDashboardPage() {
                           <h3 className="text-xl font-bold text-slate-900 flex items-center gap-2">
                             <Newspaper className="w-5 h-5 text-hp-navy" />
                             <span>Live Signals</span>
-                            <HelpButton onClick={() => tour.help('recent_news_signals')} />
                           </h3>
                           <p className="text-sm text-slate-500 mt-0.5">
                             Real-time intelligence triggers for {selectedAccount?.name}
@@ -3004,7 +3038,6 @@ export default function UserDashboardPage() {
                           <h2 className="text-xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
                             <TrendingUp className="w-5 h-5 text-hp-navy" />
                             <span>Intent & Demand Signals</span>
-                            <HelpButton onClick={() => tour.help('intent_demand_signals')} />
                           </h2>
                           {/* Sahaj, 27 Sep: replace the counts line with the source. */}
                           <p className="text-xs text-slate-500 mt-0.5">
@@ -3961,7 +3994,6 @@ export default function UserDashboardPage() {
                           <h2 className="text-xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
                             <Lightbulb className="w-6 h-6 text-hp-navy" />
                             <span>Opportunity Map</span>
-                            <HelpButton onClick={() => tour.help('solution_narrative_opportunity_map')} />
                           </h2>
                           <p className="text-xs text-slate-500 mt-0.5">
                             {isAvailable ? generatedPlays.length : 0} HP {isAvailable && generatedPlays.length === 1 ? 'opportunity' : 'opportunities'} mapped for {selectedAccount?.name} &mdash; business outcome, HP products, entry path, and evidence in one view.
@@ -4682,7 +4714,6 @@ export default function UserDashboardPage() {
                           <h3 className="text-xl font-bold text-slate-900 flex items-center gap-2">
                             <Users className="w-5 h-5 text-hp-navy" />
                             <span>Stakeholder Map</span>
-                            <HelpButton onClick={() => tour.help('stakeholder_map')} />
                           </h3>
                           <p className="text-sm text-slate-500 mt-0.5">
                             {contactsList.length} contact{contactsList.length === 1 ? '' : 's'} identified for {selectedAccount?.name}
@@ -4891,7 +4922,6 @@ export default function UserDashboardPage() {
                           <h3 className="text-xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
                             <Cpu className="w-6 h-6 text-hp-navy" />
                             <span>Technographic Map</span>
-                            <HelpButton onClick={() => tour.help('tech_landscape')} />
                           </h3>
                           <p className="text-xs text-slate-500 mt-0.5">
                             {/* Two different counts: the full technographics export, and the
@@ -5675,7 +5705,7 @@ export default function UserDashboardPage() {
                           </div>
                           <div>
                             <h2 className="text-xl font-extrabold text-slate-900 tracking-tight">
-                              Message Evaluator <HelpButton onClick={() => tour.help('message_evaluator')} />
+                              Message Evaluator
                             </h2>
                             <p className="text-xs text-slate-500 font-medium">
                               Persona-aware message scoring for {evalOptions?.company_name || selectedAccount?.name || 'this account'}.
@@ -5701,6 +5731,7 @@ export default function UserDashboardPage() {
                           return (
                             <React.Fragment key={st.key}>
                               <button
+                                data-tour={`evaluator-step-${st.key}`}
                                 type="button"
                                 onClick={() => reachable && setEvaluatorStep(st.key)}
                                 disabled={!reachable}
@@ -5782,7 +5813,7 @@ export default function UserDashboardPage() {
 
                       {/* ------------------------------------------------ STEP A — INPUTS */}
                       {evalOptions && evaluatorStep === 'inputs' && (
-                        <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-5">
+                        <div data-tour="evaluator-panel-inputs" className="bg-white rounded-xl border border-slate-200 p-5 space-y-5">
                           <h3 className="text-sm font-semibold text-slate-800">
                             Step A &mdash; Configure Evaluation
                           </h3>
@@ -5924,7 +5955,7 @@ export default function UserDashboardPage() {
                       {/* ----------------------------------------------- STEP B — PERSONA */}
                       {evalOptions && ['persona', 'confirm'].includes(evaluatorStep) && chosenPersona && (
                         <div className="space-y-4">
-                          <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-5">
+                          <div data-tour="evaluator-panel-persona" className="bg-white rounded-xl border border-slate-200 p-5 space-y-5">
                             <h3 className="text-sm font-semibold text-slate-800 flex items-center gap-2">
                               <User className="w-4 h-4 text-indigo-500" />
                               Persona: {chosenPersona.name || chosenPersona.title}
@@ -6094,7 +6125,7 @@ export default function UserDashboardPage() {
                           </div>
 
                           <div className="flex flex-wrap gap-3">
-                            <button
+                            <button data-tour="evaluator-panel-confirm"
                               type="button"
                               disabled={isEvaluating}
                               onClick={runEvaluation}
@@ -6127,7 +6158,7 @@ export default function UserDashboardPage() {
                               the client sees neutral wording, never a placeholder 50. */}
 
                           {/* Step D - dimension scores */}
-                          <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-4">
+                          <div data-tour="evaluator-panel-scores" className="bg-white rounded-xl border border-slate-200 p-5 space-y-4">
                             <h3 className="text-sm font-semibold text-slate-800">
                               Step D &mdash; Dimension Scores
                             </h3>
@@ -6344,7 +6375,7 @@ export default function UserDashboardPage() {
                           )}
 
                           {/* Step E - phrase table, with the recommendation checkboxes inline. */}
-                          <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-3">
+                          <div data-tour="evaluator-panel-phrases" className="bg-white rounded-xl border border-slate-200 p-5 space-y-3">
                             <h3 className="text-sm font-semibold text-slate-800">
                               Step E &mdash; Phrase-Level Analysis
                             </h3>
@@ -6444,7 +6475,7 @@ export default function UserDashboardPage() {
                           </div>
 
                           {/* Step F - summary */}
-                          <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-4">
+                          <div data-tour="evaluator-panel-summary" className="bg-white rounded-xl border border-slate-200 p-5 space-y-4">
                             <h3 className="text-sm font-semibold text-slate-800">
                               Step F &mdash; Summary
                             </h3>
@@ -6548,7 +6579,7 @@ export default function UserDashboardPage() {
 
                       {/* ------------------------------------------------------- 7. REWRITE */}
                       {evaluation && evaluatorStep === 'rewrite' && (
-                        <div className="space-y-5">
+                        <div data-tour="evaluator-panel-rewrite" className="space-y-5">
                           {isRewriting && (
                             <div className="flex flex-col items-center justify-center py-16 space-y-4">
                               <div className="w-16 h-16 rounded-full border-4 border-slate-200 border-t-indigo-500 animate-spin" />
@@ -6728,7 +6759,6 @@ export default function UserDashboardPage() {
                           <h3 className="text-xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
                             <ShieldAlert className="w-6 h-6 text-hp-navy" />
                             <span>Objection Playbook</span>
-                            <HelpButton onClick={() => tour.help('objection_playbook')} />
                           </h3>
                           <p className="text-xs text-slate-500 mt-0.5">
                             {objectionCards.length} objection reframes for {selectedAccount?.name || 'Target Account'}
@@ -7334,7 +7364,6 @@ export default function UserDashboardPage() {
                         <h3 className="text-xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
                           <FileText className="w-6 h-6 text-hp-navy" />
                           <span>Content Studio</span>
-                          <HelpButton onClick={() => tour.help('content_studio')} />
                         </h3>
                         <p className="text-xs text-slate-500 mt-0.5">
                           Generate persona-targeted ABM content for {selectedAccount?.name || 'Target Account'} - grounded in the account&apos;s own data
@@ -7455,7 +7484,7 @@ export default function UserDashboardPage() {
                           </div>
 
                           {/* 4. Additional Context Section */}
-                          <div className="space-y-2 pt-2 border-t border-slate-100">
+                          <div data-tour="studio-context" className="space-y-2 pt-2 border-t border-slate-100">
                             <span className="text-xs font-black text-slate-900 flex items-center gap-1.5 uppercase tracking-wider">
                               <MessageSquare className="w-3.5 h-3.5 text-hp-navy" />
                               <span>Additional Context (Optional)</span>
@@ -8109,7 +8138,6 @@ export default function UserDashboardPage() {
                         <h3 className="text-xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
                           <MessageSquare className="w-6 h-6 text-hp-navy" />
                           <span>AI Strategy Chat</span>
-                          <HelpButton onClick={() => tour.help('strategy_chat')} />
                         </h3>
                         <p className="text-xs text-slate-500 mt-0.5">
                           Brainstorm GTM &amp; ABM strategy for {companyName} - grounded in account intelligence
@@ -8190,9 +8218,9 @@ export default function UserDashboardPage() {
                                 <div className="text-left max-w-xl mx-auto mt-3 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3">
                                   <p className="text-[10px] font-extrabold uppercase tracking-wider text-hp-navy mb-1.5">How to ask</p>
                                   <ul className="space-y-1 text-xs text-slate-600 leading-relaxed">
-                                    <li className="flex gap-2"><span className="text-hp-navy">&bull;</span><span>Ask about {companyName} only - not other accounts or general topics.</span></li>
-                                    <li className="flex gap-2"><span className="text-hp-navy">&bull;</span><span>Ask one clear question at a time, and name the person, product or topic.</span></li>
-                                    <li className="flex gap-2"><span className="text-hp-navy">&bull;</span><span>Answers come only from this account&apos;s data, with sources. If the data does not have it, the chat says so.</span></li>
+                                    {CHAT_TIPS.map((tip) => (
+                                      <li key={tip} className="flex gap-2"><span className="text-hp-navy">&bull;</span><span>{tip}</span></li>
+                                    ))}
                                   </ul>
                                 </div>
                                 </>

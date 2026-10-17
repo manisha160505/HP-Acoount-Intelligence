@@ -16,6 +16,9 @@ class UserResponse(UserBase):
     # When the user finished or closed the first-sign-in tour; None until
     # then, and the dashboard starts the tour while it is None.
     tour_completed_at: datetime | None = None
+    # The same for the admin pages' tour (Accounts, Platform, Users,
+    # Analytics), kept apart so an admin sees each tour once.
+    admin_tour_completed_at: datetime | None = None
 
 class UserLogin(BaseModel):
     email: EmailStr
@@ -33,4 +36,5 @@ class ChangePasswordRequest(BaseModel):
     new_password: str = Field(min_length=1, max_length=128)
 
 class TourCompletedResponse(BaseModel):
+    tour: str
     tour_completed_at: datetime

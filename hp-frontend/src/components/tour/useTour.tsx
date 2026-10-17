@@ -5,7 +5,7 @@
 // Client, 17 Oct: a new user is walked through every feature on their first
 // sign-in. Each feature opens with an overview card: Skip goes to the next
 // feature, Dive in goes through that feature's detail cards and then on to the
-// next feature. The same cards replay for one feature from its ? button.
+// next feature. The same cards replay for one feature from Take the tour.
 //
 // A hook rather than a context provider: the dashboard page owns the active
 // feature, and the tour needs to switch it, so the page calls the hook and
@@ -23,17 +23,22 @@ import {
   FEATURE_TOURS,
   TOUR_FINISH,
   TOUR_WELCOME,
+  type FeatureTour,
   type TourCard,
 } from '@/lib/tourContent';
-import { featureLabel } from '@/lib/features';
 
+const NO_CARDS: TourCard[] = [];
 const TARGET_WAIT_MS = 4000;
+// How long a card waits for its preferred target before settling for a
+// fallback: the dashboard opens the screen a card describes a moment after
+// the card itself appears.
+const PREFER_MS = 600;
 const PAD = 6;          // spotlight padding around the target
 const GAP = 12;         // between the spotlight and the card
 const MARGIN = 16;      // kept clear of the window edges
 const WIDTH = 380;
 
-type Stage = 'welcome' | 'feature' | 'finish';
+type Stage = 'welcome' | 'feature' | 'outro' | 'finish';
 
 interface TourState {
   mode: 'tour' | 'help';
@@ -52,26 +57,50 @@ interface UseTourOptions {
   setActiveFeatureKey: (key: string) => void;
   /** The full tour was finished or closed. */
   onTourDone: () => void;
+  /** A card with an `action` is showing (e.g. open one Evaluator step). */
+  onCardAction?: (action: string) => void;
+  /** The tour or a feature's help closed, however it ended. */
+  onEnd?: () => void;
+  /** Another tour's cards (the admin pages'); the dashboard's by default. */
+  tours?: Record<string, FeatureTour>;
+  welcome?: TourCard;
+  finish?: TourCard;
+  /** What one stop is called in the progress line: "Feature 3 of 10". */
+  unit?: string;
+  /** Cards after the last feature and before the finish card (My Activity). */
+  outro?: TourCard[];
 }
 
-export function useTour({ activeFeatureKey, setActiveFeatureKey, onTourDone }: UseTourOptions) {
+export function useTour({
+  activeFeatureKey, setActiveFeatureKey, onTourDone, onCardAction, onEnd,
+  tours = FEATURE_TOURS, welcome = TOUR_WELCOME, finish = TOUR_FINISH, unit = 'Feature',
+  outro = NO_CARDS,
+}: UseTourOptions) {
   const [state, setState] = useState<TourState | null>(null);
   const stateRef = useRef<TourState | null>(null);
   stateRef.current = state;
   const returnTo = useRef<string | null>(null);
 
+  // Every way of ending - the X, Esc, Done, the last Skip or Next - lands here.
+  const wasRunning = useRef(false);
+  useEffect(() => {
+    if (wasRunning.current && !state) onEnd?.();
+    wasRunning.current = !!state;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state]);
+
   const start = useCallback((featureKeys: string[]) => {
-    const features = featureKeys.filter((k) => FEATURE_TOURS[k]);
+    const features = featureKeys.filter((k) => tours[k]);
     if (!features.length) return;
     returnTo.current = activeFeatureKey;
     setState({ mode: 'tour', features, stage: 'welcome', fi: 0, ci: -1 });
-  }, [activeFeatureKey]);
+  }, [activeFeatureKey, tours]);
 
   const help = useCallback((featureKey: string) => {
-    if (!FEATURE_TOURS[featureKey]) return;
+    if (!tours[featureKey]) return;
     returnTo.current = null;
     setState({ mode: 'help', features: [featureKey], stage: 'feature', fi: 0, ci: -1 });
-  }, []);
+  }, [tours]);
 
   // Ends whatever is running. Ending the full tour - finished or closed early -
   // records it, so it does not start again, and goes back to where the user was.
@@ -93,42 +122,63 @@ export function useTour({ activeFeatureKey, setActiveFeatureKey, onTourDone }: U
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [feature]);
 
+  // After the last feature: the outro cards, then the finish card - in the
+  // full tour only; a feature's own tour just closes.
+  const afterFeatures = useCallback((s: TourState): TourState | null => {
+    if (s.mode !== 'tour') return null;
+    return outro.length ? { ...s, stage: 'outro', ci: 0 } : { ...s, stage: 'finish' };
+  }, [outro]);
+
   const nextFeature = useCallback(() => {
     setState((s) => {
       if (!s) return s;
       if (s.fi + 1 < s.features.length) return { ...s, stage: 'feature', fi: s.fi + 1, ci: -1 };
-      return s.mode === 'tour' ? { ...s, stage: 'finish' } : null;
+      return afterFeatures(s);
     });
-  }, []);
+  }, [afterFeatures]);
 
   const advance = useCallback(() => {
     setState((s) => {
       if (!s) return s;
       if (s.stage === 'welcome') return { ...s, stage: 'feature', fi: 0, ci: -1 };
-      const details = FEATURE_TOURS[s.features[s.fi]].details;
+      if (s.stage === 'outro') {
+        return s.ci + 1 < outro.length ? { ...s, ci: s.ci + 1 } : { ...s, stage: 'finish' };
+      }
+      const details = tours[s.features[s.fi]].details;
       if (s.ci + 1 < details.length) return { ...s, ci: s.ci + 1 };
       if (s.fi + 1 < s.features.length) return { ...s, fi: s.fi + 1, ci: -1 };
-      return s.mode === 'tour' ? { ...s, stage: 'finish' } : null;
+      return afterFeatures(s);
     });
-  }, []);
+  }, [tours, outro, afterFeatures]);
 
   const back = useCallback(() => {
-    setState((s) => (s && s.ci >= 0 ? { ...s, ci: s.ci - 1 } : s));
+    setState((s) => (s && s.stage === 'feature' && s.ci >= 0 ? { ...s, ci: s.ci - 1 } : s));
   }, []);
 
   let card: TourCard | null = null;
-  if (state?.stage === 'welcome') card = TOUR_WELCOME;
-  else if (state?.stage === 'finish') card = TOUR_FINISH;
+  if (state?.stage === 'welcome') card = welcome;
+  else if (state?.stage === 'finish') card = finish;
+  else if (state?.stage === 'outro') card = outro[state.ci] ?? null;
   else if (state && feature) {
-    const t = FEATURE_TOURS[feature];
+    const t = tours[feature];
     card = state.ci < 0 ? t.overview : t.details[state.ci];
   }
+
+  const action = card?.action;
+  const cardId = state ? `${state.stage}-${state.fi}-${state.ci}` : '';
+  useEffect(() => {
+    if (action) onCardAction?.(action);
+    // Once per card shown.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cardId]);
 
   const overlay = state && card ? (
     <TourOverlay
       key={`${state.stage}-${state.fi}-${state.ci}`}
       card={card}
       state={state}
+      tours={tours}
+      unit={unit}
       onClose={close}
       onSkip={nextFeature}
       onAdvance={advance}
@@ -145,6 +195,8 @@ export function useTour({ activeFeatureKey, setActiveFeatureKey, onTourDone }: U
 interface OverlayProps {
   card: TourCard;
   state: TourState;
+  tours: Record<string, FeatureTour>;
+  unit: string;
   onClose: () => void;
   onSkip: () => void;
   onAdvance: () => void;
@@ -155,34 +207,62 @@ interface OverlayProps {
 function findTarget(name?: string): HTMLElement | null {
   if (!name || typeof document === 'undefined') return null;
   const el = document.querySelector<HTMLElement>(`[data-tour="${name}"]`);
-  // A collapsed or hidden section has no box to point at.
-  return el && el.getClientRects().length ? el : null;
+  // A collapsed, hidden or empty section has no box to point at.
+  return el && el.getClientRects().length && el.getBoundingClientRect().height > 0 ? el : null;
 }
 
-function TourOverlay({ card, state, onClose, onSkip, onAdvance, onBack, onFinish }: OverlayProps) {
-  const [target, setTarget] = useState<HTMLElement | null>(() => findTarget(card.target));
-  const [searching, setSearching] = useState(() => !!card.target && !findTarget(card.target));
+function targetsOf(card: TourCard): string[] {
+  if (!card.target) return [];
+  return Array.isArray(card.target) ? card.target : [card.target];
+}
+
+/** The first target on screen, and its place in the list. Fallbacks count
+ *  only when `fallback` is set. */
+function pickTarget(names: string[], fallback: boolean): { el: HTMLElement; index: number } | null {
+  for (let i = 0; i < names.length; i++) {
+    if (i > 0 && !fallback) break;
+    const el = findTarget(names.at(i));
+    if (el) return { el, index: i };
+  }
+  return null;
+}
+
+function TourOverlay({ card, state, tours, unit, onClose, onSkip, onAdvance, onBack, onFinish }: OverlayProps) {
+  const names = targetsOf(card);
+  const namesKey = names.join('|');
+  const [target, setTarget] = useState<HTMLElement | null>(() => pickTarget(names, false)?.el ?? null);
+  const [searching, setSearching] = useState(() => names.length > 0 && !pickTarget(names, false));
+  // The card settled on a fallback, or on nothing: what it describes is not
+  // on screen yet.
+  const [fellBack, setFellBack] = useState(false);
   const [spot, setSpot] = useState<Box | null>(null);
   const [place, setPlace] = useState<{ top: number; left: number; width: number } | null>(null);
   const cardRef = useRef<HTMLDivElement>(null);
   const primaryRef = useRef<HTMLButtonElement>(null);
 
-  // Wait for the target: a feature just switched to renders after its data.
+  // Wait for the target: a feature just switched to renders after its data,
+  // and a screen the card opens renders after the card.
   useEffect(() => {
     if (!searching) return;
+    const list = namesKey.split('|');
+    const started = Date.now();
     const found = () => {
-      const el = findTarget(card.target);
-      if (!el) return false;
-      setTarget(el);
+      const hit = pickTarget(list, Date.now() - started >= PREFER_MS);
+      if (!hit) return false;
+      setTarget(hit.el);
+      setFellBack(hit.index > 0);
       setSearching(false);
       return true;
     };
     if (found()) return;
     const obs = new MutationObserver(() => { found(); });
     obs.observe(document.body, { childList: true, subtree: true, attributes: true });
-    const giveUp = setTimeout(() => setSearching(false), TARGET_WAIT_MS);
-    return () => { obs.disconnect(); clearTimeout(giveUp); };
-  }, [searching, card.target]);
+    // Fallbacks already on screen do not change the page, so look again once
+    // the wait for the preferred one is over.
+    const settle = setTimeout(found, PREFER_MS + 50);
+    const giveUp = setTimeout(() => { setFellBack(true); setSearching(false); }, TARGET_WAIT_MS);
+    return () => { obs.disconnect(); clearTimeout(settle); clearTimeout(giveUp); };
+  }, [searching, namesKey]);
 
   useEffect(() => {
     if (!target) return;
@@ -196,7 +276,16 @@ function TourOverlay({ card, state, onClose, onSkip, onAdvance, onBack, onFinish
     const vw = window.innerWidth, vh = window.innerHeight;
     const width = Math.min(WIDTH, vw - 2 * MARGIN);
     const h = cardRef.current?.offsetHeight ?? 220;
-    if (!target) {
+    // A feature can redraw the section after the card found it; the old
+    // element is then gone from the page and would light nothing. Look again.
+    if (target && !target.isConnected) {
+      const again = pickTarget(namesKey.split('|'), true);
+      if (again) {
+        setTarget(again.el);
+        return;
+      }
+    }
+    if (!target || !target.isConnected) {
       setSpot(null);
       setPlace({ top: Math.max(MARGIN, (vh - h) / 2), left: (vw - width) / 2, width });
       return;
@@ -222,7 +311,7 @@ function TourOverlay({ card, state, onClose, onSkip, onAdvance, onBack, onFinish
       cardTop = vh - h - MARGIN;
     }
     setPlace({ top: cardTop, left, width });
-  }, [target]);
+  }, [target, namesKey]);
 
   useLayoutEffect(() => { position(); }, [position, searching]);
 
@@ -248,7 +337,7 @@ function TourOverlay({ card, state, onClose, onSkip, onAdvance, onBack, onFinish
 
   const { mode, stage, features, fi, ci } = state;
   const featureKey = features[fi];
-  const details = stage === 'feature' ? FEATURE_TOURS[featureKey].details : [];
+  const details = stage === 'feature' ? tours[featureKey].details : [];
   const isOverview = stage === 'feature' && ci < 0;
   const isLastDetail = stage === 'feature' && ci === details.length - 1;
   const isLastFeature = fi === features.length - 1;
@@ -256,8 +345,8 @@ function TourOverlay({ card, state, onClose, onSkip, onAdvance, onBack, onFinish
   let progress = '';
   if (stage === 'feature') {
     progress = mode === 'tour'
-      ? `Feature ${fi + 1} of ${features.length}`
-      : featureLabel(featureKey);
+      ? `${unit} ${fi + 1} of ${features.length}`
+      : tours[featureKey].overview.title;
     if (!isOverview) progress += ` · ${ci + 1} of ${details.length}`;
   }
 
@@ -273,6 +362,8 @@ function TourOverlay({ card, state, onClose, onSkip, onAdvance, onBack, onFinish
     </>);
   } else if (stage === 'finish') {
     buttons = <button type="button" ref={primaryRef} className={primary} onClick={onFinish}>Done</button>;
+  } else if (stage === 'outro') {
+    buttons = <button type="button" ref={primaryRef} className={primary} onClick={onAdvance}>Next</button>;
   } else if (isOverview) {
     buttons = (<>
       <button type="button" className={secondary} onClick={mode === 'help' ? onClose : onSkip}>
@@ -284,7 +375,7 @@ function TourOverlay({ card, state, onClose, onSkip, onAdvance, onBack, onFinish
     </>);
   } else {
     const nextLabel = isLastDetail
-      ? (mode === 'help' ? 'Done' : isLastFeature ? 'Finish' : 'Next feature')
+      ? (mode === 'help' ? 'Done' : isLastFeature ? 'Finish' : `Next ${unit.toLowerCase()}`)
       : 'Next';
     buttons = (<>
       <button type="button" className={secondary} onClick={onBack}>Back</button>
@@ -339,6 +430,9 @@ function TourOverlay({ card, state, onClose, onSkip, onAdvance, onBack, onFinish
           </button>
         </div>
         <p className="mt-2 text-sm text-slate-700 leading-relaxed">{card.body}</p>
+        {card.notYet && fellBack && (
+          <p className="mt-2 text-xs text-slate-500 italic leading-relaxed">{card.notYet}</p>
+        )}
         {card.points && card.points.length > 0 && (
           <ul className="mt-2 space-y-1.5">
             {card.points.map((p) => (

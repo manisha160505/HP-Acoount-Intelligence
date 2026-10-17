@@ -35,6 +35,7 @@ def _user_response(user: dict) -> UserResponse:
         role=user["role"],
         must_change_password=bool(user.get("must_change_password")),
         tour_completed_at=user.get("tour_completed_at"),
+        admin_tour_completed_at=user.get("admin_tour_completed_at"),
     )
 
 
@@ -131,15 +132,20 @@ def change_password(current_user: dict, body: ChangePasswordRequest) -> None:
     logger.info("auth: user %s changed their password", current_user["id"])
 
 
-def mark_tour_completed(current_user: dict) -> datetime:
-    """Record that the user has been through the product tour, finished or
+# Which user field records each tour: the dashboard's, and the admin pages'.
+TOUR_FIELDS = {"dashboard": "tour_completed_at", "admin": "admin_tour_completed_at"}
+
+
+def mark_tour_completed(current_user: dict, tour: str = "dashboard") -> datetime:
+    """Record that the user has been through a product tour, finished or
     closed. The first time is kept: replaying a feature's help later does not
     move it."""
+    field = TOUR_FIELDS[tour]
     db = get_db()
     oid = ObjectId(current_user["id"])
     user = db["users"].find_one({"_id": oid}) or {}
-    if user.get("tour_completed_at"):
-        return user["tour_completed_at"]
+    if user.get(field):
+        return user[field]
     now = datetime.now(UTC)
-    db["users"].update_one({"_id": oid}, {"$set": {"tour_completed_at": now}})
+    db["users"].update_one({"_id": oid}, {"$set": {field: now}})
     return now

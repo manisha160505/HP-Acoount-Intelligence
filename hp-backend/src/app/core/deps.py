@@ -73,6 +73,7 @@ def _principal(raw_token: str | None) -> dict:
         "session_id": sid,
         "must_change_password": bool(user.get("must_change_password")),
         "tour_completed_at": user.get("tour_completed_at"),
+        "admin_tour_completed_at": user.get("admin_tour_completed_at"),
         "account_ids": [str(a) for a in user.get("account_ids") or []],
     }
 

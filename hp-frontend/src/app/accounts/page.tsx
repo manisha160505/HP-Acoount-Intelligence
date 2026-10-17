@@ -105,7 +105,7 @@ export default function AccountSelectionPage() {
       <div className="as-page min-h-[calc(100vh-4rem)]">
         {/* Header band: continues the navbar's ink, with parallax depth. */}
         <ParallaxBand>
-          <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 pt-10 pb-20 sm:pt-14 sm:pb-24">
+          <div data-tour="admin-accounts-header" className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 pt-10 pb-20 sm:pt-14 sm:pb-24">
             <h1 className="as-rise text-2xl sm:text-3xl font-extrabold text-white tracking-tight [text-wrap:balance]">
               Select an account
             </h1>
@@ -120,7 +120,7 @@ export default function AccountSelectionPage() {
 
         <div className="relative max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 -mt-12 sm:-mt-14 pb-16">
           {/* Controls, floating over the band's edge */}
-          <div
+          <div data-tour="admin-accounts-controls"
             className="as-rise as-glass relative z-10 rounded-2xl p-3 sm:p-4"
             style={{ ['--as-delay' as string]: '120ms' }}
           >
@@ -165,7 +165,7 @@ export default function AccountSelectionPage() {
           </div>
 
           {/* List */}
-          <div id="as-list" className="mt-5 bg-white rounded-2xl border border-slate-200/80 shadow-[0_1px_2px_rgba(11,19,43,0.05)] overflow-hidden scroll-mt-6">
+          <div id="as-list" data-tour="admin-accounts-list" className="mt-5 bg-white rounded-2xl border border-slate-200/80 shadow-[0_1px_2px_rgba(11,19,43,0.05)] overflow-hidden scroll-mt-6">
             <div className="flex items-center justify-between px-4 sm:px-5 py-2.5 border-b border-slate-100 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
               <span>Account</span>
               <span className="pr-7 inline-flex items-center gap-1">Urgency Score <ScoreInfo topic="urgency" align="right" /></span>

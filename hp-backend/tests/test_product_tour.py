@@ -64,3 +64,26 @@ def test_a_user_who_must_change_password_cannot_record_it(db, client):
     user = add_user(db, "forced@example.com", must_change_password=True)
     assert client.post(URL, headers=auth(user)).status_code == 403
     assert "tour_completed_at" not in db["users"].find_one({"_id": user["_id"]})
+
+
+# --- the admin pages' tour, remembered apart --------------------------------
+
+def test_the_admin_tour_is_remembered_apart_from_the_dashboard_tour(db, client):
+    admin = add_user(db, "boss@example.com", role="admin")
+    r = client.post(URL + "?tour=admin", headers=auth(admin))
+    assert r.status_code == 200, r.text
+    assert body(r)["tour"] == "admin"
+    me = body(client.get("/api/v1/auth/me", headers=auth(admin)))
+    assert me["admin_tour_completed_at"] and me["tour_completed_at"] is None
+    login = body(_login(client, "boss@example.com"))["user"]
+    assert login["admin_tour_completed_at"] and login["tour_completed_at"] is None
+
+    client.post(URL, headers=auth(admin))
+    stored = db["users"].find_one({"_id": admin["_id"]})
+    assert stored["tour_completed_at"] and stored["admin_tour_completed_at"]
+
+
+def test_an_unknown_tour_is_refused(db, client):
+    user = add_user(db, "odd@example.com")
+    assert client.post(URL + "?tour=other", headers=auth(user)).status_code == 422
+    assert "tour_completed_at" not in db["users"].find_one({"_id": user["_id"]})

@@ -273,11 +273,11 @@ export default function ManagePlatformPage() {
   return (
     <ProtectedRoute allowedRoles={['admin']}>
       <div className="as-page">
-      <PageHero
+      <PageHero tourId="admin-platform-header"
         title="Manage Platform"
         subtitle="Enterprise account portfolio management & entity status control"
         actions={
-          <button
+          <button data-tour="admin-platform-create"
             type="button"
             onClick={() => {
               setIsModalOpen(true);
@@ -319,7 +319,7 @@ export default function ManagePlatformPage() {
         )}
 
         {/* Search Bar */}
-        <div className="as-glass as-rise relative z-10 p-4 rounded-2xl mb-6 flex items-center gap-3" style={{ ['--as-delay' as string]: '120ms' }}>
+        <div data-tour="admin-platform-search" className="as-glass as-rise relative z-10 p-4 rounded-2xl mb-6 flex items-center gap-3" style={{ ['--as-delay' as string]: '120ms' }}>
           <div className="relative flex-1">
             <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
               <Search className="h-4 w-4 text-gray-400" />
@@ -350,7 +350,7 @@ export default function ManagePlatformPage() {
         </div>
 
         {/* Account Table */}
-        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+        <div data-tour="admin-platform-table" className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
           {isLoading ? (
             <div className="p-12 flex flex-col items-center justify-center space-y-3">
               <Loader2 className="w-8 h-8 text-hp-navy animate-spin" />
@@ -399,7 +399,7 @@ export default function ManagePlatformPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200 text-xs font-medium">
-                  {accounts.map((account) => (
+                  {accounts.map((account, ai) => (
                     <tr key={account.id} className="hover:bg-slate-50/80 transition duration-150">
                       <td className="py-4 px-6 font-semibold text-gray-900">
                         <div className="flex items-center space-x-2.5">
@@ -435,6 +435,7 @@ export default function ManagePlatformPage() {
                       <td className="py-4 px-6">
                         <div className="flex items-center justify-end gap-2">
                           <button
+                            data-tour={ai === 0 ? 'admin-platform-manage' : undefined}
                             type="button"
                             onClick={() => router.push(`/admin/accounts/${account.id}`)}
                             className={ROW_BUTTON}
@@ -447,6 +448,7 @@ export default function ManagePlatformPage() {
                               <Loader2 className="w-4 h-4 text-hp-navy animate-spin" />
                             </span>
                           ) : (
+                            <span data-tour={ai === 0 ? 'admin-platform-hide' : undefined} className="inline-flex">
                             <RowMenu
                               label={`Actions for ${account.name}`}
                               items={[
@@ -459,6 +461,7 @@ export default function ManagePlatformPage() {
                                       onSelect: () => handleStatusToggle(account) },
                               ]}
                             />
+                            </span>
                           )}
                         </div>
                       </td>

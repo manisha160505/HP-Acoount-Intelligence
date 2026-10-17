@@ -14,6 +14,8 @@ export interface User {
   must_change_password?: boolean;
   /** When the product tour was finished or closed; null until then. */
   tour_completed_at?: string | null;
+  /** The same for the admin pages' tour. */
+  admin_tour_completed_at?: string | null;
 }
 
 export interface AuthState {

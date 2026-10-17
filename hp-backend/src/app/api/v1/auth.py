@@ -1,3 +1,5 @@
+from typing import Literal
+
 from fastapi import APIRouter, Cookie, Depends, Request, Response
 from fastapi.security import HTTPAuthorizationCredentials
 
@@ -73,11 +75,13 @@ def get_me(current_user: dict = Depends(get_signed_in_user)):
 
 
 @router.post("/me/tour-completed", response_model=TourCompletedResponse)
-def tour_completed(current_user: dict = Depends(get_current_user)):
-    """The product tour has been finished or closed: do not start it again on
-    any device. Safe to call more than once."""
+def tour_completed(tour: Literal["dashboard", "admin"] = "dashboard",
+                   current_user: dict = Depends(get_current_user)):
+    """A product tour - the dashboard's, or the admin pages' with ?tour=admin -
+    has been finished or closed: do not start it again on any device. Safe to
+    call more than once."""
     return TourCompletedResponse(
-        tour_completed_at=auth_service.mark_tour_completed(current_user))
+        tour=tour, tour_completed_at=auth_service.mark_tour_completed(current_user, tour))
 
 
 @router.post("/logout", response_model=MessageResponse)
