@@ -33,21 +33,22 @@ export const Navbar: React.FC = () => {
     <nav className="bg-[#0B132B] text-white shadow-md border-b border-slate-800">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between h-16 items-center">
-          <div className="flex items-center space-x-3 flex-shrink-0">
-            <HpLogo size={40} onDark />
-            <div className="whitespace-nowrap">
-              <span className="text-lg font-bold tracking-tight text-white">
+          <div className="flex items-center gap-3 flex-shrink-0">
+            <HpLogo size={36} onDark />
+            <span className="hidden sm:block h-7 w-px bg-white/15" aria-hidden="true" />
+            <div className="flex items-center gap-2.5 whitespace-nowrap">
+              <span className="text-[17px] font-semibold tracking-tight text-white">
                 Account Intelligence
               </span>
               {/* Dropped on narrower screens so the admin links never wrap. */}
-              <span className="hidden 2xl:inline ml-2 text-[10px] bg-hp-blue text-white px-2 py-0.5 rounded font-bold uppercase">
+              <span className="hidden 2xl:inline-flex items-center h-5 px-2 rounded-md border border-sky-400/30 bg-sky-400/10 text-sky-200 text-[9.5px] font-bold uppercase tracking-[0.14em]">
                 Enterprise
               </span>
             </div>
           </div>
 
           {isAdminRole(user.role) && (
-            <div className="hidden md:flex items-center space-x-1">
+            <div className="hidden md:flex items-center space-x-1 ml-6 mr-4">
               {ADMIN_LINKS.map(({ href, label, Icon }) => {
                 const active = pathname?.startsWith(href);
                 return (

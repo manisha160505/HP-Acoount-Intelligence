@@ -4,16 +4,13 @@ import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/providers/AuthProvider';
 import { ParallaxBand } from '@/components/common/motion';
-import { Lock, AlertCircle, Loader2, KeyRound } from 'lucide-react';
+import { AlertCircle, Loader2, KeyRound } from 'lucide-react';
+import { PasswordInput } from '@/components/common/PasswordInput';
 import HpLogo from '@/components/common/HpLogo';
 
 // Mirrors MIN_PASSWORD_LENGTH in hp-backend/src/app/core/security.py; the
 // server is the authority, this only saves a round trip.
 const MIN_LENGTH = 8;
-
-const inputClass =
-  'block w-full pl-10 pr-3 py-2.5 bg-[#0B132B] border border-slate-700 rounded-lg text-xs text-white '
-  + 'placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-hp-navy focus:border-transparent transition';
 
 function PasswordField({ label, value, onChange, autoComplete }: {
   label: string; value: string; onChange: (v: string) => void; autoComplete: string;
@@ -23,13 +20,7 @@ function PasswordField({ label, value, onChange, autoComplete }: {
       <label className="block text-[10px] font-bold text-gray-300 uppercase tracking-wider mb-1">
         {label}
       </label>
-      <div className="relative rounded-md shadow-sm">
-        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-          <Lock className="h-4 w-4 text-gray-400" />
-        </div>
-        <input type="password" required autoComplete={autoComplete} value={value}
-               onChange={(e) => onChange(e.target.value)} className={inputClass} />
-      </div>
+      <PasswordInput value={value} onChange={onChange} autoComplete={autoComplete} />
     </div>
   );
 }
