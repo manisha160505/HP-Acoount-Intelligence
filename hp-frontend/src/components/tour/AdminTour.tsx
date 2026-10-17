@@ -8,12 +8,12 @@
 // lib/tourContent.ts.
 //
 // It starts once, on an admin's first visit to these pages, and is remembered
-// apart from the dashboard tour (admin_tour_completed_at). A page's ? button
-// replays that page; Take the tour in the top bar replays all four.
+// apart from the dashboard tour (admin_tour_completed_at). After that, Take the
+// tour in the top bar shows the tour of the page on screen.
 
 import { useCallback, useEffect, useRef } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
-import { Compass, HelpCircle } from 'lucide-react';
+import { Compass } from 'lucide-react';
 import { useAuth } from '@/providers/AuthProvider';
 import { isAdminRole } from '@/types/auth';
 import { ADMIN_TOUR_FINISH, ADMIN_TOUR_WELCOME, ADMIN_TOURS } from '@/lib/tourContent';
@@ -26,28 +26,9 @@ export const ADMIN_TOUR_PAGES: { key: string; href: string }[] = [
   { key: 'analytics', href: '/admin/analytics' },
 ];
 const PAGE_KEYS = ADMIN_TOUR_PAGES.map((p) => p.key);
-const HELP_EVENT = 'hp-admin-tour-help';
 
 function pageKeyFor(pathname: string | null): string {
   return ADMIN_TOUR_PAGES.find((p) => pathname === p.href || pathname?.startsWith(`${p.href}/`))?.key ?? '';
-}
-
-/** A page's ? button: replays that page's cards. The tour itself is in the
- *  top bar, so the request goes there as a window event. */
-export function AdminHelpButton({ page }: { page: string }) {
-  const { user } = useAuth();
-  if (!isAdminRole(user?.role)) return null;
-  return (
-    <button
-      type="button"
-      onClick={() => window.dispatchEvent(new CustomEvent(HELP_EVENT, { detail: page }))}
-      title="How this page works"
-      aria-label="How this page works"
-      className="inline-flex items-center align-middle ml-2 p-0.5 rounded text-slate-300 hover:text-white transition"
-    >
-      <HelpCircle className="w-5 h-5" />
-    </button>
-  );
 }
 
 /** Take the tour, for the top bar, and the tour's cards. Admins only. */
@@ -83,27 +64,22 @@ export function AdminTour() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAdmin, current, user?.admin_tour_completed_at]);
 
-  // A page's ? button.
-  const { help } = tour;
-  useEffect(() => {
-    const onHelp = (e: Event) => help((e as CustomEvent<string>).detail);
-    window.addEventListener(HELP_EVENT, onHelp);
-    return () => window.removeEventListener(HELP_EVENT, onHelp);
-  }, [help]);
-
   if (!isAdmin) return null;
   return (
     <>
+      {/* Only on a page that has a tour (not Rules). */}
+      {current && (
       <button
         type="button"
         data-tour="admin-tour-button"
-        onClick={() => tour.start(PAGE_KEYS)}
-        title="Take the tour of the admin pages"
+        onClick={() => tour.help(current)}
+        title="How this page works"
         className="flex items-center space-x-1 text-gray-300 hover:text-white hover:bg-white/10 text-xs font-bold px-2 py-1.5 rounded-lg whitespace-nowrap transition duration-150"
       >
         <Compass className="w-3.5 h-3.5" />
         <span className="hidden xl:inline">Take the tour</span>
       </button>
+      )}
       {tour.overlay}
     </>
   );

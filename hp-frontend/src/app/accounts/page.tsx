@@ -8,7 +8,6 @@ import { CountUpText, ParallaxBand, SlidingSegments, growDelay } from '@/compone
 import api from '@/services/api';
 import { useAuth } from '@/providers/AuthProvider';
 import { isAdminRole } from '@/types/auth';
-import { AdminHelpButton } from '@/components/tour/AdminTour';
 import { CompanyAccount } from '@/types/account';
 import {
   URGENCY_FILTERS,
@@ -108,7 +107,7 @@ export default function AccountSelectionPage() {
         <ParallaxBand>
           <div data-tour="admin-accounts-header" className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 pt-10 pb-20 sm:pt-14 sm:pb-24">
             <h1 className="as-rise text-2xl sm:text-3xl font-extrabold text-white tracking-tight [text-wrap:balance]">
-              Select an account <AdminHelpButton page="accounts" />
+              Select an account
             </h1>
             <p className="as-rise mt-2 text-sm text-slate-300/90 max-w-xl" style={{ ['--as-delay' as string]: '70ms' }}>
               Choose a target account to open its intelligence dashboard.

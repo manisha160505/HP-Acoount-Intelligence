@@ -3,7 +3,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ProtectedRoute } from '@/components/common/ProtectedRoute';
 import { PageHero } from '@/components/common/motion';
-import { AdminHelpButton } from '@/components/tour/AdminTour';
 import { useAuth } from '@/providers/AuthProvider';
 import { isAdminRole } from '@/types/auth';
 import api from '@/services/api';
@@ -104,7 +103,7 @@ export default function AdminUsersPage() {
     <ProtectedRoute allowedRoles={['admin']}>
       <div className="as-page">
         <PageHero tourId="admin-users-header"
-          title={<>Users <AdminHelpButton page="users" /></>}
+          title="Users"
           subtitle="Add people, choose which accounts each seller can open, and reset passwords. Admins see every account."
           actions={
             <>

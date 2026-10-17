@@ -5,7 +5,7 @@
 // Client, 17 Oct: a new user is walked through every feature on their first
 // sign-in. Each feature opens with an overview card: Skip goes to the next
 // feature, Dive in goes through that feature's detail cards and then on to the
-// next feature. The same cards replay for one feature from its ? button.
+// next feature. The same cards replay for one feature from Take the tour.
 //
 // A hook rather than a context provider: the dashboard page owns the active
 // feature, and the tour needs to switch it, so the page calls the hook and
@@ -27,6 +27,7 @@ import {
   type TourCard,
 } from '@/lib/tourContent';
 
+const NO_CARDS: TourCard[] = [];
 const TARGET_WAIT_MS = 4000;
 // How long a card waits for its preferred target before settling for a
 // fallback: the dashboard opens the screen a card describes a moment after
@@ -37,7 +38,7 @@ const GAP = 12;         // between the spotlight and the card
 const MARGIN = 16;      // kept clear of the window edges
 const WIDTH = 380;
 
-type Stage = 'welcome' | 'feature' | 'finish';
+type Stage = 'welcome' | 'feature' | 'outro' | 'finish';
 
 interface TourState {
   mode: 'tour' | 'help';
@@ -66,11 +67,14 @@ interface UseTourOptions {
   finish?: TourCard;
   /** What one stop is called in the progress line: "Feature 3 of 10". */
   unit?: string;
+  /** Cards after the last feature and before the finish card (My Activity). */
+  outro?: TourCard[];
 }
 
 export function useTour({
   activeFeatureKey, setActiveFeatureKey, onTourDone, onCardAction, onEnd,
   tours = FEATURE_TOURS, welcome = TOUR_WELCOME, finish = TOUR_FINISH, unit = 'Feature',
+  outro = NO_CARDS,
 }: UseTourOptions) {
   const [state, setState] = useState<TourState | null>(null);
   const stateRef = useRef<TourState | null>(null);
@@ -118,32 +122,43 @@ export function useTour({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [feature]);
 
+  // After the last feature: the outro cards, then the finish card - in the
+  // full tour only; a feature's own tour just closes.
+  const afterFeatures = useCallback((s: TourState): TourState | null => {
+    if (s.mode !== 'tour') return null;
+    return outro.length ? { ...s, stage: 'outro', ci: 0 } : { ...s, stage: 'finish' };
+  }, [outro]);
+
   const nextFeature = useCallback(() => {
     setState((s) => {
       if (!s) return s;
       if (s.fi + 1 < s.features.length) return { ...s, stage: 'feature', fi: s.fi + 1, ci: -1 };
-      return s.mode === 'tour' ? { ...s, stage: 'finish' } : null;
+      return afterFeatures(s);
     });
-  }, []);
+  }, [afterFeatures]);
 
   const advance = useCallback(() => {
     setState((s) => {
       if (!s) return s;
       if (s.stage === 'welcome') return { ...s, stage: 'feature', fi: 0, ci: -1 };
+      if (s.stage === 'outro') {
+        return s.ci + 1 < outro.length ? { ...s, ci: s.ci + 1 } : { ...s, stage: 'finish' };
+      }
       const details = tours[s.features[s.fi]].details;
       if (s.ci + 1 < details.length) return { ...s, ci: s.ci + 1 };
       if (s.fi + 1 < s.features.length) return { ...s, fi: s.fi + 1, ci: -1 };
-      return s.mode === 'tour' ? { ...s, stage: 'finish' } : null;
+      return afterFeatures(s);
     });
-  }, [tours]);
+  }, [tours, outro, afterFeatures]);
 
   const back = useCallback(() => {
-    setState((s) => (s && s.ci >= 0 ? { ...s, ci: s.ci - 1 } : s));
+    setState((s) => (s && s.stage === 'feature' && s.ci >= 0 ? { ...s, ci: s.ci - 1 } : s));
   }, []);
 
   let card: TourCard | null = null;
   if (state?.stage === 'welcome') card = welcome;
   else if (state?.stage === 'finish') card = finish;
+  else if (state?.stage === 'outro') card = outro[state.ci] ?? null;
   else if (state && feature) {
     const t = tours[feature];
     card = state.ci < 0 ? t.overview : t.details[state.ci];
@@ -261,7 +276,16 @@ function TourOverlay({ card, state, tours, unit, onClose, onSkip, onAdvance, onB
     const vw = window.innerWidth, vh = window.innerHeight;
     const width = Math.min(WIDTH, vw - 2 * MARGIN);
     const h = cardRef.current?.offsetHeight ?? 220;
-    if (!target) {
+    // A feature can redraw the section after the card found it; the old
+    // element is then gone from the page and would light nothing. Look again.
+    if (target && !target.isConnected) {
+      const again = pickTarget(namesKey.split('|'), true);
+      if (again) {
+        setTarget(again.el);
+        return;
+      }
+    }
+    if (!target || !target.isConnected) {
       setSpot(null);
       setPlace({ top: Math.max(MARGIN, (vh - h) / 2), left: (vw - width) / 2, width });
       return;
@@ -287,7 +311,7 @@ function TourOverlay({ card, state, tours, unit, onClose, onSkip, onAdvance, onB
       cardTop = vh - h - MARGIN;
     }
     setPlace({ top: cardTop, left, width });
-  }, [target]);
+  }, [target, namesKey]);
 
   useLayoutEffect(() => { position(); }, [position, searching]);
 
@@ -338,6 +362,8 @@ function TourOverlay({ card, state, tours, unit, onClose, onSkip, onAdvance, onB
     </>);
   } else if (stage === 'finish') {
     buttons = <button type="button" ref={primaryRef} className={primary} onClick={onFinish}>Done</button>;
+  } else if (stage === 'outro') {
+    buttons = <button type="button" ref={primaryRef} className={primary} onClick={onAdvance}>Next</button>;
   } else if (isOverview) {
     buttons = (<>
       <button type="button" className={secondary} onClick={mode === 'help' ? onClose : onSkip}>

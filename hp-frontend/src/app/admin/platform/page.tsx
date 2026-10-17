@@ -4,7 +4,6 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { ProtectedRoute } from '@/components/common/ProtectedRoute';
 import { PageHero } from '@/components/common/motion';
-import { AdminHelpButton } from '@/components/tour/AdminTour';
 import api from '@/services/api';
 import { CompanyAccount, AccountStatus } from '@/types/account';
 import { 
@@ -272,7 +271,7 @@ export default function ManagePlatformPage() {
     <ProtectedRoute allowedRoles={['admin']}>
       <div className="as-page">
       <PageHero tourId="admin-platform-header"
-        title={<>Manage Platform <AdminHelpButton page="platform" /></>}
+        title="Manage Platform"
         subtitle="Enterprise account portfolio management & entity status control"
         actions={
           <button data-tour="admin-platform-create"

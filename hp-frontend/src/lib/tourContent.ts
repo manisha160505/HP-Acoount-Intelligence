@@ -1,5 +1,5 @@
 /**
- * The words of the product tour and of each feature's help (?) button.
+ * The words of the product tour, and of each feature's own tour (Take the tour).
  *
  * Client, 17 Oct: people new to the platform should be walked through every
  * feature on their first sign-in, in very simple English, and be able to see
@@ -47,10 +47,20 @@ export const TOUR_WELCOME: TourCard = {
 export const TOUR_FINISH: TourCard = {
   title: "You're all set",
   body:
-    'That is the whole platform. Click the ? next to any feature title to see its walkthrough again, ' +
-    'or use Take the tour to start this tour from the beginning.',
+    "That is the whole platform. To see a feature's walkthrough again, open it and click " +
+    'Take the tour at the top of the page.',
   target: 'tour-button',
 };
+
+/** How to ask Strategy Chat: its tour card and the box on its empty screen. */
+export const CHAT_TIPS: string[] = [
+  'Ask about this account only. Questions about other accounts or general topics are declined.',
+  'Ask one clear question at a time, and name the person, product or topic.',
+  'Say what you are trying to do, e.g. "I am meeting their CIO next week about AI PCs."',
+  'Say what you want back: a short answer, 3 bullet points, an email draft or a 90-day plan.',
+  'Follow up in the same chat to go deeper, e.g. "Tell me more about the second point."',
+  "Answers come only from this account's data, with sources. If the data does not have it, the chat says so.",
+];
 
 const EVALUATE_FIRST = 'You will see this after you evaluate a message.';
 
@@ -61,6 +71,15 @@ function evaluatorStep(key: string, title: string, body: string, notYet?: string
     target: [`evaluator-panel-${key}`, `evaluator-step-${key}`],
   };
 }
+
+/** After the last feature, for sellers (admins have no My Activity button). */
+export const MY_ACTIVITY_CARD: TourCard = {
+  title: 'My Activity',
+  body:
+    'Your own use of the platform: time spent, feature views and logins, ' +
+    'the features you use most, and the accounts you viewed most.',
+  target: 'my-activity',
+};
 
 export const FEATURE_TOURS: Record<string, FeatureTour> = {
   executive_dashboard: {
@@ -261,6 +280,13 @@ export const FEATURE_TOURS: Record<string, FeatureTour> = {
         target: 'studio-controls',
       },
       {
+        title: 'Additional context',
+        body:
+          'You can also give additional context, if any: talking points, recent news, or anything ' +
+          'the draft should mention. It is optional.',
+        target: 'studio-context',
+      },
+      {
         title: 'Your draft',
         body: 'The draft appears here. Read it, then copy or download it. Always check it before you send it.',
         target: 'studio-output',
@@ -280,17 +306,14 @@ export const FEATURE_TOURS: Record<string, FeatureTour> = {
       {
         title: 'How to ask',
         body: 'You get the best answers when you:',
-        points: [
-          'Ask about this account only.',
-          'Ask one clear question at a time, and name the person, product or topic.',
-          'Do not ask about other accounts or general topics. The chat will say no.',
-          'If the data does not have the answer, the chat tells you so instead of guessing.',
-        ],
+        points: CHAT_TIPS,
         target: 'chat-welcome',
       },
       {
         title: 'Suggested questions',
-        body: 'Not sure where to start? Click one of these ready-made questions.',
+        body:
+          'Not sure where to start? Click one of these, or try: "Who should I approach first for an ' +
+          'AI PC refresh, and why?" or "What objections might their CFO raise, and how do I answer them?"',
         target: 'chat-suggestions',
       },
       {
@@ -354,7 +377,7 @@ export const ADMIN_TOUR_WELCOME: TourCard = {
 export const ADMIN_TOUR_FINISH: TourCard = {
   title: "You're all set",
   body:
-    'Click the ? next to a page title to see that page again, or Take the tour to replay all of it. ' +
+    "To see a page's walkthrough again, open it and click Take the tour at the top. " +
     "Each account's dashboard has its own tour too.",
   target: 'admin-tour-button',
 };

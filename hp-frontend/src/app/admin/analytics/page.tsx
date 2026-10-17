@@ -12,7 +12,6 @@ import {
 } from '@/components/analytics/AnalyticsParts';
 import { ParallaxBand } from '@/components/common/motion';
 import { Loader2, AlertCircle, RefreshCw, Users, Activity, LogIn, Eye, Clock } from 'lucide-react';
-import { AdminHelpButton } from '@/components/tour/AdminTour';
 
 type FeatureMeasure = 'users' | 'views' | 'time';
 type CellMeasure = 'views' | 'time';
@@ -122,7 +121,7 @@ export default function AdminAnalyticsPage() {
       <div className="as-page">
       <ParallaxBand>
         <div data-tour="admin-analytics-header" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-10 pb-20 sm:pt-12 sm:pb-24">
-          <h1 className="as-rise text-2xl sm:text-3xl font-extrabold text-white tracking-tight">Usage Analytics <AdminHelpButton page="analytics" /></h1>
+          <h1 className="as-rise text-2xl sm:text-3xl font-extrabold text-white tracking-tight">Usage Analytics</h1>
           <p className="as-rise mt-2 text-sm text-slate-300/90 max-w-2xl" style={{ ['--as-delay' as string]: '70ms' }}>
             Which features sellers use. Admin activity is excluded. Dates are UTC and inclusive.
           </p>
