@@ -13,6 +13,7 @@ import { Modal, ModalActions, dangerButton, primaryButton, secondaryButton } fro
 import { AccountPicker } from '@/components/users/AccountPicker';
 import { OneTimePassword } from '@/components/users/OneTimePassword';
 import { AuditLog, formatDateTime } from '@/components/users/AuditLog';
+import { RowMenu } from '@/components/users/RowMenu';
 import {
   AlertCircle,
   Building2,
@@ -242,22 +243,31 @@ export default function AdminUsersPage() {
                                   {u.role === 'super_admin' ? '—' : 'Super admin only'}
                                 </div>
                               ) : (
-                                <div className="flex flex-wrap justify-end gap-1.5">
+                                <div className="flex items-center justify-end gap-2">
                                   {u.role === 'user' && (
-                                    <RowButton icon={<Building2 className="w-3.5 h-3.5" />} label="Accounts"
-                                               onClick={() => setDialog({ kind: 'accounts', user: u })} />
+                                    <button type="button" onClick={() => setDialog({ kind: 'accounts', user: u })}
+                                            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-gray-200 text-[11px] font-bold text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition">
+                                      <Building2 className="w-3.5 h-3.5 text-gray-400" />
+                                      Accounts
+                                    </button>
                                   )}
-                                  <RowButton icon={<KeyRound className="w-3.5 h-3.5" />} label="Reset password"
-                                             onClick={() => setDialog({ kind: 'reset', user: u })} />
-                                  {isSuper && (
-                                    <RowButton icon={<ShieldCheck className="w-3.5 h-3.5" />}
-                                               label={u.role === 'admin' ? 'Make seller' : 'Make admin'}
-                                               onClick={() => setDialog({ kind: 'role', user: u })} />
-                                  )}
-                                  <RowButton icon={u.is_active ? <UserX className="w-3.5 h-3.5" /> : <UserCheck className="w-3.5 h-3.5" />}
-                                             label={u.is_active ? 'Deactivate' : 'Activate'}
-                                             tone={u.is_active ? 'warn' : 'ok'}
-                                             onClick={() => setDialog({ kind: 'active', user: u })} />
+                                  <RowMenu
+                                    label={`Actions for ${u.email}`}
+                                    items={[
+                                      { label: 'Reset password', icon: <KeyRound className="w-3.5 h-3.5" />,
+                                        onSelect: () => setDialog({ kind: 'reset', user: u }) },
+                                      ...(isSuper ? [{
+                                        label: u.role === 'admin' ? 'Make seller' : 'Make admin',
+                                        icon: <ShieldCheck className="w-3.5 h-3.5" />,
+                                        onSelect: () => setDialog({ kind: 'role', user: u }),
+                                      }] : []),
+                                      u.is_active
+                                        ? { label: 'Deactivate', icon: <UserX className="w-3.5 h-3.5" />, danger: true,
+                                            onSelect: () => setDialog({ kind: 'active', user: u }) }
+                                        : { label: 'Activate', icon: <UserCheck className="w-3.5 h-3.5" />,
+                                            onSelect: () => setDialog({ kind: 'active', user: u }) },
+                                    ]}
+                                  />
                                 </div>
                               )}
                             </td>
@@ -360,22 +370,6 @@ export default function AdminUsersPage() {
         )}
       </div>
     </ProtectedRoute>
-  );
-}
-
-function RowButton({ icon, label, onClick, tone }: {
-  icon: React.ReactNode; label: string; onClick: () => void; tone?: 'warn' | 'ok';
-}) {
-  const color = tone === 'warn'
-    ? 'text-amber-700 border-amber-200 hover:bg-amber-50'
-    : tone === 'ok'
-      ? 'text-emerald-700 border-emerald-200 hover:bg-emerald-50'
-      : 'text-gray-700 border-gray-200 hover:bg-gray-50';
-  return (
-    <button type="button" onClick={onClick}
-            className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border text-[11px] font-bold transition ${color}`}>
-      {icon}<span>{label}</span>
-    </button>
   );
 }
 
