@@ -439,8 +439,10 @@ export const ADMIN_TOURS: Record<string, FeatureTour> = {
         target: 'admin-platform-manage',
       },
       {
-        title: 'Hide and Show',
-        body: "Hide takes the account off sellers' lists without deleting anything. Show brings it back.",
+        title: 'More actions',
+        body:
+          "The menu next to Manage opens the account's dashboard, or hides the account from sellers " +
+          'without deleting anything. Show to sellers brings it back.',
         target: 'admin-platform-hide',
       },
     ],
