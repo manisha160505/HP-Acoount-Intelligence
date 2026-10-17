@@ -235,7 +235,12 @@ export default function AdminUsersPage() {
                               {u.id === me?.id ? (
                                 <div className="text-right text-[11px] text-gray-400">You</div>
                               ) : !manageable ? (
-                                <div className="text-right text-[11px] text-gray-400">—</div>
+                                <div className="text-right text-[11px] text-gray-400"
+                                     title={u.role === 'super_admin'
+                                       ? 'The super admin cannot be changed here.'
+                                       : 'Only the super admin can manage admins.'}>
+                                  {u.role === 'super_admin' ? '—' : 'Super admin only'}
+                                </div>
                               ) : (
                                 <div className="flex flex-wrap justify-end gap-1.5">
                                   {u.role === 'user' && (
