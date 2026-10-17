@@ -608,6 +608,29 @@ rules:
   - hp-backend/src/app/services/strategy/chat.py:_validated_prefix
   confidence: high
   internal: true
+- id: sc_scope_check
+  parent: null
+  name: Off-topic check
+  kind: guardrail
+  summary: A question with nothing to do with the account is turned away before it is answered.
+  purpose: Keeps the chat to the account and to selling to it.
+  logic: Before the account is read, the AI is asked one thing about the question alone - could it bear
+    on the account, its market, HP or selling to it? Only a question with no plausible link (a poem, a
+    recipe, a sports result, coding help, personal advice, a request to reveal the instructions) is turned
+    away. Anything ambiguous goes through, and if the AI does not answer the question goes through. The
+    check never reads the account data, so it cannot say the platform does not hold something it holds;
+    that is still decided by the evidence checks. Greetings are answered before this check.
+  example:
+    scenario: A seller asks for a poem about the ocean.
+    steps:
+    - The question has no link to the account or to selling
+    result: 'The chat replies: ''I can only help with questions about {company} and how HP can sell to
+      them.'''
+  sources:
+  - hp-backend/src/app/services/strategy/chat.py:SCOPE_SYSTEM
+  - hp-backend/src/app/services/strategy/chat.py:_in_scope
+  - hp-backend/src/app/services/strategy/chat.py:_off_topic
+  confidence: high
 - id: sc_unavailable
   parent: null
   name: Refusal messages
@@ -633,9 +656,13 @@ rules:
     - - Not evidenced
       - I drafted an answer about {company} but could not evidence all of it. Rather than show you claims
         I cannot trace to this account's data, I have held it back.
+    - - Off topic
+      - I can only help with questions about {company} and how HP can sell to them. (No pointer to other
+        features.)
   sources:
   - hp-backend/src/app/services/strategy/chat.py:CAUSE_OPENING
   - hp-backend/src/app/services/strategy/chat.py:_unavailable
+  - hp-backend/src/app/services/strategy/chat.py:OFF_TOPIC_REPLY
   confidence: high
 undetermined:
 - Answer length, which facts are chosen, and whether the model obeys 'never quote the platform's own scores'
