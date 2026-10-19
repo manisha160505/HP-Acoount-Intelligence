@@ -10,12 +10,15 @@ from app.core.security import verify_password
 from app.services import user_import
 from regen_fakes import FakeDb
 
+HEADER = ["Country", "Sales Territory ID", "Sales Territory Name", "EAM", "IAM"]
+REVISED_HEADER = [*HEADER, "EAM Manager", "IAM Manager"]     # the 19 Oct revision
 
-def _sheet(tmp_path, sales, admins):
+
+def _sheet(tmp_path, sales, admins, header=HEADER):
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Sales"
-    ws.append(["Country", "Sales Territory ID", "Sales Territory Name", "EAM", "IAM"])
+    ws.append(header)
     for row in sales:
         ws.append(row)
     adm = wb.create_sheet("Admin")
@@ -199,3 +202,56 @@ def test_an_exact_name_still_wins_over_the_alias(tmp_path):
     ], []))
     plan = user_import.build_plan(sheet, _accounts(d), {})
     assert plan.matched == [("PT ASTRA INTERNATIONAL TBK - ID", "PT ASTRA INTERNATIONAL TBK - ID", "exact")]
+
+
+# ------------------------------------------------------- 19 Oct revision
+
+@pytest.fixture
+def revised(tmp_path):
+    return user_import.read_sheet(_sheet(tmp_path, [
+        ("MY", 169890, "MALAYAN BANKING BHD - MY", "seller.one@example.com",
+         "seller.two@example.com", "eam.boss@example.com", "admin.one@example.com"),
+        ("MY", 184582, "PUBLIC BANK BHD - MY", "seller.three@example.com", "-",
+         "eam.boss@example.com", "-"),
+        ("AU", 216239, "WESFARMERS HOLDINGS - AU", "seller.four@example.com", "-",
+         "Seller.Four@Example.com", "iam.boss@example.com"),
+    ], ["admin.one@example.com"], header=REVISED_HEADER))
+
+
+def test_managers_become_sellers_on_the_rows_they_manage(db, revised):
+    assert revised.rows[0].emails == ["seller.one@example.com", "seller.two@example.com",
+                                      "eam.boss@example.com", "admin.one@example.com"]
+    # The same person twice on one row is one seller once.
+    assert revised.rows[2].emails == ["seller.four@example.com", "iam.boss@example.com"]
+    people = _by_email(_plan(db, revised))
+    assert people["eam.boss@example.com"].role == "user"
+    assert people["eam.boss@example.com"].account_names == [
+        "MALAYAN BANKING BHD - MY", "PUBLIC BANK BHD - MY"]
+    assert people["iam.boss@example.com"].account_names == ["BUNNINGS GROUP LIMITED"]
+    # A manager on the Admin tab stays an admin.
+    assert people["admin.one@example.com"].role == "admin"
+
+
+def test_the_renamed_bunnings_row_still_matches_bunnings(db, revised):
+    how = {s: (ours, h) for s, ours, h in _plan(db, revised).matched}
+    assert how["WESFARMERS HOLDINGS - AU"] == ("BUNNINGS GROUP LIMITED", "alias")
+
+
+def test_add_accounts_gives_missing_accounts_and_removes_none(db, revised):
+    ids = {a["name"]: str(a["_id"]) for a in db["accounts"].find({})}
+    asc = ids["AUSTRALIAN SUBMARINE CORPORATION [ASC] - AU"]
+    # Given ASC by an admin on the site; the sheet gives Malayan Banking.
+    db["users"].insert_one({"email": "seller.two@example.com", "role": "user",
+                            "account_ids": [asc]})
+    existing = {u["email"]: u for u in db["users"].find({})}
+    plan = _plan(db, revised, existing)
+    pw = {}
+    user_import.fill_passwords(plan, pw)
+    counts = user_import.apply(db, plan, pw, super_admin_email="bridge@gmail.com",
+                               super_admin_password="x", add_accounts=True)
+    assert counts["accounts_synced"] == 1
+    user = db["users"].find_one({"email": "seller.two@example.com"})
+    assert user["account_ids"] == [asc, ids["MALAYAN BANKING BHD - MY"]]
+    row = db["user_audit"].find_one({"action": "user.accounts_changed"})
+    assert row["details"]["added"] == ["MALAYAN BANKING BHD - MY"]
+    assert row["details"]["removed"] == []
