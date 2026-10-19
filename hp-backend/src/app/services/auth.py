@@ -13,13 +13,21 @@ from pymongo.errors import PyMongoError
 from app.config.settings import settings
 from app.core.security import (
     create_access_token,
+    generate_recovery_code,
     get_password_hash,
+    normalize_recovery_code,
     password_problem,
     verify_password,
 )
 from app.database.mongodb import get_db
 from app.errors import APIError, ErrorCode
-from app.schemas.user import ChangePasswordRequest, TokenResponse, UserLogin, UserResponse
+from app.schemas.user import (
+    ChangePasswordRequest,
+    ForgotPasswordRequest,
+    TokenResponse,
+    UserLogin,
+    UserResponse,
+)
 from app.services import sessions, user_audit
 from app.services.usage import record_login
 from app.services.users_admin import is_user_active
@@ -106,9 +114,21 @@ def logout(session_id: str | None, refresh_token: str | None) -> None:
             sessions.revoke(db, sid, "logout")
 
 
-def change_password(current_user: dict, body: ChangePasswordRequest) -> None:
+def _issue_recovery_code(db, user_id) -> str:
+    """A new recovery code for the user, replacing any earlier one. Returned
+    once to show the user; only its hash is kept."""
+    code = generate_recovery_code()
+    db["users"].update_one({"_id": user_id}, {"$set": {
+        "recovery_code_hash": get_password_hash(normalize_recovery_code(code)),
+        "recovery_code_created_at": datetime.now(UTC),
+    }})
+    return code
+
+
+def change_password(current_user: dict, body: ChangePasswordRequest) -> str:
     """Replace the caller's password and end every one of their sessions, this
-    one included: they sign in again with the new password."""
+    one included: they sign in again with the new password. Returns a new
+    recovery code, to be shown to the user once."""
     db = get_db()
     oid = ObjectId(current_user["id"])
     user = db["users"].find_one({"_id": oid})
@@ -130,6 +150,40 @@ def change_password(current_user: dict, body: ChangePasswordRequest) -> None:
     user_audit.record(db, current_user, user_audit.PASSWORD_CHANGED, user,
                       {"first_sign_in": bool(user.get("must_change_password"))})
     logger.info("auth: user %s changed their password", current_user["id"])
+    return _issue_recovery_code(db, oid)
+
+
+# Compared against when the email is unknown, so an unknown email and a wrong
+# code take the same time and give the same answer.
+_DUMMY_HASH = get_password_hash("no-such-recovery-code")
+_RECOVERY_REFUSED = "That email and recovery code do not match."
+
+
+def recover_password(body: ForgotPasswordRequest) -> str:
+    """Set a new password with the recovery code saved when the last one was
+    set. No sign-in and no admin needed. The code works once: every session
+    ends and a new code is returned, to be shown to the user once."""
+    db = get_db()
+    user = db["users"].find_one({"email": body.email.lower().strip()})
+    stored = (user or {}).get("recovery_code_hash")
+    matches = verify_password(normalize_recovery_code(body.recovery_code), stored or _DUMMY_HASH)
+    if not user or not stored or not matches or not is_user_active(user):
+        raise APIError(ErrorCode.INVALID_CREDENTIALS, _RECOVERY_REFUSED, status_code=400)
+    problem = password_problem(body.new_password, user.get("password_hash"))
+    if problem:
+        raise APIError(ErrorCode.VALIDATION_ERROR, problem, fields={"new_password": problem})
+    now = datetime.now(UTC)
+    db["users"].update_one({"_id": user["_id"]}, {"$set": {
+        "password_hash": get_password_hash(body.new_password),
+        "must_change_password": False,
+        "password_changed_at": now,
+        "updated_at": now,
+    }})
+    sessions.revoke_user(db, str(user["_id"]), "password set with recovery code")
+    actor = {"id": str(user["_id"]), "email": user["email"]}
+    user_audit.record(db, actor, user_audit.PASSWORD_RECOVERED, user)
+    logger.info("auth: user %s set a new password with their recovery code", user["_id"])
+    return _issue_recovery_code(db, user["_id"])
 
 
 # Which user field records each tour: the dashboard's, and the admin pages'.

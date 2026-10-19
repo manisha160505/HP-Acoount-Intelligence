@@ -65,6 +65,23 @@ def generate_temporary_password(length: int = 12) -> str:
             return pw
 
 
+# Recovery codes are read off a screen and typed back: upper case, no 0/O, 1/I/L.
+_RECOVERY_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
+
+
+def generate_recovery_code() -> str:
+    """A one-time code a user saves when they set a password, to set a new one
+    themselves if they forget it. 16 characters (about 79 bits), shown as
+    XXXX-XXXX-XXXX-XXXX. Stored only as a hash."""
+    raw = "".join(secrets.choice(_RECOVERY_ALPHABET) for _ in range(16))
+    return "-".join(raw[i:i + 4] for i in range(0, 16, 4))
+
+
+def normalize_recovery_code(code: str) -> str:
+    """What is hashed and compared: case and dashes or spaces do not matter."""
+    return "".join(ch for ch in (code or "").upper() if ch.isalnum())
+
+
 def generate_private_key_pem() -> str:
     key = ec.generate_private_key(ec.SECP256R1())
     return key.private_bytes(serialization.Encoding.PEM,

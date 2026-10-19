@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/providers/AuthProvider';
 import { landingRouteFor } from '@/lib/accountSelection';
@@ -106,9 +107,14 @@ export default function LoginPage() {
             </div>
 
             <div>
-              <label className="block text-[10px] font-bold text-gray-300 uppercase tracking-wider mb-1">
-                Password
-              </label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-[10px] font-bold text-gray-300 uppercase tracking-wider">
+                  Password
+                </label>
+                <Link href="/forgot-password" className="text-[11px] font-semibold text-sky-300 hover:text-white transition">
+                  Forgot password?
+                </Link>
+              </div>
               <PasswordInput value={password} onChange={setPassword}
                              autoComplete="current-password" placeholder="••••••••••••" />
             </div>

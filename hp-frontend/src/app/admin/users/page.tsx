@@ -555,6 +555,7 @@ function ResetPasswordDialog({ user, onClose, onDone }: {
         <p className="text-sm text-gray-700">
           A new temporary password is generated for <span className="font-bold">{user.email}</span>.
           They are signed out everywhere and must set their own password at next sign-in.
+          Users who still have their recovery code can do this themselves from &ldquo;Forgot password?&rdquo;.
         </p>
         <ModalActions>
           <button type="button" onClick={onClose} className={secondaryButton}>Cancel</button>
