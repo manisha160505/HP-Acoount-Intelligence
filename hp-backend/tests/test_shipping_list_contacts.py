@@ -3,7 +3,8 @@
 The client's rules: an email tag only beside an email, catch_all and CATCH_ALL
 as one tag, "unknown" and blank left blank; a phone only when there is a
 number, with its line type as the tag. A number Excel stored in scientific
-notation has lost its digits and is never shown.
+notation has lost its digits: it is restored only from the person's earlier
+record, when exactly one number there fits it, and is never shown otherwise.
 
 Run: python -m pytest tests/test_shipping_list_contacts.py -v
 """
@@ -45,8 +46,8 @@ def _row(**over):
 
 
 def test_a_full_row_keeps_every_column_we_load(loader):
-    out, damaged = loader.convert(_row(), ACCOUNT)
-    assert not damaged
+    out, how = loader.convert(_row(), ACCOUNT)
+    assert how == ""
     assert out["Prospect full_name"] == "Aiko Tanaka"
     assert out["Prospect job_department_main"] == "master_information_technology"
     assert out["Prospect job_level_main"] == "c_suite"
@@ -72,8 +73,8 @@ def test_no_email_means_no_email_tag(loader):
 
 
 def test_no_phone_means_no_phone_tag(loader):
-    out, damaged = loader.convert(_row(phone=None, phone_line_type="MOBILE"), ACCOUNT)
-    assert out["Mobile Phone"] == "" and out["Phone Line Type"] == "" and not damaged
+    out, how = loader.convert(_row(phone=None, phone_line_type="MOBILE"), ACCOUNT)
+    assert out["Mobile Phone"] == "" and out["Phone Line Type"] == "" and how == ""
 
 
 def test_a_phone_without_a_line_type_shows_without_a_tag(loader):
@@ -82,9 +83,37 @@ def test_a_phone_without_a_line_type_shows_without_a_tag(loader):
 
 
 def test_a_number_excel_stored_in_scientific_notation_is_dropped(loader):
-    out, damaged = loader.convert(_row(phone="8.17048E+11", phone_line_type="MOBILE"), ACCOUNT)
-    assert damaged
+    out, how = loader.convert(_row(phone="8.17048E+11", phone_line_type="MOBILE"), ACCOUNT)
+    assert how == "damaged"
     assert out["Mobile Phone"] == "" and out["Phone Line Type"] == ""
+
+
+def test_a_damaged_number_is_restored_from_the_earlier_record(loader):
+    known = {"817048123456", "6512345678"}
+    out, how = loader.convert(_row(phone="8.17048E+11", phone_line_type="MOBILE"), ACCOUNT, known)
+    assert how == "restored"
+    assert out["Mobile Phone"] == "817048123456" and out["Phone Line Type"] == "MOBILE"
+
+
+@pytest.mark.parametrize("known", [
+    set(),                                   # nothing earlier
+    {"81704812345"},                         # one digit short
+    {"817049123456"},                        # different leading digits
+    {"817048123456", "817048999999"},        # two fit: no guess
+])
+def test_no_restore_without_exactly_one_matching_number(loader, known):
+    out, how = loader.convert(_row(phone="8.17048E+11"), ACCOUNT, known)
+    assert how == "damaged" and out["Mobile Phone"] == ""
+
+
+def test_earlier_numbers_are_read_from_every_phone_column(loader, tmp_path):
+    folder = tmp_path / "EXAMPLE_HOLDINGS"
+    folder.mkdir()
+    (folder / "prospect_contacts.csv").write_text(
+        "Prospect full_name,Mobile Phone,apollo_direct_mobile_phone_as_delivered\n"
+        "Aiko Tanaka,,817048123456.0\n", encoding="utf-8")
+    previous = loader.read_previous(tmp_path)
+    assert previous["EXAMPLE_HOLDINGS"]["aikotanaka"] == {"817048123456"}
 
 
 @pytest.mark.parametrize("raw, level", [

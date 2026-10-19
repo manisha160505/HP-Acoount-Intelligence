@@ -26,7 +26,8 @@ This converts each account's rows to the `prospect_contacts.csv` layout the
 features already read (see upload_balance_contacts.py), writes them into the
 account's split folder and uploads them. It is a dry run unless --apply:
 
-    hp-backend/.venv/bin/python scripts/upload_shipping_list_contacts.py --source <xlsx>
+    hp-backend/.venv/bin/python scripts/upload_shipping_list_contacts.py --source <xlsx> \
+        --previous ~/Desktop/HP_contacts_backup_2026-10-19
     export HP_BASE_URL=https://hp.abx.220.bridgeai.ai HP_EMAIL=bridge@gmail.com HP_PASSWORD=...
     hp-backend/.venv/bin/python scripts/upload_shipping_list_contacts.py --source <xlsx> --apply
     ... --apply --regenerate     # then one run for the uploaded accounts (super admin)
@@ -93,20 +94,69 @@ def email_tag(email: str, status) -> str:
     return "CATCH_ALL" if tag.upper() == "CATCH_ALL" else tag
 
 
-def phone_and_tag(raw, line_type) -> tuple[str, str, bool]:
-    """(number, tag, damaged). A damaged number is dropped with its tag."""
+def person_key(name) -> str:
+    return re.sub(r"[^a-z]", "", clean(name).lower())
+
+
+def phone_digits(value) -> set[str]:
+    """Every phone-like number in a cell, as digits ("6281293986658.0" too)."""
+    out = set()
+    for m in re.findall(r"\+?\d[\d\s\-().]{6,}\d", str(value or "")):
+        digits = re.sub(r"\D", "", re.sub(r"\.0+$", "", m))
+        if len(digits) >= 8:
+            out.add(digits)
+    return out
+
+
+PREVIOUS_PHONE_COLUMNS = ("Mobile Phone", "Contact mobile_phone", "Phone Numbers",
+                          "apollo_direct_mobile_phone", "apollo_direct_mobile_phone_as_delivered",
+                          "apollo_added_phone")
+
+
+def read_previous(folder: Path | None) -> dict[str, dict[str, set[str]]]:
+    """account folder name -> person -> the numbers their earlier record held."""
+    out: dict[str, dict[str, set[str]]] = defaultdict(lambda: defaultdict(set))
+    if folder is None:
+        return out
+    for path in folder.glob("*/prospect_contacts.csv"):
+        with open(path, encoding="utf-8-sig", newline="") as fh:
+            for r in csv.DictReader(fh):
+                for col in PREVIOUS_PHONE_COLUMNS:
+                    out[path.parent.name][person_key(r.get("Prospect full_name"))] |= \
+                        phone_digits(r.get(col))
+    return out
+
+
+def restore(damaged: str, known: set[str]) -> str:
+    """The one known number that "8.17048E+11" can be: same length, same
+    leading digits. Empty when there is none, or more than one."""
+    mantissa, _, exponent = damaged.upper().partition("E")
+    lead = mantissa.replace(".", "")
+    length = int(exponent) + 1
+    hits = [d for d in known if len(d) == length and d.startswith(lead)]
+    return hits[0] if len(hits) == 1 else ""
+
+
+def phone_and_tag(raw, line_type, known: set[str] = frozenset()) -> tuple[str, str, str]:
+    """(number, tag, how): how is "", "restored" or "damaged". A damaged number
+    that cannot be restored is dropped with its tag."""
     number = clean(raw)
+    how = ""
     if not number:
-        return "", "", False
+        return "", "", ""
     if SCIENTIFIC.search(number):
-        return "", "", True
+        number = restore(number, known)
+        if not number:
+            return "", "", "damaged"
+        how = "restored"
     tag = clean(line_type).upper()
-    return number, tag if tag in PHONE_TAGS else "", False
+    return number, tag if tag in PHONE_TAGS else "", how
 
 
-def convert(row: dict, account: dict) -> tuple[dict, bool]:
-    """One shipping-list row in the prospect_contacts layout, and whether its
-    phone number was damaged."""
+def convert(row: dict, account: dict, known: set[str] = frozenset()) -> tuple[dict, str]:
+    """One shipping-list row in the prospect_contacts layout, and what happened
+    to its phone number ("", "restored" or "damaged"). `known`: the numbers
+    this person's earlier record held."""
     name = clean(row.get("full_name"))
     first, _, last = name.partition(" ")
     title = clean(row.get("job_title"))
@@ -114,7 +164,7 @@ def convert(row: dict, account: dict) -> tuple[dict, bool]:
     dept_raw = clean(row.get("role_department"))
     dept = DEPARTMENTS.get(dept_raw.lower(), dept_raw)
     email = clean(row.get("email"))
-    phone, phone_tag, damaged = phone_and_tag(row.get("phone"), row.get("phone_line_type"))
+    phone, phone_tag, how = phone_and_tag(row.get("phone"), row.get("phone_line_type"), known)
     linkedin = clean(row.get("linkedin_url"))
     return {
         "Company Name": account["vendor_company_name"],
@@ -142,7 +192,7 @@ def convert(row: dict, account: dict) -> tuple[dict, bool]:
         "apollo_department": dept,
         "apollo_verified_work_email": email,
         "apollo_linkedin_url": linkedin,
-    }, damaged
+    }, how
 
 
 def read_rows(source: Path) -> list[dict]:
@@ -172,6 +222,9 @@ def match(name: str, country: str, by_folder: dict):
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--source", required=True, help="shipping_list_with_four_tabs.xlsx")
+    parser.add_argument("--previous", default="",
+                        help="Folder of the earlier contacts (<account>/prospect_contacts.csv), "
+                             "to restore damaged phone numbers from.")
     parser.add_argument("--base-url", default="", help="Deployed backend (default $HP_BASE_URL).")
     parser.add_argument("--apply", action="store_true", help="Actually upload.")
     parser.add_argument("--regenerate", action="store_true",
@@ -182,6 +235,10 @@ def main():
     if not source.exists():
         sys.exit(f"{source} not found")
     rows = read_rows(source)
+    previous_dir = Path(args.previous).expanduser() if args.previous else None
+    if previous_dir is not None and not previous_dir.is_dir():
+        sys.exit(f"--previous {previous_dir} is not a folder")
+    previous = read_previous(previous_dir)
 
     by_folder = folders()
     cols = header()
@@ -200,18 +257,21 @@ def main():
         sys.exit("no split folder for: " + "; ".join(f"{k} x{v}" for k, v in unknown.items()))
 
     # Convert and write. Local only: the upload below is the gated step.
-    paths, seen, damaged = {}, Counter(), defaultdict(list)
+    paths, seen, damaged, restored = {}, Counter(), defaultdict(list), Counter()
     tags = Counter()
     for name, account_rows in sorted(grouped.items()):
         folder, account = by_folder[name.lower()]
+        known_here = previous.get(folder.name, {})
         out = []
         for r in account_rows:
-            converted, bad = convert(r, account)
+            converted, how = convert(r, account, known_here.get(person_key(r.get("full_name")), set()))
             out.append(converted)
             tags["email:" + (converted["Email Status"] or "-")] += 1
             tags["phone:" + (converted[PHONE_TAG_COLUMN] or "-")] += 1
-            if bad:
+            if how == "damaged":
                 damaged[name].append(clean(r.get("full_name")))
+            elif how == "restored":
+                restored[name] += 1
         path = folder / f"{DATASET_KEY}.csv"
         with open(path, "w", encoding="utf-8-sig", newline="") as fh:
             writer = csv.DictWriter(fh, fieldnames=cols, extrasaction="ignore")
@@ -227,8 +287,10 @@ def main():
     print("Phone tags: " + ", ".join(f"{k[6:]} {v}" for k, v in sorted(tags.items())
                                      if k.startswith("phone:")))
     n_bad = sum(len(v) for v in damaged.values())
-    print(f"Phone numbers stored in scientific notation (dropped, not shown): {n_bad} "
-          f"in {len(damaged)} accounts\n")
+    print(f"Phone numbers stored in scientific notation: {sum(restored.values()) + n_bad}. "
+          f"Restored from earlier contacts: {sum(restored.values())}. "
+          f"Dropped, not shown: {n_bad} in {len(damaged)} accounts"
+          + ("" if previous_dir else " (pass --previous to restore what can be)") + "\n")
 
     base_url = (args.base_url or __import__("os").getenv("HP_BASE_URL") or "").rstrip("/")
     if not base_url:
