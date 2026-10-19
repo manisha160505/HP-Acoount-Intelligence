@@ -90,7 +90,7 @@ def test_every_seller_reachable_account_route_is_guarded():
         deps = _top_deps(r)
         if deps & GUARDS:
             continue
-        if "require_admin_role" in deps and not deps & SELLER_DEPS:
+        if deps & {"require_admin_role", "require_super_admin"} and not deps & SELLER_DEPS:
             continue
         unguarded.append("%s %s" % (sorted(r.methods), r.path))
     assert not unguarded, "seller-reachable account routes without the access guard: %s" % unguarded
@@ -102,7 +102,7 @@ def test_the_guard_covers_the_routes_sellers_use():
                      "/api/v1/accounts/{account_id}/widgets/strategy_chat/ask/stream",
                      "/api/v1/accounts/{account_id}/data/filing",
                      "/api/v1/accounts/{account_id}/data/download/{dataset_key}",
-                     "/api/v1/accounts/{account_id}/features/status"):
+                     "/api/v1/accounts/{account_id}/widgets/strategy_chat/ask"):
         assert expected in paths
 
 
@@ -183,3 +183,42 @@ def test_admins_see_every_active_account(db, api):
     _account(db, "Jabil")
     for role in ("admin", "super_admin"):
         assert _names(api, add_user(db, "%s@example.com" % role, role=role)) == ["Astra", "Jabil"]
+
+
+# ------------------------------------------------------------ pipeline is ours
+
+PIPELINE_PATHS = (
+    "/api/v1/regeneration/preview", "/api/v1/regeneration", "/api/v1/regeneration/runs",
+    "/api/v1/regeneration/queue", "/api/v1/regeneration/accounts-summary",
+    "/api/v1/regeneration/live", "/api/v1/accounts/{account_id}/pipeline",
+    "/api/v1/indexes/rebuild", "/api/v1/accounts/{account_id}/features/status",
+    "/api/v1/accounts/{account_id}/features/{feature_id}/regenerate",
+    "/api/v1/accounts/{account_id}/widgets/{feature_key}/regenerate",
+    "/api/v1/accounts/{account_id}/retrieval/{index}/rebuild",
+)
+
+
+def test_every_pipeline_route_is_super_admin_only():
+    by_path = {}
+    for r in _routes():
+        by_path.setdefault(r.path, set()).update(_top_deps(r))
+    for path in PIPELINE_PATHS:
+        assert by_path.get(path) == {"require_super_admin"}, (path, by_path.get(path))
+
+
+@pytest.mark.parametrize("role", ["admin", "user"])
+def test_hp_admins_and_sellers_cannot_reach_the_pipeline(db, api, role):
+    acct = _account(db, "Astra")
+    who = add_user(db, "%s@example.com" % role, role=role, account_ids=[acct])
+    for method, path in (("GET", "/api/v1/regeneration/accounts-summary"),
+                         ("GET", "/api/v1/accounts/%s/pipeline" % acct),
+                         ("POST", "/api/v1/regeneration/preview")):
+        r = api.request(method, path, headers=auth(who), json={})
+        assert r.status_code == 403, (role, path, r.status_code)
+
+
+def test_the_super_admin_reaches_the_pipeline(db, api):
+    acct = _account(db, "Astra")
+    boss = add_user(db, "bridge@example.com", role="super_admin")
+    r = api.get("/api/v1/accounts/%s/pipeline" % acct, headers=auth(boss))
+    assert r.status_code != 403, r.text

@@ -58,7 +58,7 @@ def env(monkeypatch, tmp_path):
     app = FastAPI()
     for router in (data_router, regen_router, widgets_router):
         app.include_router(router, prefix="/api/v1")
-    for dep in (deps.require_user_role, deps.require_admin_role,
+    for dep in (deps.require_user_role, deps.require_admin_role, deps.require_super_admin,
                 deps.get_current_user_flexible):
         app.dependency_overrides[dep] = lambda: USER
 

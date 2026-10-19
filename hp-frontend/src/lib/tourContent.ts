@@ -430,7 +430,7 @@ export const ADMIN_TOURS: Record<string, FeatureTour> = {
         title: 'The account table',
         body:
           'Status shows if sellers can see the account (Active) or not (Hidden). ' +
-          'Pipeline shows if its data is being updated right now. Last Updated shows when it last changed.',
+          'Last Updated shows when it last changed.',
         target: 'admin-platform-table',
       },
       {
@@ -457,8 +457,8 @@ export const ADMIN_TOURS: Record<string, FeatureTour> = {
     overview: {
       title: 'Manage an account',
       body:
-        'Everything about one account: its details, its data files, and the pipeline that builds ' +
-        'its features. Each tab below is one part.',
+        'Everything about one account: its details, its data files and its writing guidance. ' +
+        'Each tab below is one part.',
       target: 'admin-account-header',
     },
     details: [
@@ -478,15 +478,8 @@ export const ADMIN_TOURS: Record<string, FeatureTour> = {
         title: 'Data',
         body:
           'Upload or replace the data files for this account, one dataset at a time. ' +
-          'Nothing is rebuilt straight away: the sections that use the file wait for you in the Pipeline tab.',
+          "The account's features are then updated from them by the platform team.",
         target: 'admin-account-tab-data',
-      },
-      {
-        title: 'Pipeline',
-        body:
-          "Each section of the account's features and its status: current, stale, failed or no data. " +
-          'Submit & start pipeline rebuilds what needs it, or tick sections to rebuild only those.',
-        target: 'admin-account-tab-pipeline',
       },
       {
         title: 'Instructions',

@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { ProtectedRoute } from '@/components/common/ProtectedRoute';
 import { ParallaxBand } from '@/components/common/motion';
 import PipelinePanel from '@/components/admin/PipelinePanel';
+import { useAuth } from '@/providers/AuthProvider';
 import { AccountSellersPanel } from '@/components/users/AccountSellersPanel';
 import { ROW_BUTTON, ROW_ICON_BUTTON_DANGER } from '@/components/common/RowMenu';
 import api from '@/services/api';
@@ -42,6 +43,9 @@ import {
 type TabType = 'details' | 'data' | 'pipeline' | 'instructions' | 'guardrails';
 
 export default function ManageAccountPage() {
+  // The Pipeline tab is BridgeAI's: only the super admin sees it.
+  const { user } = useAuth();
+  const isSuperAdmin = user?.role === 'super_admin';
   const params = useParams();
   const accountId = params.id as string;
   const router = useRouter();
@@ -282,9 +286,11 @@ export default function ManageAccountPage() {
       // submitted from the Pipeline tab.
       const stale = (response.data as { regeneration?: { stale?: string[] } }).regeneration?.stale || [];
       setUploadSuccess(`Stored "${registryItem?.display_name}" (${response.data.original_filename}). `
-        + (stale.length
-          ? `${stale.length} section(s) now need a run - nothing runs until you submit from the Pipeline tab.`
-          : 'Nothing runs until you submit from the Pipeline tab.'));
+        + (!isSuperAdmin
+          ? "The account's features are updated from it by the platform team."
+          : stale.length
+            ? `${stale.length} section(s) now need a run - nothing runs until you submit from the Pipeline tab.`
+            : 'Nothing runs until you submit from the Pipeline tab.'));
       setUploadedFileModal(response.data);
       
       setSelectedFile(null);
@@ -480,6 +486,7 @@ export default function ManageAccountPage() {
                   <span>Data ({dataFiles.filter(f => f.status === 'active').length} Active Files)</span>
                 </button>
 
+                {isSuperAdmin && (
                 <button
                   type="button"
                   data-tour="admin-account-tab-pipeline"
@@ -493,6 +500,7 @@ export default function ManageAccountPage() {
                   <Workflow className="w-4 h-4" />
                   <span>Pipeline</span>
                 </button>
+                )}
 
                 <button
                   type="button"
@@ -526,7 +534,7 @@ export default function ManageAccountPage() {
               {/* Tab Content Container */}
               <div className="p-8">
                 
-                {activeTab === 'pipeline' && <PipelinePanel accountId={accountId} />}
+                {activeTab === 'pipeline' && isSuperAdmin && <PipelinePanel accountId={accountId} />}
 
                 {/* Tab 1: Account Details Form */}
                 {activeTab === 'details' && (
