@@ -241,7 +241,9 @@ def reset_password(db, user_id: str, password: str | None, actor: dict) -> Passw
         "password_hash": get_password_hash(password or generated),
         "must_change_password": True,
         "updated_at": now,
-    }})
+    }, "$unset": {"recovery_code_hash": "", "recovery_code_created_at": ""}})
+    # The old recovery code ends here (the user may have lost it); a new one
+    # is issued when they set their own password.
     sessions.revoke_user(db, str(user["_id"]), "password reset by %s" % actor["id"])
     user["must_change_password"] = True
     user_audit.record(db, actor, user_audit.PASSWORD_RESET, user)

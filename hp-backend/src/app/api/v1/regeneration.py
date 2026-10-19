@@ -29,12 +29,15 @@ from datetime import UTC, date, datetime
 from bson import ObjectId
 from fastapi import APIRouter, Body, Depends, HTTPException, status
 
-from app.core.deps import require_account_access, require_admin_role
+from app.core.deps import require_super_admin
 from app.database.mongodb import get_db
 from app.services.regen import jobs as regen_jobs, planner, reasons, runs
 from app.services.regen.engine import get_engine
 from app.services.regen.graph import DEFAULT, INDEX
 
+# The regeneration pipeline is run by BridgeAI only: every route here needs the
+# super admin. HP admins upload data (which marks sections stale) but do not
+# see or start runs.
 router = APIRouter(tags=["Regeneration"])
 
 
@@ -92,7 +95,7 @@ def _plan_or_400(fn, **kw):
 
 
 @router.post("/regeneration/preview")
-def preview(body: dict = Body(...), current_user: dict = Depends(require_admin_role)):
+def preview(body: dict = Body(...), current_user: dict = Depends(require_super_admin)):
     """What `POST /regeneration` with this body would run, and why. Writes
     nothing and calls no model."""
     req = _request(body)
@@ -100,7 +103,7 @@ def preview(body: dict = Body(...), current_user: dict = Depends(require_admin_r
 
 
 @router.post("/regeneration", status_code=status.HTTP_202_ACCEPTED)
-def start_run(body: dict = Body(...), current_user: dict = Depends(require_admin_role)):
+def start_run(body: dict = Body(...), current_user: dict = Depends(require_super_admin)):
     """Plan and queue. Returns the run with its plan; the worker does the work.
     Poll `GET /regeneration/{run_id}` for progress."""
     req = _request(body)
@@ -112,12 +115,12 @@ def start_run(body: dict = Body(...), current_user: dict = Depends(require_admin
 
 @router.get("/regeneration/runs")
 def list_runs(account_id: str | None = None, limit: int = 10,
-              current_user: dict = Depends(require_admin_role)):
+              current_user: dict = Depends(require_super_admin)):
     return {"runs": jsonable(runs.recent(get_db(), account_id, limit))}
 
 
 @router.get("/regeneration/queue")
-def queue_state(current_user: dict = Depends(require_admin_role)):
+def queue_state(current_user: dict = Depends(require_super_admin)):
     db = get_db()
     counts = {s: db[regen_jobs.COLLECTION].count_documents({"status": s})
               for s in regen_jobs.LIVE}
@@ -126,14 +129,14 @@ def queue_state(current_user: dict = Depends(require_admin_role)):
 
 @router.post("/regeneration/queue/pause")
 def queue_pause(body: dict = Body(default={}),
-                current_user: dict = Depends(require_admin_role)):
+                current_user: dict = Depends(require_super_admin)):
     regen_jobs.pause(get_db(), str((body or {}).get("reason") or "paused by an admin"),
                      by=_actor(current_user))
     return jsonable(regen_jobs.queue_state(get_db()))
 
 
 @router.post("/regeneration/queue/resume")
-def queue_resume(current_user: dict = Depends(require_admin_role)):
+def queue_resume(current_user: dict = Depends(require_super_admin)):
     regen_jobs.resume(get_db(), by=_actor(current_user))
     return jsonable(regen_jobs.queue_state(get_db()))
 
@@ -165,7 +168,7 @@ SUMMARY_THREADS = 8
 
 
 @router.get("/regeneration/accounts-summary")
-def accounts_summary(current_user: dict = Depends(require_admin_role)):
+def accounts_summary(current_user: dict = Depends(require_super_admin)):
     """Every account's sections counted by status. No model calls; a few
     queries per account. For what is running right now, poll
     `/regeneration/live` instead - it is one query."""
@@ -177,7 +180,7 @@ def accounts_summary(current_user: dict = Depends(require_admin_role)):
 
 
 @router.get("/regeneration/live")
-def live_jobs(current_user: dict = Depends(require_admin_role)):
+def live_jobs(current_user: dict = Depends(require_super_admin)):
     """What is running and queued right now, per account, from the job queue
     alone - one query, cheap enough to poll every few seconds. Stale, failed
     and never-run counts need fingerprints; those come from accounts-summary.
@@ -201,7 +204,7 @@ def live_jobs(current_user: dict = Depends(require_admin_role)):
 
 
 @router.get("/regeneration/{run_id}")
-def get_run(run_id: str, current_user: dict = Depends(require_admin_role)):
+def get_run(run_id: str, current_user: dict = Depends(require_super_admin)):
     if not ObjectId.is_valid(run_id):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid run id")
     run = runs.get(get_db(), run_id)
@@ -211,7 +214,7 @@ def get_run(run_id: str, current_user: dict = Depends(require_admin_role)):
 
 
 @router.post("/regeneration/{run_id}/cancel")
-def cancel_run(run_id: str, current_user: dict = Depends(require_admin_role)):
+def cancel_run(run_id: str, current_user: dict = Depends(require_super_admin)):
     if not ObjectId.is_valid(run_id):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid run id")
     out = runs.cancel(get_db(), run_id, _actor(current_user))
@@ -221,7 +224,7 @@ def cancel_run(run_id: str, current_user: dict = Depends(require_admin_role)):
 
 
 @router.get("/accounts/{account_id}/pipeline")
-def account_pipeline(account_id: str, current_user: dict = Depends(require_admin_role)):
+def account_pipeline(account_id: str, current_user: dict = Depends(require_super_admin)):
     """One account's sections grouped by status, each with why it is in that
     status (categorised), the live job's progress and the last error, plus the
     account's recent runs and the queue state. Refresh-safe: no model calls."""
@@ -261,14 +264,14 @@ def _index_nodes(indexes) -> list:
 
 
 @router.post("/indexes/rebuild/preview")
-def index_preview(body: dict = Body(...), current_user: dict = Depends(require_admin_role)):
+def index_preview(body: dict = Body(...), current_user: dict = Depends(require_super_admin)):
     req = _request({**(body or {}), "nodes": _index_nodes((body or {}).get("indexes"))})
     req["features"] = None
     return jsonable(_plan_or_400(planner.plan, engine=get_engine(), **req))
 
 
 @router.post("/indexes/rebuild", status_code=status.HTTP_202_ACCEPTED)
-def index_rebuild(body: dict = Body(...), current_user: dict = Depends(require_admin_role)):
+def index_rebuild(body: dict = Body(...), current_user: dict = Depends(require_super_admin)):
     """Rebuild index nodes. `full: true` drops and rebuilds in place (the index
     is unavailable meanwhile); otherwise only changed documents are updated."""
     req = _request({**(body or {}), "nodes": _index_nodes((body or {}).get("indexes"))})
@@ -286,7 +289,7 @@ def index_rebuild(body: dict = Body(...), current_user: dict = Depends(require_a
 @router.post("/accounts/{account_id}/features/{feature_id}/regenerate",
              status_code=status.HTTP_202_ACCEPTED)
 def regenerate_feature(account_id: str, feature_id: str, force: bool = False,
-                       current_user: dict = Depends(require_account_access)):
+                       current_user: dict = Depends(require_super_admin)):
     """One feature of one account, as an explicit run. Sections that are
     current are skipped unless `force=true`."""
     _check_account(account_id)
@@ -297,7 +300,7 @@ def regenerate_feature(account_id: str, feature_id: str, force: bool = False,
 
 
 @router.get("/accounts/{account_id}/features/status")
-def feature_status(account_id: str, current_user: dict = Depends(require_account_access)):
+def feature_status(account_id: str, current_user: dict = Depends(require_super_admin)):
     """Every feature's lifecycle - CURRENT, STALE, GENERATING, FAILED or
     NEVER_GENERATED - with the producers underneath and why each is stale."""
     _check_account(account_id)
@@ -306,7 +309,7 @@ def feature_status(account_id: str, current_user: dict = Depends(require_account
 
 @router.get("/accounts/{account_id}/regeneration/jobs")
 def regeneration_jobs(account_id: str, limit: int = 20,
-                      current_user: dict = Depends(require_account_access)):
+                      current_user: dict = Depends(require_super_admin)):
     """Recent jobs: which run asked, which inputs changed, the outcome."""
     _check_account(account_id)
     rows = regen_jobs.history(get_db(), account_id, limit)
@@ -317,7 +320,7 @@ def regeneration_jobs(account_id: str, limit: int = 20,
 
 
 @router.post("/regeneration/sweep")
-def run_sweep(current_user: dict = Depends(require_admin_role)):
+def run_sweep(current_user: dict = Depends(require_super_admin)):
     """Formerly queued every stale node of every account. Now a report only:
     how many accounts need a run. Use POST /regeneration to run them."""
     return jsonable(get_engine().stale_report())

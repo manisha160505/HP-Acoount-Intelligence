@@ -6,6 +6,7 @@ import { ProtectedRoute } from '@/components/common/ProtectedRoute';
 import { PageHero } from '@/components/common/motion';
 import { ROW_BUTTON, RowMenu } from '@/components/common/RowMenu';
 import { dashboardHref } from '@/lib/accountSelection';
+import { useAuth } from '@/providers/AuthProvider';
 import api from '@/services/api';
 import { CompanyAccount, AccountStatus } from '@/types/account';
 import { 
@@ -68,7 +69,6 @@ function PipelineCell({ row, live, liveLoaded }: { row?: PipelineSummaryRow; liv
     ['never run', c.NEVER_RUN || 0, 'bg-slate-200 text-slate-700'],
   ];
   const shown = chips.filter(([, n]) => n > 0);
-  const gaps = row?.data_gaps || [];
   if (!shown.length && !row) return <span className="text-gray-400">—</span>;
   const p = running?.progress;
   return (
@@ -82,12 +82,6 @@ function PipelineCell({ row, live, liveLoaded }: { row?: PipelineSummaryRow; liv
           {n} {label}
         </span>
       ))}
-      {gaps.length > 0 && (
-        <span className="text-[11px] text-stone-700 w-full"
-          title={gaps.map(g => g.label + (g.blocks ? ` (${g.blocks} section(s) have no data at all)` : '')).join('\n')}>
-          Not provided: {gaps.slice(0, 3).map(g => g.label).join(', ')}{gaps.length > 3 ? ` +${gaps.length - 3} more` : ''}
-        </span>
-      )}
       {running && (
         <span className="text-[11px] text-blue-800 w-full">
           {running.label}{p ? ` ${Math.round((p.done / Math.max(1, p.total)) * 100)}%` : ''}
@@ -98,6 +92,10 @@ function PipelineCell({ row, live, liveLoaded }: { row?: PipelineSummaryRow; liv
 }
 
 export default function ManagePlatformPage() {
+  // The pipeline is run by BridgeAI: only the super admin sees its column and
+  // polls its status (the API refuses everyone else).
+  const { user } = useAuth();
+  const showPipeline = user?.role === 'super_admin';
   const [accounts, setAccounts] = useState<CompanyAccount[]>([]);
   const [pipeline, setPipeline] = useState<Record<string, PipelineSummaryRow>>({});
   const [live, setLive] = useState<Record<string, LiveRow>>({});
@@ -194,6 +192,7 @@ export default function ManagePlatformPage() {
   // summary every minute (and whenever the live poll sees a change). Coming
   // back to the tab refreshes both at once.
   useEffect(() => {
+    if (!showPipeline) return;
     refreshPipeline();
     const liveTimer = setInterval(() => {
       if (document.visibilityState === 'visible') fetchLive();
@@ -210,7 +209,7 @@ export default function ManagePlatformPage() {
       clearInterval(summaryTimer);
       document.removeEventListener('visibilitychange', onVisible);
     };
-  }, [refreshPipeline, fetchLive, fetchPipeline]);
+  }, [showPipeline, refreshPipeline, fetchLive, fetchPipeline]);
 
   const handleCreateAccount = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -381,6 +380,7 @@ export default function ManagePlatformPage() {
                   <tr className="bg-gray-50 border-b border-gray-200 text-[11px] font-bold uppercase tracking-wider text-gray-600">
                     <th className="py-3.5 px-6">Account Name</th>
                     <th className="py-3.5 px-6">Status</th>
+                    {showPipeline && (
                     <th className="py-3.5 px-6">
                       <span className="inline-flex items-center gap-1.5">
                         Pipeline
@@ -394,6 +394,7 @@ export default function ManagePlatformPage() {
                         {pipelineError && <span className="normal-case text-red-700" title={pipelineError}>· status failed to load</span>}
                       </span>
                     </th>
+                    )}
                     <th className="py-3.5 px-6 whitespace-nowrap">Last Updated</th>
                     <th className="py-3.5 px-6 text-right">Actions</th>
                   </tr>
@@ -424,9 +425,11 @@ export default function ManagePlatformPage() {
                         )}
                       </td>
 
+                      {showPipeline && (
                       <td className="py-4 px-6">
                         <PipelineCell row={pipeline[account.id]} live={live[account.id]} liveLoaded={liveLoaded} />
                       </td>
+                      )}
 
                       <td className="py-4 px-6 text-gray-500">
                         {formatDate(account.updated_at)}

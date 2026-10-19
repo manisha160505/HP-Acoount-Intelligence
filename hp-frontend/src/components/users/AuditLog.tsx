@@ -15,6 +15,7 @@ const ACTION_LABEL: Record<string, string> = {
   'user.accounts_changed': 'Changed accounts',
   'user.password_reset': 'Reset password',
   'user.password_changed': 'Changed own password',
+  'user.password_recovered': 'Set password with recovery code',
   'sessions.revoked_all': 'Signed out everyone',
 };
 

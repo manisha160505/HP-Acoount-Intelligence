@@ -16,6 +16,8 @@ from app.database.mongodb import get_db
 from app.schemas.auth import MessageResponse
 from app.schemas.user import (
     ChangePasswordRequest,
+    ChangePasswordResponse,
+    ForgotPasswordRequest,
     TokenResponse,
     TourCompletedResponse,
     UserLogin,
@@ -96,12 +98,23 @@ def logout(response: Response,
     return MessageResponse(message="Successfully logged out.")
 
 
-@router.post("/change-password", response_model=MessageResponse)
+@router.post("/change-password", response_model=ChangePasswordResponse)
 def change_password(body: ChangePasswordRequest, response: Response,
                     current_user: dict = Depends(get_signed_in_user)):
-    auth_service.change_password(current_user, body)
+    code = auth_service.change_password(current_user, body)
     _clear_session_cookies(response)
-    return MessageResponse(message="Password changed. Please sign in with your new password.")
+    return ChangePasswordResponse(
+        message="Password changed. Please sign in with your new password.", recovery_code=code)
+
+
+@router.post("/forgot-password", response_model=ChangePasswordResponse)
+def forgot_password(body: ForgotPasswordRequest, response: Response):
+    """A user who forgot their password sets a new one with their recovery
+    code. No sign-in is needed; the code is the proof."""
+    code = auth_service.recover_password(body)
+    _clear_session_cookies(response)
+    return ChangePasswordResponse(
+        message="Password changed. Please sign in with your new password.", recovery_code=code)
 
 
 @router.post("/sessions/revoke-all", response_model=MessageResponse)

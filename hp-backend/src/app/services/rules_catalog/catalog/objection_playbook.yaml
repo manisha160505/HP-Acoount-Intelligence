@@ -2,61 +2,59 @@
 # `ref:` values are read live; `stated` is what the prose was written against.
 # Examples marked `verified` are recomputed by tests/test_rules_examples.py.
 feature_key: objection_playbook
-purpose: Prepares the seller for push-back in five fixed HP contest areas, using the technology the account
-  is known to run, claims approved in HP's sales rulebook and, where one exists, an HP customer case study.
+purpose: Prepares the seller for push-back in five HP contest areas, using the technology the account
+  runs, claims from HP's approved sales rulebook and, where one fits, an HP customer case study.
 final_output: A header showing the number of reframes and an 'Incumbents Detected' count, then up to five
   expandable cards, one per area. Each card shows a hypothetical buyer objection and 'Could be raised
-  by' (a real contact's job title only when the title is a strong match, otherwise the function that owns
-  the area). When expanded, the card shows the reframe, the evidence line word for word, a counter question,
-  an HP proof point when one exists, and a topic-owner line stating that the person has not raised it.
-how_it_combines: The playbook always works through the same five HP contest areas. For each area it finds
-  the vendors the account runs (from the installed technology list, or from website technology when that
-  list is empty), names a topic owner only on a strong job-title match, and selects the claims from HP's
-  approved sales rulebook that the account's evidence has earned. It can also attach a case study. The
-  AI writes the objection and reframe from that material only. The app then rejects cards that use the
-  sector as justification, make unsupported HP claims or invent numbers, gives rejected areas one more
-  try, and merges near-duplicates.
+  by' (a contact's job title when the title is a strong match, otherwise the function that owns the area).
+  When expanded, the card shows the reframe, the evidence line, a counter question, an HP proof point
+  where one fits, and a Topic owner or Owning function line.
+how_it_combines: The playbook works through the same five HP contest areas. For each area it finds the
+  vendors the account runs (from the installed technology list first, otherwise from website
+  technology), names a topic owner only on a strong job-title match, and selects the claims from HP's
+  approved sales rulebook that the account's evidence supports. It can also attach an HP case study. The
+  AI writes the objection and reframe from that material only. Each card is then checked for sector-based
+  reasoning, HP claims the rulebook does not support and numbers that are not in the account's data. An
+  area that misses a sector or HP-claim check gets one rewrite, and near-duplicate objections are merged.
 rules:
 - id: technology_evidence_source
   parent: null
-  name: Which technology evidence the playbook is built from
+  name: Which technology evidence the playbook uses
   kind: source
-  summary: Picks one source of technology information per account, in a fixed order, and records which
-    one was used.
-  purpose: Picks one source of technology information per account, in a fixed order, and records which
-    one was used.
+  summary: Uses one source of technology information per account, chosen in a fixed order, and records
+    which one was used.
+  purpose: Uses one source of technology information per account, chosen in a fixed order, and records
+    which one was used.
   inputs:
   - The account's installed technology list
   - The account's website technology
-  logic: '1) If the installed technology list has at least one non-blank entry, it is used. 2) Otherwise
+  logic: '1) If at least one entry in the installed technology list names something, it is used. 2) Otherwise
     the website technology is used: every technology named under its categories is combined into one ''Website
-    stack'' list. Technical page details (search-engine headers, titles and descriptions, copyright, document
-    information, robots, language, feeds, links, web master) and ID fields are skipped. 3) Otherwise there
-    is no technology evidence and no objection is written. Technology seen in job ads and in other vendors''
-    technology detections is never used. The source used is recorded on the card. When website technology
-    is used, a note says that the installed technology list has no data for this account and that the
-    evidence is website technology; the admin data-gaps view reads that note.'
+    stack'' list. Page details (search-engine headers, titles and descriptions, copyright, document information,
+    robots, language, feeds, links, web master) and ID fields are skipped. 3) Cards are written when
+    one of these two sources names a technology. Technology named in job ads or in other technology detections
+    does not feed the evidence line. The source is recorded with each card, and the page header names
+    it.'
   conditions:
-  - Installed technology list has any non-blank entry -> use it
-  - Otherwise website technology has any real technology (not page details) -> use it
-  - Otherwise -> no technology evidence; the Objection Playbook shows an empty message and no cards
+  - Installed technology list has an entry that names something -> use it
+  - Otherwise website technology names at least one technology (not page details) -> use it
   constants:
-  - label: Names shown for each source
+  - label: Name recorded for each source
     ref: py:app.services.extractors.objection_playbook:EVIDENCE_SOURCE_LABELS
     stated:
       technographics: 4_Technographics
       tech_breakdown: tech_breakdown (website technology)
       none: No technology evidence available
   example:
-    scenario: The installed technology list exists but its only entry is blank.
+    scenario: The installed technology list exists, but none of its entries names anything.
     steps:
-    - The entry has no non-blank value, so it cannot be used
-    - Fall back to website technology
-    result: The installed technology list is not usable, so website technology is tried
+    - No entry names anything, so the installed technology list is not used
+    - Website technology is checked next
+    result: The installed technology list is not used, and website technology is checked next
     verified: true
     expect: false
-  output: 'One of three sources: installed technology list, website technology, or none. The page header
-    says which one was used.'
+  output: The source used, either the installed technology list or website technology. The page header
+    names it.
   sources:
   - hp-backend/src/app/services/extractors/objection_playbook.py:_technology_evidence
   - hp-backend/src/app/services/extractors/objection_playbook.py:_usable
@@ -68,10 +66,12 @@ rules:
   confidence: high
 - id: incumbent_context
   parent: null
-  name: Incumbent Technology Context panel
+  name: Incumbent technologies and business context
   kind: selection
-  summary: Lists the technologies the account is known to run, plus business context.
-  purpose: Lists the technologies the account is known to run, plus business context.
+  summary: Lists the technologies the account runs, with business context, and counts them for the page
+    header.
+  purpose: Lists the technologies the account runs, with business context, and counts them for the page
+    header.
   inputs:
   - The account's installed technology list
   - The company profile
@@ -82,10 +82,8 @@ rules:
     comes from the company profile: business description, company name, web domain, headquarters location
     (city, region and country joined; otherwise the stated headquarters), industry (the LinkedIn, NAICS
     and SIC industry labels, with repeats removed, joined with '' / ''), employee range and revenue range.
-    The panel also carries the evidence and topic owner for each area. Status is ''available'' if there
-    are incumbents or business context, otherwise ''empty''. When website technology is the source, the
-    incumbent list stays empty (count 0).'
-  output: The 'N Incumbents Detected' badge in the page header. The other details sit in the panel.
+    The section also records the evidence and topic owner for each area.'
+  output: The 'N Incumbents Detected' badge in the page header.
   sources:
   - hp-backend/src/app/services/extractors/objection_playbook.py:extract_objection_playbook
   - hp-backend/src/app/services/extractors/objection_playbook.py:TECHNOGRAPHICS_CATEGORY_COLUMNS
@@ -98,8 +96,8 @@ rules:
   purpose: Every account is examined in the same five areas; each area gets at most one objection card.
   logic: 'For each area, the playbook finds competing vendors in the technology evidence and writes a
     plain evidence line. Areas are always handled in this order: Client Devices, Collaboration, Print
-    / MPS, Endpoint Security, Device Management. An area with no vendor is still kept (marked as not shown
-    in the installed technology) and still gets a card.'
+    / MPS, Endpoint Security, Device Management. An area where no vendor is named is still included and
+    can still get a card.'
   table:
     columns:
     - Area
@@ -166,7 +164,8 @@ rules:
   logic: For Endpoint Security only, products matching Cisco ASA, Cisco IronPort, Fortinet, FortiGate,
     FortiManager, Aruba ClearPass, Palo Alto, Check Point, Azure AD or Okta (found in the technology list
     or the area's categories, and not already a main vendor) are listed as 'supporting context'. They
-    never make an area count as 'detected', and the AI is told not to treat them as doing the area's job.
+    do not make an area count as 'detected', and the AI is instructed to treat them as context, not as
+    doing the area's job.
   constants:
   - label: Endpoint Security supporting-context vendors
     ref: py:app.services.extractors.objection_playbook:AREA_CONTEXT_TOKENS.Endpoint Security
@@ -190,14 +189,14 @@ rules:
   parent: contest_areas
   name: The evidence line shown on each card
   kind: display
-  summary: An evidence line written by fixed rules and shown word for word; the AI may read it but not
-    rewrite it.
-  purpose: An evidence line written by fixed rules and shown word for word; the AI may read it but not
-    rewrite it.
+  summary: An evidence line built by fixed rules and shown exactly as built; the AI reads it but does
+    not change it.
+  purpose: An evidence line built by fixed rules and shown exactly as built; the AI reads it but does
+    not change it.
   logic: 'If vendors were found: ''<source> -> <Area> | <category>: <vendors> | ...'', plus '' | supporting
     context: ...'' when there is any. If none were found: ''<source> -> <Area>: no vendor for this area
-    appears in this account''s <installed technology | website technology> evidence''. The no-vendor wording
-    means only that the data does not name one, never that the account has none.'
+    appears in this account''s <installed technology | website technology> evidence''. This wording says
+    only that the evidence names no vendor for the area, not that the account uses none.'
   example:
     scenario: 'Technology list: Dell Latitude, Microsoft Teams, Zoom, Canon imageRUNNER, Kaspersky Endpoint
       Security, Fortinet FortiGate, Okta, Microsoft Intune, SAP ERP. The collaboration category lists
@@ -230,18 +229,18 @@ rules:
   parent: null
   name: Topic owner ('Could be raised by')
   kind: selection
-  summary: Names who at the account would own each area's subject - never someone who raised the objection.
-  purpose: Names who at the account would own each area's subject - never someone who raised the objection.
+  summary: Names who at the account would own each area's subject, as the audience for the reframe rather
+    than someone who raised the objection.
+  purpose: Names who at the account would own each area's subject, as the audience for the reframe rather
+    than someone who raised the objection.
   inputs:
   - 'The contact list: each contact''s job title and department'
-  logic: For each area, every contact's job title is checked for the area's STRONG title words (whole
-    words only). A contact whose title has no strong word is ignored entirely, even if a weaker word or
-    the department matches, because a weak match is only the nearest technically adjacent person, not
-    the owner. Rank = the number of strong words matched, plus 1 if the contact's department is one of
-    the area's owner departments. The highest rank wins; on a tie the contact listed first stays. The
-    winner's own job title is shown and marked as coming from the contact list. If nobody matches a strong
-    word, the area name itself is shown and marked as an HP contest area. Weaker title words play no part
-    in the choice.
+  logic: For each area, every contact's job title is checked for the area's strong title words (whole
+    words only). Only contacts whose title contains a strong word are considered; a department match
+    alone does not qualify a contact. Rank = the number of strong words matched, plus 1 if the contact's
+    department is one of the area's owner departments. The highest rank wins; on a tie the contact listed
+    first stays. The winner's job title is shown and marked as coming from the contact list. If no title
+    contains a strong word, the area name is shown as the owning function.
   formula: rank of a contact = number of strong title words in the job title + (1 if the department is
     one of the area's owner departments, otherwise 0); only contacts with at least 1 strong word are eligible
   table:
@@ -312,17 +311,17 @@ rules:
   confidence: high
 - id: topic_owner_wording
   parent: topic_owner
-  name: Deliberately cautious wording for the topic owner
+  name: Cautious wording for the topic owner
   kind: guardrail
-  summary: The card never says the person 'likely raised' the objection, because a title is named only
-    on a strong word match and otherwise the area name is shown.
-  purpose: The card never says the person 'likely raised' the objection, because a title is named only
-    on a strong word match and otherwise the area name is shown.
+  summary: The card uses 'Could be raised by' and 'Topic owner', because the person named owns the subject
+    and has not raised the objection.
+  purpose: The card uses 'Could be raised by' and 'Topic owner', because the person named owns the subject
+    and has not raised the objection.
   logic: 'Collapsed card: ''Could be raised by: <name>'', with '' (owning function)'' added when the area
     name is shown instead of a contact. Expanded card: if a contact''s title was used, ''Topic owner:
     <title> - a title in this account''s contacts who would own this subject. They have not raised this
-    objection.''; otherwise ''Owning function: <area>''. The AI is told that the topic owner is the audience,
-    not the speaker, and that the objection must never be attributed to a person.'
+    objection.''; otherwise ''Owning function: <area>''. The AI is instructed to treat the topic owner
+    as the audience, not the speaker, and not to attribute the objection to a person.'
   example:
     scenario: Collaboration resolved to the area name.
     steps:
@@ -350,14 +349,13 @@ rules:
   purpose: Limits what the reframe may say about HP to approved rulebook facts that the account's own
     evidence earns.
   logic: 'The account''s evidence is matched against HP''s approved sales rulebook. For each area, the
-    rules from the relevant rule groups that the evidence has earned are kept, each rule''s facts are
-    passed through the guardrails, and at most 3 rules x 4 facts per area are given to the AI as ''may
-    say'' lines (with the rule''s prohibitions as ''must not say''). An area with no approved claim is
-    told: ''APPROVED HP CLAIMS for this area: NONE ... may name an HP line but MUST NOT state any capability,
-    benefit, saving or figure''. If the rulebook cannot be read, every area is treated as having no approved
-    claims.'
-  output: The list of approved HP claims given to the AI for each area. The claim source, the rules used
-    and any note are saved with the card but not shown.
+    rules from the relevant rule groups that the evidence has earned are kept, each rule''s facts go
+    through the guardrails, and at most 3 rules x 4 facts per area are given to the AI as ''may say''
+    lines (with the rule''s prohibitions as ''must not say''). For an area with no approved claim, the
+    AI is instructed that it may name an HP line but must not state any capability, benefit, saving or
+    figure.'
+  output: The list of approved HP claims given to the AI for each area. The claim source and the rules
+    used are saved with each card.
   sources:
   - hp-backend/src/app/services/extractors/objection_playbook.py:_rulebook_claims
   - hp-backend/src/app/services/extractors/objection_playbook.py:_claims_block
@@ -371,8 +369,8 @@ rules:
   summary: Defines which pieces of account information can fire a rule.
   purpose: Defines which pieces of account information can fire a rule.
   logic: Every field of the company profile, installed technology list, job openings, intent topics, news
-    events, Google News results, website technology and technology detections. The contact list is deliberately
-    left out, because a person's skill is not the company's need. A piece of text is skipped if it is
+    events, Google News results, website technology and technology detections. The contact list is not
+    used here, because a person's skill is not the company's need. A piece of text is skipped if it is
     shorter than 4 characters, starts with '{' or '[', sits in a field that looks like an ID, link, web
     address, domain, date, timestamp, score, count, currency, salary, map coordinate or postal code, or
     is itself an ID, timestamp, web address or plain number.
@@ -391,7 +389,7 @@ rules:
   example:
     scenario: A 'company domain' field with the value 'astra.co.id'.
     steps:
-    - The field name looks like a domain field, so it is ignored
+    - The field name looks like a domain field, so it is skipped
     result: Skipped
     verified: true
     expect: false
@@ -446,7 +444,8 @@ rules:
     crm, cloud, suite, platform, enterprise, software, system(s), solution(s), service(s), tool(s), application(s),
     app(s), financials, server(s), online, premium, pro, plus, standard, edition), and at least one word
     is a ubiquitous vendor. For a rule marked as routing-only (with extra words), only the extra words
-    can qualify. A rule with no qualifying word is dropped and the reason is recorded.
+    can qualify. A rule is kept only when at least one matched word qualifies; otherwise it is set aside
+    and the reason is recorded.
   example:
     scenario: The word 'sap erp'.
     steps:
@@ -454,7 +453,7 @@ rules:
     result: Indicative (yes) - it cannot earn a rule
     verified: true
     expect: true
-  output: Qualifying words, indicative words and dropped rules.
+  output: Qualifying words, indicative words, and the rules kept or set aside.
   sources:
   - hp-backend/src/app/services/hp/rulebook.py:indicative_term
   - hp-backend/src/app/services/hp/rulebook.py:split_terms
@@ -462,25 +461,25 @@ rules:
   confidence: high
 - id: family_gates
   parent: rule_fired_by
-  name: Rule-group gates (HP IQ market, Wolf device support)
+  name: Rule-group checks (HP IQ market, Wolf device support)
   kind: guardrail
-  summary: Removes whole rule groups or offerings the account cannot take.
-  purpose: Removes whole rule groups or offerings the account cannot take.
-  logic: 'HP IQ: if the account''s country is known and is not the United States (''united states'', ''us'',
-    ''usa''), every IQ rule is blocked, because IQ 1.0 is for the US and English only. An unknown country
-    does not block. Wolf: if the account''s evidence names no HP client hardware (hp elitebook, hp probook,
-    hp elitedesk, hp prodesk, hp zbook, hp elitestudio, hp prostudio, hp elite pc, hp pro pc, hp workstation,
-    hp z workstation, hp dragonfly, hp omnibook), a Wolf rule is dropped when its offering is listed as
-    ''HP PCs only'' or ''HP commercial PCs only'' for device support (the longest matching offering name
-    is used first). Offerings that are not listed are allowed.'
+  summary: Keeps only the rule groups and offerings that fit the account's market and devices.
+  purpose: Keeps only the rule groups and offerings that fit the account's market and devices.
+  logic: 'HP IQ: IQ rules are used when the account''s country is the United States (''united states'',
+    ''us'', ''usa'') or is unknown, because IQ 1.0 is offered in the US and in English. For any other
+    known country, IQ rules are set aside. Wolf: if the account''s evidence names no HP client hardware
+    (hp elitebook, hp probook, hp elitedesk, hp prodesk, hp zbook, hp elitestudio, hp prostudio, hp elite
+    pc, hp pro pc, hp workstation, hp z workstation, hp dragonfly, hp omnibook), a Wolf rule is set aside
+    when its offering is listed as ''HP PCs only'' or ''HP commercial PCs only'' for device support (the
+    longest matching offering name is used first). Offerings that are not listed are allowed.'
   example:
     scenario: Account in Indonesia.
     steps:
     - The country is known and is not the United States
-    result: HP IQ is not available, so all IQ rules are blocked
+    result: All HP IQ rules are set aside for this account
     verified: true
     expect: false
-  output: Rules kept or dropped.
+  output: Rules kept or set aside.
   sources:
   - hp-backend/src/app/services/hp/rulebook.py:iq_availability
   - hp-backend/src/app/services/hp/rulebook.py:has_hp_client_hardware
@@ -489,29 +488,29 @@ rules:
   confidence: high
 - id: rule_conditions
   parent: rule_fired_by
-  name: 'Rule conditions: drop, or label as unverified'
+  name: Rule conditions
   kind: guardrail
   summary: Applies the conditions written into a rule.
   purpose: Applies the conditions written into a rule.
-  logic: Only country, management environment and operating system conditions can be tested. A country
-    condition naming the United States drops the rule if the account's country is known and does not contain
-    it ('English' is ignored as a language). A management environment or operating system condition is
-    met when a term it names (intune, entra, autopilot, sccm, vpro, azure, active directory, on-premises,
-    cloud portal, tenancy / windows, macos, linux, android, ios, chromeos) also appears in the account's
-    evidence; otherwise it is kept as 'unverified'. Every other kind of condition is kept as 'unverified'
-    and the rule stays.
+  logic: Country, management environment and operating system conditions are tested against the account.
+    A country condition naming the United States sets the rule aside when the account's country is known
+    and does not contain it ('English' is read as a language, not a country). A management environment
+    or operating system condition is met when a term it names (intune, entra, autopilot, sccm, vpro, azure,
+    active directory, on-premises, cloud portal, tenancy / windows, macos, linux, android, ios, chromeos)
+    also appears in the account's evidence; otherwise it stays with the rule as an open condition. Every
+    other kind of condition also stays with the rule as an open condition, and the rule is kept.
   example:
     scenario: Condition 'Requires E5 licence' (a licence condition), account in Indonesia.
     steps:
-    - A licence condition cannot be tested
-    result: The rule is kept; the condition is listed as unverified
+    - A licence condition is not one of the tested kinds
+    result: The rule is kept; the condition stays with it as an open condition
     verified: true
     expect:
     - true
     - []
     - - condition_type: licence
         text: Requires E5 licence
-  output: Whether each condition is met, not met or unverified.
+  output: Whether each condition is met, not met or open.
   sources:
   - hp-backend/src/app/services/hp/rulebook.py:check_conditions
   - hp-backend/src/app/services/hp/rulebook.py:TESTABLE
@@ -552,9 +551,9 @@ rules:
   purpose: Connects the five areas to rulebook rule groups through the shared HP product lines.
   logic: Each area is linked to HP product lines, each rule group belongs to an HP product line, and a
     group qualifies when its line matches one of the area's lines. The first 3 fired rules (in overall
-    rank order) from those groups are then taken for the area; this step does not exclude modifier-only
-    or catalogue-only rules. For each, the facts approved by the guardrails are kept (maximum 4); a rule
-    with no approved fact is skipped.
+    rank order) from those groups are then taken for the area; modifier-only and catalogue-only rules
+    can be among them. For each, the facts approved by the guardrails are kept (maximum 4); a rule with
+    no approved fact is skipped.
   table:
     columns:
     - Area
@@ -581,7 +580,7 @@ rules:
     scenario: 'Fired rules: a Wolf security rule (matched on ''kaspersky'') and a Poly rule (matched on
       ''microsoft teams rooms''). A Care rule matched only ''sap erp''.'
     steps:
-    - 'The Care rule is dropped: it matched only an indicative word'
+    - 'The Care rule is set aside: it matched only an indicative word'
     - The Wolf rule goes to Endpoint Security
     - The Poly rule goes to Collaboration
     result: 'Collaboration: the Poly rule; Endpoint Security: the Wolf rule; other areas: none'
@@ -609,33 +608,34 @@ rules:
   kind: guardrail
   uses:
   - hp_rulebook
-  summary: Removes facts that may not be stated in this account's market or without context.
-  purpose: Removes facts that may not be stated in this account's market or without context.
-  logic: 'The country is the last comma-separated part of the account''s country, in lower case. In order,
-    a fact is withheld if: G2 - the country is on the restricted-superlative list (romania, slovakia,
-    turkey, uae / united arab emirates, russia, armenia, belarus, kazakhstan, kyrgyzstan, moldova, tajikistan,
-    turkmenistan, ukraine, uzbekistan, china, vietnam, indonesia, malaysia, brazil, mexico) and the fact
-    uses world''s, industry''s, market''s, most, best, first, only, fastest, strongest, safest or leading;
-    G3/G4 - the rule names a competitor (Lenovo, ThinkPad, Dell, Latitude, Apple, MacBook, Asus, Acer,
-    Huawei, Samsung, Microsoft Surface) and the country is on the competitor-block list; G5 - it compares
-    against a competitor (a %, higher, better, faster, less) without benchmark wording (Cinebench, Procyon,
-    MobileMark, internal testing, benchmark, tested, spec / data sheet) in the fact or the rule''s conditions;
-    G6/G7 - it mentions 5G, HP Go, Wi-Fi 7, Sure View, discrete graphics or ''up to N displays'' without
-    the required qualifier. Kept facts carry the rule''s conditions with them. Only the number of facts
-    withheld by each guardrail is recorded, never the text.'
+  summary: Keeps only the facts that suit the account's market and carry their required qualifiers.
+  purpose: Keeps only the facts that suit the account's market and carry their required qualifiers.
+  logic: 'The country is the last comma-separated part of the account''s country, in lower case. A fact
+    is kept only when it passes each check, in order. Superlatives by country: when the country is on
+    the restricted-superlative list (romania, slovakia, turkey, uae / united arab emirates, russia, armenia,
+    belarus, kazakhstan, kyrgyzstan, moldova, tajikistan, turkmenistan, ukraine, uzbekistan, china, vietnam,
+    indonesia, malaysia, brazil, mexico), the fact does not use world''s, industry''s, market''s, most,
+    best, first, only, fastest, strongest, safest or leading. Competitor names by country: when the country
+    is on the competitor-restricted list, the rule names no competitor (Lenovo, ThinkPad, Dell, Latitude,
+    Apple, MacBook, Asus, Acer, Huawei, Samsung, Microsoft Surface). Competitor comparisons: a comparison
+    with a competitor (a %, higher, better, faster, less) comes with benchmark wording (Cinebench, Procyon,
+    MobileMark, internal testing, benchmark, tested, spec / data sheet) in the fact or the rule''s conditions.
+    Required qualifiers: a mention of 5G, HP Go, Wi-Fi 7, Sure View, discrete graphics or ''up to N displays''
+    carries its required qualifier. Kept facts carry the rule''s conditions with them. The number of
+    facts set aside by each check is recorded.'
   example:
     scenario: Rule facts 'HP Wolf Pro Security is the most comprehensive PC security.' and 'Wolf Pro Security
       isolates risky attachments.'; account in 'Jakarta, Indonesia'.
     steps:
     - The country is indonesia, which is on the restricted-superlative list
-    - The first fact says 'most', so it is withheld (G2)
+    - The first fact says 'most', so the superlatives-by-country check sets it aside
     - The second fact is kept, with the condition 'Supported Windows PCs'
-    result: 1 approved fact; 1 fact withheld under 'G2 superlative by country'
+    result: 1 approved fact; 1 fact set aside by the superlatives-by-country check
     verified: true
     expect:
     - - Wolf Pro Security isolates risky attachments.
     - G2 superlative by country: 1
-  output: Approved facts (given to the AI) and counts of withheld facts (saved with the card).
+  output: Approved facts (given to the AI) and the number set aside by each check (saved with the card).
   sources:
   - hp-backend/src/app/services/hp/guardrails.py:approve_rulebook_facts
   - hp-backend/src/app/services/hp/guardrails.py:SUPERLATIVE_BLOCK_COUNTRIES
@@ -650,15 +650,14 @@ rules:
   kind: selection
   summary: Gives each card, where possible, one real HP customer story from HP's customer case studies.
   purpose: Gives each card, where possible, one real HP customer story from HP's customer case studies.
-  logic: 'Chosen by fixed rules before the AI writes; the AI never sees or writes it. For each area (in
-    fixed order): candidate studies are those whose product line is one of the area''s lines and that
-    have a headline. They are ranked by score (see the ranking rule). Studies already used on an earlier
-    card of this playbook are excluded (hard rule: no customer twice in one playbook). Among the rest,
-    the best study sets a quality bar (same industry? told as a story rather than only a customer quote?).
-    The first study that meets that bar and that no higher-priority part of the app has cited is chosen;
-    if all such studies are cited elsewhere, the best one is repeated. If nothing qualifies, the card
-    has no proof point and the section is not shown. The Objection Playbook chooses first among all parts
-    of the app.'
+  logic: 'Chosen by fixed rules before the AI writes; the AI does not see or change it. For each area
+    (in fixed order): candidate studies are those whose product line is one of the area''s lines and
+    that have a headline. They are ranked by score (see the ranking rule). A customer appears at most
+    once in a playbook, so studies used on an earlier card are not used again. Among the rest, the best
+    study sets a quality bar (same industry? told as a story rather than only a customer quote?). The
+    first study that meets that bar and that no higher-priority section has cited is chosen; if every
+    such study is cited elsewhere, the best one is used. The HP Proof Point box appears when a study qualifies.
+    The Objection Playbook chooses first among all sections.'
   table:
     columns:
     - Area
@@ -697,7 +696,7 @@ rules:
       - Security
       Device Management: []
   output: 'The ''HP Proof Point'' box: headline (and outcome), customer, industry and a ''View the HP
-    case study'' link. The study''s product tag is not shown.'
+    case study'' link.'
   sources:
   - hp-backend/src/app/services/extractors/objection_playbook.py:generate_objection_cards
   - hp-backend/src/app/services/hp/case_studies.py:allocate
@@ -717,8 +716,7 @@ rules:
   logic: +100 per use-case tag shared with the area; +10 same industry as the account (the account's industry
     is matched to one of 11 industry labels by keyword, most specific first); +4 has a stated outcome;
     +2 published by HP itself; +1 has a challenge; +2 told as a story (not only a customer quote). Ties
-    are broken by the number of source documents merged into the study, then by customer name. Region
-    is not scored because the case studies carry no region information.
+    are broken by the number of source documents merged into the study, then by customer name.
   formula: score = 100 x shared use-case tags + 10 x same industry + 4 x has outcome + 2 x published by
     HP + 1 x has challenge + 2 x told as a story (each yes/no item counts 1 for yes and 0 for no)
   constants:
@@ -764,17 +762,17 @@ rules:
   - Evidence, topic owner and approved claims for each area
   - The business description from the company profile
   - The company name
-  logic: 'One AI request covers all areas. The AI writes only: the objection (a buyer brush-off, in quotes,
-    one sentence), the reframe (maximum two sentences; it must name an HP line and an account-specific
-    angle tied to that area''s evidence), a counter question, why the objection is expected, and a recommended
-    next step. The evidence, vendors, area, topic owner, proof point and the source of each HP claim are
-    fixed by rules and are never sent back for rewriting. The AI is instructed (these instructions are
-    not checked automatically) to: treat objections as hypothetical, never as reported speech; use no
-    vendor, product, number, customer or event outside the area''s evidence; for areas with no vendor,
-    frame a visibility gap, never ''greenfield'' or ''no incumbent'', and make the objection a de-prioritisation;
-    build only on main technologies; avoid complimenting openers, the ''<praise> ... However'' pattern
-    and filler phrases; and give each reframe a different shape.'
-  output: Draft cards, before checking.
+  logic: 'One AI request covers all areas. The AI writes only: the objection (a one-sentence buyer brush-off,
+    in quotes), the reframe (at most two sentences, naming an HP line and an account-specific angle tied
+    to that area''s evidence), a counter question, why the objection is expected, and a recommended next
+    step. The evidence, vendors, area, topic owner, proof point and the source of each HP claim are set
+    by fixed rules, not by the AI. The AI is instructed to: treat objections as hypothetical, never as
+    reported speech; use no vendor, product, number, customer or event outside the area''s evidence;
+    for areas with no vendor named, frame a visibility gap rather than ''greenfield'' or ''no incumbent'',
+    and make the objection a de-prioritisation; build only on main technologies; avoid complimenting
+    openers, the ''<praise> ... However'' pattern and filler phrases; and give each reframe a different
+    shape.'
+  output: Draft cards, which then go through the card checks.
   sources:
   - hp-backend/src/app/services/extractors/objection_playbook.py:generate_objection_cards
   confidence: high
@@ -782,16 +780,16 @@ rules:
   parent: null
   name: Checks on every AI-written card
   kind: guardrail
-  summary: Rejects cards that break evidence or HP-claim rules.
-  purpose: Rejects cards that break evidence or HP-claim rules.
-  logic: 'A card is discarded if: the area name is not exactly one of the five; the objection, reframe
-    or counter question is empty; (a) the reframe or counter question names a sector word that also appears
-    in the account''s business description (rejected, then rewritten); (b) any of the objection, reframe
-    or counter question carries a number or web address that is not in the account''s installed technology
-    list, company profile or contact list (or website technology when that is the source) (dropped, NOT
-    rewritten); (c) the reframe makes an HP claim the approved facts do not support (rejected, then rewritten)
-    - see the sub-rules.'
-  output: Accepted cards.
+  summary: Keeps only cards that meet the evidence and HP-claim rules.
+  purpose: Keeps only cards that meet the evidence and HP-claim rules.
+  logic: 'A card is kept only when: the area name is exactly one of the five; the objection, reframe
+    and counter question are all present; (a) the reframe and counter question use no sector word that
+    also appears in the account''s business description; (b) the objection, reframe and counter question
+    carry no number or web address beyond those in the account''s installed technology list, company
+    profile or contact list (or website technology when that is the source); (c) the reframe makes only
+    HP claims that the approved facts support (see the sub-rules). An area that misses check (a) or (c)
+    gets one rewrite, which must pass every check. Check (b) has no rewrite.'
+  output: The cards that pass every check.
   sources:
   - hp-backend/src/app/services/extractors/objection_playbook.py:generate_objection_cards
   confidence: high
@@ -799,12 +797,14 @@ rules:
   parent: card_validation
   name: No sector used as justification
   kind: guardrail
-  summary: Blocks 'because you are in mining' style reasoning that the evidence does not support.
-  purpose: Blocks 'because you are in mining' style reasoning that the evidence does not support.
+  summary: Keeps 'because you are in mining' reasoning out of the card, since a sector is not evidence
+    of a technology need.
+  purpose: Keeps 'because you are in mining' reasoning out of the card, since a sector is not evidence
+    of a technology need.
   logic: 'Sector words: automotive, financial services, heavy equipment, mining, construction, energy,
     agriculture, agribusiness, infrastructure, logistics, property development, plantations, forestry,
-    banking, insurance, toll road, palm oil, coal. A card fails if a sector word appears in BOTH its reframe
-    or counter question and the account''s business description.'
+    banking, insurance, toll road, palm oil, coal. A card passes only when no sector word appears in
+    both its reframe or counter question and the account''s business description.'
   constants:
   - label: Sector words
     ref: py:app.services.extractors.objection_playbook:SECTOR_WORDS
@@ -832,11 +832,11 @@ rules:
       mentions automotive, mining and financial services.
     steps:
     - '''mining'' appears in both'
-    result: '''mining'' is found -> the card is rejected and rewritten'
+    result: '''mining'' is found, so the card is sent for one rewrite'
     verified: true
     expect:
     - mining
-  output: Card rejected or kept.
+  output: Card kept, or sent for one rewrite.
   sources:
   - hp-backend/src/app/services/extractors/objection_playbook.py:SECTOR_WORDS
   - hp-backend/src/app/services/extractors/objection_playbook.py:_sector_terms_used
@@ -845,17 +845,17 @@ rules:
   parent: card_validation
   name: HP-claim checks on the reframe
   kind: guardrail
-  summary: Stops the reframe asserting HP things the approved facts do not support.
-  purpose: Stops the reframe asserting HP things the approved facts do not support.
-  logic: 'A reframe fails on any of: G15 - calls something a ''Next Gen AI PC'' with a TOPS figure outside
-    40-60 within 140 characters; G16 - names a product generation (such as G1 or G2, with an optional
-    i, a, q or 8) that the approved facts do not state; internal jargon - refers to data sources, datasets,
-    records or evidence blocks instead of speaking to the seller; integration claims - a sentence with
-    an integration verb (integrate, interoperate, works with, connects to or into, plugs into, native
-    support for, compatible with) names a capitalised product that is not HP''s own brand, not the account,
-    not the rule''s offering or line, and not in the text or conditions of the approved facts; G2 sentence
-    superlatives - when the country is on the restricted-superlative list, a superlative word that the
-    approved facts do not use.'
+  summary: Makes sure the reframe states only HP claims that the approved facts support.
+  purpose: Makes sure the reframe states only HP claims that the approved facts support.
+  logic: 'A reframe passes only when it does none of the following. AI PC figures: calls something a
+    ''Next Gen AI PC'' with a TOPS figure outside 40-60 within 140 characters. Product generations: names
+    a generation (such as G1 or G2, with an optional i, a, q or 8) that the approved facts do not state.
+    Research wording: refers to data sources, datasets, records or evidence blocks instead of speaking
+    to the seller. Integration claims: in a sentence with an integration verb (integrate, interoperate,
+    works with, connects to or into, plugs into, native support for, compatible with), names a capitalised
+    product that is not HP''s own brand, not the account, not the rule''s offering or line, and not in
+    the text or conditions of the approved facts. Superlatives by country: when the country is on the
+    restricted-superlative list, uses a superlative word that the approved facts do not use.'
   example:
     scenario: Approved fact 'WXP integrates with Microsoft Intune.'; reframe 'HP WXP integrates seamlessly
       with ServiceNow to cut tickets.'
@@ -866,7 +866,7 @@ rules:
     verified: true
     expect:
     - 'C 03 integration: claims HP connects to ServiceNow, which no approved fact names'
-  output: List of faults (an empty list means the card passes).
+  output: List of faults. The card passes when the check finds no faults.
   sources:
   - hp-backend/src/app/services/extractors/objection_playbook.py:_claim_faults
   - hp-backend/src/app/services/extractors/objection_playbook.py:_INTERNAL_VOCABULARY
@@ -877,6 +877,7 @@ rules:
   confidence: high
 - id: superlative_country_case
   parent: hp_claim_faults
+  internal: true
   name: Sentence-level superlative check depends on how the country is written
   kind: guardrail
   summary: Records an observed quirk of the G2 sentence check.
@@ -919,14 +920,14 @@ rules:
   confidence: high
 - id: merge_near_duplicates
   parent: null
-  name: Near-duplicate objections merged; card cap
+  name: Near-duplicate objections merged; card limit
   kind: filter
   summary: Avoids two cards saying the same thing.
   purpose: Avoids two cards saying the same thing.
   logic: Each objection is put in lower case, spaces are collapsed, outer quotes are removed and everything
-    except letters and numbers is dropped. If its similarity to an earlier kept card is 0.85 or more,
-    it becomes a 'variant' (area, objection, raiser) of that card instead of a separate card. At most
-    10 cards are kept (with five areas, at most 5 can exist). Variants are stored but not shown.
+    except letters, numbers and spaces is removed. If its similarity to an earlier kept card is 0.85
+    or more, it is saved as a 'variant' (area, objection, topic owner) of that card instead of a separate
+    card. At most 10 cards are kept (with five areas, at most 5 can exist).
   formula: merge when the similarity of the two cleaned objections is 0.85 or more (similarity runs from
     0 to 1)
   constants:
@@ -983,14 +984,13 @@ rules:
   kind: display
   summary: Defines the card as displayed.
   purpose: Defines the card as displayed.
-  logic: 'Header: ''<N> objection reframes for <account>'' and a disclaimer that these are anticipated
-    push-back generated from the installed technology (or website technology) evidence and are not statements
-    made by any contact; a badge ''<count> Incumbents Detected''. Each card, collapsed: the objection
-    in quotes, ''Could be raised by: ...'' and the area tag. Expanded: Reframe, Evidence (word for word),
-    Counter Question, HP Proof Point (only if one was chosen; customer, industry, link; product tag hidden)
-    and the Topic owner / Owning function line. Saved but not shown: why the objection is expected, the
-    recommended next step, the source of each HP claim, variants, detected and supporting vendors, and
-    the evidence link, date and confidence (always blank).'
+  logic: 'Header: ''<N> objection reframes for <account>'', a note that these are anticipated push-back
+    generated from the account''s installed technology (or website technology) and are not statements
+    made by any contact, and a badge ''<count> Incumbents Detected''. Each card, collapsed: the objection
+    in quotes, ''Could be raised by: ...'' and the area tag. Expanded: Reframe, Evidence (exactly as built),
+    Counter Question, HP Proof Point (when one was chosen: headline, customer, industry and link) and
+    the Topic owner / Owning function line. Each card also saves why the objection is expected, the recommended
+    next step, the source of each HP claim, variants, and the detected and supporting vendors.'
   output: The Objection Playbook tab.
   sources:
   - hp-frontend/src/app/dashboard/page.tsx

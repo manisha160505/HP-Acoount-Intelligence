@@ -19,7 +19,7 @@ interface AuthContextType extends AuthState {
   login: (email: string, pass: string) => Promise<{ success: boolean; user?: User; error?: string }>;
   logout: () => Promise<void>;
   /** Ends every session of this user; they sign in again with the new password. */
-  changePassword: (current: string, next: string) => Promise<{ success: boolean; error?: string }>;
+  changePassword: (current: string, next: string) => Promise<{ success: boolean; recoveryCode?: string; error?: string }>;
   /** A product tour - the dashboard's, or the admin pages' - was finished or
    *  closed: do not start it again. */
   markTourCompleted: (tour?: 'dashboard' | 'admin') => Promise<void>;
@@ -76,9 +76,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const changePassword = async (current: string, next: string) => {
     try {
-      await api.post('/auth/change-password', { current_password: current, new_password: next });
-      clearSession();
-      return { success: true };
+      const res = await api.post<{ recovery_code: string }>('/auth/change-password',
+        { current_password: current, new_password: next });
+      // The session is already ended on the server. It is cleared here once the
+      // user has seen their recovery code (see the change-password page).
+      return { success: true, recoveryCode: res.data.recovery_code };
     } catch (err: any) {
       return { success: false, error: errorMessage(err, 'Could not change the password.') };
     }

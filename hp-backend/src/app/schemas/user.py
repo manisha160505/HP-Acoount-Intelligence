@@ -38,3 +38,14 @@ class ChangePasswordRequest(BaseModel):
 class TourCompletedResponse(BaseModel):
     tour: str
     tour_completed_at: datetime
+
+
+class ChangePasswordResponse(BaseModel):
+    message: str
+    # Shown once: the code that lets this user set a new password themselves.
+    recovery_code: str
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+    recovery_code: str = Field(min_length=1, max_length=64)
+    new_password: str = Field(min_length=1, max_length=128)

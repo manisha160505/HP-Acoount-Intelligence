@@ -23,6 +23,7 @@ ROLE_CHANGED = "user.role_changed"
 ACCOUNTS_CHANGED = "user.accounts_changed"
 PASSWORD_RESET = "user.password_reset"
 PASSWORD_CHANGED = "user.password_changed"
+PASSWORD_RECOVERED = "user.password_recovered"
 SESSIONS_REVOKED_ALL = "sessions.revoked_all"
 
 

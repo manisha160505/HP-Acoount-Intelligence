@@ -121,7 +121,7 @@ api.interceptors.response.use(
     const config = error?.config as (Record<string, unknown> & { headers?: Record<string, string> }) | undefined;
     const url = String(config?.url || '');
     const isAuthCall = url.startsWith('/auth/login') || url.startsWith('/auth/refresh')
-      || url.startsWith('/auth/logout');
+      || url.startsWith('/auth/logout') || url.startsWith('/auth/forgot-password');
 
     // Not on the login page: a 401 there is a wrong password, which the form
     // already reports, and redirecting would loop.

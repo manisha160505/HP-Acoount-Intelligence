@@ -15,7 +15,7 @@ from app.services.extractors.datasets import account_data_as_of
 from app.services.regen import store as widget_store
 
 logger = logging.getLogger(__name__)
-from app.core.deps import require_account_access, require_admin_role, require_user_role
+from app.core.deps import require_account_access, require_super_admin, require_user_role
 from app.schemas.widget import (
     ContentGenerateRequest,
     MessageEvaluateRequest,
@@ -693,7 +693,7 @@ def get_account_feature_widgets(
 def regenerate_account_feature_widgets(
     account_id: str,
     feature_key: str,
-    current_user: dict = Depends(require_account_access)
+    current_user: dict = Depends(require_super_admin)
 ):
     """Regenerate one feature as an explicit run.
 
@@ -1094,7 +1094,7 @@ def retrieval_status(
 def retrieval_rebuild(
     account_id: str,
     index: str,
-    current_user: dict = Depends(require_admin_role)
+    current_user: dict = Depends(require_super_admin)
 ):
     """Queue a FULL rebuild. Admin only, and deliberately not automatic.
 
@@ -1140,7 +1140,7 @@ def retrieval_rebuild(
 def retrieval_retire(
     account_id: str,
     index: str,
-    current_user: dict = Depends(require_admin_role)
+    current_user: dict = Depends(require_super_admin)
 ):
     """Drop an index's workspace to free Atlas vector-index capacity.
 
@@ -1177,7 +1177,7 @@ def retrieval_retire(
 def retrieval_run_now(
     account_id: str,
     index: str,
-    current_user: dict = Depends(require_admin_role)
+    current_user: dict = Depends(require_super_admin)
 ):
     """Drain the queue synchronously. Admin escape hatch for local work.
 

@@ -7,6 +7,8 @@ import { ParallaxBand } from '@/components/common/motion';
 import { AlertCircle, Loader2, KeyRound } from 'lucide-react';
 import { PasswordInput } from '@/components/common/PasswordInput';
 import HpLogo from '@/components/common/HpLogo';
+import { RecoveryCodeNotice } from '@/components/common/RecoveryCodeNotice';
+import { clearSession } from '@/lib/session';
 
 // Mirrors MIN_PASSWORD_LENGTH in hp-backend/src/app/core/security.py; the
 // server is the authority, this only saves a round trip.
@@ -34,9 +36,11 @@ export default function ChangePasswordPage() {
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const [recoveryCode, setRecoveryCode] = useState<string | null>(null);
+
   useEffect(() => {
-    if (!isLoading && !isAuthenticated) router.push('/login');
-  }, [isLoading, isAuthenticated, router]);
+    if (!isLoading && !isAuthenticated && !recoveryCode) router.push('/login');
+  }, [isLoading, isAuthenticated, recoveryCode, router]);
 
   const forced = !!user?.must_change_password;
 
@@ -58,13 +62,35 @@ export default function ChangePasswordPage() {
     setIsSubmitting(true);
     const result = await changePassword(current, next);
     setIsSubmitting(false);
-    if (result.success) {
+    if (result.success && result.recoveryCode) {
+      // Every session has ended; show the recovery code once before sign-in.
+      setRecoveryCode(result.recoveryCode);
+    } else if (result.success) {
+      clearSession();
       // Every session was ended, this one included.
       window.location.href = '/login?changed=1';
     } else {
       setError(result.error || 'Could not change the password.');
     }
   };
+
+  if (recoveryCode) {
+    return (
+      <ParallaxBand fadeOnScroll={false} className="min-h-screen text-white flex flex-col justify-center py-12 sm:px-6 lg:px-8">
+        <div className="as-rise sm:mx-auto sm:w-full sm:max-w-md text-center">
+          <HpLogo size={64} onDark className="mx-auto" />
+        </div>
+        <div className="as-rise mt-8 sm:mx-auto sm:w-full sm:max-w-md">
+          <div className="as-glass-dark py-8 px-4 rounded-2xl sm:px-10">
+            <RecoveryCodeNotice code={recoveryCode} onDone={() => {
+              clearSession();
+              window.location.href = '/login?changed=1';
+            }} />
+          </div>
+        </div>
+      </ParallaxBand>
+    );
+  }
 
   if (isLoading || !isAuthenticated) return null;
 

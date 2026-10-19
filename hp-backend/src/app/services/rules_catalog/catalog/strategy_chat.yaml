@@ -4,19 +4,19 @@
 feature_key: strategy_chat
 purpose: Lets a seller ask questions about one account (advisor mode) or rehearse a conversation with
   the role of one of its real stakeholders (roleplay mode). Answers come only from what the account's
-  dashboard already shows.
+  dashboard shows.
 final_output: 'One of three things: a structured answer (a short answer, optional supporting facts, optional
-  recommended next steps) with footnote citations pointing to dashboard sections; an in-character rehearsal
-  reply; or a plain explanation of why no answer could be backed by evidence.'
+  recommended next steps) with footnote citations to dashboard sections; an in-character rehearsal reply;
+  or a short standard message from the chat.'
 how_it_combines: 'Every answer is built only from the account''s dashboard sections.
 
-  - Advisor mode: the AI writes its reply as a series of short parts, each labelled as a fact, a derived
-  point, a conclusion, a recommendation or general advice. Each part is then checked. For example, a fact
-  must quote the section it cites word for word. If any part fails, the AI tries again. After the last
-  attempt, only the parts that passed are shown.
+  - Advisor mode: the AI writes its reply as a series of short parts, each labelled as a fact, a conclusion,
+  a recommendation or general advice. Each part is checked. For example, a fact must quote the section
+  it cites word for word. If a part does not pass, the AI revises the answer. Only parts that pass are
+  shown.
 
   - Roleplay mode: the AI plays the role of a real stakeholder, never the person by name. Every sentence
-  that says something substantive must cite a dashboard section.'
+  that states something cites a dashboard section.'
 rules:
 - id: sc_snapshot_widget
   parent: null
@@ -31,22 +31,20 @@ rules:
   - Intent topics
   - Recent news signals
   - Strategic priorities
-  logic: 'Built only from what the account''s other dashboard sections already show (only sections that
-    are available). It never uses raw data files and has no fallback numbers: if a section is missing,
-    its count is left blank and shown as a dash.
+  logic: 'Built only from what the account''s other dashboard sections show, so every number matches
+    the page it comes from.
 
     Counts: solutions = the number of plays on the Opportunity Map; installed vendors = the total number
     of technologies detected on the technology map; live signals = the total number of news signals; intent
-    topics = the total number of intent topics; priorities = the number of strategic priorities. There
-    is no stakeholder count, because the client asked for it to be dropped.
+    topics = the total number of intent topics; priorities = the number of strategic priorities.
 
     Lists: the first 5 intent topics, the first 15 different vendors from the technology map, and the
     first 5 news headlines in the order the feed shows them.
 
-    The company name comes from the executive summary, otherwise from the account record. With no company
-    name, the snapshot is shown as empty.
+    The company name comes from the executive summary, otherwise from the account record. The snapshot
+    appears once the account has a company name.
 
-    Six fixed starter questions are written using the company name.'
+    Six standard starter questions are written using the company name.'
   constants:
   - label: Topics shown
     ref: py:app.services.extractors.strategy_chat:MAX_SNAPSHOT_TOPICS
@@ -89,8 +87,8 @@ rules:
   summary: Says which dashboard sections the chat can draw on.
   purpose: Says which dashboard sections the chat can draw on.
   logic: 'Lists which of these sections have content for the account: Executive Dashboard, Stakeholder
-    Map, Recent Signals, Tech Landscape, Intent & Demand and Opportunity Map. If none do, the chat is
-    shown as empty.'
+    Map, Recent Signals, Tech Landscape, Intent & Demand and Opportunity Map. The list appears once at
+    least one of them has content.'
   sources:
   - hp-backend/src/app/services/extractors/strategy_chat.py:extract_strategy_chat
   confidence: high
@@ -100,15 +98,15 @@ rules:
   kind: selection
   summary: Gives the AI every dashboard section of the account at once.
   purpose: Gives the AI every dashboard section of the account at once.
-  logic: 'Every dashboard section of the account is included, except those that belong to Content Studio,
-    Message Evaluator and Strategy Chat itself. A section is included only if it is available and has
-    content. Each one is labelled with its name and the feature it belongs to, followed by its content.
+  logic: 'Every dashboard section of the account that has content is included, except those of Content
+    Studio, Message Evaluator and Strategy Chat itself. Each one is labelled with its name and the feature
+    it belongs to, followed by its content.
 
-    Order: a fixed priority list comes first (the executive summary first, the raw technology detections
+    Order: a set priority list comes first (the executive summary first, the technology detections list
     last). Any other section follows in alphabetical order.
 
-    Nothing is searched for or cut down. If the total goes above 900,000 characters, a warning is recorded
-    but nothing is removed. Only this one account''s information is ever used.'
+    The AI reads every included section in full, with nothing shortened. An account above 900,000 characters
+    is logged for review and still read in full. Only this one account''s information is used.'
   constants:
   - label: Size warning level (characters)
     ref: py:app.services.strategy.context:MAX_PAYLOAD_CHARS
@@ -166,14 +164,13 @@ rules:
   confidence: high
 - id: sc_small_talk
   parent: null
-  name: Greetings get a fixed reply
+  name: Greetings get an instant reply
   kind: selection
-  summary: Simple greetings such as 'hi' get a fixed reply without asking the AI.
-  purpose: Simple greetings such as 'hi' get a fixed reply without asking the AI.
-  logic: If the question is shorter than 3 characters, or (once punctuation is trimmed) matches a fixed
-    list of short phrases (hi, hello, thanks, ok, help, what can you do, and so on), a fixed greeting
-    is returned. In roleplay the greeting stays in character, for example 'You have my attention. I am
-    the <title> here...'.
+  summary: Simple greetings such as 'hi' get an instant standard reply without calling the AI.
+  purpose: Simple greetings such as 'hi' get an instant standard reply without calling the AI.
+  logic: If the question is shorter than 3 characters, or matches a short list of everyday phrases (hi,
+    hello, thanks, ok, help, what can you do, and so on), a standard greeting is returned. In roleplay
+    the greeting stays in character, for example 'You have my attention. I am the <title> here...'.
   example:
     scenario: Three inputs.
     steps:
@@ -192,17 +189,15 @@ rules:
   confidence: high
 - id: sc_question_resolution
   parent: null
-  name: Follow-up questions are rewritten; earlier answers are never evidence
+  name: Follow-up questions keep their context
   kind: guardrail
-  summary: Lets a follow-up such as 'what about them?' work without treating earlier answers as sources.
-  purpose: Lets a follow-up such as 'what about them?' work without treating earlier answers as sources.
-  logic: 'On the first question, the wording is used as it is. After that, the AI looks at the last 12
-    turns of the conversation (each cut to 800 characters). It replaces words like ''them'' or ''that''
-    with what they refer to, and files the question under one topic: stakeholder, priority, technology,
-    objection, opportunity, evidence or general. Anything else is filed as general. The topic is only
-    a label and does not narrow the information used. The AI also sees up to 12 earlier turns when it
-    answers, but the rules require every fact to come from the account''s dashboard, not from earlier
-    answers.'
+  summary: Lets a follow-up such as 'what about them?' work, while facts still come only from the dashboard.
+  purpose: Lets a follow-up such as 'what about them?' work, while facts still come only from the dashboard.
+  logic: 'The first question is used as written. For a follow-up, the AI reads the last 12 turns of the
+    conversation and replaces words like ''them'' or ''that'' with what they refer to. It also tags the
+    question with one topic: stakeholder, priority, technology, objection, opportunity, evidence or general.
+    The tag is a label only; the AI still reads the whole account. When it answers, the AI also sees up
+    to 12 earlier turns, and every fact comes from the account''s dashboard, not from earlier answers.'
   constants:
   - label: Earlier turns considered
     ref: py:app.services.strategy.chat:MAX_HISTORY_TURNS
@@ -215,46 +210,41 @@ rules:
   parent: null
   name: 'Advisor answer: labelled parts'
   kind: model
-  summary: How an advisor answer is structured and grounded.
-  purpose: How an advisor answer is structured and grounded.
-  logic: 'The AI replies as a list of short parts. Each part is labelled as a fact, a derived point, a
-    conclusion (synthesis), a recommendation or general advice, and also has a display style (paragraph,
-    bullet, heading or label).
+  summary: How an advisor answer is built from short, labelled parts that are each checked.
+  purpose: How an advisor answer is built from short, labelled parts that are each checked.
+  logic: 'The AI writes the answer as a list of short parts. Each part is labelled as a fact, a conclusion,
+    a recommendation or general advice, and has a display style (paragraph, bullet, heading or label).
+    A fact is either read directly from a section or worked out from it, such as a count or a comparison.
 
-    Shape asked for: an ''ANSWER:'' heading every time; a ''FACTS:'' list (at most 5 for a single topic,
-    up to 8 for a multi-part question) only when useful; and ''RECOMMENDED NEXT STEPS:'' (2-3 actions)
-    only when the question asks what to do.
+    Layout: an ''ANSWER:'' section every time; a ''FACTS:'' list (up to 5 points, or up to 8 for a multi-part
+    question) when it helps; and ''RECOMMENDED NEXT STEPS:'' (2-3 actions) when the question asks what
+    to do.
 
-    Length is left to the AI''s judgement, with no target. About 30 parts is treated as padding. The platform''s
-    own scores (relevance scores, priority or tier labels, urgency or confidence, match percentages) must
-    not be quoted. This is an instruction to the AI and is not checked.
+    The AI sizes the answer to the question and keeps it concise. The answer does not quote the platform''s
+    own scores (relevance, priority, urgency or confidence).
 
-    At most 60 parts are read.
+    Up to 60 parts are read per answer.
 
-    Unfamiliar labels are tidied up: heading, label and title become general; conclusion becomes synthesis;
-    inference becomes derived; advice, next step, plan and action become recommendation. Duplicate part
-    ids are renamed. A conclusion or recommendation that does not say what it rests on is linked to the
-    evidenced parts above it, or to the parts that name the same things.'
+    Each conclusion and recommendation is linked to the parts it rests on. When the AI does not name them,
+    it is linked to the facts above it, or to the facts that name the same things.'
   table:
     columns:
     - Label
-    - Must carry
-    - May not contain
+    - Must include
+    - Must not add
     rows:
-    - - Fact / Derived
-      - One or more valid dashboard sections, and a quote that appears word for word in the account's
-        information and in a cited section
-      - Nothing further
-    - - Synthesis
+    - - Fact (read or worked out)
+      - One or more of the account's dashboard sections, and a quote found word for word in a cited section
+      - No further limits
+    - - Conclusion
       - The parts it rests on
-      - Any name or figure that is missing from those parts, their sections and the account's information
-        as a whole
+      - Any name or figure not found in those parts, their sections or the account's information
     - - Recommendation
-      - Nothing extra (the parts it rests on are optional)
-      - Names or figures that are not in the account's information, except plan figures (week 1, 30 days,
+      - The parts it rests on (optional)
+      - Names or figures not found in the account's information, apart from plan figures (week 1, 30 days,
         30/60/90) and plan or channel words
     - - General
-      - Nothing
+      - No further requirements
       - The company name, or any figure other than a plan figure
   constants:
   - label: Maximum parts read per answer
@@ -270,21 +260,21 @@ rules:
   confidence: high
 - id: sc_fact_check
   parent: sc_advisor_answer
-  name: Fact and derived-point check
+  name: Fact check
   kind: guardrail
-  summary: A fact must quote the section it cites.
-  purpose: A fact must quote the section it cites.
-  logic: 'The part fails if: it cites no section; it cites a section that is not part of this account''s
-    information (this keeps accounts separate); its quote is empty; the quote cannot be found anywhere
-    in the account''s information; or the quote cannot be found in the text of the cited section or sections.'
+  summary: Every fact quotes the section it cites.
+  purpose: Every fact quotes the section it cites.
+  logic: 'A fact passes only when: it cites at least one section; every cited section belongs to this
+    account (this keeps accounts separate); it has a quote; and the quote appears word for word in the
+    account''s information and in a cited section.'
   example:
     scenario: A fact citing the technology table with the quote 'SolidWorks', which the account's information
       does not contain. A conclusion naming Siemens. A general-advice part containing '4,000 seats'.
     steps:
-    - 'Part c1: its quote is not in the data'
-    - Part c2 names 'siemens' (and also rests on the failed c1)
+    - 'Part c1: its quote is not in the account''s information'
+    - Part c2 names 'siemens' (and also rests on c1)
     - Part c3 is general advice but carries a figure
-    result: All three parts fail.
+    result: None of the three parts passes.
     verified: true
     expect:
     - false
@@ -302,15 +292,14 @@ rules:
   parent: sc_advisor_answer
   name: Conclusion and recommendation checks
   kind: guardrail
-  summary: Conclusions and advice may add nothing new about the customer.
-  purpose: Conclusions and advice may add nothing new about the customer.
-  logic: A conclusion must say which parts it rests on. Both conclusions and recommendations fail if a
-    part they rest on is missing; if a figure appears that is not in those parts, their sections or the
-    account's information as a whole; or if a capitalised word (not at the start of a sentence, at least
-    3 letters, not all capitals) or an HP product line name appears in none of those places. The company
-    name's words and words from the question are always allowed. A recommendation may also use plan figures
-    and channel or plan words (linkedin, email, webinar, workshop, phase, week, pilot, brief, demo, and
-    so on).
+  summary: Conclusions and recommendations use only what the account's data contains.
+  purpose: Conclusions and recommendations use only what the account's data contains.
+  logic: A conclusion names the parts it rests on. A conclusion or recommendation passes only when every
+    part it rests on is in the answer, and every figure, capitalised name (at least 3 letters, not at
+    the start of a sentence, not all capitals) and HP product line it mentions appears in those parts,
+    their sections or the account's information. Words from the company name and from the question are
+    always allowed. A recommendation may also use plan figures and plan or channel words (linkedin, email,
+    webinar, workshop, phase, week, pilot, brief, demo, and so on).
   constants:
   - label: Channel words
     ref: py:app.services.strategy.claims:GENERIC_CHANNELS
@@ -349,7 +338,7 @@ rules:
   logic: A figure counts as a plan figure when it appears as '<unit> N' (week 2, phase 1, weeks 1-4),
     'N <unit>' (30 days, 90-day, 3 touches) or 'N/N' (30/60/90). The units are day, week, month, quarter,
     year, hour, minute, touch, email, call, meeting, session, follow-up, step, phase, sprint, wave and
-    message. Numbers written out in words ('three') are not treated as figures at all.
+    message. Numbers written in words ('three') are not counted as figures.
   example:
     scenario: '''three touches over 30 days, week 2 and a 90-day plan, 30/60/90'''
     steps:
@@ -372,19 +361,18 @@ rules:
   parent: sc_advisor_answer
   name: Whole-answer checks
   kind: guardrail
-  summary: A last sweep over everything that would be shown.
-  purpose: A last sweep over everything that would be shown.
-  logic: 'A part that rests on a failed part also fails. Then, over the text that is left: every figure
-    (except in recommendations) must appear in the account''s information, and any HP product line named
-    (phrases starting with HP, Poly, or Z by HP) must appear in the account''s information. The HP line
-    check also applies to recommendations.'
+  summary: A final check over the full answer before it is shown.
+  purpose: A final check over the full answer before it is shown.
+  logic: 'A part passes only when every part it rests on also passes. Then, across the remaining text,
+    every figure (outside recommendations) and every HP product line named (phrases starting with HP,
+    Poly, or Z by HP), including in recommendations, must appear in the account''s information.'
   example:
     scenario: The answer says 'Lead with HP Wolf Security.' but the account's information never mentions
       it.
     steps:
-    - Tidy the phrase to 'HP Wolf Security'
+    - Read the product name as 'HP Wolf Security'
     - It is not in the account's information
-    result: 'Fault: the answer names HP Wolf Security.'
+    result: 'Flagged: the answer names HP Wolf Security.'
     verified: true
     expect: HP Wolf Security
   sources:
@@ -393,28 +381,26 @@ rules:
   confidence: high
 - id: sc_retry_partial
   parent: sc_advisor_answer
-  name: Retries and partial answers
+  name: Revising an answer
   kind: selection
-  summary: What happens when an answer fails the checks.
-  purpose: What happens when an answer fails the checks.
-  logic: There are up to 3 attempts. After a failure, the AI is given a note for each failed part (up
-    to 8 notes) so it can fix them. If the reply was cut off, it is asked for a much shorter answer. If
-    the AI service gives an unusable reply (blocked, failed or empty), the process stops at once and the
-    'service' message is shown. If all 3 attempts fail, the parts that passed (and do not rest on a failed
-    part) are checked again and shown, with any heading that has nothing under it removed. The response
-    records how many parts were dropped. If nothing substantive survives, the 'could not evidence' message
-    is shown.
+  summary: How the AI revises an answer so that only checked parts are shown.
+  purpose: How the AI revises an answer so that only checked parts are shown.
+  logic: The AI has up to 3 attempts. After each attempt, it gets a note on each part that did not pass
+    (up to 8 notes) so it can correct them. If a reply runs too long, the AI is asked for a much shorter
+    answer. After the last attempt, the parts that passed (and rest only on parts that passed) are checked
+    again and shown, each under its heading. When the passing parts do not make a substantive answer,
+    the 'Not evidenced' message is shown.
   constants:
   - label: Attempts
     internal: true
     ref: py:app.services.strategy.chat:MAX_VALIDATION_ATTEMPTS
     stated: 3
   example:
-    scenario: The three-part bad answer from the fact check, after the attempts are used up.
+    scenario: The three-part answer from the fact check, after the last attempt.
     steps:
-    - All three parts failed
-    - Nothing survives
-    result: Nothing can be shown, so the seller sees a refusal message.
+    - None of the three parts passed
+    - The answer is not evidenced
+    result: The seller sees the 'Not evidenced' message instead.
     verified: true
     expect: []
   sources:
@@ -426,12 +412,11 @@ rules:
   parent: sc_advisor_answer
   name: Citations shown to the seller
   kind: display
-  summary: Citations are added after the checks pass.
-  purpose: Citations are added after the checks pass.
-  logic: Facts and derived points show their own sections. Conclusions and recommendations show all the
-    sections of the parts they rest on. General advice shows none. Each citation is shown as footnote
-    tags and turned into footnotes labelled with a readable section name and the feature's display name.
-    A clean copy without the tags is also provided.
+  summary: Each checked part shows the dashboard sections it comes from.
+  purpose: Each checked part shows the dashboard sections it comes from.
+  logic: Facts show their own sections. Conclusions and recommendations show all the sections of the
+    parts they rest on. General advice needs none. Citations appear as tags at the end of each line and
+    as footnotes labelled with the section name and its feature. A copy without the tags is also provided.
   example:
     scenario: The valid answer from the conclusion and recommendation checks.
     steps:
@@ -461,20 +446,20 @@ rules:
   kind: selection
   summary: Who the seller can rehearse against.
   purpose: Who the seller can rehearse against.
-  logic: Only the account's real stakeholder contacts with a usable job title are offered. A title is
-    not usable if it is blank, '-', n/a, none, employee, staff, member or unknown. Contacts are sorted
-    by stakeholder score, highest first. There are no default personas. The person's name is shown in
-    the menu but is never given to the AI. The AI is given only the title, department, seniority, influence,
-    decision power, the HP focus for that person, up to 4 recorded pain points and up to 5 objection cards
-    that the same title is expected to raise. A persona from another account is refused. Roleplay mode
-    needs a persona to be chosen, and a persona cannot be chosen outside roleplay.
+  logic: The seller rehearses against the account's real stakeholder contacts that have a specific job
+    title, not a generic one such as '-', n/a, none, employee, staff, member or unknown.
+    Contacts are sorted by stakeholder score, highest first. The person's name appears in the menu, and
+    the AI is given the role, not the name - the title, department, seniority, influence, decision power,
+    the HP focus for that person, up to 4 recorded pain points and up to 5 objection cards that the same
+    title is expected to raise. Only the account's own personas can be chosen. Roleplay mode always has a persona, and a
+    persona is used only in roleplay mode.
   example:
     scenario: A COO contact with 5 pain points and one objection.
     steps:
     - Write the role lines
     - Use the first 4 pain points
     - Add the 1 objection
-    result: A role brief that leaves out the person's name.
+    result: A role brief for the title, without the person's name.
     verified: true
     expect: 'You are playing THE CHIEF OPERATING OFFICER.
 
@@ -502,16 +487,17 @@ rules:
   confidence: high
 - id: sc_roleplay_validator
   parent: sc_roleplay_personas
-  name: Roleplay reply checks (sentence by sentence)
+  name: Roleplay reply checks, sentence by sentence
   kind: guardrail
-  summary: The role may sound real, but what it says must come from the data.
-  purpose: The role may sound real, but what it says must come from the data.
-  logic: 'A reply fails if: any cited section is not in the account''s information; any banned name appears
-    (every full name in the stakeholder list, plus each part of a name longer than 4 characters); any
-    sentence lacks a valid citation, unless it is filler (''ok'', ''go on'', ''hmm'', and so on), has
-    no meaningful words, or is a question; any figure has no source; or a cited sentence shares no meaningful
-    word with the section it cites. Bold markers and a speaker label at the start are ignored. There are
-    3 attempts. After that, an out-of-character message says ''The rehearsal stopped here''.'
+  summary: The role sounds real, and everything it states comes from the account's data.
+  purpose: The role sounds real, and everything it states comes from the account's data.
+  logic: 'A reply passes only when: every cited section belongs to this account; no stakeholder''s name
+    appears (full names, and each part of a name longer than 4 characters); every sentence that states
+    something cites a valid section and shares a meaningful word with it; and every figure has a source.
+    Short filler (''ok'', ''go on'', ''hmm'', and so on), questions and sentences with no meaningful words
+    need no citation. Bold markers and a speaker label at the start are ignored. There are 3 attempts.
+    If none passes, a message outside the role says ''The rehearsal stopped here'' and suggests rephrasing
+    or switching to Strategy Advisor.'
   constants:
   - label: Reply must share wording with its cited section
     ref: py:app.services.strategy.chat:ROLEPLAY_REQUIRE_SECTION_OVERLAP
@@ -521,8 +507,8 @@ rules:
     steps:
     - '''Hmm. Go on. We run AutoCAD and CATIA [technology section]. What would switching gain us?'' passes'
     - '''Talk to Santoso about it.'' names a real person'
-    - '''We are locked into a three-year agreement.'' has no source'
-    result: Pass, fail, fail.
+    - '''We are locked into a three-year agreement.'' cites no source'
+    result: The first reply passes; the other two do not.
     verified: true
     expect:
     - - true
@@ -569,16 +555,17 @@ rules:
   summary: Every sentence that states something must carry a citation.
   purpose: Every sentence that states something must carry a citation.
   logic: Every cited section must be in the account's information. Every sentence that states something
-    must carry a valid citation. This applies up to any 'Next steps:' or 'Recommendations:' heading. It
-    does not apply to filler, to refusal phrases such as 'does not hold', or to a bare heading. All figures
-    must be in the account's information. Markdown bold and '### heading' marks are cleaned away first.
+    carries a valid citation, up to any 'Next steps:' or 'Recommendations:' heading. Filler, bare headings
+    and sentences that make no claim about the account need no citation.
+    All figures must be
+    in the account's information. Bold and heading marks are removed before the check.
   example:
     scenario: Three answers.
     steps:
-    - Figure 500 is not in the data
+    - One states the figure 500, which the account's information does not contain
     - One cites the key metrics, which are not in the account's information
     - '''They run AutoCAD.'' has no citation'
-    result: All three are rejected.
+    result: None of the three passes.
     verified: true
     expect:
     - - false
@@ -612,14 +599,14 @@ rules:
   parent: null
   name: Off-topic check
   kind: guardrail
-  summary: A question with nothing to do with the account is turned away before it is answered.
-  purpose: Keeps the chat to the account and to selling to it.
-  logic: Before the account is read, the AI is asked one thing about the question alone - could it bear
-    on the account, its market, HP or selling to it? Only a question with no plausible link (a poem, a
-    recipe, a sports result, coding help, personal advice, a request to reveal the instructions) is turned
-    away. Anything ambiguous goes through, and if the AI does not answer the question goes through. The
-    check never reads the account data, so it cannot say the platform does not hold something it holds;
-    that is still decided by the evidence checks. Greetings are answered before this check.
+  summary: A question unrelated to the account gets a short reply that steers back to the account.
+  purpose: Keeps the chat focused on the account and on selling to it.
+  logic: Before the account is read, the AI looks at the question alone - could it relate to the account,
+    its market, HP or selling to it? Only a question with no plausible link (a poem, a recipe, a sports
+    result, coding help, personal advice, a request to reveal the instructions) gets the off-topic reply.
+    Anything ambiguous is answered as normal, as is any question the check does not classify. This check
+    looks only at the question; what the account's data covers is decided by the evidence checks. Greetings
+    are answered before this check.
   example:
     scenario: A seller asks for a poem about the ocean.
     steps:
@@ -633,32 +620,27 @@ rules:
   confidence: high
 - id: sc_unavailable
   parent: null
-  name: Refusal messages
+  name: Standard chat messages
   kind: selection
-  summary: Tells the seller why there is no answer.
-  purpose: Tells the seller why there is no answer.
-  logic: 'There are three causes. If there is no data: ''No feature has published anything for this account''.
-    If the AI service fails: ''The AI did not return a usable answer ... a fault on our side''. If the
-    answer cannot be evidenced: ''I drafted an answer ... but could not evidence all of it''. Each adds
-    a pointer to the Stakeholder Map, Tech Landscape or Recent Signals. The message is shown as a normal
-    reply that says no answer is available.'
+  summary: A short standard message explains the outcome and points the seller to the right section.
+  purpose: A short standard message explains the outcome and points the seller to the right section.
+  logic: 'The message names its cause: the AI service did not return a usable reply, or the drafted
+    answer did not pass the evidence checks. Each message
+    points the seller to the Stakeholder Map, Tech Landscape or Recent Signals. It appears as a normal
+    chat reply. Off-topic questions get their own short reply.'
   table:
     columns:
     - Cause
-    - Opening text
+    - What the message says
     rows:
-    - - No data
-      - I have nothing to answer from for {company} yet. No feature has published anything for this account,
-        so there is no account intelligence to read.
     - - AI service
-      - I could not finish that answer for {company}. The model did not return a usable answer, so there
-        is nothing I can stand behind. This is a fault on our side, not a gap in the data.
+      - The AI service did not return a usable answer for {company}. The account's data is not the cause.
     - - Not evidenced
-      - I drafted an answer about {company} but could not evidence all of it. Rather than show you claims
-        I cannot trace to this account's data, I have held it back.
+      - An answer about {company} was drafted, and it is not shown because not every claim in it could
+        be traced to the account's data.
     - - Off topic
-      - I can only help with questions about {company} and how HP can sell to them. (No pointer to other
-        features.)
+      - I can only help with questions about {company} and how HP can sell to them. (This reply has no
+        pointer to other sections.)
   sources:
   - hp-backend/src/app/services/strategy/chat.py:CAUSE_OPENING
   - hp-backend/src/app/services/strategy/chat.py:_unavailable

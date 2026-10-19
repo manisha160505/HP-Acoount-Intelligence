@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { ProtectedRoute } from '@/components/common/ProtectedRoute';
 import { ParallaxBand } from '@/components/common/motion';
 import PipelinePanel from '@/components/admin/PipelinePanel';
+import { useAuth } from '@/providers/AuthProvider';
 import { AccountSellersPanel } from '@/components/users/AccountSellersPanel';
 import { ROW_BUTTON, ROW_ICON_BUTTON_DANGER } from '@/components/common/RowMenu';
 import api from '@/services/api';
@@ -42,6 +43,9 @@ import {
 type TabType = 'details' | 'data' | 'pipeline' | 'instructions' | 'guardrails';
 
 export default function ManageAccountPage() {
+  // The Pipeline tab is BridgeAI's: only the super admin sees it.
+  const { user } = useAuth();
+  const isSuperAdmin = user?.role === 'super_admin';
   const params = useParams();
   const accountId = params.id as string;
   const router = useRouter();
@@ -282,9 +286,11 @@ export default function ManageAccountPage() {
       // submitted from the Pipeline tab.
       const stale = (response.data as { regeneration?: { stale?: string[] } }).regeneration?.stale || [];
       setUploadSuccess(`Stored "${registryItem?.display_name}" (${response.data.original_filename}). `
-        + (stale.length
-          ? `${stale.length} section(s) now need a run - nothing runs until you submit from the Pipeline tab.`
-          : 'Nothing runs until you submit from the Pipeline tab.'));
+        + (!isSuperAdmin
+          ? "The account's features are updated from it by the platform team."
+          : stale.length
+            ? `${stale.length} section(s) now need a run - nothing runs until you submit from the Pipeline tab.`
+            : 'Nothing runs until you submit from the Pipeline tab.'));
       setUploadedFileModal(response.data);
       
       setSelectedFile(null);
@@ -413,7 +419,7 @@ export default function ManageAccountPage() {
           <div className="space-y-6 as-feature-in">
             
             {/* Account Title Banner */}
-            <div className="as-glass-strong rounded-2xl p-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div data-tour="admin-account-header" className="as-glass-strong rounded-2xl p-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div className="flex items-center space-x-4">
                 <div className="w-12 h-12 rounded-xl bg-hp-navy/10 text-hp-navy flex items-center justify-center font-extrabold text-lg uppercase">
                   {account.name.substring(0, 2)}
@@ -454,6 +460,7 @@ export default function ManageAccountPage() {
               <div className="flex border-b border-gray-200 bg-gray-50/50">
                 <button
                   type="button"
+                  data-tour="admin-account-tab-details"
                   onClick={() => setActiveTab('details')}
                   className={`flex-1 flex items-center justify-center space-x-2 py-3.5 px-4 text-xs font-bold border-b-2 transition ${
                     activeTab === 'details'
@@ -467,6 +474,7 @@ export default function ManageAccountPage() {
 
                 <button
                   type="button"
+                  data-tour="admin-account-tab-data"
                   onClick={() => setActiveTab('data')}
                   className={`flex-1 flex items-center justify-center space-x-2 py-3.5 px-4 text-xs font-bold border-b-2 transition ${
                     activeTab === 'data'
@@ -478,8 +486,10 @@ export default function ManageAccountPage() {
                   <span>Data ({dataFiles.filter(f => f.status === 'active').length} Active Files)</span>
                 </button>
 
+                {isSuperAdmin && (
                 <button
                   type="button"
+                  data-tour="admin-account-tab-pipeline"
                   onClick={() => setActiveTab('pipeline')}
                   className={`flex-1 flex items-center justify-center space-x-2 py-3.5 px-4 text-xs font-bold border-b-2 transition ${
                     activeTab === 'pipeline'
@@ -490,9 +500,11 @@ export default function ManageAccountPage() {
                   <Workflow className="w-4 h-4" />
                   <span>Pipeline</span>
                 </button>
+                )}
 
                 <button
                   type="button"
+                  data-tour="admin-account-tab-instructions"
                   onClick={() => setActiveTab('instructions')}
                   className={`flex-1 flex items-center justify-center space-x-2 py-3.5 px-4 text-xs font-bold border-b-2 transition ${
                     activeTab === 'instructions'
@@ -506,6 +518,7 @@ export default function ManageAccountPage() {
 
                 <button
                   type="button"
+                  data-tour="admin-account-tab-guardrails"
                   onClick={() => setActiveTab('guardrails')}
                   className={`flex-1 flex items-center justify-center space-x-2 py-3.5 px-4 text-xs font-bold border-b-2 transition ${
                     activeTab === 'guardrails'
@@ -521,7 +534,7 @@ export default function ManageAccountPage() {
               {/* Tab Content Container */}
               <div className="p-8">
                 
-                {activeTab === 'pipeline' && <PipelinePanel accountId={accountId} />}
+                {activeTab === 'pipeline' && isSuperAdmin && <PipelinePanel accountId={accountId} />}
 
                 {/* Tab 1: Account Details Form */}
                 {activeTab === 'details' && (

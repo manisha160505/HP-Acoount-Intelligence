@@ -7,7 +7,7 @@ purpose: Shows what the account is researching online, mapped to HP's five busin
   HP products.
 final_output: A 'So what for HP' box; an 'Intent across HP business units' chart and cards (one score
   per HP category, the topics behind it, a one-line read and a dropdown for the remaining topics); per-category
-  cards with supporting research signals and confirming technologies; the full table of research topics;
+  cards with supporting research signals and confirming technologies; the list of research topics;
   and a Hiring Signals section with job-posting and hybrid-role tiles, job-family bars, technology tags
   and one HP theme card per hiring theme.
 how_it_combines: 'One intent source leads each account: the company''s online research activity where
@@ -39,15 +39,15 @@ rules:
   - The website and date the research data belongs to
   - HP's own interest scores for its five product categories
   logic: If the account has at least one usable research topic (it belongs to this company's website and
-    has a numeric score), the research activity leads. The HP business-unit summary is then built from
-    it, and HP's own category scores are left out of the 'So what for HP' box. If the account has no usable
-    research topic, HP's own category scores lead. The two sources are never blended into one number.
+    has a numeric score), the research activity leads, and the HP business-unit summary and the 'So what
+    for HP' box are built from it. Otherwise HP's own category scores lead. The two sources are never blended
+    into one number.
   example:
     scenario: Astra has 4 research topics and also a row in HP's own category scores.
     steps:
     - Usable research topics exist -> research activity leads.
-    result: The lead source is the research activity; the line of HP's own category scores is not printed
-      in 'So what for HP'.
+    result: The lead source is the research activity; 'So what for HP' is built from the research, not
+      from HP's own category scores.
     verified: true
     expect: Bombora
   output: Which source leads the summary
@@ -58,28 +58,27 @@ rules:
   confidence: high
 - id: int_domain_match
   parent: int_lead_source
-  name: Research data must belong to this account's organisation
+  name: Research data is matched to the account's organisation
   kind: selection
-  summary: Prevents another company's research being shown.
-  purpose: Prevents another company's research being shown.
-  logic: 'The website the research data was collected for is tidied up (web prefix, ''www.'' and any path
-    removed) and compared with the account''s website. It matches when the two are equal, when one is
-    a subdomain of the other (health.nsw.gov.au and nsw.gov.au), or when the data''s website is on the
-    confirmed list of websites the client accepted for the account (iag.com.au for IAG NZ, client 5 Oct;
-    six more, e.g. nga.mil for NIS Korea, client 8 Oct).
-    Anything else is a mismatch: the topics are not attached and the tab names both websites. No website
-    on either side: unverified, and the topics are still shown. The observation date is the data''s date
-    stamp (YYYYMMDD) when exactly one is present.'
+  summary: Only research for the account's own organisation is used.
+  purpose: Only research for the account's own organisation is used.
+  logic: 'The website the research data was collected for is compared with the account''s website, ignoring
+    the web prefix, ''www.'' and any path. It matches when the two are equal, when one is a subdomain of
+    the other (health.nsw.gov.au and nsw.gov.au), or when the data''s website is on the account''s confirmed
+    list (for example iag.com.au for IAG NZ and nga.mil for NIS Korea). A matched website is shown on the
+    tab as verified. Research for any other website is not used for the account. The research date is
+    the data''s date stamp, when the data carries a single one.'
   conditions:
-  - Look-alike registered websites (posco-inc.com and posco.com) never match by rule
-  - Research for a different company stays a mismatch unless the client confirmed it for this account
+  - Look-alike registered websites (posco-inc.com and posco.com) are treated as different organisations
+  - Research for a different company is used only when its website is on the account's confirmed list
   example:
     scenario: 'Three accounts: NSW Health (health.nsw.gov.au) with data for nsw.gov.au; IAG NZ (iag.co.nz)
       with data for www.iag.com.au; Astra (astra.co.id) with data for acme-holdings.com.'
     steps:
     - 'NSW Health: nsw.gov.au is the parent of health.nsw.gov.au -> matched.'
     - 'IAG NZ: iag.com.au is on the confirmed list -> matched.'
-    - 'Astra: acme-holdings.com is another organisation, never confirmed -> mismatch, topics dropped.'
+    - 'Astra: acme-holdings.com is another organisation, not on the confirmed list -> mismatch, research
+      not used.'
     result: matched, matched, mismatch.
     verified: true
     expect:
@@ -98,42 +97,45 @@ rules:
   confidence: high
 - id: int_unavailable_states
   parent: int_lead_source
-  name: What is shown when intent data is missing
+  internal: true
+  name: Sections follow the intent data on file
   kind: display
-  summary: Missing data is stated, never drawn as zero.
-  purpose: Missing data is stated, never drawn as zero.
-  logic: 'No research topics: the tab says that no intent topics are on file for this account. Research
-    data for a different website: a ''No matched signal'' message. If there is no research data AND HP''s
-    own category scores have no row for the account, the summary shows only that message. Empty sections
-    are hidden rather than showing ''no data''.'
+  summary: Each intent section appears when its data is on file; no score is drawn as zero.
+  purpose: Each intent section appears when its data is on file; no score is drawn as zero.
+  logic: When the account has no matched research topics, the research sections are left out and HP's
+    own category scores lead where the account has them. When the account has neither source, the intent
+    summary is left out of the tab. A score is never filled in as zero.
   example:
     scenario: Account with no research topics and no row in HP's own category scores.
     steps:
-    - There are no research topics, so no intent data.
-    - HP's own category scores have no match for the account.
-    result: Both summaries show the unavailable message; no scores are shown.
-  output: Availability flag and message
+    - There are no research topics.
+    - HP's own category scores have no row for the account.
+    result: The intent summary is left out of the tab; no scores are shown.
+  output: Which intent sections appear
   sources:
   - hp-backend/src/app/services/extractors/intent_demand_signals.py:extract_intent_demand_signals
   - hp-frontend/src/app/dashboard/page.tsx:sourceAMessage
   confidence: high
 - id: int_topics_table
   parent: null
-  name: Research topics table
+  name: Research topics list
   kind: selection
   summary: Every research topic for the account, as received.
   purpose: Every research topic for the account, as received.
-  logic: Each topic keeps its score (0-100) exactly as received. Topics are sorted by score, highest first;
-    topics without a numeric score go last. Each row also shows an intensity label, the research theme
-    from HP's topic list, any HP category that list assigns, and whether the topic is staffing-related.
+  logic: Each topic keeps its score (0-100) exactly as received. Topics are grouped by research theme
+    from HP's topic list and sorted by score, highest first; topics without a numeric score are listed
+    separately. Each row shows the topic, its score and any HP category the list assigns, and a topic
+    marked for review carries a Review tag. Sellers can search, filter by score (70+, 85+) and sort A-Z.
+    Where research activity leads and is grouped by HP category, the topics appear on the category cards
+    and in the 'Other researched topics' dropdown instead.
   example:
     scenario: Topics Laptops 72, laptops 90 (repeat), 3D Printing 88, Zero Trust 'n/a'.
     steps:
     - The repeat 'laptops' is removed and the first row (72) is kept.
     - 'Zero Trust is excluded: its score is not a number.'
     - 'Sorted: 3D Printing 88, Laptops 72, Zero Trust (excluded).'
-    result: 3D Printing 88 (High, 3D), Laptops 72 (Moderate, PC), Zero Trust shown without a score; the
-      repeat 'laptops' (90) is listed as removed.
+    result: 3D Printing 88 (High, 3D), Laptops 72 (Moderate, PC), Zero Trust listed separately with its
+      non-numeric score; the repeat 'laptops' (90) is listed as removed.
     verified: true
     expect:
     - - - 3D Printing
@@ -157,7 +159,7 @@ rules:
     - - topic_name: laptops
         composite_score: 90
         kept_score: 72
-  output: The topics table and the list of repeats removed
+  output: The topics list and the list of repeats removed
   sources:
   - hp-backend/src/app/services/extractors/intent_demand_signals.py:_build_topics
   - hp-backend/src/app/services/extractors/intent_demand_signals.py:extract_intent_demand_signals
@@ -166,17 +168,18 @@ rules:
   parent: int_topics_table
   name: Repeated and non-numeric topics
   kind: filter
-  summary: Keeps the table honest without inventing values.
-  purpose: Keeps the table honest without inventing values.
+  summary: Each topic is counted once, and only numeric scores enter a calculation.
+  purpose: Each topic is counted once, and only numeric scores enter a calculation.
   logic: 'A topic name repeated in the same data (ignoring capital letters) is a duplicate: the first
-    row is kept and the repeat is listed under ''duplicates removed'' with both scores. The scores are
-    never averaged. A topic whose score is not a number stays in the table but is left out of every calculation,
-    with the reason shown. It is not scored 0.'
+    row is kept, and the repeat is listed under ''Not in any summary'' with both scores. The scores are
+    never averaged. A topic whose score is not a number is listed under ''Not in any summary'' and left
+    out of every calculation. It is never counted as 0.'
   example:
     scenario: Topic 'Zero Trust' with score 'n/a'.
     steps:
     - '''n/a'' is not a number.'
-    result: 'Left out of calculations, with the reason: the score ''n/a'' is not a number.'
+    result: Left out of calculations because the score 'n/a' is not a number; listed under 'Not in any
+      summary'.
     verified: true
     expect: Composite Score 'n/a' is not a number
   output: Included flag and reason for exclusion
@@ -190,8 +193,8 @@ rules:
   summary: Plain-language strength of a topic score.
   purpose: Plain-language strength of a topic score.
   logic: A score of 85 or more is High; 70-84 is Moderate; below 70 is Low. This is applied only to research-topic
-    scores, never to HP's own category scores. The topic table's 70+ and 85+ filter buttons use the same
-    cut points.
+    scores, never to HP's own category scores. The topics list's 70+ and 85+ filters use the same cut
+    points.
   table:
     columns:
     - Research score
@@ -239,8 +242,8 @@ rules:
   summary: Labels each topic with a research theme and, only where the link is direct, an HP category.
   purpose: Labels each topic with a research theme and, only where the link is direct, an HP category.
   logic: 'Every term from HP''s topic list that appears as a whole word in the topic name is collected.
-    A term contained in a longer matched term is dropped (''printing'' is dropped when ''3d printing''
-    matched). The terms'' themes decide the topic''s theme, and their HP categories decide its HP category.
+    When one matched term sits inside a longer one, only the longer term counts (''3d printing'' counts,
+    not ''printing''). The terms'' themes decide the topic''s theme, and their HP categories decide its HP category.
     There are ten themes: Collaboration & Workplace, AI & Compute, Cloud & Infrastructure, Devices & Endpoints,
     Financial Services & Fintech, Security, E-commerce & Logistics, Print, 3D, and Other / Low Relevance.
     Only terms for devices (pc, laptop, desktop, notebook -> PC; workstation -> Workstation), collaboration
@@ -289,8 +292,8 @@ rules:
   kind: selection
   uses:
   - intent_dictionary
-  summary: Keeps doubtful topics out of HP categories.
-  purpose: Keeps doubtful topics out of HP categories.
+  summary: Gives an HP category only when the topic's link to it is clear.
+  purpose: Gives an HP category only when the topic's link to it is clear.
   logic: If a topic fits two themes, the higher one in this order wins (3D > Print > Devices > Collaboration
     > AI > Security > Cloud > Finance > Commerce), and only the winner's terms can give an HP category.
     If a topic names two HP categories (for example laptops and workstations), the theme is kept, no HP
@@ -336,8 +339,7 @@ rules:
   purpose: Marks research topics about staffing.
   logic: 'A topic is staffing-related if it contains staffing, staff, recruitment, recruiting, hiring,
     onboarding, talent, layoff(s) or workforce as a whole word. HR software topics (for example ''hr tech:
-    successfactors'') are not. The tag is kept, but the section that displayed it is no longer shown,
-    at the client''s request.'
+    successfactors'') are not.'
   example:
     scenario: '''Talent Acquisition'' and ''hr tech: successfactors''.'
     steps:
@@ -399,14 +401,14 @@ rules:
     related technologies, first and latest intent dates and the geographic source. The account''s row
     is found by website. If several runs exist, the latest run date wins. Category names are standardised
     (PCs -> PC, Workstations -> Workstation, Poly -> Poly/Collaboration, Printers -> Print, 3D Printers
-    -> 3D). Empty markers (dashes, n/a, none, blank) are treated as empty, and cells holding several items
-    are split into separate items. Scores are used exactly as received.'
+    -> 3D). Cells holding several items are split into separate items. Scores are used exactly as received.'
   example:
     scenario: Astra has runs on 2026-08-01 and 2026-09-01.
     steps:
     - The latest run, 2026-09-01, is used.
-    - PC 32 Consideration; Workstation 38 No Signal.
-    result: The account matches. PC 32 (Consideration) has a signal; Workstation 38 (No Signal) does not.
+    - PC 32 at the Consideration stage; Workstation 38.
+    result: The account matches. PC 32 (Consideration) carries a buying signal; Workstation 38 is shown
+      as a score.
     verified: true
     expect:
     - matched
@@ -430,15 +432,15 @@ rules:
   parent: int_category_file
   name: Does a category carry a signal?
   kind: selection
-  summary: HP's own verdict on whether a score means something.
-  purpose: HP's own verdict on whether a score means something.
-  logic: A category has a signal when its score is present and not zero AND its buying stage is not blank
-    and not 'No Signal'. A category that fails this still keeps its score on screen.
+  summary: Reads whether HP's own data marks a category score as a buying signal.
+  purpose: Reads whether HP's own data marks a category score as a buying signal.
+  logic: A category carries a signal when its score is above zero AND HP's data gives it a buying stage
+    (for example Awareness or Consideration). Every category shows its score.
   example:
-    scenario: Workstation 38 with stage 'No Signal'.
+    scenario: Workstation 38, whose stage in HP's data is not a buying stage.
     steps:
-    - The stage is 'No Signal'.
-    result: No signal (the score of 38 is still shown).
+    - A signal needs a buying stage such as Awareness or Consideration.
+    result: Not a buying signal; the score of 38 is shown.
     verified: true
     expect: false
   output: Signal yes or no
@@ -447,21 +449,20 @@ rules:
   confidence: high
 - id: int_trend_and_flags
   parent: int_category_file
-  name: Trend label and keyword-noise flags
+  name: Trend label and keyword review
   kind: display
-  summary: How the trend and noisy keywords are treated.
-  purpose: How the trend and noisy keywords are treated.
-  logic: The trend is shown as the label supplied with HP's category scores; it is not calculated by the
-    app. The summary states that a trend is unavailable because only one data delivery exists. Flagging
-    of noisy keywords is switched off, so no category is ever flagged or barred because of its keywords.
+  summary: How the trend label and keywords are treated.
+  purpose: How the trend label and keywords are treated.
+  logic: The trend is the label supplied with HP's category scores, kept as received. No keyword is treated
+    as noise, so no category is flagged because of its keywords.
   constants:
-  - label: Keywords treated as noise (none are set)
+  - label: Keywords treated as noise
     ref: py:app.services.hp.intent_topic_map:NOISY_CATEGORY_TERMS
     stated: {}
   example:
     scenario: Any category.
     steps:
-    - The list of noisy keywords is empty.
+    - Every keyword is read as a normal keyword.
     result: No category is flagged.
     verified: true
     expect: []
@@ -480,10 +481,10 @@ rules:
   logic: The stated top HP category and top score are compared with the highest category score in the
     row. They count as consistent only if both match.
   example:
-    scenario: The row states top 'Workstations' but gives no top score; the highest score is Workstation
+    scenario: The row states the top category 'Workstations'; the highest score in the row is Workstation
       38.
     steps:
-    - The category matches but the score is missing -> not consistent.
+    - The category matches, but the stated top score does not equal 38 -> not consistent.
     result: Not consistent.
     verified: true
     expect: false
@@ -598,8 +599,7 @@ rules:
   logic: 'The list is built from the company''s installed technology: first the technologies grouped by
     category, then its full technology stack, then the technologies used on its website. Values are split
     at commas, underscores are read as spaces, and duplicates are removed (the first place a technology
-    appears is the one kept). Workforce trend data is not used. Technologies are matched to the technology
-    terms as whole words.'
+    appears is the one kept). Technologies are matched to the technology terms as whole words.'
   example:
     scenario: Product and design technologies 'AutoCAD, SolidWorks'; full technology stack 'AutoCAD, NVIDIA,
       Microsoft Intune'; website technologies 'Google Analytics, Zoom'.
@@ -630,8 +630,7 @@ rules:
   kind: display
   summary: A fixed-pattern read of each category card.
   purpose: A fixed-pattern read of each category card.
-  logic: 'Built from fixed sentences: the category score and buying stage (or ''No <category> score''
-    when there is none); confirmed signals with their highest score and up to 4 technologies; research
+  logic: 'Built from fixed sentences: the category score and buying stage; confirmed signals with their highest score and up to 4 technologies; research
     with no matching technology; then ''This may strengthen an existing <HP play> conversation; it does
     not change the category score'' if any signal is confirmed, otherwise ''On its own this does not support
     a recommendation for <HP play>''.'
@@ -658,10 +657,10 @@ rules:
   kind: selection
   summary: Limits how strongly any wording may talk about a category.
   purpose: Limits how strongly any wording may talk about a category.
-  logic: 'Evidence sources counted: HP''s own category score (always) plus the account''s technology,
-    if any supporting signal is confirmed. If the category''s score is 0 / No Signal, technology does
-    not count. Tier: no signal, or no corroborating source -> Context Only; 2 or more sources -> Opportunity;
-    otherwise Conversation Starter. The tier sets the wording allowed: Opportunity = ''is relevant'',
+  logic: 'Evidence sources counted: HP''s own category score (always), plus the account''s technology
+    when a supporting signal is confirmed and the category score is above zero. Tier: a buying signal
+    and 2 or more sources -> Opportunity; a buying signal and one source -> Conversation Starter; every
+    other category -> Context Only. The tier sets the wording allowed: Opportunity = ''is relevant'',
     Conversation Starter = ''may be relevant'', Context Only = ''possible fit'' (not recommended).'
   table:
     columns:
@@ -669,25 +668,24 @@ rules:
     - Tier
     - Wording allowed
     rows:
-    - - No signal, or no corroborating source
-      - Context Only
-      - possible fit (not recommended)
-    - - Has a signal, category score only
-      - Conversation Starter
-      - may be relevant
     - - Has a signal + confirmed technology (2 sources)
       - Opportunity
       - is relevant
+    - - Has a signal, category score only
+      - Conversation Starter
+      - may be relevant
+    - - Every other category
+      - Context Only
+      - possible fit (not recommended)
   constants:
   - label: Sources needed for Opportunity
     ref: py:app.services.hp.evidence_tier:PIPELINES_FOR_OPPORTUNITY
     stated: 2
   example:
-    scenario: 'Workstation: (a) score 38, has a signal, confirmed CAD/GPU signals; (b) score 0, No Signal,
-      same technology.'
+    scenario: 'Workstation: (a) score 38, has a signal, confirmed CAD/GPU signals; (b) score 0, same technology.'
     steps:
     - (a) Category score + technology = 2 sources -> Opportunity.
-    - (b) No signal -> Context Only (the technology is ignored).
+    - (b) A score of 0 is not a buying signal -> Context Only (the technology does not count).
     result: Opportunity; Context Only.
     verified: true
     expect:
@@ -711,10 +709,10 @@ rules:
     the score out of 100, the buying stage, the topics researched, the confirmed technology, the evidence
     tier and the wording allowed. Rules: 80-90 words, no invented figures, no trend or volume words, and
     the wording must match the tier. A paragraph outside 80-90 words is rewritten once; the rewrite is
-    kept only if it is closer to the word range. The wording check (sub-rule) then runs; text that fails
-    it is withheld and the category has no ''So What''.'
+    kept only if it is closer to the word range. The wording check (sub-rule) then runs, and only a paragraph
+    that passes it is kept as the category''s ''So What''.'
   conditions:
-  - Stored with each category but not currently shown on the dashboard page
+  - Saved with each category's data
   constants:
   - label: Minimum words
     ref: py:app.services.extractors.intent_demand_signals:SO_WHAT_MIN_WORDS
@@ -742,23 +740,24 @@ rules:
   parent: int_so_what_category
   name: Wording guard for the tier
   kind: guardrail
-  summary: Drops text that claims more than its evidence allows.
-  purpose: Drops text that claims more than its evidence allows.
-  logic: 'Below Opportunity, these are rejected: ''is relevant'', ''is a strong/clear/direct/natural fit'',
-    ''is well-suited'', ''clearly/directly addresses''. A sentence that does not start with HP, Wolf,
-    Poly, Z by HP, Elite or Pro and says the account needs, requires, plans to, is evaluating, is replacing,
-    has budget, is in market and similar is also rejected. At Context Only, ''recommend'', ''should deploy/adopt/buy/consider'',
-    ''propose'', ''position HP'' and ''pitch'' are also rejected.'
+  summary: Keeps each paragraph's claims within what its evidence supports.
+  purpose: Keeps each paragraph's claims within what its evidence supports.
+  logic: 'Below Opportunity, these phrases are not allowed: ''is relevant'', ''is a strong/clear/direct/natural
+    fit'', ''is well-suited'', ''clearly/directly addresses''. Nor is a sentence that does not start with
+    HP, Wolf, Poly, Z by HP, Elite or Pro and says the account needs, requires, plans to, is evaluating,
+    is replacing, has budget, is in market and similar. At Context Only, ''recommend'', ''should deploy/adopt/buy/consider'',
+    ''propose'', ''position HP'' and ''pitch'' are also not allowed. A paragraph that uses any of them
+    is not kept.'
   example:
     scenario: Conversation Starter text 'Astra needs new workstations for its engineers.'
     steps:
     - The subject is the account and the verb is 'needs'.
-    result: Rejected; the category has no 'So What'.
+    result: Not allowed at this tier; the paragraph is not kept for the category.
     verified: true
     expect:
     - 'tier Conversation Starter: says ''needs'', which states a confirmed need, project or buying motion
       that only the Opportunity tier may claim'
-  output: Reasons the text was withheld
+  output: The wording check result, with its reasons
   sources:
   - hp-backend/src/app/services/hp/guardrails.py:tier_language_faults
   - hp-backend/src/app/services/hp/guardrails.py:_SETTLED_RELEVANCE_RE
@@ -773,19 +772,18 @@ rules:
   summary: The lines shown in the summary box.
   purpose: The lines shown in the summary box.
   logic: 'The box shows these lines in order. For an account led by research activity: AI''s one-sentence
-    overview of the account''s research, if one was written. For other accounts: a line listing each category''s
-    score out of 100 and buying stage and, if no category has a signal, a line saying that no category
-    reports a buying stage, so none of the scores stands as a signal on its own. If there are no category
-    scores at all: a line saying so. Then, for any account, a line on supporting research confirmed by
+    overview of the account''s research, when one is written. For accounts led by HP''s own scores: a
+    line listing each category''s score out of 100 and its buying stage. Then, for any account, a line on supporting research confirmed by
     the account''s own technology, listing the confirmed families with their highest score and up to 3
     technologies.'
   example:
-    scenario: No research data; HP's category scores PC 32 Consideration (signal), Workstation 0 No Signal;
-      no technology.
+    scenario: An account led by HP's own scores, with PC 32 at the Consideration stage (a buying signal)
+      and Workstation 0.
     steps:
     - HP's own scores lead -> score line.
-    - PC has a signal -> no 'no buying stage' line.
-    result: 'One line: category scores PC 32/100 (Consideration); Workstation 0/100 (No Signal).'
+    - PC carries a buying signal, so the score line stands on its own.
+    result: 'One line listing the category scores: PC 32/100 (Consideration) and Workstation 0/100 with
+      its stage from HP''s data.'
     verified: true
     expect:
     - 'HP Category Intent file scores: PC 32/100 (Consideration); Workstation 0/100 (No Signal).'
@@ -800,17 +798,16 @@ rules:
   kind: selection
   summary: One score per HP category - PC, Workstation, Poly, Print, 3D - from the leading source.
   purpose: One score per HP category - PC, Workstation, Poly, Print, 3D - from the leading source.
-  logic: 'Three cases. (1) No usable research topic: each category''s score is HP''s own category score,
-    sorted highest first, with no long tail. (2) Research exists but AI placed no topic in any HP category:
-    HP''s own category scores stand in, and every research topic goes to the long tail. (3) Otherwise:
-    each category''s score is the average of the scores of the research topics placed in it (sub-rules);
-    categories with none have no score. Categories are sorted by score (no score last), then by topic
-    count.'
+  logic: 'Three cases. (1) Accounts led by HP''s own scores: each category''s score is HP''s own category
+    score, sorted highest first. (2) Research where AI places every topic outside HP''s five categories:
+    HP''s own category scores are used, and every research topic goes to the long tail. (3) Otherwise:
+    each category''s score is the average of the scores of the research topics placed in it (sub-rules).
+    Categories are sorted by score, then by topic count.'
   example:
-    scenario: No research data; HP's own category scores PC 32 Consideration, Workstation 38 Awareness.
+    scenario: An account led by HP's own category scores, PC 32 Consideration and Workstation 38 Awareness.
     steps:
     - Case (1).
-    result: Workstation 38, PC 32; the other three have no score.
+    result: Workstation 38, then PC 32.
     verified: true
     expect:
     - PredictLeads
@@ -848,9 +845,9 @@ rules:
     (for example PC = laptops, 2-in-1s, desktops, thin clients, PC processors, Windows migrations, monitors
     and docks; Workstation = workstations, RTX/Quadro graphics, CAD/BIM/rendering applications; data-centre
     GPUs, high-performance computing clusters, cloud, general AI, security and networking are always none).
-    When unsure, the label is none; a topic naming two categories equally is none. The AI never sees a
-    score. Answers naming an unknown category are ignored. Labels are saved per topic text and reused
-    across accounts.
+    When unsure, the label is none; a topic naming two categories equally is none. The AI is not given
+    the scores. Only the five HP categories or none are accepted as labels. Labels are saved per topic
+    text and reused across accounts.
   constants:
   - label: Version of the category definitions
     ref: py:app.services.hp.bombora_hp_classifier:PROMPT_VERSION
@@ -859,14 +856,14 @@ rules:
     internal: true
     ref: py:app.services.hp.bombora_hp_classifier:BATCH_SIZE
     stated: 120
-  - label: Store of saved labels
+  - label: Saved topic labels
     ref: py:app.services.hp.bombora_hp_classifier:COLLECTION
     stated: bombora_topic_hp_classes
   example:
     scenario: 'Topics ''Laptops'' and ''cloud: kubernetes''.'
     steps:
     - AI labels Laptops -> PC and kubernetes -> none.
-    result: AI judgement; saved for later accounts.
+    result: The labels come from the AI and are saved for reuse on later accounts.
   output: HP category label and reason per topic
   sources:
   - hp-backend/src/app/services/hp/bombora_hp_classifier.py:SYSTEM
@@ -883,8 +880,7 @@ rules:
   purpose: The number on each business-unit bar and card on an account led by research activity.
   logic: Score = the sum of the scores of the topics placed in the category / the number of those topics,
     rounded to 1 decimal. The sum, the count and the full topic list are kept so the average can be checked
-    by hand. The top 3 topics are used for the card's one-line read. A category with no topic has no score
-    (not 0). Topics labelled none form the long tail, strongest first, shown as received in a dropdown.
+    by hand. The top 3 topics are used for the card's one-line read. Topics labelled none form the long tail, strongest first, shown as received in a dropdown.
   formula: Category score = (sum of the scores of placed topics / number of placed topics), rounded to
     1 decimal
   constants:
@@ -898,9 +894,9 @@ rules:
     - PC = (80 + 65) / 2 = 72.5.
     - Workstation = 89 / 1 = 89.0.
     - Kubernetes 92 goes to the long tail.
-    - 'Order: Workstation 89.0, PC 72.5, then the three unscored.'
-    result: 'Workstation 89.0 (1 topic), PC 72.5 (2 topics, sum 145), Poly/Collaboration, Print and 3D
-      unscored; Cloud: Kubernetes 92 in the long tail.'
+    - 'Order: Workstation 89.0, then PC 72.5.'
+    result: 'Workstation 89.0 (1 topic), PC 72.5 (2 topics, sum 145); Cloud: Kubernetes 92 in the long
+      tail.'
     verified: true
     expect:
     - - - Workstation
@@ -933,17 +929,17 @@ rules:
   uncommitted: true
 - id: int_bu_fallback
   parent: int_bu_summary
-  name: 'No HP-relevant research topic: HP''s own category scores stand in'
+  name: HP's own category scores for research outside HP's categories
   kind: source
-  summary: What an account with research data shows when none of its research is about HP's categories.
-  purpose: What an account with research data shows when none of its research is about HP's categories.
-  logic: If AI places no research topic in any HP category, each category takes HP's own category score,
-    and all research topics go to the long tail. The page says that the scores come from HP's own category
-    interest scores because none of the account's research topics is about an HP category.
+  summary: Uses HP's own category scores when all of an account's research sits outside HP's categories.
+  purpose: Uses HP's own category scores when all of an account's research sits outside HP's categories.
+  logic: When AI places every research topic outside HP's five categories, each category takes HP's own
+    category score, and all research topics go to the long tail. The page notes that these scores come
+    from HP's own buying-interest data for each HP area.
   example:
     scenario: Same 4 topics, all labelled none; HP's own scores PC 32, Workstation 38.
     steps:
-    - Nothing is placed -> HP's own scores stand in.
+    - Every topic sits outside HP's categories -> HP's own scores are used.
     result: Workstation 38 and PC 32 from HP's own scores; 4 topics in the long tail.
     verified: true
     expect:
@@ -970,9 +966,9 @@ rules:
     with its top 3 topic names (no scores), and writes one sentence per category and one overview sentence
     naming 1-3 categories. Rules: 18-40 words; research language (''suggests'', ''may indicate''), never
     ''needs'' or ''is ready to''; name only the listed topics; never an HP product; no numbers, scores,
-    percentages or dates. A read is dropped if it contains a number that does not appear in the category
-    or topic names, or if it falls outside 18-40 words (there is no second attempt). An overview with
-    an unsourced figure is blanked. The overview becomes the first line of the ''So what for HP'' box.'
+    percentages or dates. A read is kept only if it is 18-40 words and every number in it appears in
+    the category or topic names. The overview is kept on the same number check, and becomes the first
+    line of the ''So what for HP'' box.'
   constants:
   - label: Minimum words
     ref: py:app.services.extractors.intent_demand_signals:BU_READ_MIN_WORDS
@@ -988,8 +984,8 @@ rules:
       pcs''), and a read containing ''73 topics''.'
     steps:
     - '''2-in-1'' appears in the topic name -> allowed.'
-    - '''73'' appears in no name -> read dropped.'
-    result: The first is kept, the second is dropped.
+    - '''73'' appears in no name -> read not kept.'
+    result: The first is kept, the second is not.
     verified: true
     expect:
     - false
@@ -1011,12 +1007,11 @@ rules:
   purpose: One shared selection, also used by the Executive Dashboard job tile.
   inputs:
   - 'The company''s job postings: company name, country code, location and first-seen date'
-  logic: 'From the account''s job postings: (1) Country check: drop a job whose location names a country
-    other than the account''s; keep blank locations and locations naming no country. (2) Keep only jobs
-    first seen within the 12 months up to the date the job data was collected (18 Sep 2026, so from 18
-    Sep 2025); a job with no first-seen date is dropped. (3) Open and closed postings both count. The
-    original order is kept. Location is never shown. If the account''s country cannot be worked out, the
-    country check is skipped and a note is recorded.'
+  logic: 'From the account''s job postings: (1) Country check: a job counts when its location names the
+    account''s country or names no other country. (2) Window: a job counts when its first-seen date falls
+    within the 12 months up to the date the job data was collected. (3) Open and closed postings both
+    count. The original order is kept. Location is used only for the country check, which applies when
+    the account''s country is known.'
   constants:
   - label: Job data collection date (window end)
     ref: py:app.services.hp.hiring_jobs:PREDICTLEADS_PULL_DATE
@@ -1029,13 +1024,13 @@ rules:
     stated: 2
   example:
     scenario: 'Jabil - MY account, six jobs on rows shared by the Malaysian and Singaporean companies:
-      Singapore (Mar 2026), Kuala Lumpur Malaysia (Mar 2026), blank location (Jun 2025), blank location
-      and no date, Penang Malaysia (18 Sep 2025), Austin United States (May 2026).'
+      Singapore (Mar 2026), Kuala Lumpur Malaysia (Mar 2026), a location naming no country (Jun 2025),
+      an undated job naming no country, Penang Malaysia (18 Sep 2025), Austin United States (May 2026).'
     steps:
-    - Singapore and United States -> other country, dropped (2).
-    - Jun 2025 -> before 18 Sep 2025, dropped.
-    - No first-seen date -> dropped.
-    - Kuala Lumpur and Penang (on the window start day) are kept.
+    - Singapore and United States -> other country, not counted (2).
+    - Jun 2025 -> before 18 Sep 2025, not counted.
+    - A job counts only with a first-seen date in the window -> the undated job is not counted.
+    - Kuala Lumpur and Penang (on the window start day) count.
     result: 2 jobs.
     verified: true
     expect:
@@ -1043,7 +1038,7 @@ rules:
     - 2
     - 1
     - 1
-  output: The job list every Hiring figure uses, with counts of the jobs dropped
+  output: The job list every Hiring figure uses, with counts of the jobs not counted
   sources:
   - hp-backend/src/app/services/hp/hiring_jobs.py:select_jobs
   - hp-backend/src/app/services/hp/hiring_jobs.py:PREDICTLEADS_PULL_DATE
@@ -1106,28 +1101,27 @@ rules:
   parent: hire_job_selection
   name: Location country check
   kind: guardrail
-  summary: Drops jobs located in another country.
-  purpose: Drops jobs located in another country.
+  summary: Counts only jobs located in the account's country.
+  purpose: Counts only jobs located in the account's country.
   logic: 'Country names (the ten account countries plus about 150 others) are searched for in the location
-    as whole words, longest first (so ''Papua New Guinea'' is not read as ''Guinea''). No country found,
-    or a blank location: the job is kept. Otherwise it is kept only if one of the countries found is the
-    account''s.'
+    as whole words, longest first (so ''Papua New Guinea'' is not read as ''Guinea''). The job counts
+    when its location names the account''s country or names no other country.'
   example:
     scenario: 'AU account: ''Cremorne, Victoria, Australia'', ''Columbus, OH'', ''Port Moresby, Papua
       New Guinea''; MY account: ''Singapore''.'
     steps:
-    - Australia -> keep.
-    - No country named -> keep.
-    - Papua New Guinea -> drop.
-    - Singapore is not Malaysia -> drop.
-    result: Kept, kept, dropped, dropped.
+    - Australia -> counts.
+    - No country named -> counts.
+    - Papua New Guinea -> not counted.
+    - Singapore is not Malaysia -> not counted.
+    result: Counted, counted, not counted, not counted.
     verified: true
     expect:
     - true
     - true
     - false
     - false
-  output: Keep or drop
+  output: Whether the job counts
   sources:
   - hp-backend/src/app/services/hp/hiring_jobs.py:location_in_country
   - hp-backend/src/app/services/hp/hiring_jobs.py:_COUNTRY_RE
@@ -1189,18 +1183,18 @@ rules:
   summary: Jobs per job family.
   purpose: Jobs per job family.
   logic: Jobs are counted per job family (the standard occupation group each job belongs to). The 6 largest
-    families are shown (ties keep the original order); everything else, including jobs with no family,
-    is one 'Other' bar, so the bars add up to the job postings tile.
+    families are shown (ties keep the original order); every other job, including unclassified jobs,
+    is in one 'Other' bar, so the bars add up to the job postings tile.
   constants:
   - label: Bars shown before Other
     ref: py:app.services.extractors.hiring_signals:FAMILY_BARS
     stated: 6
   example:
     scenario: '22 jobs: Management 5, Sales 4, Office 3, Computer 3, Business 2, Production 2, Legal 1,
-      Education 1, no family 1.'
+      Education 1, unclassified 1.'
     steps:
     - The top 6 are kept.
-    - Other = Legal 1 + Education 1 + no family 1 = 3.
+    - Other = Legal 1 + Education 1 + unclassified 1 = 3.
     result: 7 bars, with Other = 3.
     verified: true
     expect:
@@ -1231,7 +1225,7 @@ rules:
   summary: Tools and skills most mentioned in the account's job ads.
   purpose: Tools and skills most mentioned in the account's job ads.
   logic: 'Each job''s tags count once per job. Tags are ranked by the number of jobs (ties keep the order
-    first seen). These are removed: Internship, Contractor, Business development, Customer success, Marketing
+    first seen). These are left out: Internship, Contractor, Business development, Customer success, Marketing
     campaigns, Advertising and Social media (any capitalisation); the company''s own name (the account
     name without its '' - XX'' ending, or the first part of its website address, matched ignoring capitals
     and punctuation); and any tag of 5 or more characters that is the start of that name. At most 30 tags
@@ -1276,8 +1270,8 @@ rules:
   purpose: Maps each job to one of nine HP themes and its HP product, service and solution.
   logic: Each job carries a standard occupation code. The code is checked against the table from the top
     down, and the first matching row gives the theme. Exact codes for Security, IT operations and Leadership
-    are checked before the broad code groups. A job with no code, or a code no row matches, has no theme
-    and appears on no card.
+    are checked before the broad code groups. Each job whose code matches a row appears on that theme's
+    card.
   table:
     columns:
     - '#'
@@ -1346,17 +1340,17 @@ rules:
     ref: py:app.services.hp.hiring_themes:THEMES_VERSION
     stated: 1
   example:
-    scenario: Codes 15-1212.00, 15-2051.00, 11-2021.00, 41-2031.00, 23-2011.00, blank.
+    scenario: Codes 15-1212.00, 15-2051.00, 11-2021.00, 41-2031.00, 23-2011.00, and an uncoded job.
     steps:
     - Exact Security code.
     - Other 15- -> Technical.
     - Other 11- -> Knowledge workers.
     - 41-2 -> Frontline.
     - 23-2 -> Office support.
-    - Blank -> no theme.
+    - The uncoded job matches no row.
     result: '15-1212.00: Security. 15-2051.00: Technical, engineering & design experts. 11-2021.00: Office
       knowledge workers. 41-2031.00: Frontline & operations. 23-2011.00: Office support & customer service.
-      Blank: no theme.'
+      The uncoded job takes no theme.'
     verified: true
     expect:
     - - 15-1212.00
@@ -1386,21 +1380,20 @@ rules:
   logic: 'Each theme with at least one job gets a card: the theme name, the job count, up to 5 job titles
     (the job''s title, otherwise its standard title) most frequent first with a posted count, ''+ N more
     jobs'' for the rest, and the theme''s HP product, service and solution. Cards are sorted by job count,
-    with ties in table order. Titles are shown in English (client, 9 Oct): the job data''s own English
-    title where it has one, otherwise a machine translation made once and reused; postings that read the
-    same in English are counted together, and the title as posted is shown on hover. A translation that
-    comes back empty or not in English is not used - the posted title is shown instead.'
+    with ties in table order. Titles are shown in English: the job data''s own English title where it
+    has one, otherwise a machine translation made once and reused; postings that read the same in English
+    are counted together, and the title as posted is shown on hover.'
   constants:
   - label: Titles per card
     ref: py:app.services.extractors.hiring_signals:CARD_TITLES
     stated: 5
   example:
     scenario: 3 Security jobs (Security Engineer x2, SOC Analyst), 3 Office support jobs (Customer Service
-      Rep x2, Contact Centre Agent), 1 job with no code.
+      Rep x2, Contact Centre Agent), 1 uncoded job.
     steps:
     - Both themes have 3 jobs -> Security first by table order.
-    - The job with no code has no theme.
-    result: Security 3, Office support 3; 1 job has no theme.
+    - The uncoded job sits outside the themes.
+    result: Security 3, Office support 3; 1 job sits outside the themes.
     verified: true
     expect:
     - - - Security
@@ -1426,18 +1419,19 @@ rules:
   confidence: high
 - id: hire_empty_section
   parent: null
-  name: 'No jobs: section hidden'
+  internal: true
+  name: When the Hiring Signals section appears
   kind: guardrail
-  summary: Never shows 'no data' for hiring.
-  purpose: Never shows 'no data' for hiring.
-  logic: If no job passes the selection, all four Hiring figures are empty and the page leaves the Hiring
-    Signals section out. A figure with nothing to show (no tags, no themed jobs) is also empty.
+  summary: The Hiring Signals section appears when at least one job is selected.
+  purpose: The Hiring Signals section appears when at least one job is selected.
+  logic: The page shows the Hiring Signals section when at least one job passes the selection. Within
+    the section, each figure appears when it has something to show (tags, themed jobs).
   example:
     scenario: Every job is in another country.
     steps:
     - The selection is empty.
     result: The section is not shown.
-  output: Section hidden
+  output: Whether the section is shown
   sources:
   - hp-backend/src/app/services/extractors/hiring_signals.py:extract_hiring_signals
   - hp-frontend/src/app/dashboard/page.tsx

@@ -5,18 +5,20 @@ feature_key: recent_news_signals
 purpose: Lists current news and events about the account and scores each one out of 10 for how recent
   it is, how relevant it is to HP and how reliable its source is.
 final_output: 'A feed of event cards, highest score first. Each card shows a category tag, an urgency
-  badge, the event status, the date, the score out of 10, the headline and the supporting evidence. Below
-  that is an ''Implication for HP'' paragraph with the HP product line it points to and, where one fits,
-  a customer case study. An expandable breakdown shows the three scores behind the total and the source
-  line (for example ''T1 - Established news: Nikkei'').'
-how_it_combines: 'News items about the account are tidied up and dropped if they are older than 12 months
-  or have no date. Repeat reports of the same event are merged into one. Each remaining signal gets a
-  score from 0 to 10: Recency ({{scoring:live_signal.weights.recency|pct}}, from date bands) + Relevance
-  & Impact ({{scoring:live_signal.weights.relevance_impact|pct}}, judged by AI) + Source Reliability ({{scoring:live_signal.weights.source_reliability|pct}},
-  from the type of source). There are no tiers, no minimum score and no limit on the number of signals.
-  Every scored signal in the window is published, highest first. Each one carries an AI-written ''Implication
-  for HP'', which is checked for banned phrases, repetition, length and invented numbers before it is
-  shown.'
+  badge, the event status, the date, the score out of 10 and the headline. An ''Implication for HP''
+  paragraph follows, with the HP product line it points to and, where one fits, a customer case study.
+  Below it are the supporting detail and a link to the source, with any further sources one click away.
+  A score breakdown shows the three scores behind the total and the source line (for example ''Established
+  news outlet: Nikkei'').'
+how_it_combines: 'News items about the account are standardised, and those dated within the last 12
+  months are kept. Repeat reports of the same event are merged into one card, and each card links to
+  its source. Each signal gets a score from 0 to 10: Recency ({{scoring:live_signal.weights.recency|pct}},
+  from date bands) + Relevance & Impact ({{scoring:live_signal.weights.relevance_impact|pct}}, judged
+  by AI) + Source Reliability ({{scoring:live_signal.weights.source_reliability|pct}}, from the type
+  of source). Every signal about the account is published, highest score first, with no minimum score
+  and no limit on the number of cards. Each card can carry an AI-written ''Implication for HP'', shown
+  once it passes checks on phrasing, repetition and that every number and link comes from the account''s
+  news. A paragraph outside 70-100 words gets one rewrite.'
 rules:
 - id: ls_sources
   parent: null
@@ -35,15 +37,16 @@ rules:
     and news events from a third-party business data provider. Every item becomes one signal with a headline,
     an optional evidence sentence, a date, a category and its source. The source text is used word for
     word. For news coverage the date used is the event date. For news events it is the effective date
-    and, only when that is blank, the date the item was first found. An item with no headline text is
-    skipped.'
+    when one is given, otherwise the date the item was first found. Each item needs headline text to
+    become a signal.'
   conditions:
-  - News events come with no web link, so their signals never get a link (none is made up)
-  - Hiring-event data and job-opening data are NOT used by this feature
+  - A news event uses the web link supplied with it when that is a valid web address; a link is never
+    made up
+  - Hiring and job-opening data feed the Hiring section
   example:
-    scenario: A news event with a blank effective date and a first-found date of 2026-09-02.
+    scenario: A news event whose only date is a first-found date of 2026-09-02.
     steps:
-    - The effective date is blank, so the first-found date is used as the event date.
+    - The first-found date is used as the event date.
     result: The signal is dated 2026-09-02.
     verified: true
     expect: '2026-09-02'
@@ -56,15 +59,15 @@ rules:
   confidence: high
 - id: ls_headline_publisher
   parent: ls_sources
-  name: Publisher recovered from the headline
+  name: Publisher read from the headline
   kind: selection
   summary: News headlines often end with ' - Publisher'. That name is used to judge the source.
   purpose: News headlines often end with ' - Publisher'. That name is used to judge the source.
   logic: If the headline contains ' - ', the text after the last ' - ' is treated as the publisher and
     removed from the headline. This happens only when that text is 40 characters or fewer, 6 words or
-    fewer, and does not end in . ! ? or a comma. Otherwise the headline is left whole and no publisher
-    is claimed. A publisher recovered this way takes priority over any publisher name supplied separately
-    with the item.
+    fewer, and does not end in . ! ? or a comma. Otherwise the headline is left whole and the publisher
+    supplied with the item is used. A publisher read from the headline takes priority over any publisher
+    name supplied separately with the item.
   constants:
   - label: Max publisher length (characters)
     value: 40
@@ -87,24 +90,24 @@ rules:
   confidence: high
 - id: ls_duplicate_body
   parent: ls_sources
-  name: Repeated body text is not shown twice
+  name: Each line appears once on the card
   kind: display
   summary: Stops the card printing the same line twice.
   purpose: Stops the card printing the same line twice.
   logic: If the evidence text is identical to the headline, ignoring capital letters and spacing, the
-    evidence text is left blank.
+    card shows the headline only.
   example:
     scenario: A news coverage item whose headline and announcement text are both 'Astra opens plant -
       Reuters'.
     steps:
     - The publisher 'Reuters' is split off the headline.
-    - The evidence text equals the original headline, so it is blanked.
-    result: No evidence sentence; the publisher is Reuters.
+    - The evidence text equals the original headline, so the card shows the headline only.
+    result: The card shows the headline once; the publisher is Reuters.
     verified: true
     expect:
     - ''
     - Reuters
-  output: An evidence sentence, or nothing.
+  output: An evidence sentence when it adds to the headline.
   sources:
   - hp-backend/src/app/services/extractors/recent_news_signals.py:_same_text
   - hp-backend/src/app/services/extractors/recent_news_signals.py:_normalize_signals
@@ -162,7 +165,7 @@ rules:
       - anything else
       - Strategic
   example:
-    scenario: A news event of type 'expands to' and one of an unknown type 'opens office'.
+    scenario: A news event of type 'expands to' and one of an unlisted type 'opens office'.
     steps:
     - '''Expands to'' is in the table, so it is Strategic.'
     - '''Opens office'' is not in the table, so it gets the default, Strategic.'
@@ -179,34 +182,32 @@ rules:
   confidence: high
 - id: ls_gate
   parent: null
-  name: 12-month gate
+  name: 12-month window
   kind: guardrail
-  summary: Removes items that cannot be current account news before any AI sees them.
-  purpose: Removes items that cannot be current account news before any AI sees them.
+  summary: Keeps only dated account news from the last 12 months, before any AI step.
+  purpose: Keeps only dated account news from the last 12 months, before any AI step.
   inputs:
   - Standardised signals and today's date
-  logic: A signal is rejected, with the reason recorded, if it has no headline and no evidence sentence,
-    if its date cannot be read, if its date is in the future, or if it is more than 365 days before today
-    (the day the feed is built). Everything else passes. Rejections are counted by reason and shown in
-    the feed summary ('from N raw').
+  logic: 'A signal is kept when it has a headline or evidence sentence, a readable date, and that date
+    is not in the future and no more than 365 days before today (the day the feed is built). The other
+    items are counted by reason and shown in the feed summary (''from N raw'').'
   conditions:
   - The window is measured back from the day the feed is built, not from the day the data was collected
-  - An undated signal is dropped here, so the 'No usable date = 0/10' band is never shown on a card
-  - A future-dated signal is dropped here, although the recency scoring itself would treat it as same-day
+  - Every card therefore carries a date within the last 12 months
   constants:
   - label: Maximum age in days
     ref: py:app.services.extractors.recent_news_signals:GATE_MAX_AGE_DAYS
     stated: 365
   example:
-    scenario: 'Build date 17 Sep 2026; five signals: A dated 1 Sep 2026, B undated, C dated 1 Oct 2026,
-      D dated 1 Sep 2025, E with no text.'
+    scenario: 'Build date 17 Sep 2026; five signals: A dated 1 Sep 2026, B with an unreadable date, C
+      dated 1 Oct 2026, D dated 1 Sep 2025, E dated 1 Sep 2026 that carries a date only.'
     steps:
-    - A is 16 days old, so it passes.
+    - A is 16 days old, so it is kept.
     - 'B: the date cannot be read.'
     - 'C: the date is in the future.'
     - 'D: 381 days old, which is older than 365 days.'
-    - 'E: no headline or evidence.'
-    result: Only A passes.
+    - 'E: a date alone does not make a signal; it needs a headline or evidence sentence.'
+    result: Only A is kept.
     verified: true
     expect:
     - - A
@@ -214,7 +215,7 @@ rules:
       - date is in the future
       - older than 365 days
       - no headline or evidence sentence
-  output: The signals that passed, plus a list of rejections with reasons.
+  output: The signals kept, and a count of the other items by reason.
   sources:
   - hp-backend/src/app/services/extractors/recent_news_signals.py:_apply_gate
   - hp-backend/src/app/services/extractors/recent_news_signals.py:GATE_MAX_AGE_DAYS
@@ -228,21 +229,22 @@ rules:
   summary: Combines repeat coverage of one event into one card, keeping every source as supporting evidence.
   purpose: Combines repeat coverage of one event into one card, keeping every source as supporting evidence.
   logic: Signals are processed newest first. A signal joins an existing card when (a) its cleaned headline
-    is identical, (b) the headline similarity is 0.85 or more, or (c) it has the same non-empty evidence
-    sentence AND the same event date. The first (newest) signal of a group becomes the card. The link,
-    publisher, source type and dates of every merged item are kept as supporting sources. If the card
-    had no link and a merged item has one, the card takes that item's link and publisher.
+    is identical, (b) the headline similarity is 0.85 or more, or (c) both carry an evidence sentence,
+    the sentences are the same, AND the event dates are the same. The first (newest) signal of a group
+    becomes the card. The link, publisher, source type and dates of every merged item are kept as supporting
+    sources.
   formula: Similarity = how closely two headlines match as text, ignoring capital letters and punctuation
-    (0 means nothing in common, 1 means identical). Merge when similarity is 0.85 or more
+    (0 means completely different, 1 means identical). Merge when similarity is 0.85 or more
   conditions:
-  - The card's source is that of the newest item (or the first item with a link), not the most reliable
-    of the merged sources
+  - The card's link and publisher come from the newest item in the group that has a link. Source Reliability
+    is scored on that source
+  - A card appears on the page when it, or one of its merged items, has a source link that opens
   constants:
   - label: Headline similarity threshold
     ref: scoring:live_signal.dedup_similarity
     stated: 0.85
   example:
-    scenario: A news event 'Astra sets IDR 36 trillion capex for 2026' (23 Apr, no link) and a news coverage
+    scenario: A news event 'Astra sets IDR 36 trillion capex for 2026' (23 Apr, data-provider record) and a news coverage
       item 'Astra sets IDR 36 trillion capex for 2026 year' (24 Apr, IDNFinancials link).
     steps:
     - The similarity of the two headlines is 0.94, above 0.85, so they are the same event.
@@ -271,8 +273,7 @@ rules:
   purpose: One score per unique signal that ranks the feed.
   logic: 'Three driver scores, each from 0 to 10, are weighted and added: Recency 30%, Signal Relevance
     & Impact 50%, Source Reliability 20%. The total is calculated by fixed rules and rounded once to 2
-    decimals. AI is never asked for the total. Each signal is scored on its own; scores are never added
-    across signals.'
+    decimals; the AI is never asked for it. Each signal is scored on its own.'
   formula: Live Signal Score = 30% × Recency + 50% × Relevance & Impact + 20% × Source Reliability (rounded
     to 2 decimals)
   constants:
@@ -312,12 +313,11 @@ rules:
   summary: Rewards newer events.
   purpose: Rewards newer events.
   logic: Age in whole days = the date the feed is built minus the event date (never below 0). The first
-    band whose upper limit the age does not exceed gives the points. Over 365 days scores 0, and so does
-    no usable date. The explanation on the card names the event date ('event dated 23 Apr 2026') rather
-    than an age, because an age would be out of date as soon as the feed was built.
+    band whose upper limit the age does not exceed gives the points. Over 365 days, or a date that cannot
+    be read, scores 0. The card shows the event date at the top, and the score breakdown shows the Recency
+    points.
   conditions:
-  - A date with no time zone is treated as UTC
-  - A future date would score as same day (10), but future dates are removed before scoring
+  - Dates are read in UTC unless they state a time zone
   table:
     columns:
     - Age of signal
@@ -335,7 +335,7 @@ rules:
       - 2
     - - over 365 days
       - 0
-    - - no usable date
+    - - date that cannot be read
       - 0
   constants:
   - label: Recency bands (maximum age in days, points)
@@ -354,7 +354,7 @@ rules:
   - label: Over 365 days
     ref: scoring:live_signal.recency_over_max
     stated: 0
-  - label: No usable date
+  - label: Date that cannot be read
     ref: scoring:live_signal.recency_no_date
     stated: 0
   example:
@@ -368,7 +368,7 @@ rules:
     expect:
     - 4
     - event dated 23 Apr 2026
-  output: Recency points and the 'event dated' line.
+  output: Recency points from 0 to 10.
   sources:
   - hp-backend/src/app/services/extractors/signal_scoring.py:recency_points
   - hp-backend/config/scoring.yaml
@@ -380,22 +380,19 @@ rules:
   kind: model
   summary: How directly the event points to something HP can sell or service.
   purpose: How directly the event points to something HP can sell or service.
-  logic: 'AI reads each signal''s date, category, publisher, headline (first 180 characters) and evidence
-    (first 300 characters), plus a short summary of what is already known about the account. It must pick
-    one level: 10, 8, 6, 3 or 0. It is told to take the highest level that any single piece of evidence
-    supports (never to add levels) and not to raise the score for a need that merely might follow from
-    the event. Whatever number comes back is limited to the range 0 to 10; it is not forced onto the 10/8/6/3/0
-    ladder. Any recency or source reliability scores suggested by the AI are ignored and replaced by the
-    values worked out by fixed rules. A short explanation is stored with the level, unless it contains
-    a number or link that is not in the account''s news information. In that case only the explanation
-    is withheld and the score stays.'
+  logic: 'The AI reads each signal''s date, category, publisher, headline and evidence, plus a short summary
+    of what is already known about the account. It is asked to pick one level: 10, 8, 6, 3 or 0. It takes
+    the highest level that any single piece of evidence supports (levels are never added) and does not
+    raise the score for a need that merely might follow from the event. The score is kept within 0 to
+    10. Recency and Source Reliability always come from the fixed rules, never from the AI. A short explanation
+    is shown with the level when every number and link in it appears in the account''s news information;
+    the score is kept either way.'
   conditions:
   - 'Levels are not added together: new factory (6) + hiring growth (6) = 6; new factory (6) + enterprise
     AI (8) = 8'
   - 'No-inference rule: a capex announcement stays 6 even though new facilities will later need equipment'
-  - The AI also says whether the signal is really about this account. If it says no, the signal is removed
-    from the feed (see 'What is published and in what order')
-  - The AI is also asked which categories matched, but that list is not stored
+  - The AI also says whether the signal is really about this account. If it says no, the signal is left
+    out of the feed (see 'What is published and in what order')
   table:
     columns:
     - Level
@@ -426,7 +423,7 @@ rules:
   - label: Signals judged together in one AI request
     ref: py:app.services.extractors.recent_news_signals:SCORING_BATCH_SIZE
     stated: 8
-  - label: Revision number of the AI scoring guidance
+  - label: Version of the AI scoring guidance
     ref: py:app.services.extractors.recent_news_signals:SIGNAL_SCORING_PROMPT_VERSION
     stated: 18
   example:
@@ -436,7 +433,7 @@ rules:
     - It does not state a PC, workstation, support, security or print requirement.
     - 'Highest supported level: 6 (major business change).'
     - 'Weighted: 6 × 0.50 = 3.00.'
-    result: Relevance & Impact = 6/10 (an AI judgement; it cannot be reproduced by a fixed formula).
+    result: Relevance & Impact = 6/10 (an AI judgement).
   output: A relevance score, a short explanation, whether the signal is about this account, the HP product
     line, the event status and the sales angle.
   sources:
@@ -451,12 +448,12 @@ rules:
   kind: score
   summary: Scores how verifiable the underlying source is, not the route by which it was found.
   purpose: Scores how verifiable the underlying source is, not the route by which it was found.
-  logic: 'Checks run in this order and the first one that applies wins. 1) No link: a recognised publisher
+  logic: 'Checks run in this order and the first one that applies decides. 1) No link: a recognised publisher
     name decides (the account''s own name = 10, news aggregator = 3, established outlet = 8). Otherwise
     a news event record = 6 (structured data-provider record). Otherwise 0 (Unverifiable), or unclassified
-    if only an unknown publisher name is given. 2) A news-search or redirect link is unwrapped to find
-    the original web address, without going online. 3) If the link is still an aggregator link, the publisher
-    name decides when it is recognised; a named publisher that is not recognised is left unclassified.
+    if only an unknown publisher name is given. 2) A news-search or redirect link is traced to the original
+    web address when that address can be read from the link itself. 3) If the link is still an aggregator
+    link, the publisher name decides when it is recognised; an unrecognised named publisher is unclassified.
     4) Otherwise the website decides: regulator, stock exchange or government website = 10; aggregator
     or wire service = 3; established publication = 8; a company newsroom, investor relations, careers,
     filings or tender page (judged from the web address path or from a prefix such as ''newsroom.'' or
@@ -465,37 +462,37 @@ rules:
     columns:
     - Points
     - Document classification
-    - Client tier
-    - Card label
+    - Tier
+    - Shown on the page as
     - What triggers it
     rows:
     - - 10
       - First-party or authoritative
       - T0
-      - First-party
+      - The company's own announcement or filing
       - Regulator, stock exchange or government website; company newsroom, investor relations, careers,
         filing or tender page; or a publisher name matching the account
     - - 8
       - Established independent reporting
       - T1
-      - Established news
+      - Established news outlet
       - Website or publisher name on the established-publisher list (for example Reuters, Bloomberg, Nikkei,
         IDNFinancials, Straits Times)
     - - 6
       - Structured third-party evidence
       - T2
-      - Licensed data tool
+      - Business data provider
       - A news event record with no link; also every unclassified source (see the sub-rule below)
     - - 3
       - Weak secondary evidence
       - T3
-      - Long tail
+      - Smaller or less established site
       - News-aggregator or wire-service website (for example Yahoo, MSN, PR Newswire, Business Wire, LinkedIn,
         Medium)
     - - 0
       - Unverifiable
       - (none)
-      - Unverifiable
+      - Source could not be verified
       - No link and no publisher, or a link with no website name
   constants:
   - label: First-party points
@@ -514,12 +511,13 @@ rules:
     ref: scoring:live_signal.source_unverifiable
     stated: 0
   example:
-    scenario: A news item with an opaque link (nothing can be decoded) and publisher 'IDNFinancials'.
+    scenario: A news item with a news-search link that does not contain the original address, and publisher
+      'IDNFinancials'.
     steps:
-    - The link cannot be unwrapped and is an aggregator link.
+    - The link cannot be traced further and is an aggregator link.
     - The publisher name 'IDNFinancials' matches an established outlet (idnfinancials.com).
     - 'Weighted: 8 × 0.20 = 1.60.'
-    result: Source Reliability = 8/10 (T1 - Established news).
+    result: Source Reliability = 8/10 (T1, Established news outlet).
     verified: true
     expect: 8
   output: Source points and a short explanation of the basis.
@@ -553,7 +551,7 @@ rules:
     steps:
     - It is not a regulator, aggregator or established outlet.
     - The address has 3 parts and starts with 'newsroom.'.
-    result: 10 points, shown as 'first-party company page (newsroom subdomain)'.
+    result: 10 points, with the basis recorded as 'first-party company page (newsroom subdomain)'.
     verified: true
     expect:
     - 10
@@ -570,16 +568,17 @@ rules:
   parent: ls_source_reliability
   name: Aggregators and wire services score 3
   kind: score
-  summary: A repost where the original cannot be established is weak evidence.
-  purpose: A repost where the original cannot be established is weak evidence.
-  logic: A link on an aggregator or wire-service website that could not be unwrapped scores 3. The exception
-    is an aggregator link where the item names a recognised publisher; that publisher is scored instead.
-    Wire services (such as PR Newswire, Business Wire, GlobeNewswire and EIN Presswire) count as aggregators.
+  summary: A repost that cannot be traced to its original source counts as weaker evidence.
+  purpose: A repost that cannot be traced to its original source counts as weaker evidence.
+  logic: A link on an aggregator or wire-service website that cannot be traced to the original site scores
+    3. The exception is an aggregator link where the item names a recognised publisher; that publisher
+    is scored instead. Wire services (such as PR Newswire, Business Wire, GlobeNewswire and EIN Presswire)
+    count as aggregators.
   example:
     scenario: Link https://www.prnewswire.com/news-releases/x with no publisher.
     steps:
     - prnewswire.com is on the aggregator list.
-    result: 3 points (T3 - Long tail).
+    result: 3 points (T3, Smaller or less established site).
     verified: true
     expect: 3
   output: 3 points.
@@ -590,19 +589,16 @@ rules:
   confidence: high
 - id: ls_source_structured
   parent: ls_source_reliability
-  name: Data-provider records without a link score 6
+  name: Business data-provider records score 6
   kind: score
-  summary: A news event from a business data provider is usable evidence, though not confirmed by the
-    company itself.
-  purpose: A news event from a business data provider is usable evidence, though not confirmed by the
-    company itself.
-  logic: A news event, job opening or hiring event record with no link and no recognised publisher scores
-    6.
+  summary: A news event from a business data provider counts as structured third-party evidence.
+  purpose: A news event from a business data provider counts as structured third-party evidence.
+  logic: A news event record with no link and no recognised publisher scores 6.
   example:
-    scenario: A news event record (no link available).
+    scenario: A news event record with no link.
     steps:
     - There is no link and no publisher, and the record is a news event.
-    result: 6 points (T2 - Licensed data tool).
+    result: 6 points (T2, Business data provider).
     verified: true
     expect: 6
   output: 6 points.
@@ -614,18 +610,18 @@ rules:
   confidence: high
 - id: ls_source_unknown_fallback
   parent: ls_source_reliability
-  name: Unrecognised source falls back to 6
+  name: Other named sources score 6
   kind: score
-  summary: Avoids burying regional outlets that are simply missing from the lists.
-  purpose: Avoids burying regional outlets that are simply missing from the lists.
-  logic: When the source is real but unclassified (an unknown website, or an unknown publisher behind
-    an aggregator link), it scores 6, structured third-party evidence, and '; scored as structured third-party
-    evidence' is added to the explanation. It is not scored 0, and AI is not asked.
+  summary: Gives regional outlets outside the publisher lists a fair middle score.
+  purpose: Gives regional outlets outside the publisher lists a fair middle score.
+  logic: When the source is real but on none of the lists (an unknown website, or an unknown publisher
+    behind an aggregator link), it scores 6, the same as structured third-party evidence. The score comes
+    from this rule, not from the AI.
   example:
     scenario: Signal dated 1 Sep 2026 from https://www.localherald.co.id/x, scored 17 Sep 2026.
     steps:
-    - localherald.co.id is on no list, so it is unclassified.
-    - The fallback gives 6.
+    - localherald.co.id is on no list.
+    - A named source on no list scores 6.
     - Age is 16 days, so recency is 8.
     result: Recency 8, Source 6.
     verified: true
@@ -638,21 +634,24 @@ rules:
   confidence: high
 - id: ls_source_line
   parent: ls_source_reliability
-  name: Source line on the card
+  name: Source line in the score breakdown
   kind: display
-  summary: Shows the source using the client's tier wording.
-  purpose: Shows the source using the client's tier wording.
-  logic: 'The card reads ''<tier> - <label>: <publisher>''. Tiers: 10 = T0 First-party, 8 = T1 Established
-    news, 6 = T2 Licensed data tool, 3 = T3 Long tail. 0 has no tier and reads ''Unverifiable''. The longer
-    definition of each tier is never printed. The points are not changed by the label.'
+  summary: Says in plain words how reliable the source is, followed by the publisher's name.
+  purpose: Says in plain words how reliable the source is, followed by the publisher's name.
+  logic: 'The score breakdown reads ''<band>: <publisher>''. Bands: 10 = ''The company''s own announcement
+    or filing'', 8 = ''Established news outlet'', 6 = ''Business data provider'', 3 = ''Smaller or less
+    established site'', 0 = ''Source could not be verified''. The same source is also recorded with its
+    tier code (10 = T0 First-party, 8 = T1 Established news, 6 = T2 Licensed data tool, 3 = T3 Long tail).
+    The wording does not change the points.'
   example:
     scenario: An 8-point source published by Nikkei.
     steps:
     - 8 is tier T1, 'Established news'.
-    result: '''T1 - Established news: Nikkei''.'
+    result: 'Recorded as ''T1 - Established news: Nikkei''; the breakdown shows ''Established news outlet:
+      Nikkei''.'
     verified: true
     expect: 'T1 - Established news: Nikkei'
-  output: The source explanation text.
+  output: The source line in the score breakdown.
   sources:
   - hp-backend/src/app/services/extractors/signal_scoring.py:describe_source
   - hp-backend/src/app/services/extractors/signal_scoring.py:SOURCE_TIERS
@@ -662,31 +661,31 @@ rules:
   confidence: high
 - id: ls_no_tiers_no_floor_no_cap
   parent: null
-  name: No letter tiers, no publish floor, no cap
+  name: Every current signal is shown with its score
   kind: filter
   summary: Every current signal is shown with its 0-10 score.
   purpose: Every current signal is shown with its 0-10 score.
-  logic: No S/A/B/C letter is given, because the tier list is empty. The minimum score to publish is 0,
-    so no scored signal is hidden for a low score. The maximum number of signals is 0, which means there
-    is no limit on the number of cards.
+  logic: Signals are ranked by their 0-10 score, with no letter grade. The minimum score to publish is
+    0, so every scored signal appears whatever its score. The maximum number of signals is 0, which means
+    there is no limit on the number of cards.
   constants:
-  - label: Tier thresholds
+  - label: Letter-grade thresholds (none set)
     ref: scoring:live_signal.tier_thresholds
     stated: []
   - label: Minimum score to publish
     ref: scoring:live_signal.min_confidence_to_publish
     stated: 0
-  - label: Maximum signals (0 = no cap)
+  - label: Maximum signals (0 = no limit)
     ref: scoring:live_signal.max_signals
     stated: 0
   example:
     scenario: A signal scoring 5.8.
     steps:
-    - The tier list is empty.
-    result: No tier letter; the card shows 5.8/10.
+    - No letter-grade thresholds are set.
+    result: No letter grade; the card shows 5.8/10.
     verified: true
     expect: null
-  output: No tier letter on any signal.
+  output: Each signal shows its score out of 10.
   sources:
   - hp-backend/config/scoring.yaml:live_signal
   - hp-backend/src/app/services/extractors/recent_news_signals.py:_tier
@@ -730,22 +729,20 @@ rules:
   kind: selection
   summary: Decides the feed order.
   purpose: Decides the feed order.
-  logic: 'If at least one signal was scored: signals the AI flagged as not being about this account are
-    removed (usually a story about another company). Scored signals are sorted by Live Signal Score, highest
-    first, with ties going to the newest. Signals the AI never returned a result for are kept, marked
-    ''relevance not assessed'', with no total score, and placed after all scored ones, newest first. Undated
-    signals sort last. No limit is applied. If nothing was scored at all, the feed shows the merged signals
-    newest first with no scores, and a notice that scoring is unavailable.'
+  logic: 'Signals the AI judges not to be about this account (usually a story about another company) are
+    left out. Scored signals are sorted by Live Signal Score, highest first, with ties going to the newest.
+    Any other signals follow, newest first. No limit is applied.'
   example:
     scenario: 'Three scored signals: X 5.8 (1 Sep), Y 7.1 (1 Aug), Z 5.8 (10 Sep, flagged by the AI as
-      not about this account); one unassessed signal W (15 Sep).'
+      not about this account); and one other signal, W (15 Sep).'
     steps:
-    - Z is removed (flagged as not about this account).
+    - Z is left out (flagged as not about this account).
     - 'Scored: Y 7.1 first, then X 5.8.'
-    - W follows, unassessed.
+    - W follows the scored signals.
     result: 'Order: Y, X, W.'
-  output: 'The feed of signals, with counts for: raw items, rejected by the 12-month check, passed that
-    check, after merging, not assessed, and rejected by the AI.'
+  output: 'The feed of signals, with counts for: items read, items outside the date, content and source-link
+    checks, items within the 12-month window, cards after merging, cards listed after the scored ones,
+    and cards the AI judged to be about another company.'
   sources:
   - hp-backend/src/app/services/extractors/recent_news_signals.py:extract_recent_news_signals
   confidence: high
@@ -760,10 +757,10 @@ rules:
   - 'What has already been published for the account: opportunity plays, intent topics and detected technologies'
   logic: 'Written by AI in the same step as the relevance score. The AI is given what the platform has
     already worked out for the account: up to 8 earned opportunity titles (from the Opportunity Map),
-    up to 12 intent topics and up to 25 detected technologies. It must name the event type, say what the
-    event does and does not establish, connect it to that context where related, end with a usable action,
-    introduce no new number, product or customer, and be 70-100 words. Automatic checks then apply the
-    rules in the sub-rules below.'
+    up to 12 intent topics and up to 25 detected technologies. It names the event type, says what the
+    event does and does not establish, connects it to that context where related, ends with a usable action,
+    introduces no new number, product or customer, and runs to 70-100 words. Automatic checks then apply
+    the rules in the sub-rules below.'
   constants:
   - label: Minimum words
     ref: py:app.services.extractors.recent_news_signals:ANGLE_MIN_WORDS
@@ -775,9 +772,9 @@ rules:
     scenario: A capex announcement on an account whose intent topics include 3D printing.
     steps:
     - The AI writes the paragraph.
-    - Automatic checks cover banned phrases, repetition, numbers or links that are not in the news information,
+    - Automatic checks cover stock phrases, repetition, numbers or links that are not in the news information,
       and length.
-    result: Free text; no fixed formula.
+    result: A written paragraph that depends on the event and the account.
   output: The 'Implication for HP' paragraph on the card.
   sources:
   - hp-backend/src/app/services/extractors/recent_news_signals.py:_account_context
@@ -788,22 +785,22 @@ rules:
   confidence: high
 - id: ls_angle_banned
   parent: ls_implication_for_hp
-  name: Banned phrases drop the paragraph
+  name: Stock phrases are rewritten
   kind: guardrail
-  summary: Stops stock phrases that claim a buying moment.
-  purpose: Stops stock phrases that claim a buying moment.
+  summary: Keeps out stock phrases that claim a buying moment.
+  purpose: Keeps out stock phrases that claim a buying moment.
   logic: If the paragraph contains 'ideal time', 'perfect time', 'right time to', 'now is the time', 'monitor
     for follow-on announcements', 'monitor for future announcements' or 'does not indicate any it or workforce
-    transformation needs' (in any capitalisation), it is not published as written and is sent back for
-    one rewrite.
+    transformation needs' (in any capitalisation), it is sent back for one rewrite, and the rewrite is
+    shown once it passes the checks.
   example:
     scenario: Paragraph 'Now is the time to call the CIO about the new plant.'
     steps:
     - It contains 'now is the time'.
-    result: Rejected and sent back for a rewrite.
+    result: Sent back for a rewrite.
     verified: true
     expect: uses the banned phrase 'now is the time'
-  output: The reason it was rejected.
+  output: The reason a rewrite is requested.
   sources:
   - hp-backend/src/app/services/extractors/recent_news_signals.py:ANGLE_BANNED_PHRASES
   - hp-backend/src/app/services/extractors/recent_news_signals.py:_angle_fault
@@ -812,11 +809,11 @@ rules:
   parent: ls_implication_for_hp
   name: No two paragraphs open or close the same way
   kind: guardrail
-  summary: Prevents templated angles across cards.
-  purpose: Prevents templated angles across cards.
+  summary: Keeps each card's paragraph distinct.
+  purpose: Keeps each card's paragraph distinct.
   logic: The first 5 and last 5 words (ignoring capital letters) of each accepted paragraph are remembered.
-    A later paragraph that opens or closes with the same 5 words as an earlier one is rejected and sent
-    back for a rewrite.
+    A later paragraph that opens or closes with the same 5 words as an earlier one is sent back for a
+    rewrite.
   constants:
   - label: Opening and closing words compared
     ref: py:app.services.extractors.recent_news_signals:ANGLE_STEM_WORDS
@@ -825,57 +822,54 @@ rules:
     scenario: An earlier card already opened 'Leadership change at Astra opens ...'.
     steps:
     - The new paragraph starts with the same five words.
-    result: Rejected as repetitive.
+    result: Sent back for a rewrite, as it opens the same way as another card.
     verified: true
     expect: opens the same way as another angle ('leadership change at astra opens...')
-  output: The reason it was rejected.
+  output: The reason a rewrite is requested.
   sources:
   - hp-backend/src/app/services/extractors/recent_news_signals.py:ANGLE_STEM_WORDS
   - hp-backend/src/app/services/extractors/recent_news_signals.py:_angle_fault
   confidence: high
 - id: ls_angle_length
   parent: ls_implication_for_hp
-  name: 70-100 word band (one rewrite, not fatal)
+  name: 70-100 word length
   kind: guardrail
-  summary: Holds the paragraph to the client's length.
-  purpose: Holds the paragraph to the client's length.
-  logic: 'A paragraph outside 70-100 words is still published, but it is sent back for one rewrite. The
-    rewrite is requested for each signal separately, with a three-part structure: two sentences on what
-    the event is, two connecting it to known account facts, and one on the next step. The rewrite replaces
-    the original only if it passes the banned-phrase, repetition and invented-number checks and is no
-    further from the 70-100 band than the original.'
+  summary: Keeps the paragraph close to 70-100 words.
+  purpose: Keeps the paragraph close to 70-100 words.
+  logic: 'A paragraph outside 70-100 words is shown and is also sent back for one rewrite. The rewrite
+    is requested for each signal separately, with a three-part structure: two sentences on what the event
+    is, two connecting it to known account facts, and one on the next step. The rewrite replaces the original
+    when it passes the stock-phrase, repetition and number checks and is at least as close to the 70-100
+    band as the original.'
   formula: Distance from band = the larger of (70 - words), (words - 100) and 0. Keep the rewrite only
     if its distance is no greater than the original's
   example:
     scenario: A 50-word paragraph.
     steps:
-    - 50 is below 70, so it is too short; it is kept for now and sent back for a rewrite.
+    - 50 is below 70, so it is kept for now and sent back for a rewrite.
     result: Flagged as 'is 50 words; the brief is 70-100'.
     verified: true
     expect: is 50 words; the brief is 70-100
-  output: The reason it was flagged, or none.
+  output: The reason a rewrite is requested.
   sources:
   - hp-backend/src/app/services/extractors/recent_news_signals.py:_angle_length_fault
   - hp-backend/src/app/services/extractors/recent_news_signals.py:score_news_signals
   confidence: high
 - id: ls_angle_grounding
   parent: ls_implication_for_hp
-  name: No invented numbers or links
+  name: Numbers and links come from the account's news
   kind: guardrail
-  summary: The paragraph may not state a figure or web link that the account's news information never
-    contained.
-  purpose: The paragraph may not state a figure or web link that the account's news information never
-    contained.
+  summary: Every figure and web link in the paragraph comes from the account's news information.
+  purpose: Every figure and web link in the paragraph comes from the account's news information.
   logic: Each paragraph and each explanation is checked against the text of the account's news information.
-    A paragraph with a number or link that does not appear there is dropped (the score stays). An explanation
-    with one is withheld, for that score only. The recency and source lines are added after this check,
-    because they come from the signal itself.
+    A paragraph is shown only when every number and link in it appears there. The same check applies to
+    each score explanation on its own. The scores are kept either way.
   example:
-    scenario: A paragraph claims '5,000 new laptops' that no news item mentions.
+    scenario: A paragraph mentions '5,000 new laptops', a figure that no news item contains.
     steps:
     - 5,000 is not in the news information.
-    result: Paragraph dropped; score kept.
-  output: A checked paragraph, or none.
+    result: Only paragraphs that pass this check appear on the card; the score is kept.
+  output: A checked paragraph.
   sources:
   - hp-backend/src/app/services/extractors/recent_news_signals.py:_grounded_angle
   - hp-backend/src/app/services/extractors/recent_news_signals.py:_grounded_rationales
@@ -885,17 +879,17 @@ rules:
   parent: null
   name: HP play label
   kind: display
-  summary: Names the single HP product line the signal supports, or none.
-  purpose: Names the single HP product line the signal supports, or none.
+  summary: Names the single HP product line the signal supports.
+  purpose: Names the single HP product line the signal supports.
   logic: 'The AI may return one of exactly six labels: ''Z by HP Workstations'', ''HP Elite / Pro PCs'',
     ''HP Wolf Security'', ''Poly Collaboration'', ''HP Enterprise Print / MPS'', ''HP Anyware / DaaS''.
-    Anything else is discarded (no label).'
+    Only these six labels appear on the card.'
   example:
     scenario: The AI returns 'HP Wolf Security' on one signal and 'HP Laptops' on another.
     steps:
     - The first is on the list.
-    - The second is not, so it is discarded.
-    result: Label 'HP Wolf Security' on the first; none on the second.
+    - The second is not on the list, so only the first card carries a label.
+    result: Label 'HP Wolf Security' on the first card only.
     verified: true
     expect:
     - true
@@ -912,8 +906,8 @@ rules:
   summary: Says whether the event has happened.
   purpose: Says whether the event has happened.
   logic: The AI picks completed, announced, planned, rumoured or unknown from the wording of the headline
-    and evidence. Any other value becomes unknown. Signals that were not scored are unknown. Unknown shows
-    no badge.
+    and evidence. Any other value counts as unknown. A badge appears for completed, announced, planned
+    and rumoured events.
   example:
     scenario: '''Astra will build a plant in 2027''.'
     steps:
@@ -932,28 +926,26 @@ rules:
   kind: display
   summary: Adds an HP customer story only where it supports the named play.
   purpose: Adds an HP customer story only where it supports the named play.
-  logic: After ranking, a case study is added only to signals that have both an Implication for HP and
-    an HP play. The play is mapped to HP product lines, and a study is chosen by the account's industry
-    and the play, skipping studies already cited elsewhere in the account's pages and on other cards.
-    No play means no proof.
+  logic: After ranking, a case study is added to signals that have both an Implication for HP and an
+    HP play. The play is mapped to HP product lines, and a study is chosen by the account's industry and
+    the play, using studies not already cited elsewhere in the account's pages or on other cards.
   example:
     scenario: A signal with the HP play 'Z by HP Workstations'.
     steps:
-    - The play maps to the workstation line; a matching unused study is picked.
-    result: A proof point shown under the implication (depends on the available case studies).
+    - The play maps to the workstation line; a matching study not yet cited is picked.
+    result: A proof point shown under the implication, chosen from the case-study library.
   output: A proof point under the implication.
   sources:
   - hp-backend/src/app/services/extractors/recent_news_signals.py:extract_recent_news_signals
   confidence: medium
 - id: ls_display_badge
   parent: null
-  name: Urgency badge on the card (screen only)
+  name: Urgency badge on the card
   kind: display
-  summary: A colour label derived from the score on the page.
-  purpose: A colour label derived from the score on the page.
+  summary: A colour label based on the score, shown on the page.
+  purpose: A colour label based on the score, shown on the page.
   logic: 'The page labels each scored signal: 8.0 or more = Critical (red, pulsing, red border), 6.0 or
-    more = High, 4.0 or more = Medium, below 4.0 = Low. Unassessed signals get no badge. The label is
-    worked out on screen and is not stored.'
+    more = High, 4.0 or more = Medium, below 4.0 = Low. The page sets the badge from the score each time it is shown.'
   table:
     columns:
     - Score
@@ -978,32 +970,32 @@ rules:
   confidence: high
 - id: ls_display_filters
   parent: null
-  name: Feed filters (screen only)
+  name: Feed filters
   kind: filter
   summary: Lets the seller narrow the feed.
   purpose: Lets the seller narrow the feed.
-  logic: 'Filters: category tags (the categories present in the data), a minimum score (a signal with
-    no score is hidden whenever a minimum above 0 is set), and a date range of Last 7 / 30 / 90 days,
-    measured back from the NEWEST signal in the feed, not from today.'
+  logic: 'Filters: category tags (the categories present in the feed), a minimum score (when set above
+    0, only signals with a score at or above it are listed), and a date range of All time or Last 7 / 30
+    / 90 days, measured back from the NEWEST signal in the feed, not from today.'
   example:
     scenario: The newest signal is dated 15 Sep; the filter is 'Last 30 days'.
     steps:
     - A signal dated 10 Aug is 36 days before 15 Sep.
-    result: Hidden by the filter.
+    result: Not listed under this filter.
   output: The filtered list.
   sources:
   - hp-frontend/src/app/dashboard/page.tsx:filteredSignals
   confidence: high
 - id: ls_source_confidence_dot
   parent: null
-  name: Source-confidence dot (screen only)
+  name: Source-confidence dot
   kind: display
   summary: Shows the news feed's own confidence rating as a coloured dot.
   purpose: Shows the news feed's own confidence rating as a coloured dot.
   logic: 'The page reads the confidence rating that the news feed supplied with each item: High, Medium
     or Low for news coverage, or a number from 0 to 1 for news events. A number of 0.8 or more, or text
-    starting ''high'', gives a green dot. 0.5 or more, or text starting ''med'', gives amber. Anything
-    else gives red. No value means no dot. It does not affect the score.'
+    starting ''high'', gives a green dot. 0.5 or more, or text starting ''med'', gives amber. A number
+    below 0.5, or text starting ''low'', gives red. The dot does not affect the score.'
   example:
     scenario: A news event with confidence 0.62.
     steps:
@@ -1023,11 +1015,10 @@ rules:
   purpose: Headlines, their detail and publisher names that arrive in Japanese, Korean or Thai are shown
     in English.
   logic: 'After the 12-month check and before duplicates are merged and items are scored, each headline,
-    detail sentence and publisher name that is not in English is translated once by AI and the result is
-    reused for every later run. A translation is used only if it is in English and keeps every number the
-    original had; otherwise the original is shown. The text as published is shown when the reader hovers
-    over it. Duplicates are merged on the English text, so two different stories in Japanese are no longer
-    mistaken for one (client, 9 Oct).'
+    detail sentence and publisher name that is not in English is translated once by AI, and the translation
+    is reused on later runs. A translation is used when it is in English and keeps every number the original
+    had; otherwise the original text is shown. The text as published appears when the reader hovers over
+    it. Duplicates are merged on the English text.'
   output: Headline, detail and publisher in English, with the original on hover.
   sources:
   - hp-backend/src/app/services/extractors/recent_news_signals.py:_translate_signals

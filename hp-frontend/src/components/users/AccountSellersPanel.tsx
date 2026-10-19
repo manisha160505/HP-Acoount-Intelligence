@@ -20,7 +20,7 @@ export function AccountSellersPanel({ accountId }: { accountId: string }) {
   }, [accountId]);
 
   return (
-    <div className="mt-10 pt-6 border-t border-gray-200">
+    <div data-tour="admin-account-sellers" className="mt-10 pt-6 border-t border-gray-200">
       <div className="flex items-center justify-between mb-3">
         <h2 className="text-base font-bold text-gray-900 flex items-center gap-2">
           <Users className="w-4 h-4 text-hp-navy" /> Sellers with access
