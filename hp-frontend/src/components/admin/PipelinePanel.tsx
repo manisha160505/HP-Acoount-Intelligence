@@ -148,7 +148,8 @@ interface RunDetail {
 const GROUPS: { key: Status; title: string; tone: string; open: boolean }[] = [
   { key: 'RUNNING', title: 'Running', tone: 'text-blue-700 bg-blue-50 border-blue-200', open: true },
   { key: 'QUEUED', title: 'Queued', tone: 'text-indigo-700 bg-indigo-50 border-indigo-200', open: true },
-  { key: 'NO_DATA', title: 'Data not provided - upload a dataset before this can run', tone: 'text-stone-800 bg-stone-50 border-stone-300', open: true },
+  { key: 'FILES_MISSING', title: 'Files missing on server', tone: 'text-rose-900 bg-rose-50 border-rose-200', open: true },
+  { key: 'NO_DATA', title: 'No data', tone: 'text-stone-800 bg-stone-50 border-stone-300', open: true },
   { key: 'FAILED', title: 'Failed', tone: 'text-red-700 bg-red-50 border-red-200', open: true },
   { key: 'STALE', title: 'Stale', tone: 'text-amber-800 bg-amber-50 border-amber-200', open: true },
   { key: 'DEGRADED', title: 'Degraded (fallback output)', tone: 'text-orange-800 bg-orange-50 border-orange-200', open: true },
@@ -174,84 +175,6 @@ const CATEGORY_TONE: Record<string, string> = {
   files_missing: 'bg-rose-200 text-rose-900',
   no_data: 'bg-stone-200 text-stone-800',
 };
-
-// Every dataset this account is missing, once, with the sections that read
-// it - the list to take to whoever supplies the data.
-// Files uploaded once but not on this server's disk, by dataset - these
-// sections have no card of their own; the gaps box is the one place to look.
-interface MissingOnServer {
-  dataset: string;
-  label: string;
-  files: string[];
-  sections: string[];
-}
-
-function missingOnServer(sections: Section[]): MissingOnServer[] {
-  const by: Record<string, MissingOnServer> = {};
-  for (const s of sections) {
-    for (const f of s.missing_files || []) {
-      const key = f.dataset || '?';
-      const entry = by[key] || (by[key] = { dataset: key, label: f.label || key, files: [], sections: [] });
-      const name = f.file || f.path || '?';
-      if (!entry.files.includes(name)) entry.files.push(name);
-      if (!entry.sections.includes(s.label)) entry.sections.push(s.label);
-    }
-  }
-  return Object.values(by).sort((a, b) => a.label.localeCompare(b.label));
-}
-
-function DataGapsBox({ gaps, missing, covered }:
-  { gaps: DataGap[]; missing: MissingOnServer[]; covered: DataCovered[] }) {
-  const blocking = gaps.filter(g => g.blocks.length > 0).length;
-  return (
-    <div className="rounded-xl border border-stone-300 bg-stone-50 px-4 py-3">
-      <div className="text-xs font-bold uppercase tracking-wider text-stone-800">
-        Data gaps ({gaps.length} dataset{gaps.length === 1 ? '' : 's'} not provided
-        {blocking > 0 ? `; ${blocking} read by a section that has no data at all` : ''}
-        {missing.length > 0 ? `; ${missing.length} with files missing on this server` : ''})
-      </div>
-      <ul className="mt-2 space-y-1">
-        {missing.map(m => (
-          <li key={`missing-${m.dataset}`} className="text-[11px] text-stone-800">
-            <span className="font-bold">{m.label}</span>
-            <span className="ml-1.5 px-1.5 py-0.5 rounded bg-rose-200 text-rose-900 font-bold"
-              title={`Uploaded before, but not on this server's disk - upload again before running:\n${m.files.join('\n')}`}>
-              {m.files.length} FILE{m.files.length === 1 ? '' : 'S'} MISSING ON SERVER
-            </span>
-            <span className="text-stone-500"> - read by {m.sections.join(', ')}</span>
-          </li>
-        ))}
-        {gaps.map(g => (
-          <li key={g.dataset} className="text-[11px] text-stone-800">
-            <span className="font-bold">{g.label}</span>
-            {g.blocks.length > 0 && (
-              <span className="ml-1.5 px-1.5 py-0.5 rounded bg-stone-300 text-stone-900 font-bold"
-                title={`${g.blocks.join(', ')} ha${g.blocks.length === 1 ? 's' : 've'} no data at all. Uploading this, or any other dataset listed on ${g.blocks.length === 1 ? 'that section' : 'those sections'}, lets ${g.blocks.length === 1 ? 'it' : 'them'} run.`}>
-                {g.blocks.length} SECTION{g.blocks.length === 1 ? '' : 'S'} CAN&apos;T RUN WITHOUT DATA
-              </span>
-            )}
-            <span className="text-stone-500"> - read by {g.sections.join(', ')}</span>
-          </li>
-        ))}
-      </ul>
-      {covered.length > 0 && (
-        <div className="mt-2.5 border-t border-stone-200 pt-2">
-          <div className="text-[10px] font-bold uppercase tracking-wider text-stone-500">
-            Covered by another source ({covered.length}) - not gaps
-          </div>
-          <ul className="mt-1 space-y-0.5">
-            {covered.map(c => (
-              <li key={`covered-${c.dataset}`} className="text-[11px] text-stone-500"
-                title={`Read by ${c.sections.join(', ')}`}>
-                {c.label}: covered by {c.covered_by}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-    </div>
-  );
-}
 
 function fmt(value?: string | null): string {
   if (!value) return '—';
@@ -551,13 +474,8 @@ export default function PipelinePanel({ accountId }: { accountId: string }) {
       {!data && loading && (
         <div className="flex items-center gap-2 text-sm text-gray-500"><Loader2 className="w-4 h-4 animate-spin" /> Loading pipeline…</div>
       )}
-      {data && (() => {
-        const missing = missingOnServer(data.groups.FILES_MISSING || []);
-        return ((data.data_gaps?.length ?? 0) > 0 || missing.length > 0
-                || (data.data_covered?.length ?? 0) > 0)
-          ? <DataGapsBox gaps={data.data_gaps || []} missing={missing} covered={data.data_covered || []} />
-          : null;
-      })()}
+      {/* Which datasets were not provided is still worked out and returned by
+          the API (data_gaps, datasets_not_provided); admins see statuses only. */}
       {data && GROUPS.filter(g => (data.groups[g.key] || []).length > 0).map(g => {
         const rows = data.groups[g.key];
         const selectable = NEEDS_RUN.includes(g.key) || g.key === 'CURRENT';
@@ -585,7 +503,6 @@ export default function PipelinePanel({ accountId }: { accountId: string }) {
                           <span className="text-sm font-semibold text-gray-900">{s.label}</span>
                           {s.kind === 'index' && <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 font-bold">INDEX</span>}
                           {s.llm && <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 font-bold">MODEL</span>}
-                          {!s.has_data && s.status !== 'NO_DATA' && <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-200 text-gray-700 font-bold">NO DATA UPLOADED</span>}
                           {(s.missing_files?.length ?? 0) > 0 && (
                             <span className="text-[10px] px-1.5 py-0.5 rounded bg-rose-200 text-rose-900 font-bold">
                               {s.missing_files!.length} FILE(S) MISSING ON SERVER
@@ -602,18 +519,6 @@ export default function PipelinePanel({ accountId }: { accountId: string }) {
                         )}
                         {s.status === 'QUEUED' && s.job && (
                           <div className="mt-1 text-[11px] text-indigo-800">queued {fmt(s.job.requested_at)}</div>
-                        )}
-                        {(s.datasets_not_provided?.length ?? 0) > 0 && s.status !== 'NO_DATA' && (
-                          <div className="mt-1.5 text-[11px] text-stone-700">
-                            <span className="font-bold">Not provided:</span>{' '}
-                            {s.datasets_not_provided!.map(d => d.label).join(', ')}
-                          </div>
-                        )}
-                        {(s.datasets_covered?.length ?? 0) > 0 && (
-                          <div className="mt-1 text-[11px] text-stone-500">
-                            <span className="font-bold">Covered:</span>{' '}
-                            {s.datasets_covered!.map(d => `${d.label} (by ${d.covered_by})`).join(', ')}
-                          </div>
                         )}
                         {s.reasons.length > 0 && (
                           <ul className="mt-2 space-y-1">

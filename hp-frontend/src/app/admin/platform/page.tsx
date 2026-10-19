@@ -68,7 +68,6 @@ function PipelineCell({ row, live, liveLoaded }: { row?: PipelineSummaryRow; liv
     ['never run', c.NEVER_RUN || 0, 'bg-slate-200 text-slate-700'],
   ];
   const shown = chips.filter(([, n]) => n > 0);
-  const gaps = row?.data_gaps || [];
   if (!shown.length && !row) return <span className="text-gray-400">—</span>;
   const p = running?.progress;
   return (
@@ -82,12 +81,6 @@ function PipelineCell({ row, live, liveLoaded }: { row?: PipelineSummaryRow; liv
           {n} {label}
         </span>
       ))}
-      {gaps.length > 0 && (
-        <span className="text-[11px] text-stone-700 w-full"
-          title={gaps.map(g => g.label + (g.blocks ? ` (${g.blocks} section(s) have no data at all)` : '')).join('\n')}>
-          Not provided: {gaps.slice(0, 3).map(g => g.label).join(', ')}{gaps.length > 3 ? ` +${gaps.length - 3} more` : ''}
-        </span>
-      )}
       {running && (
         <span className="text-[11px] text-blue-800 w-full">
           {running.label}{p ? ` ${Math.round((p.done / Math.max(1, p.total)) * 100)}%` : ''}
