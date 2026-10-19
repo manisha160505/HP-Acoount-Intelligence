@@ -413,7 +413,7 @@ export default function ManageAccountPage() {
           <div className="space-y-6 as-feature-in">
             
             {/* Account Title Banner */}
-            <div className="as-glass-strong rounded-2xl p-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div data-tour="admin-account-header" className="as-glass-strong rounded-2xl p-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div className="flex items-center space-x-4">
                 <div className="w-12 h-12 rounded-xl bg-hp-navy/10 text-hp-navy flex items-center justify-center font-extrabold text-lg uppercase">
                   {account.name.substring(0, 2)}
@@ -454,6 +454,7 @@ export default function ManageAccountPage() {
               <div className="flex border-b border-gray-200 bg-gray-50/50">
                 <button
                   type="button"
+                  data-tour="admin-account-tab-details"
                   onClick={() => setActiveTab('details')}
                   className={`flex-1 flex items-center justify-center space-x-2 py-3.5 px-4 text-xs font-bold border-b-2 transition ${
                     activeTab === 'details'
@@ -467,6 +468,7 @@ export default function ManageAccountPage() {
 
                 <button
                   type="button"
+                  data-tour="admin-account-tab-data"
                   onClick={() => setActiveTab('data')}
                   className={`flex-1 flex items-center justify-center space-x-2 py-3.5 px-4 text-xs font-bold border-b-2 transition ${
                     activeTab === 'data'
@@ -480,6 +482,7 @@ export default function ManageAccountPage() {
 
                 <button
                   type="button"
+                  data-tour="admin-account-tab-pipeline"
                   onClick={() => setActiveTab('pipeline')}
                   className={`flex-1 flex items-center justify-center space-x-2 py-3.5 px-4 text-xs font-bold border-b-2 transition ${
                     activeTab === 'pipeline'
@@ -493,6 +496,7 @@ export default function ManageAccountPage() {
 
                 <button
                   type="button"
+                  data-tour="admin-account-tab-instructions"
                   onClick={() => setActiveTab('instructions')}
                   className={`flex-1 flex items-center justify-center space-x-2 py-3.5 px-4 text-xs font-bold border-b-2 transition ${
                     activeTab === 'instructions'
@@ -506,6 +510,7 @@ export default function ManageAccountPage() {
 
                 <button
                   type="button"
+                  data-tour="admin-account-tab-guardrails"
                   onClick={() => setActiveTab('guardrails')}
                   className={`flex-1 flex items-center justify-center space-x-2 py-3.5 px-4 text-xs font-bold border-b-2 transition ${
                     activeTab === 'guardrails'

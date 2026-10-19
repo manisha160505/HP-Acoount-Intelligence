@@ -435,7 +435,9 @@ export const ADMIN_TOURS: Record<string, FeatureTour> = {
       },
       {
         title: 'Manage',
-        body: "Opens the account's own page. There you upload its data files, which updates its features.",
+        body:
+          "Opens the account's own page. There you upload its data files and rebuild its features. " +
+          'That page has its own tour: click Take the tour there.',
         target: 'admin-platform-manage',
       },
       {
@@ -444,6 +446,57 @@ export const ADMIN_TOURS: Record<string, FeatureTour> = {
           "The menu next to Manage opens the account's dashboard, or hides the account from sellers " +
           'without deleting anything. Show to sellers brings it back.',
         target: 'admin-platform-hide',
+      },
+    ],
+  },
+
+  // The page Manage opens (/admin/accounts/<id>). Help only: Take the tour
+  // shows it, but the first-visit tour does not, since it has no one account
+  // to open (see ADMIN_HELP_PAGES in components/tour/AdminTour.tsx).
+  account: {
+    overview: {
+      title: 'Manage an account',
+      body:
+        'Everything about one account: its details, its data files, and the pipeline that builds ' +
+        'its features. Each tab below is one part.',
+      target: 'admin-account-header',
+    },
+    details: [
+      {
+        title: 'Account Details',
+        body: "Change the account's name. Below it, see which sellers can open this account.",
+        target: 'admin-account-tab-details',
+      },
+      {
+        title: 'Sellers with access',
+        body:
+          'The sellers who can open this account. Admins can open every account, so they are not listed. ' +
+          'To change who has access, use Accounts on the Users page.',
+        target: 'admin-account-sellers',
+      },
+      {
+        title: 'Data',
+        body:
+          'Upload or replace the data files for this account, one dataset at a time. ' +
+          'Nothing is rebuilt straight away: the sections that use the file wait for you in the Pipeline tab.',
+        target: 'admin-account-tab-data',
+      },
+      {
+        title: 'Pipeline',
+        body:
+          "Each section of the account's features and its status: current, stale, failed or no data. " +
+          'Submit & start pipeline rebuilds what needs it, or tick sections to rebuild only those.',
+        target: 'admin-account-tab-pipeline',
+      },
+      {
+        title: 'Instructions',
+        body: 'Custom guidelines for this account only, such as topics to focus on or regional notes.',
+        target: 'admin-account-tab-instructions',
+      },
+      {
+        title: 'Guardrails',
+        body: 'Rules for this account only, such as wording or claims to avoid.',
+        target: 'admin-account-tab-guardrails',
       },
     ],
   },

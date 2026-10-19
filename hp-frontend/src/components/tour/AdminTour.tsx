@@ -27,8 +27,16 @@ export const ADMIN_TOUR_PAGES: { key: string; href: string }[] = [
 ];
 const PAGE_KEYS = ADMIN_TOUR_PAGES.map((p) => p.key);
 
+// Pages with a Take the tour but no place in the first-visit tour: their
+// address names one account, which the tour cannot choose for the admin.
+const ADMIN_HELP_PAGES: { key: string; prefix: string }[] = [
+  { key: 'account', prefix: '/admin/accounts/' },
+];
+
 function pageKeyFor(pathname: string | null): string {
-  return ADMIN_TOUR_PAGES.find((p) => pathname === p.href || pathname?.startsWith(`${p.href}/`))?.key ?? '';
+  return ADMIN_TOUR_PAGES.find((p) => pathname === p.href || pathname?.startsWith(`${p.href}/`))?.key
+    ?? ADMIN_HELP_PAGES.find((p) => pathname?.startsWith(p.prefix))?.key
+    ?? '';
 }
 
 /** Take the tour, for the top bar, and the tour's cards. Admins only. */
@@ -58,7 +66,7 @@ export function AdminTour() {
   // First visit to the admin pages.
   const autoStarted = useRef(false);
   useEffect(() => {
-    if (autoStarted.current || !isAdmin || !current || user?.admin_tour_completed_at) return;
+    if (autoStarted.current || !isAdmin || !PAGE_KEYS.includes(current) || user?.admin_tour_completed_at) return;
     autoStarted.current = true;
     tour.start(PAGE_KEYS);
     // eslint-disable-next-line react-hooks/exhaustive-deps
