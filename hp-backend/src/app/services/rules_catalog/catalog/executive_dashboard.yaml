@@ -101,13 +101,13 @@ rules:
   - The account's own record
   - 'The company profile: domain and website address'
   logic: The company name is the account's own name from the account list, not the data supplier's name
-    for the website. The website is the company's domain; if that is blank, its website address is used.
+    for the website. The website is the company's domain, or else its website address.
   conditions:
   - 'Website order: domain first, then website address'
   example:
-    scenario: The company profile has a blank domain and the website address 'astra.co.id'.
+    scenario: The company profile gives only a website address, 'astra.co.id'.
     steps:
-    - The domain is blank, so the website address is used.
+    - Only the website address is given, so it is used.
     result: 'Website shown: astra.co.id'
   output: Company name and website
   sources:
@@ -121,14 +121,13 @@ rules:
   purpose: Shows where the company is headquartered.
   inputs:
   - 'The company profile: city, region and country'
-  logic: City, region and country are joined with commas, skipping any that are blank, and shown in proper
-    case ('tokyo, japan' reads 'Tokyo, Japan'). The line appears when at least one of the three is present.
-  formula: City, Region, Country (blanks skipped)
+  logic: The city, region and country that are given are joined with commas and shown in proper case
+    ('tokyo, japan' reads 'Tokyo, Japan'). The line appears when at least one of the three is present.
+  formula: City, Region, Country (those given)
   example:
-    scenario: City 'Jakarta', Region blank, Country 'Indonesia'.
+    scenario: City 'Jakarta' and Country 'Indonesia'.
     steps:
-    - The region is blank and skipped.
-    - The rest are joined with ', '.
+    - The two given parts are joined with ', '.
     result: Jakarta, Indonesia
   output: Headquarters location
   sources:
@@ -143,9 +142,9 @@ rules:
   inputs:
   - 'The company profile: LinkedIn industry category, NAICS description and SIC description'
   logic: The LinkedIn industry, NAICS description and SIC description are joined with ' / ' in that order,
-    skipping blanks and exact repeats. The page shows the first (normally the LinkedIn industry) in proper
+    each listed once (exact repeats skipped). The page shows the first (normally the LinkedIn industry) in proper
     case, and all of them when the reader hovers over it. The line appears when at least one is present.
-  formula: LinkedIn / NAICS / SIC (blanks and exact duplicates removed)
+  formula: LinkedIn / NAICS / SIC (exact duplicates removed)
   example:
     scenario: LinkedIn 'Motor Vehicle Manufacturing', NAICS 'Automobile Manufacturing', SIC 'Automobile
       Manufacturing'.
@@ -171,31 +170,30 @@ rules:
   - HP's company hierarchy sheet, parent rows
   - The account's name
   logic: 'For the 11 accounts in HP''s parent-company list, the list is used as written and nothing else
-    is read; where it says the account has no parent, or names the account itself, no parent is shown.
-    For every other account the parent is the ultimate parent name (column E), exactly as supplied with
-    spaces trimmed, unless it is the account itself: its id is the company''s own id, or it is the account''s
-    own name (''canon'' for Canon Inc.; ''mitsubishi'' for Mitsubishi Motors). When column E gives no
-    other company, the parent company name (column C) is used under the same test. Any parent HP''s company
-    hierarchy sheet adds is shown beside it - a company can have a direct and an ultimate parent, and both
-    are shown - unless it repeats one already listed. An account set to show no parent in its account
-    settings shows none, whatever the sources say. The line appears when there is a parent. The parent
-    comes only from these sources, not from the business description.'
+    is read; a parent it names other than the account itself is shown. For every other account the parent
+    is the ultimate parent name (column E), exactly as supplied with spaces trimmed, unless it is the account
+    itself: its id is the company''s own id, or it is the account''s own name (''canon'' for Canon Inc.;
+    ''mitsubishi'' for Mitsubishi Motors). In that case the parent company name (column C) is used under
+    the same test. Any parent HP''s company hierarchy sheet adds is shown beside it - a company can have
+    a direct and an ultimate parent, and both are shown - unless it repeats one already listed. Account
+    settings can switch the parent line off for an account, whatever the sources say. The line appears
+    when there is a parent. The parent comes only from these sources, not from the business description.'
   conditions:
-  - 'Account settings come first: an account set to show no parent shows none'
+  - 'Account settings come first: they can switch the parent line off for an account'
   - 'HP''s parent-company list next; it replaces the corporate structure information for its 11 accounts'
-  - 'Otherwise column E, then column C only when column E names no other company, then HP''s hierarchy
-    sheet'
-  - 'Blank, a repeat, or the account itself: left out'
+  - 'Otherwise column E, then column C when column E is the account itself, then HP''s hierarchy sheet'
+  - 'A repeat, or the account itself: left out'
   example:
     scenario: 'Four accounts: BDO with column E ''sm investments''; San Miguel whose column E is San Miguel
       itself and column C ''top frontier investment holdings''; Canon whose column E is ''canon''; MUFG
-      whose column E is ''us bancorp'' and which HP''s parent-company list says has no parent.'
+      whose column E is ''us bancorp'' and which HP''s parent-company list marks as a top-level company.'
     steps:
     - 'BDO: column E names another company, shown.'
     - 'San Miguel: column E is the account itself, so column C is used.'
-    - 'Canon: column E is its own name, nothing shown.'
-    - 'MUFG: HP''s list says it is the top-level company, nothing shown.'
-    result: '''sm investments'', ''top frontier investment holdings'', nothing, nothing.'
+    - 'Canon: column E is its own name, left out.'
+    - 'MUFG: HP''s list says it is the top-level company, so column E is not read.'
+    result: 'The parent line appears for BDO (''sm investments'') and San Miguel (''top frontier investment
+      holdings'') only.'
     verified: true
     expect:
     - sm investments
@@ -222,8 +220,7 @@ rules:
   - 'The subsidiaries information: subsidiary name (column A)'
   - HP's company hierarchy sheet, subsidiary rows
   logic: 'Every subsidiary name, exactly as supplied with spaces trimmed, in the order supplied, followed
-    by the subsidiaries HP''s company hierarchy sheet adds. Blank names and repeats (ignoring case) are
-    left out, and so are the account''s own name and its parents, since none of them is its subsidiary.
+    by the subsidiaries HP''s company hierarchy sheet adds. Repeats (ignoring case) are left out, and so are the account''s own name and its parents, since none of them is its subsidiary.
     Names containing the word ''government'' are left out too (for example ''japan the government of
     japan'', a shareholder). A name that only starts with the account''s name is kept (''toyota motor''
     is a Toyota Group subsidiary). Names are shown in proper case (''verigy us'' reads ''Verigy US'').
@@ -234,11 +231,11 @@ rules:
   - Names keep their supplied spelling; names in Japanese, Korean or Thai are shown in English (see Names
     and filings shown in English)
   example:
-    scenario: 'Woolworths Group with subsidiaries ''woolworths'', ''Big W'', ''big w'', a blank, ''endeavour
-      group'' and its parent ''wesfarmers''.'
+    scenario: 'Woolworths Group with subsidiaries ''woolworths'', ''Big W'', ''big w'', ''endeavour group''
+      and its parent ''wesfarmers''.'
     steps:
     - '''woolworths'' is the account itself, left out.'
-    - '''big w'' repeats ''Big W'', left out; the blank is left out.'
+    - '''big w'' repeats ''Big W'', left out.'
     - '''wesfarmers'' is the parent, left out.'
     result: '''Big W'', ''endeavour group''.'
     verified: true
@@ -322,8 +319,7 @@ rules:
   purpose: Shows the data supplier's size buckets as supplied.
   inputs:
   - 'The company profile: employee-size range and yearly revenue range'
-  logic: Both bands are copied as written. A band tile appears when it has a value (anything other than
-    blank, N/A, NA, none or '-').
+  logic: Both bands are copied as written, and each band tile appears when its band has a value.
   conditions:
   - Bands are shown as ranges and are never converted into numbers
   - A band tile appears only when the band has a value
@@ -673,13 +669,13 @@ rules:
   - The tile appears when at least one posting is counted
   - Location is used only for the country check
   example:
-    scenario: 'Five jobs for a Malaysian account: KL Malaysia (Mar 2026), Singapore (Apr 2026), blank
-      location (May 2026), ''Remote'' (Aug 2025), Penang Malaysia with no first-seen date.'
+    scenario: 'Five jobs for a Malaysian account: KL Malaysia (Mar 2026), Singapore (Apr 2026), a location
+      naming no country (May 2026), ''Remote'' (Aug 2025), and an undated Penang Malaysia job.'
     steps:
     - 'Singapore job: other country, not counted.'
-    - 'Penang job: no first-seen date, not counted.'
+    - 'Penang job: undated, not counted.'
     - 'Remote job: first seen 1 August 2025, before the window start of 18 September 2025, not counted.'
-    - KL and blank-location jobs are kept.
+    - The KL and May 2026 jobs are kept.
     result: '2 postings; sample roles Data Engineer, IT Support; not counted: other country 1, older
       than the window 1, undated 1.'
     verified: true
@@ -716,7 +712,7 @@ rules:
   logic: For rows carrying two companies and two codes ('X - MY; Y - SG' with 'MY; SG'), the code paired
     with the account's exact name is used. Otherwise the ' - XX' ending of the account name is used, then
     the most common single code on the account's rows. Only AU, NZ, SG, MY, TH, ID, PH, VN, JP and KR
-    are recognised. When no code is found, every job passes the country check.
+    are recognised.
   table:
     columns:
     - Code
@@ -756,8 +752,8 @@ rules:
   inputs:
   - Job location
   logic: A job is left out only when its location names a country and none of the named countries is the
-    account's. A blank location, or one naming no country ('Columbus, OH', 'Europe', 'Remote'), is kept
-    as the account's own country. Country names are matched as whole words, longest first, so 'North Korea'
+    account's. A location naming no country ('Columbus, OH', 'Europe', 'Remote') is kept as the account's
+    own country. Country names are matched as whole words, longest first, so 'North Korea'
     is not read as 'Korea' and 'Papua New Guinea' is not read as 'Guinea'.
   example:
     scenario: Korean account (KR), five locations.
@@ -765,7 +761,7 @@ rules:
     - '''Seoul, South Korea'': KR, kept.'
     - '''Pyongyang, North Korea'': another country, left out.'
     - '''Columbus, OH'': no country, kept.'
-    - 'Blank: kept.'
+    - 'The fourth location names no country: kept.'
     - '''Tokyo, Japan'': left out.'
     result: Kept, left out, kept, kept, left out.
     verified: true
@@ -900,6 +896,7 @@ rules:
   confidence: high
 - id: urgency_missing_input
   parent: urgency_score
+  internal: true
   name: Each component scored on its own
   kind: guardrail
   summary: Each component is scored from its own input, so an absent source affects only that component.
@@ -1022,8 +1019,8 @@ rules:
   inputs:
   - The calculated driver components
   logic: 'For each driver the explanation is built from the calculated numbers only: first ''Weight X%
-    of the total.'', then one line per component ''Label: points/max - reason'' (a component without input
-    reads ''No signal observed''), then notes. The lines are stored with each driver''s score. Evidence
+    of the total.'', then one line per component ''Label: points/max - reason'', then
+    notes. The lines are stored with each driver''s score. Evidence
     items supporting more than one driver are linked to each of them and listed as shared evidence. On
     the page, the i button beside each driver gives a plain-language description of what goes into it.'
   example:
@@ -1109,7 +1106,7 @@ rules:
       - 10
     - - below250
       - 5
-    - - Any other range / blank
+    - - Any other range
       - 0
   constants:
   - label: Employee bands
@@ -1134,7 +1131,7 @@ rules:
     ref: py:app.services.dashboard.urgency:EMPLOYEE_BAND_ALIASES
   example:
     scenario: 'Eight bands: ''50,000+'', ''10001+'', ''5001-10000'', ''1001-5000'', ''201-500'', ''11-50'',
-      ''10001-50000'', blank.'
+      ''10001-50000'' and ''''.'
     steps:
     - Each range is tidied up and looked up.
     result: 30, 25, 20, 15, 0, 0, 0, 0
@@ -1358,9 +1355,9 @@ rules:
     ref: scoring:urgency.ai_breadth_max
     stated: 35
   example:
-    scenario: Astra topics include artificial intelligence, machine learning, generative ai, no LLM.
+    scenario: Astra topics include artificial intelligence, machine learning and generative ai.
     steps:
-    - 3 families
+    - AI, ML and GenAI = 3 families
     result: 28/35
     verified: true
     expect: 28.0
@@ -1446,8 +1443,8 @@ rules:
   purpose: Research interest in workstations.
   inputs:
   - HP's own interest score for the first product category whose name contains 'workstation'
-  logic: 'Linear: the Workstations score out of 100 times 15. Without a Workstations category the component
-    scores 0 and counts as having no input; a score of 0 also gives 0 but counts as covered.'
+  logic: 'Linear: the Workstations score out of 100 times 15. A score of 0 gives 0 points and still counts
+    toward the 60% coverage gate.'
   formula: Workstation score / 100 x 15
   constants:
   - label: Maximum
@@ -1481,7 +1478,6 @@ rules:
     ai centre/center of excellence, ai infrastructure, ai partnership, ai investment, ai lab, ai research,
     deep learning'
   - Only dated events count
-  - 'No news: the component counts as having no input'
   constants:
   - label: Points per event
     ref: scoring:urgency.points_per_ai_event
@@ -1518,7 +1514,7 @@ rules:
   formula: Workforce growth + Hiring volume + Growth events
   example:
     scenario: 'Members 1,000 (1 October 2025) -> 1,035 (1 September 2026); 30 open jobs posted May 2026, 5 jobs
-      with a blank posting date but first seen Jan 2026, 10 closed jobs from 2024; news: new plant in
+      dated by their first-seen date (Jan 2026), 10 closed jobs from 2024; news: new plant in
       Vietnam, acquires local distributor, wins award. Scored 5 October 2026.'
     steps:
     - Growth 3.5% -> 7.5
@@ -1541,8 +1537,7 @@ rules:
   inputs:
   - Dated counts of associated members on the company's social-media profile
   logic: Needs at least two dated observations. Growth is measured between the earliest and the latest
-    observation on file, whatever the time between them. Zero, negative or growth under 1% scores 0. With
-    fewer than two observations the component scores 0 and counts as having no input.
+    observation on file, whatever the time between them. Zero, negative or growth under 1% scores 0.
   formula: Growth % = (latest - earliest) / earliest x 100
   table:
     columns:
@@ -1597,9 +1592,8 @@ rules:
   purpose: Number of job postings in the last 12 months.
   inputs:
   - 'Job postings: posting date, first-seen date and status'
-  logic: A job counts if its posting date (or, when that is blank, its first-seen date) is within 365
-    days before the scoring date. Closed, open and blank-status jobs all count. A job needs one of the
-    two dates to count. Only jobs in the company's own country, first seen in the 12 months before
+  logic: A job counts if its posting date, or else its first-seen date, is within 365 days before the
+    scoring date. Every job counts whatever its status (open, closed or other). Only jobs in the company's own country, first seen in the 12 months before
     the job data was collected, are considered at all - the same jobs the Hiring Velocity tile counts.
   table:
     columns:
@@ -1636,7 +1630,7 @@ rules:
     ref: scoring:urgency.hiring_volume_max
     stated: 50
   example:
-    scenario: 'Astra: 60 closed and 40 blank-status jobs posted 1 Mar 2026.'
+    scenario: 'Astra: 60 closed jobs and 40 other jobs, all posted 1 Mar 2026.'
     steps:
     - All 100 eligible
     result: 40/50
@@ -1697,7 +1691,7 @@ rules:
   inputs:
   - 'HP''s own interest scores by category: category name, score, trend, buying stage and research volume'
   logic: All four components use the details of the highest-scoring HP category (the first one in the
-    data on a tie). With no categories, all four components score 0 and count as having no input.
+    data on a tie).
   formula: Strength + Trend + Buying stage + Research volume
   example:
     scenario: PCs 45 (Stable, 'Decision/Purchase', Medium) and Printers 30 (Increasing, Awareness, High).
@@ -1723,7 +1717,7 @@ rules:
   purpose: Strength of the top category's intent.
   inputs:
   - The top category's score
-  logic: 'Linear: top category score / 100 x 60. A score of 0 or blank counts as having no input.'
+  logic: 'Linear: top category score / 100 x 60.'
   formula: score / 100 x 60
   constants:
   - label: Maximum
@@ -1761,7 +1755,7 @@ rules:
       - 5
     - - Decreasing
       - 0
-    - - Other / blank
+    - - Any other word
       - 0
   constants:
   - label: Points
@@ -1806,10 +1800,11 @@ rules:
       - 10
     - - Awareness
       - 5
-    - - No signal / blank / other
+    - - Any other stage
       - 0
   constants:
   - label: Points
+    internal: true
     ref: scoring:urgency.buying_stage_points
     stated:
       decision: 15
@@ -1853,7 +1848,7 @@ rules:
       - 10
     - - Low
       - 5
-    - - Other / blank
+    - - Any other word
       - 0
   constants:
   - label: Points
@@ -2069,8 +2064,7 @@ rules:
   - The catalyst's supporting sources (filing label, period, link, publisher, origin)
   - The account's website
   logic: 'Sum of three terms: Filing evidence (max 25), Recency (max 25) and Source diversity (max 50).
-    Age is measured to the date the card was generated, so the score stays stable. When all three terms
-    are 0, the card reads ''No signal observed''.'
+    Age is measured to the date the card was generated, so the score stays stable.'
   formula: Evidence Strength = Filing evidence + Recency + Source diversity
   constants:
   - label: Maximum score
@@ -2088,7 +2082,7 @@ rules:
     result: 65/100
     verified: true
     expect: 65
-  output: Evidence Strength score with its three terms, and the reason if it is zero
+  output: Evidence Strength score with its three terms
   sources:
   - hp-backend/src/app/services/dashboard/evidence_strength.py:score
   - hp-backend/src/app/services/dashboard/priorities.py:generate_dashboard_intelligence
@@ -2135,8 +2129,8 @@ rules:
   - Period labels of the sources
   logic: 'The most recent dated source sets the age, in whole calendar months to the generation date (never
     negative). Period labels: an ISO date; ''YYYY-Mon'' taken at month end; ''FY2025'', ''2025'' or ''FY2025/26''
-    taken at 31 December of the first year. Other shapes (for example ''Q3 2025'') count as undated. No
-    dated source: 0.'
+    taken at 31 December of the first year. Other shapes (for example ''Q3 2025'') do not set the age;
+    a catalyst whose labels are all other shapes scores 0.'
   table:
     columns:
     - Age of newest evidence
@@ -2152,7 +2146,7 @@ rules:
       - 10
     - - over 60 months
       - 5
-    - - no usable date
+    - - only other period shapes
       - 0
   constants:
   - label: Bands (upper months, points)
@@ -2169,7 +2163,7 @@ rules:
   - label: Beyond bands
     ref: scoring:evidence_strength.recency_beyond_bands
     stated: 5
-  - label: No date
+  - label: Only other period shapes
     ref: scoring:evidence_strength.recency_no_date
     stated: 0
   - label: Fiscal year end
@@ -2178,7 +2172,7 @@ rules:
     scenario: 'Scored 5 October 2026, single-source periods: 2026-09-01, 2025-Sep, FY2024, FY2022, FY2020,
       2019-01-01, ''Q3 2025''.'
     steps:
-    - Ages 1, 12, 21, 45, 69, 93 months; 'Q3 2025' unparsed
+    - Ages 1, 12, 21, 45, 69, 93 months; 'Q3 2025' is another shape
     result: 25, 25, 20, 10, 5, 5, 0
     verified: true
     expect:
@@ -2209,9 +2203,9 @@ rules:
     Filings; a government website is Government Sources; the account''s own website (or the same company
     name of 4+ letters under another country''s website) is Investor Materials if the address contains
     ''investor'' or ''ir'', otherwise Official Company Sources; LinkedIn, Facebook, Twitter/X, Instagram
-    or YouTube is uncategorised; if the account''s website is not known, uncategorised; any other website
-    is Independent Media. Without a usable link, a named publisher is Independent Media (Official Company
-    Sources if it equals the company name). Anything else is uncategorised. Each distinct category scores
+    or YouTube is uncategorised; when the account''s website is known, any other website is Independent
+    Media. A source with only an ignored link, or only a publisher, is placed by its named publisher:
+    Independent Media, or Official Company Sources if it equals the company name. Anything else is uncategorised. Each distinct category scores
     10 points, up to a maximum of 50.'
   formula: 10 x distinct categories, up to a maximum of 50
   conditions:
@@ -2230,7 +2224,8 @@ rules:
     stated: 50
   example:
     scenario: Account astra.co.id; links idx.co.id, gov.uk, ir.astra.co.id, careers.astra.com, linkedin.com,
-      a Google News link from Kompas, publisher 'Astra' with no link, and an empty source.
+      a Google News link from Kompas, a source named only by its publisher 'Astra', and a source that fits
+      no category.
     steps:
     - Categorise each source.
     result: Regulatory Filings, Government Sources, Investor Materials, Official Company Sources, uncategorised,
@@ -2326,8 +2321,7 @@ rules:
   - 'The technology HP recommendations: approved facts marked as kept'
   - 'The opportunity map''s service plays: allowed facts'
   logic: 'Up to 40 statements are collected: first the approved facts kept from the technology recommendations
-    (prefixed by the HP product family), then the allowed facts from the opportunity map''s service plays.
-    With no approved statements, AI is asked to leave out the HP sentence.'
+    (prefixed by the HP product family), then the allowed facts from the opportunity map''s service plays.'
   constants:
   - label: Maximum statements
     value: 40

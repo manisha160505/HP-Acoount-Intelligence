@@ -219,8 +219,8 @@ rules:
   summary: The word shown under the score.
   purpose: The word shown under the score.
   logic: 'Read from the top down: 90 or more is Exceptional, 75 or more is Strong, 60 or more is Good,
-    40 or more is Average, 20 or more is Weak, and anything lower is Poor. When there is no total, the
-    band reads Unavailable. The AI scores against the same scale.'
+    40 or more is Average, 20 or more is Weak, and anything lower is Poor. The AI scores against the same
+    scale.'
   table:
     columns:
     - Score from
@@ -271,9 +271,8 @@ rules:
     the first time is kept, and one that is valid only the second time is taken from there. A quality that
     still has no score is filled in with 50 and labelled as filled in, when no more than 2 are unscored
     and together they carry less than half of the total. Scores that are not numbers, or are outside 0
-    to 100, are never filled in. When any quality is still without a valid score, the valid scores are
-    shown, no total is given, the band reads 'Unavailable', and the summary names the qualities still
-    to be scored.
+    to 100, are never filled in. The valid scores are always shown. The total and its band appear once
+    every quality has a valid score.
   constants:
   - label: Fill-in score
     ref: py:app.services.evaluator.scoring:PAD_SCORE
@@ -655,7 +654,7 @@ rules:
   summary: Every sentence must belong to exactly one chunk.
   purpose: Every sentence must belong to exactly one chunk.
   logic: After the chunks are matched to the draft, they are read in order. Any text between chunks, or
-    after the last one, that is not blank is a gap. A final check confirms that the chunks joined together
+    after the last one, that is more than spacing is a gap. A final check confirms that the chunks joined together
     equal the message, ignoring spacing. If there is a gap, the AI is asked once more for chunks. If the
     second answer still has a gap, the first result is shown and the gaps are noted for review.
   example:
@@ -773,7 +772,7 @@ rules:
       - Subject line, opening, body sections, call to action
       - 1-2, no headings
       - Subject at most 80 characters
-      - Dear [<role> Name], / 'Best regards,' then a blank line and '[Your Name]'
+      - Dear [<role> Name], / 'Best regards,' with '[Your Name]' two lines below
     - - LinkedIn message
       - Opening, body sections, call to action
       - Exactly 1
@@ -801,8 +800,8 @@ rules:
     bracket, comma, semicolon, vertical bar or '' - ''). Rank prefixes such as head of, director of, senior
     and lead are removed, and known titles are shortened (Chief Financial Officer becomes CFO, information
     technology becomes IT). If the result is longer than 4 words, just ''[Name]'' is used. Email sign-off:
-    the draft''s own sign-off if it has one, otherwise ''Best regards,'' then a blank line and ''[Your
-    Name]''.'
+    the draft''s own sign-off if it has one, otherwise ''Best regards,'' with ''[Your
+    Name]'' two lines below.'
   example:
     scenario: Titles 'Head of information technology project procurement', 'Chief Financial Officer' and
       'VP / Head of Information Technology'.
@@ -827,10 +826,10 @@ rules:
   kind: guardrail
   summary: A rewrite is shown only when it has the right shape for its format.
   purpose: A rewrite is shown only when it has the right shape for its format.
-  logic: 'Only the parts the format uses are read. These are faults: an empty rewrite; a required part
-    left out; a number of body sections outside the allowed range; a one-pager section with no heading;
-    a subject line over 80 characters; or a finished message (including greeting and sign-off) longer
-    than the format''s character limit (LinkedIn: 300).'
+  logic: 'Only the parts the format uses are read. A rewrite passes when it has every required part,
+    a number of body sections within the allowed range, a heading on each one-pager section, a subject
+    line of at most 80 characters, and a finished message (including greeting and sign-off) within the
+    format''s character limit (LinkedIn: 300).'
   example:
     scenario: A LinkedIn rewrite with a 150-character opening and a 150-character paragraph.
     steps:
@@ -932,7 +931,7 @@ rules:
   summary: When length is the only thing wrong, the same rewrite is asked for again, shorter.
   purpose: When length is the only thing wrong, the same rewrite is asked for again, shorter.
   logic: 'A format with a character limit (LinkedIn: 300) tells the AI how many characters its own text may
-    use, after the greeting and the blank lines between parts are taken off. If the rewrite is still too
+    use, after the greeting and the line breaks between parts are taken off. If the rewrite is still too
     long, it is told how long each part was and how much to cut. If length is then the only fault left,
     the same rewrite is asked for shorter, up to two more times, keeping every applied change and adding
     nothing. Each shorter version goes through all the same checks. Text is never cut off automatically.

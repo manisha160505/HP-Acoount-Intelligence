@@ -37,16 +37,16 @@ rules:
     and news events from a third-party business data provider. Every item becomes one signal with a headline,
     an optional evidence sentence, a date, a category and its source. The source text is used word for
     word. For news coverage the date used is the event date. For news events it is the effective date
-    and, only when that is blank, the date the item was first found. Each item needs headline text to
+    when one is given, otherwise the date the item was first found. Each item needs headline text to
     become a signal.'
   conditions:
   - A news event uses the web link supplied with it when that is a valid web address; a link is never
     made up
-  - Hiring and job-opening data are covered by the Hiring section, not by Live Signals
+  - Hiring and job-opening data feed the Hiring section
   example:
-    scenario: A news event with a blank effective date and a first-found date of 2026-09-02.
+    scenario: A news event whose only date is a first-found date of 2026-09-02.
     steps:
-    - The effective date is blank, so the first-found date is used as the event date.
+    - The first-found date is used as the event date.
     result: The signal is dated 2026-09-02.
     verified: true
     expect: '2026-09-02'
@@ -95,19 +95,19 @@ rules:
   summary: Stops the card printing the same line twice.
   purpose: Stops the card printing the same line twice.
   logic: If the evidence text is identical to the headline, ignoring capital letters and spacing, the
-    evidence text is left blank.
+    card shows the headline only.
   example:
     scenario: A news coverage item whose headline and announcement text are both 'Astra opens plant -
       Reuters'.
     steps:
     - The publisher 'Reuters' is split off the headline.
-    - The evidence text equals the original headline, so it is left blank.
-    result: No evidence sentence; the publisher is Reuters.
+    - The evidence text equals the original headline, so the card shows the headline only.
+    result: The card shows the headline once; the publisher is Reuters.
     verified: true
     expect:
     - ''
     - Reuters
-  output: An evidence sentence, or nothing.
+  output: An evidence sentence when it adds to the headline.
   sources:
   - hp-backend/src/app/services/extractors/recent_news_signals.py:_same_text
   - hp-backend/src/app/services/extractors/recent_news_signals.py:_normalize_signals
@@ -165,7 +165,7 @@ rules:
       - anything else
       - Strategic
   example:
-    scenario: A news event of type 'expands to' and one of an unknown type 'opens office'.
+    scenario: A news event of type 'expands to' and one of an unlisted type 'opens office'.
     steps:
     - '''Expands to'' is in the table, so it is Strategic.'
     - '''Opens office'' is not in the table, so it gets the default, Strategic.'
@@ -199,14 +199,14 @@ rules:
     ref: py:app.services.extractors.recent_news_signals:GATE_MAX_AGE_DAYS
     stated: 365
   example:
-    scenario: 'Build date 17 Sep 2026; five signals: A dated 1 Sep 2026, B undated, C dated 1 Oct 2026,
-      D dated 1 Sep 2025, E with no text.'
+    scenario: 'Build date 17 Sep 2026; five signals: A dated 1 Sep 2026, B with an unreadable date, C
+      dated 1 Oct 2026, D dated 1 Sep 2025, E dated 1 Sep 2026 that carries a date only.'
     steps:
     - A is 16 days old, so it is kept.
     - 'B: the date cannot be read.'
     - 'C: the date is in the future.'
     - 'D: 381 days old, which is older than 365 days.'
-    - 'E: no headline or evidence.'
+    - 'E: a date alone does not make a signal; it needs a headline or evidence sentence.'
     result: Only A is kept.
     verified: true
     expect:
@@ -229,22 +229,22 @@ rules:
   summary: Combines repeat coverage of one event into one card, keeping every source as supporting evidence.
   purpose: Combines repeat coverage of one event into one card, keeping every source as supporting evidence.
   logic: Signals are processed newest first. A signal joins an existing card when (a) its cleaned headline
-    is identical, (b) the headline similarity is 0.85 or more, or (c) it has the same non-empty evidence
-    sentence AND the same event date. The first (newest) signal of a group becomes the card. The link,
-    publisher, source type and dates of every merged item are kept as supporting sources. If the card
-    had no link and a merged item has one, the card takes that item's link and publisher.
+    is identical, (b) the headline similarity is 0.85 or more, or (c) both carry an evidence sentence,
+    the sentences are the same, AND the event dates are the same. The first (newest) signal of a group
+    becomes the card. The link, publisher, source type and dates of every merged item are kept as supporting
+    sources.
   formula: Similarity = how closely two headlines match as text, ignoring capital letters and punctuation
-    (0 means nothing in common, 1 means identical). Merge when similarity is 0.85 or more
+    (0 means completely different, 1 means identical). Merge when similarity is 0.85 or more
   conditions:
-  - The card's link and publisher come from its newest item, or from the first merged item with a link
-    when the newest has none. Source Reliability is scored on that source
+  - The card's link and publisher come from the newest item in the group that has a link. Source Reliability
+    is scored on that source
   - A card appears on the page when it, or one of its merged items, has a source link that opens
   constants:
   - label: Headline similarity threshold
     ref: scoring:live_signal.dedup_similarity
     stated: 0.85
   example:
-    scenario: A news event 'Astra sets IDR 36 trillion capex for 2026' (23 Apr, no link) and a news coverage
+    scenario: A news event 'Astra sets IDR 36 trillion capex for 2026' (23 Apr, data-provider record) and a news coverage
       item 'Astra sets IDR 36 trillion capex for 2026 year' (24 Apr, IDNFinancials link).
     steps:
     - The similarity of the two headlines is 0.94, above 0.85, so they are the same event.
@@ -313,11 +313,11 @@ rules:
   summary: Rewards newer events.
   purpose: Rewards newer events.
   logic: Age in whole days = the date the feed is built minus the event date (never below 0). The first
-    band whose upper limit the age does not exceed gives the points. Over 365 days scores 0, and so does
-    no usable date. The card shows the event date at the top, and the score breakdown shows the Recency
+    band whose upper limit the age does not exceed gives the points. Over 365 days, or a date that cannot
+    be read, scores 0. The card shows the event date at the top, and the score breakdown shows the Recency
     points.
   conditions:
-  - A date with no time zone is read as UTC
+  - Dates are read in UTC unless they state a time zone
   table:
     columns:
     - Age of signal
@@ -335,7 +335,7 @@ rules:
       - 2
     - - over 365 days
       - 0
-    - - no usable date
+    - - date that cannot be read
       - 0
   constants:
   - label: Recency bands (maximum age in days, points)
@@ -354,7 +354,7 @@ rules:
   - label: Over 365 days
     ref: scoring:live_signal.recency_over_max
     stated: 0
-  - label: No usable date
+  - label: Date that cannot be read
     ref: scoring:live_signal.recency_no_date
     stated: 0
   example:
@@ -731,18 +731,17 @@ rules:
   purpose: Decides the feed order.
   logic: 'Signals the AI judges not to be about this account (usually a story about another company) are
     left out. Scored signals are sorted by Live Signal Score, highest first, with ties going to the newest.
-    Signals without an AI relevance result follow, newest first, shown without a total score. Undated
-    signals sort last. No limit is applied.'
+    Any other signals follow, newest first. No limit is applied.'
   example:
     scenario: 'Three scored signals: X 5.8 (1 Sep), Y 7.1 (1 Aug), Z 5.8 (10 Sep, flagged by the AI as
-      not about this account); one unassessed signal W (15 Sep).'
+      not about this account); and one other signal, W (15 Sep).'
     steps:
     - Z is left out (flagged as not about this account).
     - 'Scored: Y 7.1 first, then X 5.8.'
-    - W follows, unassessed.
+    - W follows the scored signals.
     result: 'Order: Y, X, W.'
   output: 'The feed of signals, with counts for: items read, items outside the date, content and source-link
-    checks, items within the 12-month window, cards after merging, cards without an AI relevance result,
+    checks, items within the 12-month window, cards after merging, cards listed after the scored ones,
     and cards the AI judged to be about another company.'
   sources:
   - hp-backend/src/app/services/extractors/recent_news_signals.py:extract_recent_news_signals
@@ -851,7 +850,7 @@ rules:
     result: Flagged as 'is 50 words; the brief is 70-100'.
     verified: true
     expect: is 50 words; the brief is 70-100
-  output: The reason a rewrite is requested, or none.
+  output: The reason a rewrite is requested.
   sources:
   - hp-backend/src/app/services/extractors/recent_news_signals.py:_angle_length_fault
   - hp-backend/src/app/services/extractors/recent_news_signals.py:score_news_signals
@@ -869,8 +868,8 @@ rules:
     scenario: A paragraph mentions '5,000 new laptops', a figure that no news item contains.
     steps:
     - 5,000 is not in the news information.
-    result: The paragraph is not shown; the score is kept.
-  output: A checked paragraph, or none.
+    result: Only paragraphs that pass this check appear on the card; the score is kept.
+  output: A checked paragraph.
   sources:
   - hp-backend/src/app/services/extractors/recent_news_signals.py:_grounded_angle
   - hp-backend/src/app/services/extractors/recent_news_signals.py:_grounded_rationales
@@ -880,17 +879,17 @@ rules:
   parent: null
   name: HP play label
   kind: display
-  summary: Names the single HP product line the signal supports, or none.
-  purpose: Names the single HP product line the signal supports, or none.
+  summary: Names the single HP product line the signal supports.
+  purpose: Names the single HP product line the signal supports.
   logic: 'The AI may return one of exactly six labels: ''Z by HP Workstations'', ''HP Elite / Pro PCs'',
     ''HP Wolf Security'', ''Poly Collaboration'', ''HP Enterprise Print / MPS'', ''HP Anyware / DaaS''.
-    Any other value gives no label.'
+    Only these six labels appear on the card.'
   example:
     scenario: The AI returns 'HP Wolf Security' on one signal and 'HP Laptops' on another.
     steps:
     - The first is on the list.
-    - The second is not on the list, so it gets no label.
-    result: Label 'HP Wolf Security' on the first; none on the second.
+    - The second is not on the list, so only the first card carries a label.
+    result: Label 'HP Wolf Security' on the first card only.
     verified: true
     expect:
     - true
@@ -907,8 +906,8 @@ rules:
   summary: Says whether the event has happened.
   purpose: Says whether the event has happened.
   logic: The AI picks completed, announced, planned, rumoured or unknown from the wording of the headline
-    and evidence. Any other value becomes unknown. Signals without an AI result are unknown. Unknown shows
-    no badge.
+    and evidence. Any other value counts as unknown. A badge appears for completed, announced, planned
+    and rumoured events.
   example:
     scenario: '''Astra will build a plant in 2027''.'
     steps:
@@ -929,8 +928,7 @@ rules:
   purpose: Adds an HP customer story only where it supports the named play.
   logic: After ranking, a case study is added to signals that have both an Implication for HP and an
     HP play. The play is mapped to HP product lines, and a study is chosen by the account's industry and
-    the play, using studies not already cited elsewhere in the account's pages or on other cards. A signal
-    without an HP play shows no case study.
+    the play, using studies not already cited elsewhere in the account's pages or on other cards.
   example:
     scenario: A signal with the HP play 'Z by HP Workstations'.
     steps:
@@ -947,8 +945,7 @@ rules:
   summary: A colour label based on the score, shown on the page.
   purpose: A colour label based on the score, shown on the page.
   logic: 'The page labels each scored signal: 8.0 or more = Critical (red, pulsing, red border), 6.0 or
-    more = High, 4.0 or more = Medium, below 4.0 = Low. Signals without a total score carry no badge. The
-    page sets the badge from the score each time it is shown.'
+    more = High, 4.0 or more = Medium, below 4.0 = Low. The page sets the badge from the score each time it is shown.'
   table:
     columns:
     - Score
@@ -998,8 +995,7 @@ rules:
   logic: 'The page reads the confidence rating that the news feed supplied with each item: High, Medium
     or Low for news coverage, or a number from 0 to 1 for news events. A number of 0.8 or more, or text
     starting ''high'', gives a green dot. 0.5 or more, or text starting ''med'', gives amber. A number
-    below 0.5, or text starting ''low'', gives red. Any other value shows no dot. The dot does not affect
-    the score.'
+    below 0.5, or text starting ''low'', gives red. The dot does not affect the score.'
   example:
     scenario: A news event with confidence 0.62.
     steps:

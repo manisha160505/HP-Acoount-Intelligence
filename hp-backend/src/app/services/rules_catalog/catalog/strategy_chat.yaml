@@ -7,7 +7,7 @@ purpose: Lets a seller ask questions about one account (advisor mode) or rehears
   dashboard shows.
 final_output: 'One of three things: a structured answer (a short answer, optional supporting facts, optional
   recommended next steps) with footnote citations to dashboard sections; an in-character rehearsal reply;
-  or a short message that explains why no answer is shown.'
+  or a short standard message from the chat.'
 how_it_combines: 'Every answer is built only from the account''s dashboard sections.
 
   - Advisor mode: the AI writes its reply as a series of short parts, each labelled as a fact, a conclusion,
@@ -32,7 +32,7 @@ rules:
   - Recent news signals
   - Strategic priorities
   logic: 'Built only from what the account''s other dashboard sections show, so every number matches
-    the page it comes from. A count shows a dash until its section has content.
+    the page it comes from.
 
     Counts: solutions = the number of plays on the Opportunity Map; installed vendors = the total number
     of technologies detected on the technology map; live signals = the total number of news signals; intent
@@ -387,9 +387,8 @@ rules:
   purpose: How the AI revises an answer so that only checked parts are shown.
   logic: The AI has up to 3 attempts. After each attempt, it gets a note on each part that did not pass
     (up to 8 notes) so it can correct them. If a reply runs too long, the AI is asked for a much shorter
-    answer. If the AI service does not return a usable reply, the 'AI service' message is shown straight
-    away. After the last attempt, the parts that passed (and rest only on parts that passed) are checked
-    again and shown, and any heading with nothing under it is removed. If no substantive part remains,
+    answer. After the last attempt, the parts that passed (and rest only on parts that passed) are checked
+    again and shown, each under its heading. When the passing parts do not make a substantive answer,
     the 'Not evidenced' message is shown.
   constants:
   - label: Attempts
@@ -400,7 +399,7 @@ rules:
     scenario: The three-part answer from the fact check, after the last attempt.
     steps:
     - None of the three parts passed
-    - No part remains to show
+    - The answer is not evidenced
     result: The seller sees the 'Not evidenced' message instead.
     verified: true
     expect: []
@@ -448,7 +447,7 @@ rules:
   summary: Who the seller can rehearse against.
   purpose: Who the seller can rehearse against.
   logic: The seller rehearses against the account's real stakeholder contacts that have a specific job
-    title. Titles that are blank, '-', n/a, none, employee, staff, member or unknown are not offered.
+    title, not a generic one such as '-', n/a, none, employee, staff, member or unknown.
     Contacts are sorted by stakeholder score, highest first. The person's name appears in the menu, and
     the AI is given the role, not the name - the title, department, seniority, influence, decision power,
     the HP focus for that person, up to 4 recorded pain points and up to 5 objection cards that the same
@@ -557,7 +556,7 @@ rules:
   purpose: Every sentence that states something must carry a citation.
   logic: Every cited section must be in the account's information. Every sentence that states something
     carries a valid citation, up to any 'Next steps:' or 'Recommendations:' heading. Filler, bare headings
-    and sentences that say the data does not cover a point (such as 'does not hold') need no citation.
+    and sentences that make no claim about the account need no citation.
     All figures must be
     in the account's information. Bold and heading marks are removed before the check.
   example:
@@ -621,12 +620,12 @@ rules:
   confidence: high
 - id: sc_unavailable
   parent: null
-  name: Messages when no answer is shown
+  name: Standard chat messages
   kind: selection
-  summary: Tells the seller why no answer is shown and where to look next.
-  purpose: Tells the seller why no answer is shown and where to look next.
-  logic: 'The message names one of three causes: the account has no dashboard sections yet; the AI service
-    did not return a usable reply; or the drafted answer did not pass the evidence checks. Each message
+  summary: A short standard message explains the outcome and points the seller to the right section.
+  purpose: A short standard message explains the outcome and points the seller to the right section.
+  logic: 'The message names its cause: the AI service did not return a usable reply, or the drafted
+    answer did not pass the evidence checks. Each message
     points the seller to the Stakeholder Map, Tech Landscape or Recent Signals. It appears as a normal
     chat reply. Off-topic questions get their own short reply.'
   table:
@@ -634,8 +633,6 @@ rules:
     - Cause
     - What the message says
     rows:
-    - - No dashboard sections yet
-      - No dashboard section has been published for {company} yet, so there is nothing to answer from.
     - - AI service
       - The AI service did not return a usable answer for {company}. The account's data is not the cause.
     - - Not evidenced

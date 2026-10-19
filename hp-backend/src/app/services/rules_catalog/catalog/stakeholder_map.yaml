@@ -25,7 +25,7 @@ rules:
   - The contact list supplied for the account (one entry per person)
   logic: Every entry in the account's contact list is read. Entries whose provider match is still pending
     or under review are set aside (see the sub-rule below). Every other entry becomes one contact, and
-    only this list is used. Entries with blank fields are kept.
+    only this list is used.
   output: The contact list used on the page. The number of entries set aside is recorded in the system
     log.
   sources:
@@ -41,14 +41,12 @@ rules:
   purpose: Builds stakeholder cards only from contacts whose provider match is not pending or under review.
   inputs:
   - The match status recorded for each contact
-  logic: The first non-blank match status recorded for the contact is read, ignoring capital letters.
+  logic: The match status is taken from the first place that records one, ignoring capital letters.
     If it contains any of the words pending, review, unmatched, not matched, no match or in progress,
-    the contact is set aside and counted. A blank status is kept, because it means the provider recorded
-    no status.
+    the contact is set aside and counted. Every other contact is kept.
   conditions:
   - 'Status contains ''pending'', ''review'', ''unmatched'', ''not matched'', ''no match'' or ''in progress'':
     set aside'
-  - 'Status blank: kept'
   - 'Any other status (for example ''Matched''): kept'
   constants:
   - label: Match statuses held for review
@@ -69,13 +67,13 @@ rules:
     - Match status
     - match status
   example:
-    scenario: Four contacts with the statuses 'Pending review', 'Matched', blank and 'Needs Review'.
+    scenario: Four contacts. Two have the statuses 'Pending review' and 'Needs Review'. The other two,
+      such as 'Matched', contain none of the listed words.
     steps:
     - '''Pending review'' contains ''pending'', so it is set aside'
-    - '''Matched'' contains none of the words, so it is kept'
-    - Blank is kept
     - '''Needs review'' contains ''review'', so it is set aside'
-    result: 2 contacts kept (Matched, blank), 2 set aside.
+    - The other two contain none of the words, so they are kept
+    result: 2 contacts kept, 2 set aside.
     verified: true
     expect:
     - - apollo_match_status: Matched
@@ -242,7 +240,7 @@ rules:
     list so that contacts group together.
   logic: The department as delivered is split on ';' or ','. The first part (other than 'c_suite') that
     is in the mapping table wins. If only 'c_suite' is present, the department is 'Executive'. If nothing
-    maps, the delivered text is shown in title case as it is. A blank department becomes 'Unassigned'.
+    maps, the delivered text is shown in title case as it is.
   table:
     columns:
     - Department as delivered
@@ -270,8 +268,6 @@ rules:
       - Consulting
     - - c_suite (on its own)
       - Executive
-    - - blank
-      - Unassigned
     - - anything else
       - The delivered text in title case
   constants:
@@ -299,7 +295,7 @@ rules:
   purpose: Puts every contact into one of five seniority bands.
   logic: 'The job level as delivered (ignoring brackets, quotes and capital letters) is looked up: c_suite,
     c-suite or cxo = C-Suite; vp or vice_president = VP; director or head = Director; manager or owner
-    = Manager; anything else or blank = Individual Contributor. A ''Head of ...'' title therefore bands
+    = Manager; anything else = Individual Contributor. A ''Head of ...'' title therefore bands
     as Director, not VP. A C-Suite tag is confirmed against the title (see the sub-rule below).'
   table:
     columns:
@@ -314,7 +310,7 @@ rules:
       - Director
     - - manager, owner
       - Manager
-    - - anything else / blank
+    - - anything else
       - Individual Contributor
   example:
     scenario: Job level 'head', title 'Head of IT Infrastructure'.
@@ -1038,8 +1034,7 @@ rules:
   kind: selection
   summary: Shows the department names exactly as they appear in the contact data.
   purpose: Shows the department names exactly as they appear in the contact data.
-  logic: Counts contacts for each department as delivered (not unified); a blank department counts as
-    'Unassigned'. Listed most common first.
+  logic: Counts contacts for each department as delivered (not unified). Listed most common first.
   output: A strip of department tags at the bottom of the tab.
   sources:
   - hp-backend/src/app/services/extractors/stakeholder_map.py:extract_stakeholder_map
@@ -1111,8 +1106,7 @@ rules:
   logic: 'One AI request covers every contact on the roster. The AI writes only four things: how to open,
     HP play focus, decision power and pain points. Everything else (names, bands, influence, scores, contact
     details) comes from the contact data and the rules above. Each entry then passes the automatic checks
-    in the sub-rules. A field appears on the card when it passes the checks; the card shows ''No signal
-    observed'' when there is no opener.'
+    in the sub-rules. A field appears on the card when it passes the checks.'
   output: 'For each contact: how to open, HP play focus, decision power and pain points.'
   sources:
   - hp-backend/src/app/services/extractors/stakeholder_map.py:generate_stakeholder_talking_points
@@ -1259,7 +1253,7 @@ rules:
   summary: Uses only complete entries for contacts on the roster.
   purpose: Uses only complete entries for contacts on the roster.
   logic: An entry is used when it is well formed, its contact ID matches one of the contacts supplied,
-    and its how-to-open text is not empty. An empty HP play focus is stored as blank.
+    and it includes how-to-open text.
   output: Entries passed on to the invented-number check.
   sources:
   - hp-backend/src/app/services/extractors/stakeholder_map.py:_run

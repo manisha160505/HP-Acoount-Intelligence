@@ -10,8 +10,8 @@ final_output: A header showing the number of reframes and an 'Incumbents Detecte
   When expanded, the card shows the reframe, the evidence line, a counter question, an HP proof point
   where one fits, and a Topic owner or Owning function line.
 how_it_combines: The playbook works through the same five HP contest areas. For each area it finds the
-  vendors the account runs (from the installed technology list, or from website technology when that
-  list is empty), names a topic owner only on a strong job-title match, and selects the claims from HP's
+  vendors the account runs (from the installed technology list first, otherwise from website
+  technology), names a topic owner only on a strong job-title match, and selects the claims from HP's
   approved sales rulebook that the account's evidence supports. It can also attach an HP case study. The
   AI writes the objection and reframe from that material only. Each card is then checked for sector-based
   reasoning, HP claims the rulebook does not support and numbers that are not in the account's data. An
@@ -28,17 +28,16 @@ rules:
   inputs:
   - The account's installed technology list
   - The account's website technology
-  logic: '1) If the installed technology list has at least one non-blank entry, it is used. 2) Otherwise
+  logic: '1) If at least one entry in the installed technology list names something, it is used. 2) Otherwise
     the website technology is used: every technology named under its categories is combined into one ''Website
     stack'' list. Page details (search-engine headers, titles and descriptions, copyright, document information,
-    robots, language, feeds, links, web master) and ID fields are skipped. 3) If neither source names
-    a technology, no objections are written. Technology named in job ads or in other technology detections
+    robots, language, feeds, links, web master) and ID fields are skipped. 3) Cards are written when
+    one of these two sources names a technology. Technology named in job ads or in other technology detections
     does not feed the evidence line. The source is recorded with each card, and the page header names
     it.'
   conditions:
-  - Installed technology list has any non-blank entry -> use it
+  - Installed technology list has an entry that names something -> use it
   - Otherwise website technology names at least one technology (not page details) -> use it
-  - Otherwise -> the Objection Playbook shows the 'No signal observed' message and no cards
   constants:
   - label: Name recorded for each source
     ref: py:app.services.extractors.objection_playbook:EVIDENCE_SOURCE_LABELS
@@ -47,15 +46,15 @@ rules:
       tech_breakdown: tech_breakdown (website technology)
       none: No technology evidence available
   example:
-    scenario: The installed technology list exists but its only entry is blank.
+    scenario: The installed technology list exists, but none of its entries names anything.
     steps:
-    - The only entry is blank, so the installed technology list is not used
+    - No entry names anything, so the installed technology list is not used
     - Website technology is checked next
     result: The installed technology list is not used, and website technology is checked next
     verified: true
     expect: false
-  output: 'One of three outcomes: installed technology list, website technology, or neither. The page
-    header names the source used.'
+  output: The source used, either the installed technology list or website technology. The page header
+    names it.
   sources:
   - hp-backend/src/app/services/extractors/objection_playbook.py:_technology_evidence
   - hp-backend/src/app/services/extractors/objection_playbook.py:_usable
@@ -83,8 +82,7 @@ rules:
     comes from the company profile: business description, company name, web domain, headquarters location
     (city, region and country joined; otherwise the stated headquarters), industry (the LinkedIn, NAICS
     and SIC industry labels, with repeats removed, joined with '' / ''), employee range and revenue range.
-    The section also records the evidence and topic owner for each area. When website technology is
-    the source, the incumbent list is empty and the count is 0.'
+    The section also records the evidence and topic owner for each area.'
   output: The 'N Incumbents Detected' badge in the page header.
   sources:
   - hp-backend/src/app/services/extractors/objection_playbook.py:extract_objection_playbook
@@ -868,7 +866,7 @@ rules:
     verified: true
     expect:
     - 'C 03 integration: claims HP connects to ServiceNow, which no approved fact names'
-  output: List of faults (an empty list means the card passes).
+  output: List of faults. The card passes when the check finds no faults.
   sources:
   - hp-backend/src/app/services/extractors/objection_playbook.py:_claim_faults
   - hp-backend/src/app/services/extractors/objection_playbook.py:_INTERNAL_VOCABULARY

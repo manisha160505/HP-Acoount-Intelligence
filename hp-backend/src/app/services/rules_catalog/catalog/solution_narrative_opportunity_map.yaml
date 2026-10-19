@@ -817,8 +817,7 @@ rules:
   - First cited dated headline that contains a digit
   logic: 'Fragments are joined in this order: ''<employees> employee estate'' (PCs, device as a service,
     collaboration and print only); the detected estate products for the family (up to 4, with server and
-    data-centre entries left out) or, if none is detected, a sentence saying that none of the N listed
-    technologies is in this area; the highest-scoring cited research topic with its composite score; and
+    data-centre entries left out); the highest-scoring cited research topic with its composite score; and
     the first cited dated trigger headline that contains a digit. The basis of each fragment is listed
     alongside the statement. The statement appears when at least one fragment is available.'
   table:
@@ -879,7 +878,7 @@ rules:
   logic: A contact qualifies if a title word for the play family (as a whole word) is in their title,
     or their department is one of the family's departments. Rank = 2 for a title match + 1 for a department
     match. Ties are broken by the higher stakeholder score, and the top 2 are kept. Only the account's
-    own contacts are named. When no contact matches, the play carries a standard no-contact note.
+    own contacts are named.
   table:
     columns:
     - Play family
@@ -922,7 +921,7 @@ rules:
     expect:
     - A
     - C
-  output: Up to two target contacts for each play, or the no-contact note.
+  output: Up to two target contacts for each play.
   sources:
   - hp-backend/src/app/services/extractors/solution_narrative_opportunity_map.py:_match_contacts
   - hp-backend/src/app/services/extractors/solution_narrative_opportunity_map.py:PLAY_OWNER_TITLE_TOKENS
@@ -932,8 +931,8 @@ rules:
   parent: null
   name: Case-study proof point per play
   kind: selection
-  summary: Attaches at most one HP customer story that matches the HP line the play argues for, or nothing.
-  purpose: Attaches at most one HP customer story that matches the HP line the play argues for, or nothing.
+  summary: Attaches at most one HP customer story that matches the HP line the play argues for.
+  purpose: Attaches at most one HP customer story that matches the HP line the play argues for.
   inputs:
   - The play's HP products
   - The play title (and opportunity type for service plays)
@@ -941,7 +940,7 @@ rules:
   - Case studies already cited by higher-priority sections
   logic: Only plays that stay as opportunities (not discovery areas) get a proof point. The play's HP
     products are matched to case-study product lines, and only studies on those lines that have a headline
-    are candidates, so a play whose products match no line has no proof point. Candidates are ranked
+    are candidates. Candidates are ranked
     (see the ranking rule) and then allocated (see the allocation rule). Hardware plays pick first, then
     service plays. The same study is never used twice on this page. A study's figures describe that customer,
     so they are quoted as published rather than checked against this account.
@@ -1014,11 +1013,11 @@ rules:
   inputs:
   - The study's featured product
   - The study's HP route (its sales route)
-  - The study's HP offering (used when the first two are blank)
+  - The study's HP offering (used last)
   logic: '1) The featured product is matched against the product-line keywords, most specific first: 3D,
     SitePrint, Workstation, Security, workforce experience, Collaboration, Device services, Print, PC.
-    2) Otherwise the HP route is used: 3D Printing, Workstations, Print, PC-Notebook. 3) Only if both
-    are blank: the HP offering, as read by AI.'
+    2) Otherwise the HP route is used: 3D Printing, Workstations, Print, PC-Notebook. 3) Otherwise: the
+    HP offering, as read by AI.'
   table:
     columns:
     - Line
@@ -1238,7 +1237,7 @@ rules:
       - 1
     - - 0
       - 1
-  output: One proof point, or none.
+  output: At most one proof point for each play.
   sources:
   - hp-backend/src/app/services/hp/case_studies.py:allocate
   - hp-backend/src/app/services/hp/case_studies.py:_quality_tier
@@ -1428,11 +1427,11 @@ rules:
   inputs:
   - 'Company profile: country'
   logic: 'A country containing ''united states'' (or ''us'' / ''usa'') -> available. Any other known country
-    -> the HP IQ family is not offered and a note ''HP IQ not offered: ...'' is recorded. Country not known
-    -> the family stays open to matching.'
+    -> the HP IQ family is not offered and a note ''HP IQ not offered: ...'' is recorded. Otherwise the
+    family stays open to matching.'
   example:
-    scenario: Indonesia, United States, blank.
-    result: Not offered, available, open to matching (country not known).
+    scenario: Indonesia, United States, and an account whose country is still to be confirmed.
+    result: Not offered, available, open to matching.
     computed_value:
     - false
     - true
