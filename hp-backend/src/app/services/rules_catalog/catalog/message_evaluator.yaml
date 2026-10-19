@@ -6,13 +6,12 @@ purpose: Scores a seller's own draft (an email, a LinkedIn message or a one-page
   roles, gives feedback on specific phrases, and can rewrite the draft using only the changes the seller
   picks.
 final_output: A total score with its band and the formula used; seven scores with a reason for each; format
-  checks (pass or fail); Keep, Improve or Change marks on the draft; a summary with strengths and weaknesses;
-  a carefully limited simulated reaction (Deep mode only); and, if asked, a checked rewrite with the changes
-  shown.
+  checks (met or not met); Keep, Improve or Change marks on the draft; a summary with strengths and weaknesses;
+  a simulated role reaction (Deep mode only); and, if asked, a checked rewrite with the changes shown.
 how_it_combines: The AI scores the seller's draft on seven qualities for the chosen role. The scores are
-  checked and then combined into one total using the weighting set for the chosen objective. Caps are
-  applied for serious failures (for example, an HP product line this role is never offered caps the Relevance
-  score). Format checks, source rules and market restrictions run alongside. Phrase feedback must cover
+  checked and then combined into one total using the weighting set for the chosen objective. Caps apply
+  for serious issues (for example, an HP product line this role is never offered caps the Relevance score).
+  Format checks, source rules and market restrictions run alongside. Phrase feedback is checked to cover
   the whole message. An optional rewrite applies only the changes the seller selects and is then checked
   against the same content rules as generated content.
 rules:
@@ -20,19 +19,17 @@ rules:
   parent: null
   name: Who a message is scored against
   kind: selection
-  summary: 'The role menu: the client''s eight roles, each with a fixed profile.'
-  purpose: 'The role menu: the client''s eight roles, each with a fixed profile.'
+  summary: 'The role menu: HP''s eight buying roles, each with a set profile.'
+  purpose: 'The role menu: HP''s eight buying roles, each with a set profile.'
   inputs:
   - The account's list of named contacts
-  - The fixed profiles of the eight roles
+  - The profiles of the eight roles
   logic: The same eight roles as in Content Studio are offered on every account. Each is marked as filled
-    or unfilled, depending on whether the account has a named contact in that role. The profile of each
-    role is fixed and the same on all accounts. It covers title, department, buying-committee angle, remit,
-    goals, pain points, value drivers, decision criteria, tone, format, key metrics, what resonates and
-    what does not, typical objections, the HP opportunity and an evidence grade. Only whether a named
-    contact holds the role differs between accounts. A role that is not offered for the account is refused
-    with 'does not belong to this account'. In Deep mode, the role's assumed starting attitude is added
-    to the profile.
+    or unfilled, depending on whether the account has a named contact in that role. Each role's profile
+    is the same on all accounts. It covers title, department, buying-committee angle, remit, goals, pain
+    points, value drivers, decision criteria, tone, format, key metrics, what resonates and what does not,
+    typical objections, the HP opportunity and an evidence grade. Only roles offered for the account can
+    be chosen. In Deep mode, the role's starting attitude is added to the profile.
   table:
     columns:
     - Role
@@ -84,11 +81,11 @@ rules:
   parent: me_personas
   name: Deep-mode starting attitudes
   kind: selection
-  summary: An assumed starting attitude for the reader, treated as a guess.
-  purpose: An assumed starting attitude for the reader, treated as a guess.
+  summary: A typical starting attitude for each role, used to shape the Deep-mode review.
+  purpose: A typical starting attitude for each role, used to shape the Deep-mode review.
   logic: Each role has one starting attitude. In Deep mode, the AI is shown that attitude with its trust
-    level, bias, what works, what would fast-track the decision and the key blocker. It is described as
-    'a default, not something observed'. It is not used in any calculation.
+    level, bias, what works, what would fast-track the decision and the key blocker. It is presented as
+    a default for the role, not an observation about the contact. It does not change any score.
   table:
     columns:
     - Attitude
@@ -123,9 +120,8 @@ rules:
   summary: What the seller sets for one evaluation.
   purpose: What the seller sets for one evaluation.
   logic: 'Objective (funnel stage): awareness, engagement, consideration, conversion or advocacy. Format:
-    Email, LinkedIn Message or One-Pager Exec Brief. Social Post, Website Copy, Tech Blog, Message Planks
-    and Campaign Idea are retired and refused. Mode: Lite or Deep (Deep is the default). The message must
-    not be empty. The objective alone selects the scoring weights. Format and mode never change a weight.'
+    Email, LinkedIn Message or One-Pager Exec Brief. Mode: Lite or Deep (Deep is the default). A message
+    is required. The objective alone selects the scoring weights. Format and mode never change a weight.'
   constants:
   - label: Objectives
     ref: py:app.services.evaluator.scoring:OBJECTIVES
@@ -160,35 +156,34 @@ rules:
   summary: Turns seven AI-scored qualities into one total score.
   purpose: Turns seven AI-scored qualities into one total score.
   logic: The AI scores all seven qualities from 0 to 100 and gives a one-sentence reason for each. It
-    never sees the weights or the total. The formula is chosen by the objective alone, and the total is
-    the weighted sum, rounded to 1 decimal. A quality with a weight of 0 is still shown. Every quality
-    in the formula must have a valid score, or no total is shown. The weights are not rescaled to fill
-    the gap.
+    scores without seeing the weights or the total, so each score stands on its own. The formula is chosen
+    by the objective alone, and the total is the weighted sum, rounded to 1 decimal. A quality with a weight
+    of 0 is still shown. A total is shown when every quality in the formula has a valid score.
   formula: Total = the sum of (score for each quality × its weight for the chosen objective), rounded
     to 1 decimal
   table:
     columns:
     - Objective
     - Formula
-    - Where it comes from
+    - Source of the weights
     rows:
     - - Awareness
       - 30% × Relevance + 20% × Impact + 20% × Brand Recall + 15% × Clarity + 15% × Creativity
-      - The client's HP scoring guidance
+      - HP scoring guidance
     - - Engagement
       - 50% × Relevance + 10% × Impact + 20% × Clarity + 10% × Creativity + 10% × Emotional Connection
-      - The client's HP scoring guidance
+      - HP scoring guidance
     - - Consideration
       - 40% × Relevance + 10% × Brand Recall + 10% × Clarity + 10% × Emotional Connection + 30% × Next-step
         Strength
-      - The client's HP scoring guidance
+      - HP scoring guidance
     - - Conversion
       - 15% × Relevance + 15% × Impact + 25% × Brand Recall + 10% × Clarity + 5% × Emotional Connection
         + 30% × Next-step Strength
-      - The client's HP scoring guidance
+      - HP scoring guidance
     - - Advocacy
       - 15% × Relevance + 30% × Brand Recall + 15% × Clarity + 10% × Creativity + 30% × Emotional Connection
-      - Carried over from an earlier version of the tool (not in the client's scoring guidance)
+      - Product default weighting
   example:
     scenario: 'Scores: Relevance 80, Impact 70, Brand Recall 60, Clarity 90, Creativity 50, Emotional
       Connection 40, Next-step Strength 75.'
@@ -224,8 +219,8 @@ rules:
   summary: The word shown under the score.
   purpose: The word shown under the score.
   logic: 'Read from the top down: 90 or more is Exceptional, 75 or more is Strong, 60 or more is Good,
-    40 or more is Average, 20 or more is Weak, and anything lower is Poor. If there is no total, the band
-    is Unavailable. The same scale is shown to the AI.'
+    40 or more is Average, 20 or more is Weak, and anything lower is Poor. When there is no total, the
+    band reads Unavailable. The AI scores against the same scale.'
   table:
     columns:
     - Score from
@@ -267,20 +262,18 @@ rules:
   confidence: high
 - id: me_dimension_validation
   parent: me_scoring
-  name: Score checks, one retry, and filling gaps
+  name: Score checks
   kind: guardrail
-  summary: What happens when the AI's scores are missing or invalid.
-  purpose: What happens when the AI's scores are missing or invalid.
-  logic: Quality names are matched loosely (for example 'CTA' means Next-step Strength, and 'Brand_Recall'
-    and 'Emotional' are accepted). Unknown qualities are dropped. A score is valid only if it is a number
-    from 0 to 100. If anything is wrong, the AI is asked once more and told what the problems were. The
-    second answer can only add to the first - a score that was valid the first time is kept, and one that
-    is valid only the second time is taken from there. A quality that is still missing after that is
-    filled in with 50 and listed as filled in, but only when no more than 2 are missing and together
-    they carry less than half of the total; otherwise nothing is filled in. Scores that are not numbers,
-    or are outside 0 to 100, are never filled in. Whenever a problem remains, the valid scores are still
-    shown, there is no total, the band is 'Unavailable', and the summary says which scores are missing
-    (12 Oct).
+  summary: Each AI score is checked before it counts towards the total.
+  purpose: Each AI score is checked before it counts towards the total.
+  logic: A score is valid when it is a number from 0 to 100. If any score is not valid, the AI is asked
+    once more and told what to correct. The second answer only adds to the first - a score that was valid
+    the first time is kept, and one that is valid only the second time is taken from there. A quality that
+    still has no score is filled in with 50 and labelled as filled in, when no more than 2 are unscored
+    and together they carry less than half of the total. Scores that are not numbers, or are outside 0
+    to 100, are never filled in. When any quality is still without a valid score, the valid scores are
+    shown, no total is given, the band reads 'Unavailable', and the summary names the qualities still
+    to be scored.
   constants:
   - label: Fill-in score
     ref: py:app.services.evaluator.scoring:PAD_SCORE
@@ -297,9 +290,9 @@ rules:
     steps:
     - Relevance and Impact are valid
     - Brand Recall is out of range and Clarity is not a number
-    - Creativity, Emotional Connection and Next-step Strength are missing - three, which is more than
+    - Creativity, Emotional Connection and Next-step Strength have no score - three, which is more than
       may be filled in
-    result: Nothing is filled in. The two valid scores are shown and no total is shown.
+    result: Nothing is filled in. The two valid scores are shown, with no total.
     verified: true
     expect:
     - relevance: 80.0
@@ -321,17 +314,16 @@ rules:
   confidence: high
 - id: me_severe_failures
   parent: me_scoring
-  name: Severe failures
+  name: Severe-issue caps
   kind: selection
   summary: A wrong HP product line or an out-of-angle ask always pulls the score down.
   purpose: A wrong HP product line or an out-of-angle ask always pulls the score down.
   logic: 'Before the AI scores the draft, two of Content Studio''s content checks are run on it. The first
     looks for an HP product line that this role is never offered, anywhere in the text. The second looks
     at the ask, meaning the last question in the message or, if there is none, the last sentence. After
-    the AI scores the draft, the first check, if it finds a problem, caps Relevance at 39. The second
-    check, if it finds a problem, caps Next-step Strength at 39. Caps only push scores down: if the AI''s
-    score is already lower, it is kept. The summary starts with ''<Quality> scored down: <reason>.'' These
-    checks are skipped for a role outside the eight.'
+    the AI scores the draft, an issue found by the first check caps Relevance at 39. An issue found by
+    the second check caps Next-step Strength at 39. Caps only push scores down: if the AI''s score is
+    already lower, it is kept. The summary starts with ''<Quality> scored down: <reason>.'''
   constants:
   - label: Severe cap
     ref: py:app.services.evaluator.evaluate:SEVERE_FLOOR
@@ -343,7 +335,7 @@ rules:
     - Poly Studio is never offered to the CFO, so Relevance is capped at 39
     - The ask 'Could I send you pricing?' raises a commercial term with a Finance - Budget Owner, so Next-step
       Strength is capped at 39
-    result: Two severe failures.
+    result: Two severe issues, so both qualities are capped at 39.
     verified: true
     expect:
     - dimension: relevance
@@ -372,11 +364,11 @@ rules:
   summary: Gives the AI the HP positioning and proof that exist for the product lines the seller named.
   purpose: Gives the AI the HP positioning and proof that exist for the product lines the seller named.
   logic: The draft is checked for the HP product lines it names, using a fixed list of product line names.
-    For each line found, the AI is given up to 3 rules from HP's approved messaging (what we offer, up
-    to 3 facts that may be stated and up to 3 things that must not be said). It is also given up to 2
-    HP case studies, ranked by how well they match the draft and the account's industry. If no case study
-    fits, the AI is told that the recommendation is to cut the claim that cannot be proved. How this moves
-    the scores is up to the AI's judgement. Nothing here changes a number directly.
+    For each line found, the AI is given up to 3 rules from HP's approved messaging (the offer, up to 3
+    facts that may be stated and up to 3 things that must not be said). It is also given up to 2 HP case
+    studies, ranked by how well they match the draft and the account's industry. When no case study fits,
+    the recommendation for a benefit claim with no proof is to cut it. The AI weighs this context in its
+    scoring; it does not change any number directly.
   constants:
   - label: Messaging rules per product line
     ref: py:app.services.evaluator.evaluate:RULEBOOK_RULES_PER_LINE
@@ -403,8 +395,8 @@ rules:
   parent: null
   name: Format checks
   kind: guardrail
-  summary: Pass or fail checks on the shape of the message. They still work if the AI fails.
-  purpose: Pass or fail checks on the shape of the message. They still work if the AI fails.
+  summary: Checks on the shape of the message, run directly on the text and independent of the AI.
+  purpose: Checks on the shape of the message, run directly on the text and independent of the AI.
   logic: 'Email: at most 180 words; a ''Subject:'' line that is at most 80 characters; a greeting at the
     very start of the text (dear, hi, hello, hey, good morning or good afternoon); a sign-off line at
     the end (best regards, kind regards, regards, sincerely, thanks, cheers and similar); and next-step
@@ -413,9 +405,7 @@ rules:
     lines. Next-step language means phrases such as: let me know, happy to, are you free or available,
     can we, shall we, book, schedule, set up, arrange, call, meeting, demo, chat, connect, reply, respond,
     get in touch, reach out, next step, follow up, would you be open, worth a conversation, interested
-    in. Checks that fail are passed to the AI as already decided. Known quirk: the greeting check looks
-    only at the very start of the text. A draft that begins with a ''Subject:'' line therefore always
-    reports that no greeting was found, even when ''Dear ...,'' follows.'
+    in. Any check the draft does not yet meet is given to the AI as a settled result.'
   table:
     columns:
     - Format
@@ -453,10 +443,11 @@ rules:
     steps:
     - 29 words, within the limit of 180
     - The subject line is 31 characters
-    - The greeting check looks only at the very start of the text, which is the Subject line, so it fails
+    - The greeting check reads the very start of the text, which here is the Subject line, so the greeting
+      check is not met
     - A sign-off is found
     - Next-step language is found
-    result: 4 of 5 checks pass. The greeting is reported as missing.
+    result: 4 of 5 checks are met. The greeting check is not met.
     verified: true
     expect:
     - 4
@@ -485,15 +476,15 @@ rules:
   kind: source
   summary: Decides which source may confirm which kind of claim.
   purpose: Decides which source may confirm which kind of claim.
-  logic: Your draft shows only where a phrase sits, never a fact. Account data (any uploaded rows that
-    are supplied, plus the executive summary's description, name and headquarters, the intent topic names,
-    the opportunity trigger headlines and the full technology stack) can confirm facts about the account,
+  logic: Your draft shows only where a phrase sits, never a fact. Account data (the executive summary's
+    description, name and headquarters, the intent topic names, the opportunity trigger headlines and
+    the full technology stack) can confirm facts about the account,
     but never what an HP product can do. Approved HP facts (the approved facts, conditions and qualifiers
     in the HP recommendations, plus HP product family, device type and category names) can confirm what
     an HP product can do, but never anything about the account. Role context gives the role, department
     and seniority, but never what the person thinks. A claim that names an HP product line is checked
-    against the HP facts. Any other claim is checked against the account data. A claim is never re-checked
-    against the other source.
+    against the HP facts. Any other claim is checked against the account data. Each claim is checked against
+    one source only.
   table:
     columns:
     - Source
@@ -525,13 +516,14 @@ rules:
   kind: guardrail
   summary: How one sentence is judged against its source.
   purpose: How one sentence is judged against its source.
-  logic: 'Steps: first, decide which source the claim is checked against. If the account''s country blocks
+  logic: 'Steps: first, decide which source the claim is checked against. If the account''s country restricts
     superlatives and the claim has one (world''s most, best, first or only; industry-leading; the most,
     best, fastest or safest of something; most secure; unmatched; unrivalled; number one; #1; market-leading;
-    best-in-class), that is a reason. If the country blocks competitor claims and a competitor is named
+    best-in-class), that is a reason. If the country restricts competitor claims and a competitor is named
     (lenovo, dell, apple, acer, asus, samsung, microsoft surface, huawei, toshiba, fujitsu, msi, razer),
     that is a reason. Any number or web link that the chosen source does not contain is a reason. An HP
-    claim when there are no approved HP facts is a reason. Verdict: Restricted if a country rule was hit;
+    claim with no approved HP facts to check it against is a reason. Verdict: Restricted if a country rule
+    applies;
     otherwise Unsupported if there is any reason; otherwise Supported if something was checked or the
     claim contains a number; otherwise Not checkable.'
   example:
@@ -540,7 +532,7 @@ rules:
     steps:
     - The HP claim is checked against the HP facts, which have no 99%, so it is Unsupported
     - The account claim's 4500 is in the account data, so it is Supported
-    - The superlative is blocked in Indonesia, so it is Restricted
+    - Superlatives are restricted in Indonesia, so it is Restricted
     - Nothing can be checked, so it is Not checkable
     result: Unsupported, Supported, Restricted, Not checkable
     verified: true
@@ -561,14 +553,14 @@ rules:
   parent: me_sources
   name: Market restrictions
   kind: guardrail
-  summary: Superlative and competitor-comparison claims are blocked in listed countries.
-  purpose: Superlative and competitor-comparison claims are blocked in listed countries.
+  summary: Superlative and competitor-comparison claims are restricted in the countries HP lists.
+  purpose: Superlative and competitor-comparison claims are restricted in the countries HP lists.
   logic: The country is the last comma-separated part of the account's headquarters location (taken from
-    the executive summary, otherwise from the account record). The lists of countries that block superlatives
+    the executive summary, otherwise from the account record). The lists of countries that restrict superlatives
     and competitor claims come from HP's guardrails. When a restriction applies, the AI is told so and
     the claims are judged Restricted.
   constants:
-  - label: Countries that block superlatives
+  - label: Countries that restrict superlatives
     ref: py:app.services.hp.guardrails:SUPERLATIVE_BLOCK_COUNTRIES
     stated:
     - armenia
@@ -592,7 +584,7 @@ rules:
     - united arab emirates
     - uzbekistan
     - vietnam
-  - label: Countries that block competitor claims (count)
+  - label: Countries that restrict competitor claims (count)
     ref: py:app.services.hp.guardrails:COMPETITOR_BLOCK_COUNTRIES
     format: count
     stated: 100
@@ -606,13 +598,13 @@ rules:
   kind: model
   summary: Feedback tied to the exact words the seller wrote.
   purpose: Feedback tied to the exact words the seller wrote.
-  logic: 'The AI must cut the whole message into chunks (Lite: exactly 5; Deep: 10 to 15) and give each
-    one a verdict, a comment and a suggestion. Each chunk is then found in the draft, ignoring capital
-    letters and spacing. A chunk that cannot be found, or that repeats another chunk''s words, is dropped.
-    Chunks beyond the limit for the mode are dropped. Unknown verdicts become Improve. Each chunk is also
-    checked as a claim. If it is Unsupported or Restricted, it is marked as a factual issue, and a ''Keep''
-    is changed to ''Change''. Colours: Keep is green, Improve is yellow, Change is red. A Deep review
-    with fewer than 10 chunks is noted for review but is not rejected.'
+  logic: 'The AI cuts the whole message into chunks (Lite: exactly 5; Deep: 10 to 15) and gives each one
+    a verdict, a comment and a suggestion. Each chunk is then matched to the draft, ignoring capital letters
+    and spacing. Only chunks that match the seller''s own words, do not repeat another chunk and fit within
+    the limit for the mode are shown. Any other verdict is treated as Improve. Each chunk is also checked
+    as a claim. If it is Unsupported or Restricted, it is marked as a factual issue, and a ''Keep'' is
+    changed to ''Change''. Colours: Keep is green, Improve is yellow, Change is red. A Deep review with
+    fewer than 10 chunks is still shown and is noted for review.'
   constants:
   - label: Lite chunks
     ref: py:app.services.evaluator.evaluate:LITE_MAX_CHUNKS
@@ -628,8 +620,8 @@ rules:
     - The superlative sentence is Restricted, so its Keep becomes Change (red)
     - The 99% sentence is Unsupported, so it is marked as a factual issue and stays Improve
     - The 4500 sentence is Supported, so it stays Keep (green)
-    - The chunk that was not found is dropped
-    result: 3 chunks kept (Change, Improve, Keep); 1 dropped.
+    - The chunk that does not match the draft is left out
+    result: 3 chunks shown (Change, Improve, Keep); 1 left out.
     verified: true
     expect:
     - - - 0
@@ -662,15 +654,15 @@ rules:
   kind: guardrail
   summary: Every sentence must belong to exactly one chunk.
   purpose: Every sentence must belong to exactly one chunk.
-  logic: After the chunks are found in the draft, they are read in order. Any text between chunks, or
-    after the last one, that is not blank is a fault. Then a final check confirms that the chunks joined
-    together equal the message, ignoring spacing. If there is a fault, the AI is asked once more for chunks.
-    If the retry also fails, the first result is kept and the faults are recorded.
+  logic: After the chunks are matched to the draft, they are read in order. Any text between chunks, or
+    after the last one, that is not blank is a gap. A final check confirms that the chunks joined together
+    equal the message, ignoring spacing. If there is a gap, the AI is asked once more for chunks. If the
+    second answer still has a gap, the first result is shown and the gaps are noted for review.
   example:
     scenario: Only the first two of three sentences were put into chunks.
     steps:
     - The last sentence is not covered by any chunk
-    result: 'Fault: the chunks stop before the end of the message.'
+    result: 'Gap: the chunks stop before the end of the message.'
     verified: true
     expect:
     - the chunks stop before the end of the message ('Your 4500 staff deserve better.')
@@ -685,22 +677,23 @@ rules:
   kind: guardrail
   summary: How someone in this role would likely read the message, never a real person's words.
   purpose: How someone in this role would likely read the message, never a real person's words.
-  logic: 'The reaction is withheld completely (it is not shown with a warning) if: it names the contact
-    (full name, or any part of the name longer than 2 letters); it uses a verb about inner feelings (thinks,
-    believes, wants, decided, is worried, prefers, said that, and so on) together with he, she, his or
-    her; it contains a quotation that is not the message''s own wording (quoting the seller''s message
-    back is allowed); or any sentence with a number, web link, superlative or competitor is Unsupported
-    or Restricted (a figure or link that is in the message itself is not held against it - the reaction
-    is commenting on it). A reaction that fails is asked for once more, with the reason; if it fails
-    again it is withheld (12 Oct). A reaction that is shown is labelled ''Simulated reaction
-    - how someone in this role would likely read this message. Not a statement about the real contact.'''
+  logic: 'The reaction is written in role terms and is shown only when it passes every check. It must
+    not name the contact (full name, or any part of the name longer than 2 letters); must not use a verb
+    about inner feelings (thinks, believes, wants, decided, is worried, prefers, said that, and so on)
+    together with he, she, his or her; must not contain a quotation other than the message''s own wording
+    (quoting the seller''s message back is allowed); and no sentence with a number, web link, superlative
+    or competitor may be Unsupported or Restricted (a figure or link that is in the message itself counts,
+    as the reaction is commenting on it). A reaction that does not pass is asked for once more, with the
+    reason, and is shown if the second one passes. A reaction that is shown is labelled ''Simulated
+    reaction - how someone in this role would likely read this message. Not a statement about the real
+    contact.'''
   example:
     scenario: Three reactions for the contact 'Budi Santoso'.
     steps:
     - '''Budi thinks this is too long.'' names the contact'
     - '''Someone in this role would want the cost case first.'' is fine'
     - '''He believes "pricing" matters.'' attributes a belief and contains a quotation'
-    result: Withheld, shown, withheld
+    result: Not shown, shown, not shown
     verified: true
     expect:
     - - false
@@ -761,13 +754,13 @@ rules:
   kind: selection
   summary: Applies only the changes the seller ticked, in the structure of the chosen format.
   purpose: Applies only the changes the seller ticked, in the structure of the chosen format.
-  logic: This runs only when the seller selects at least one recommendation. The AI may not add any number,
-    percentage, web link or HP capability that is not in the approved sources. It must drop or soften
-    unsupported claims from the original. The role description given to the AI leaves out the instruction
-    not to use a name. The greeting and sign-off are added by the system, not written by the AI. If there
-    is any fault, the AI gets one retry with the faults listed. If it still fails, the seller keeps the
-    original and the faults are recorded. Then the change check runs (see the rewrite change check). A
-    fault there also withholds the rewrite.
+  logic: This runs when the seller selects at least one recommendation. The AI may not add any number,
+    percentage, web link or HP capability that is not in the approved sources, and is asked to remove
+    or soften claims in the original that the sources do not support. The greeting and sign-off are added
+    by the system, not written by the AI. If the rewrite does not pass the format and content checks, the
+    AI is asked again with the issues listed. The change check then runs (see the rewrite change check).
+    A rewrite is shown only when it passes every check; otherwise the seller keeps the original draft
+    and is told what to change.
   table:
     columns:
     - Format
@@ -789,7 +782,7 @@ rules:
     - - One-pager
       - Headline, opening, body sections, call to action
       - Exactly 4, each with a heading
-      - The AI is asked for at most 400 words, but this is not checked
+      - The AI is asked to keep it to 400 words
       - None / none
   sources:
   - hp-backend/src/app/services/evaluator/evaluate.py:rewrite_message
@@ -832,10 +825,10 @@ rules:
   parent: me_rewrite
   name: Rewrite format check
   kind: guardrail
-  summary: A badly formed rewrite is never shown.
-  purpose: A badly formed rewrite is never shown.
-  logic: 'Only the parts the format uses are read. These are faults: no rewrite at all; a required part
-    missing; a number of body sections outside the allowed range; a one-pager section with no heading;
+  summary: A rewrite is shown only when it has the right shape for its format.
+  purpose: A rewrite is shown only when it has the right shape for its format.
+  logic: 'Only the parts the format uses are read. These are faults: an empty rewrite; a required part
+    left out; a number of body sections outside the allowed range; a one-pager section with no heading;
     a subject line over 80 characters; or a finished message (including greeting and sign-off) longer
     than the format''s character limit (LinkedIn: 300).'
   example:
@@ -843,7 +836,7 @@ rules:
     steps:
     - The greeting 'Hi [CFO Name],' is added
     - The finished length is 335, which is over 300
-    result: The rewrite is rejected.
+    result: The rewrite is over the LinkedIn limit, so it does not pass.
     verified: true
     expect:
     - null
@@ -857,13 +850,12 @@ rules:
   kind: guardrail
   summary: The version that gets sent must pass the same hard checks as generated content.
   purpose: The version that gets sent must pass the same hard checks as generated content.
-  logic: Content Studio's full set of content checks is run on the rewrite for the chosen role. Only serious
-    findings that reject the content become faults. These include an HP product line the role is never
-    offered. The fact-support check never rejects here, because the account facts, the approved HP facts
-    and the seller's own original are all accepted as support. A check for roles with no named contact
-    runs when the role is unfilled. The competitor check never fires, because no competitor list is supplied
-    here. Findings that only ask for a redo (word count, banned phrases, the ask) do not block the rewrite.
-    All findings are recorded for review.
+  logic: Content Studio's full set of content checks is run on the rewrite for the chosen role. Serious
+    findings become faults, for example an HP product line the role is never offered. For fact support,
+    the account facts, the approved HP facts, the HP proof the evaluation showed and the seller's own original
+    all count as support. A check for roles with no named contact runs when the role is unfilled. Lighter
+    findings (word count, filler phrases, the ask) are left for the seller to edit. All findings are recorded
+    for review.
   sources:
   - hp-backend/src/app/services/evaluator/evaluate.py:_rewrite_gate_faults
   confidence: high
@@ -871,20 +863,20 @@ rules:
   parent: me_rewrite
   name: Rewrite change check
   kind: guardrail
-  summary: The rewrite may not slip in new claims.
-  purpose: The rewrite may not slip in new claims.
+  summary: Every new figure, link or claim in the rewrite is checked against its source.
+  purpose: Every new figure, link or claim in the rewrite is checked against its source.
   logic: The numbers and web links in the original are compared with those in the rewrite. Each rewrite
     sentence that contains an added number or link is checked against its source. If it is Unsupported
-    or Restricted, that is a fault. A new superlative (where the country blocks them) or a newly named
-    competitor (where blocked) is also a fault. Figures that were dropped are reported but do not block
-    the rewrite.
+    or Restricted, that is a fault. A new superlative (where the country restricts them) or a newly named
+    competitor (where restricted) is also a fault. Figures the rewrite removes are listed in the change
+    report and are allowed.
   example:
     scenario: An Indonesian account. The original says 'Your 4500 staff deserve better.' The rewrite adds
       '12 sites' and 'the best PCs from the market-leading vendor'.
     steps:
     - 12 is not in the account data
-    - '''The best PCs'' is a blocked superlative'
-    result: Two faults, so the rewrite is withheld.
+    - '''The best PCs'' is a superlative, which Indonesia restricts'
+    result: Two faults, so the rewrite does not pass.
     verified: true
     expect:
     - 'the rewrite introduces an unsupported claim: superlative claim ''the best PCs'' is not permitted
@@ -924,10 +916,10 @@ rules:
     for the HP lines the message names, and recommends citing them. Those same items are given to the
     rewrite, with their exact wording, and count as a source when the rewrite is checked. A figure taken
     from one of them is accepted only where the sentence is about that item: it names the customer, shares
-    its wording, or is a statement about an HP line. A figure about the account itself is still checked
-    against the account''s own data only, and a figure found in none of the sources is still refused.
-    The length of a meeting being asked for (''a 15-minute call'') is a request, not a claim, and is not
-    checked as a figure; a duration that is a claim (''cut downtime by 30 minutes'') still is (12 Oct).'
+    its wording, or is a statement about an HP line. A figure about the account itself is checked against
+    the account''s own data only, and every figure must be found in one of the sources. The length of
+    a meeting being asked for (''a 15-minute call'') is treated as a request, not a claim; a duration
+    that is a claim (''cut downtime by 30 minutes'') is checked as a figure.'
   output: A rewrite that may carry a recommended case study's own figures.
   sources:
   - hp-backend/src/app/services/evaluator/sources.py:OFFERED_PROOF
@@ -945,7 +937,7 @@ rules:
     the same rewrite is asked for shorter, up to two more times, keeping every applied change and adding
     nothing. Each shorter version goes through all the same checks. Text is never cut off automatically.
     If it still does not fit, the seller is told the shortest length reached and asked to select fewer
-    changes (12 Oct).'
+    changes.'
   constants:
   - label: Extra shorten attempts
     ref: py:app.services.evaluator.evaluate:SHORTEN_PASSES
@@ -960,9 +952,9 @@ rules:
   parent: me_rewrite
   name: A rewrite with one named problem is repaired once
   kind: guardrail
-  summary: A rewrite that fails for a specific, fixable reason is given one chance to fix exactly that.
-  purpose: A rewrite that fails for a specific, fixable reason is given one chance to fix exactly that.
-  logic: 'If a rewrite has the wrong shape (a missing part, the wrong number of sections, a section with
+  summary: A rewrite with a specific, fixable issue gets one chance to fix exactly that.
+  purpose: A rewrite with a specific, fixable issue gets one chance to fix exactly that.
+  logic: 'If a rewrite has the wrong shape (a part left out, the wrong number of sections, a section with
     no heading, a subject line that is too long) it is first asked again with the rule spelled out, and
     then, if still wrong, shown its own draft and asked to fix only that. If a rewrite has the right
     shape but makes a claim that cannot be supported, it is likewise shown its own draft and told what
@@ -971,9 +963,9 @@ rules:
     and names an HP product at the same time (a figure about the account cannot be verified as an HP
     capability, so the two belong in separate sentences). The repaired rewrite goes through every check
     again and no check is relaxed. There is one repair per request. A rewrite that names an HP line the
-    role is never offered, or a contact who must not be named, is not repaired this way: it is asked
-    again once, and if it still does so the seller is told which line or name and to untick the change
-    that adds it. One request never asks the AI more than five times in all (12 Oct).'
+    role is never offered, or a contact who must not be named, is asked again once; if it still does
+    so, the seller is told which line or name and to untick the change that adds it. One request asks
+    the AI at most five times in all.'
   constants:
   - label: Most times the AI is asked for one rewrite
     ref: py:app.services.evaluator.evaluate:MAX_REWRITE_CALLS
@@ -987,18 +979,20 @@ rules:
   confidence: high
 - id: me_suggestions_traceable
   parent: null
-  name: Suggestions the rewrite could not apply are not offered
+  name: Every tickable suggestion is one a rewrite can apply
   kind: guardrail
-  summary: A suggested change is offered for ticking only if a rewrite could apply it.
-  purpose: A suggested change is offered for ticking only if a rewrite could apply it.
-  logic: 'A suggestion is not offered for ticking when a rewrite that applied it would be refused. That
-    is a suggestion that would add: a figure or a web link found in none of the sources (the account''s
-    data, the approved HP facts, the message itself, or the HP case studies and positioning shown); an HP
-    line this role is never offered; or, in a country that does not permit them, a superlative claim or a
-    competitor''s name. A suggestion to REMOVE one of these from the message stays tickable, because the
-    wording is already in the message. The phrase, its rating and its reason are still shown. For a format with a character limit, the AI is told the limit and the message''s
-    current length; when the message is at 85% of the limit or more, it is told to suggest replacing or
-    cutting words rather than adding them (12 Oct).'
+  summary: A suggested change is offered for ticking when a rewrite can apply it.
+  purpose: A suggested change is offered for ticking when a rewrite can apply it.
+  logic: 'A suggestion is tickable unless it would add something a rewrite may not contain: a figure or
+    a web link found in none of the sources
+    (the account''s data, the approved HP facts, the message itself, or the HP case studies and positioning
+    shown); an HP line this role is never offered; or, in a country that does not permit them, a superlative
+    claim or a competitor''s name. A suggestion to REMOVE one of these from the message stays tickable,
+    because the wording is already in the message. For a suggestion that is not tickable, the phrase,
+    its rating and its reason are still shown.
+    For a format with a character limit, the AI is told the limit and the message''s current length;
+    when the message is at 85% of the limit or more, it is told to suggest replacing or cutting words
+    rather than adding them.'
   constants:
   - label: Share of the limit that counts as near it
     ref: py:app.services.evaluator.evaluate:NEAR_CAP_SHARE
