@@ -2,34 +2,32 @@
 # `ref:` values are read live; `stated` is what the prose was written against.
 # Examples marked `verified` are recomputed by tests/test_rules_examples.py.
 feature_key: stakeholder_map
-purpose: Lists the people at the account from the contact list supplied for it, grouped by department
-  and ordered by seniority, and gives the seller an AI-written, automatically checked opening angle for
-  each person.
-final_output: A roster of contact cards (Senior contacts = C-Suite and VP first, then all other contacts)
-  showing name, title, department, seniority badge, email, phone, location, LinkedIn and a source label.
-  Each card also has a 'How to open' paragraph, HP play focus, decision power and potential pain points,
-  where these passed the checks. There is also a collapsible list of all departments, a strip of department
-  counts as delivered, and a CSV export.
-how_it_combines: Contacts are filtered (matches that are pending or under review are withheld), cleaned,
-  and given a department and a seniority band. A hidden 0-100 stakeholder score combines seniority, HP
-  relevance, influence, data completeness and priority. It selects Priority Contacts but is never shown.
-  The page groups people by department and orders them by seniority. Each person gets an AI-written opening
-  angle, which is checked for invented numbers or links, blocked HP product lines and repeated labels
-  before it is shown.
+purpose: Lists the people at the account, grouped by department and ordered by seniority, with an AI-written,
+  automatically checked opening angle for each person.
+final_output: A roster of contact cards (Senior contacts, meaning C-Suite and VP, first, then all other
+  contacts) showing name, title, department, seniority badge, email, email status, phone, location and
+  LinkedIn. Each card also shows a 'How to open' paragraph, HP play focus, decision power and potential
+  pain points when they pass the quality checks. The tab also has a collapsible list of all departments,
+  a strip of department counts as listed in the contact data, and a CSV export.
+how_it_combines: Contacts whose provider match is not pending or under review are cleaned and given a
+  department and a seniority band. A 0-100 stakeholder score combines seniority, HP relevance, influence, data completeness and priority,
+  and selects the Priority Contacts that other features use. The page groups people by department and
+  orders them by seniority. Each person gets an AI-written opening angle. Before it appears, it is checked
+  for unsourced numbers or links, HP product lines that do not fit the person's role, and repeated labels.
 rules:
 - id: contact_intake
   parent: null
   name: Which contacts the map uses
   kind: selection
-  summary: Decides which entries in the account's contact list become people on the Stakeholder Map.
-  purpose: Decides which entries in the account's contact list become people on the Stakeholder Map.
+  summary: Decides which entries in the account's contact list appear on the Stakeholder Map.
+  purpose: Decides which entries in the account's contact list appear on the Stakeholder Map.
   inputs:
   - The contact list supplied for the account (one entry per person)
-  logic: Every entry in the account's contact list is read. Entries where the contact data provider has
-    not finished matching the person are withheld (see the sub-rule below). Every remaining entry becomes
-    one contact; nothing is added from any other source. An entry is never dropped for having blank fields.
-  output: The usable contact list. The number of withheld entries is recorded in the system log but is
-    not shown on the page.
+  logic: Every entry in the account's contact list is read. Entries whose provider match is still pending
+    or under review are set aside (see the sub-rule below). Every other entry becomes one contact, and
+    only this list is used. Entries with blank fields are kept.
+  output: The contact list used on the page. The number of entries set aside is recorded in the system
+    log.
   sources:
   - hp-backend/src/app/services/extractors/stakeholder_map.py:extract_stakeholder_map
   doc_source: 'HP_Recommendation_Tuning_Logic_FINAL_v4.txt Input contract, Contacts row: ''Blank contact
@@ -37,25 +35,23 @@ rules:
   confidence: high
 - id: withhold_pending_review
   parent: contact_intake
-  name: Withhold contacts whose match is pending or under review
+  name: Match status check
   kind: guardrail
-  summary: A contact the data provider has not finished matching cannot support a stakeholder card, so
-    it is left off.
-  purpose: A contact the data provider has not finished matching cannot support a stakeholder card, so
-    it is left off.
+  summary: Builds stakeholder cards only from contacts whose provider match is not pending or under review.
+  purpose: Builds stakeholder cards only from contacts whose provider match is not pending or under review.
   inputs:
   - The match status recorded for each contact
   logic: The first non-blank match status recorded for the contact is read, ignoring capital letters.
     If it contains any of the words pending, review, unmatched, not matched, no match or in progress,
-    the contact is withheld and counted. A BLANK status is kept, because blank means the provider recorded
-    nothing, not that matching failed.
+    the contact is set aside and counted. A blank status is kept, because it means the provider recorded
+    no status.
   conditions:
   - 'Status contains ''pending'', ''review'', ''unmatched'', ''not matched'', ''no match'' or ''in progress'':
-    withheld'
+    set aside'
   - 'Status blank: kept'
   - 'Any other status (for example ''Matched''): kept'
   constants:
-  - label: Withholding words
+  - label: Match statuses held for review
     ref: py:app.services.extractors.stakeholder_map:UNMATCHED_STATUS_WORDS
     stated:
     - pending
@@ -75,17 +71,17 @@ rules:
   example:
     scenario: Four contacts with the statuses 'Pending review', 'Matched', blank and 'Needs Review'.
     steps:
-    - '''Pending review'' contains ''pending'', so it is withheld'
+    - '''Pending review'' contains ''pending'', so it is set aside'
     - '''Matched'' contains none of the words, so it is kept'
     - Blank is kept
-    - '''Needs review'' contains ''review'', so it is withheld'
-    result: 2 contacts kept (Matched, blank), 2 withheld.
+    - '''Needs review'' contains ''review'', so it is set aside'
+    result: 2 contacts kept (Matched, blank), 2 set aside.
     verified: true
     expect:
     - - apollo_match_status: Matched
       - Match Status: ''
     - 2
-  output: The kept contacts and the number withheld.
+  output: The kept contacts and the number set aside.
   sources:
   - hp-backend/src/app/services/extractors/stakeholder_map.py:_drop_unmatched_contacts
   - hp-backend/src/app/services/extractors/stakeholder_map.py:UNMATCHED_STATUS_WORDS
@@ -156,15 +152,15 @@ rules:
   internal: true
 - id: phone_normalisation
   parent: contact_intake
-  name: Phone numbers repaired from spreadsheet number format
+  name: Phone number format
   kind: display
-  summary: Undoes the '.0' and the lost '+' that spreadsheet programs add when a phone column is stored
-    as a number.
-  purpose: Undoes the '.0' and the lost '+' that spreadsheet programs add when a phone column is stored
-    as a number.
-  logic: A trailing '.0' is removed, then everything that is not a digit is stripped. If the original
-    started with '+', or the number has between 10 and 15 digits, a '+' is put in front. Shorter numbers
-    are kept as plain digits. No digits are made up and no spacing is added.
+  summary: Shows phone numbers in international format, without the '.0' a spreadsheet number format
+    can add.
+  purpose: Shows phone numbers in international format, without the '.0' a spreadsheet number format
+    can add.
+  logic: A trailing '.0' is removed, then everything that is not a digit is stripped. A '+' is put in
+    front when the original started with '+' or the number has 10 to 15 digits. Shorter numbers stay
+    as plain digits. The digits themselves are never changed and no spacing is added.
   example:
     scenario: Phone entry '6281293986658.0'.
     steps:
@@ -181,17 +177,17 @@ rules:
   parent: contact_intake
   name: One source label for every contact
   kind: source
-  summary: Tells the reader where the contact data came from, using the wording the client chose.
-  purpose: Tells the reader where the contact data came from, using the wording the client chose.
-  logic: 'Every contact displays the same fixed source label (shown in the value below). Behind the scenes,
-    each contact is also marked as coming from one of two contact layouts: the second provider''s layout
-    when the contact was requested or matched through that provider, otherwise the main layout. This marker
-    is not shown. Content Studio uses it to decide who may be named in its copy.'
+  summary: Gives every contact record the same source label for the contact data.
+  purpose: Gives every contact record the same source label for the contact data.
+  logic: 'Every contact record carries the same fixed source label (shown in the value below). Each contact
+    is also marked as coming from one of two contact layouts: the second provider''s layout when the contact
+    was requested or matched through that provider, otherwise the main layout. Content Studio uses this
+    marker to decide who may be named in its copy.'
   constants:
   - label: Displayed source label
     ref: py:app.services.extractors.stakeholder_map:CONTACT_SOURCE_LABEL
     stated: Explorium + Contacts Waterfall Tools
-  output: A green source tag on each card; a 'source' column in the CSV export.
+  output: The source label stored with each contact record.
   sources:
   - hp-backend/src/app/services/extractors/stakeholder_map.py:CONTACT_SOURCE_LABEL
   - hp-backend/src/app/services/extractors/stakeholder_map.py:extract_stakeholder_map
@@ -200,32 +196,31 @@ rules:
   confidence: high
 - id: buying_persona_provenance
   parent: contact_intake
-  name: When the uploaded buying-committee persona is carried on a contact
+  name: When a contact carries its buying-committee persona
   kind: selection
-  summary: Only a persona whose origin is known is attached to the contact record.
-  purpose: Only a persona whose origin is known is attached to the contact record.
-  logic: The buying-committee persona delivered with a contact is carried on the contact record only when
-    the contact is in the main layout, or when the client's persona coverage sheet assigned the person
-    a target role at load time. Contacts from the second provider's layout without such an assignment
-    carry no persona, because the 'Requested Role' on those is the role we asked for, not the person's
-    own role. The persona as delivered is still used when working out the influence type, whatever its
-    origin (see the influence type rule).
-  output: The persona stored on the contact. It is not shown on the Stakeholder Map page; it is used when
-    writing opening angles and by Content Studio.
+  summary: Attaches a persona to the contact record only when its origin is known.
+  purpose: Attaches a persona to the contact record only when its origin is known.
+  logic: The buying-committee persona delivered with a contact is carried on the contact record when the
+    contact is in the main layout, or when HP's persona coverage sheet assigned the person a target role
+    at load time. Contacts from the second provider's layout carry a persona only with such an assignment,
+    because the 'Requested Role' on those records is the role that was searched for, not the person's
+    own role. The persona as delivered is used when working out the influence type, whatever its origin
+    (see the influence type rule).
+  output: The persona stored on the contact, used when writing opening angles and by Content Studio.
   sources:
   - hp-backend/src/app/services/extractors/stakeholder_map.py:extract_stakeholder_map
   - scripts/split_account_data.py:attach_personas
   confidence: high
 - id: persona_attachment_at_load
   parent: contact_intake
-  name: Client persona attached to a contact when the data is loaded
+  name: HP target-role persona added when the data is loaded
   kind: source
-  summary: Puts the client's own target-role assignment onto the matching contact.
-  purpose: Puts the client's own target-role assignment onto the matching contact.
-  logic: When the contact data is loaded, each contact is matched to the client's persona coverage sheet
-    by its row number in the second provider's export, or else by the main provider's person identifier.
-    On a match, the contact is given the client's target role, along with a note of where the match came
-    from and how it was made. Nothing else can set it, and no guess is made from title similarity.
+  summary: Puts HP's own target-role assignment onto the matching contact.
+  purpose: Puts HP's own target-role assignment onto the matching contact.
+  logic: When the contact data is loaded, each contact is matched to HP's persona coverage sheet by its
+    row number in the second provider's export, or else by the main provider's person identifier. On
+    a match, the contact is given HP's target role, with a note of where the match came from and how it
+    was made. Only this match sets the persona; it is never inferred from a similar title.
   example:
     scenario: A contact with source row '185'; the coverage sheet maps row 185 to 'CTO'. A second contact
       has no source row or identifier.
@@ -305,7 +300,7 @@ rules:
   logic: 'The job level as delivered (ignoring brackets, quotes and capital letters) is looked up: c_suite,
     c-suite or cxo = C-Suite; vp or vice_president = VP; director or head = Director; manager or owner
     = Manager; anything else or blank = Individual Contributor. A ''Head of ...'' title therefore bands
-    as Director, not VP. A C-Suite tag must be backed up by the title (see the sub-rule below).'
+    as Director, not VP. A C-Suite tag is confirmed against the title (see the sub-rule below).'
   table:
     columns:
     - Job level as delivered
@@ -340,12 +335,12 @@ rules:
   parent: seniority_banding
   name: A C-Suite tag needs an executive title
   kind: selection
-  summary: Stops office staff tagged 'c_suite' (for example 'CIO Office') from being shown as executives.
-  purpose: Stops office staff tagged 'c_suite' (e.g. 'CIO Office') being shown as executives.
-  logic: When the band would be C-Suite, the title must look like an executive title (Chief ... Officer,
-    CEO, CIO, COO, CTO, CFO, CISO, President, Managing Director) AND must not contain the word 'office'.
-    If not, the band becomes Manager and the contact is marked as having a seniority conflict. The original
-    title is never changed.
+  summary: Shows a contact as C-Suite only when the job title confirms an executive role.
+  purpose: Shows a contact as C-Suite only when the job title confirms an executive role.
+  logic: When the band would be C-Suite, the title must be an executive title (Chief ... Officer, CEO,
+    CIO, COO, CTO, CFO, CISO, President, Managing Director) and must not contain the word 'office'. Otherwise
+    the band is Manager and the contact is flagged with a seniority conflict. The original title is kept
+    as listed.
   constants:
   - label: Band used when the C-Suite tag is not backed up by the title
     ref: py:app.services.extractors.stakeholder_map:SENIORITY_UNCORROBORATED_BAND
@@ -355,14 +350,13 @@ rules:
     steps:
     - '''CIO'' matches the executive titles'
     - but the title contains the word 'office'
-    - so the C-Suite tag is not backed up
+    - so the title does not confirm the C-Suite tag
     result: Manager, marked as a seniority conflict
     verified: true
     expect:
     - Manager
     - true
-  output: The seniority band and the conflict marker (the marker is stored but is not shown anywhere on
-    the page).
+  output: The seniority band, plus a seniority-conflict flag stored with the contact.
   sources:
   - hp-backend/src/app/services/extractors/stakeholder_map.py:seniority_band
   - hp-backend/src/app/services/extractors/stakeholder_map.py:EXECUTIVE_TITLE_RE
@@ -374,14 +368,13 @@ rules:
   confidence: high
 - id: stakeholder_score
   parent: null
-  name: Stakeholder score (calculated, not shown)
+  name: Stakeholder score (used to rank and select contacts)
   kind: score
-  summary: A 0-100 score per contact that picks Priority Contacts for other features.
-  purpose: A 0-100 score per contact that picks Priority Contacts for other features. Following client
-    feedback it is no longer displayed, used to order the page, or exported.
+  summary: A 0-100 score per contact that selects Priority Contacts and ranks contacts for other features.
+  purpose: A 0-100 score per contact that selects Priority Contacts and ranks contacts for other features.
   logic: Five components, each from 0 to 100, are combined using fixed weights and rounded to a whole
-    number. Every component is calculated by fixed rules. AI is never asked for a score, band, influence
-    type, priority or relevance.
+    number. Every component is calculated by fixed rules. Scores, bands, influence types, priorities
+    and relevance are always set by these rules, never by AI.
   formula: Stakeholder score = round(25% × Seniority + 25% × HP relevance + 20% × Influence + 15% × Data
     completeness + 15% × Priority)
   constants:
@@ -419,8 +412,8 @@ rules:
       composite: 77
       relevance_band: high
       priority_contact: true
-  output: A stakeholder score, the five component scores and a Priority Contact flag on each contact (stored,
-    not shown).
+  output: A stakeholder score, the five component scores and a Priority Contact flag on each contact,
+    used by other features.
   sources:
   - hp-backend/src/app/services/extractors/stakeholder_map.py:COMPOSITE_WEIGHTS
   - hp-backend/src/app/services/extractors/stakeholder_map.py:composite_score
@@ -543,14 +536,15 @@ rules:
   confidence: high
 - id: hp_relevance_department_text
   parent: score_hp_relevance
-  name: Department name itself can reach the top relevance tier
+  internal: true
+  name: Information Technology department reaches the top relevance tier
   kind: score
-  summary: Records an observed effect of the relevance rule.
-  purpose: Records an observed effect of the relevance rule.
-  logic: Because the department name is part of the searched text and 'information technology' is a top-tier
-    keyword, every contact whose unified department is Information Technology (including 'it' and 'data'
-    as delivered) scores 100, unless the title is non-IT (then 40). A Sales Manager filed under IT therefore
-    scores 100.
+  summary: Contacts in the Information Technology department score in the top relevance tier.
+  purpose: Contacts in the Information Technology department score in the top relevance tier.
+  logic: The department name is part of the searched text, and 'information technology' is a top-tier
+    keyword. So every contact whose unified department is Information Technology (including 'it' and
+    'data' as delivered) scores 100, unless the title is non-IT (then 40). A Sales Manager listed under
+    IT therefore scores 100.
   example:
     scenario: Title 'Sales Manager', department Information Technology.
     steps:
@@ -566,10 +560,10 @@ rules:
   confidence: high
 - id: non_it_title_cap
   parent: score_hp_relevance
-  name: Non-IT titles capped
+  name: Relevance cap for non-IT titles
   kind: filter
-  summary: Stops HR, tax, legal and similar roles looking IT-relevant because of a mislabelled department.
-  purpose: Stops HR, tax, legal and similar roles looking IT-relevant because of a mislabelled department.
+  summary: Keeps HR, tax, legal and similar roles at medium relevance or below, whatever their department.
+  purpose: Keeps HR, tax, legal and similar roles at medium relevance or below, whatever their department.
   logic: If the title contains employment relations, people experience, human resources, recruitment,
     payroll, tax, legal, audit, corporate communications or industrial relations, the relevance is the
     lower of its tier and 40, and no skill bonus is added.
@@ -619,8 +613,8 @@ rules:
     result: medium
     verified: true
     expect: medium
-  output: The HP relevance band (stored; no longer shown; it decides who can be a Priority Contact and
-    whom Content Studio may name).
+  output: The HP relevance band, which decides who can be a Priority Contact and whom Content Studio
+    may name.
   sources:
   - hp-backend/src/app/services/extractors/stakeholder_map.py:hp_relevance_band
   - hp-backend/src/app/services/extractors/stakeholder_map.py:HP_RELEVANCE_BAND_THRESHOLDS
@@ -641,7 +635,7 @@ rules:
     5) The persona assigned to the contact contains ''business decision maker'': Influencer. 6) The persona
     contains ''decision maker'': Decision Maker only if the department is Information Technology, Engineering
     & Technical or Executive and the title is not non-IT; otherwise Influencer. 7) Otherwise: Influencer.
-    Champion and Blocker are never assigned. The rule that decided the outcome is recorded.'
+    These rules assign one of the four types above. The rule that decided the outcome is recorded.'
   table:
     columns:
     - Order
@@ -727,8 +721,8 @@ rules:
     expect:
     - Influencer
     - persona_outside_it
-  output: 'The influence type: stored; no longer shown on the page; it limits what the opening angle may
-    claim as decision power.'
+  output: The influence type, which feeds the influence component and sets the limits on the decision
+    power an opening angle may describe.
   sources:
   - hp-backend/src/app/services/extractors/stakeholder_map.py:assign_influence
   - hp-backend/src/app/services/extractors/stakeholder_map.py:BUDGET_HOLDER_TITLE_TERMS
@@ -738,15 +732,14 @@ rules:
   confidence: high
 - id: influence_substring_effects
   parent: influence_type
-  name: Side effects of word matching in the technical-title check
+  internal: true
+  name: How the technical term 'it ' is matched
   kind: guardrail
-  summary: Records the observed results of the term 'it ' (with a trailing space) matching inside longer
-    words.
-  purpose: Records the observed results of the term 'it ' (with a trailing space) matching inside longer
-    words.
-  logic: The technical term 'it ' (with a trailing space) also matches inside words that end in 'it' followed
-    by a space, such as 'audit ' or 'unit '. Because the technical check runs before the non-IT check,
-    'Internal Audit Manager' and 'Business Unit Head' come out as Technical Evaluator.
+  summary: The technical term 'it ' (with a trailing space) also matches the end of longer words.
+  purpose: The technical term 'it ' (with a trailing space) also matches the end of longer words.
+  logic: The technical term 'it ' (with a trailing space) also matches words that end in 'it' followed
+    by a space, such as 'audit ' or 'unit '. The technical check runs before the non-IT check, so 'Internal
+    Audit Manager' and 'Business Unit Head' are labelled Technical Evaluator.
   example:
     scenario: Title 'Internal Audit Manager', Manager, Finance.
     steps:
@@ -768,7 +761,8 @@ rules:
   summary: Converts the influence type into points.
   purpose: Converts the influence type into points.
   logic: Decision Maker 100, Budget Holder 85, Champion 70, Technical Evaluator 60, Influencer 50, Blocker
-    30 (Champion and Blocker are never assigned). Unknown types score as Influencer.
+    30. The influence rules assign Decision Maker, Budget Holder, Technical Evaluator or Influencer. Any
+    other type scores as Influencer.
   table:
     columns:
     - Influence type
@@ -812,8 +806,8 @@ rules:
   parent: stakeholder_score
   name: Data completeness component
   kind: score
-  summary: Rewards contacts the seller can actually reach.
-  purpose: Rewards contacts the seller can actually reach.
+  summary: Gives more points to contacts the seller can reach directly.
+  purpose: Gives more points to contacts the seller can reach directly.
   logic: Start at 20. Add 15 if there is a LinkedIn address, 20 if there is an email, a further 10 if
     the email status is 'valid' or 'verified' (a confirmed mailbox), 20 if there is a phone number, and 15 if there is profile data
     (skills or experience). Maximum 100.
@@ -864,10 +858,8 @@ rules:
   parent: stakeholder_score
   name: Priority level and component
   kind: score
-  summary: A priority based on department and seniority, deliberately independent of the score so that
-    the logic is not circular.
-  purpose: A priority based on department and seniority, deliberately independent of the score so that
-    the logic is not circular.
+  summary: A priority based on department and seniority, set independently of the score it feeds.
+  purpose: A priority based on department and seniority, set independently of the score it feeds.
   logic: 'If the unified department is Information Technology, Engineering & Technical, Operations or
     Executive: High for C-Suite or VP, otherwise Medium. Any other department: Low. Points: High 100,
     Medium 50, Low 10.'
@@ -904,7 +896,7 @@ rules:
     result: Low
     verified: true
     expect: Low
-  output: The priority (stored, no longer shown) and the priority component.
+  output: The priority level and the priority component.
   sources:
   - hp-backend/src/app/services/extractors/stakeholder_map.py:assign_priority
   - hp-backend/src/app/services/extractors/stakeholder_map.py:HIGH_PRIORITY_DEPTS
@@ -935,7 +927,7 @@ rules:
     result: 'Score 36: not a Priority Contact'
     verified: true
     expect: false
-  output: The Priority Contact flag (stored; not shown; the number of Priority Contacts is also recorded).
+  output: The Priority Contact flag on each contact, and the number of Priority Contacts.
   sources:
   - hp-backend/src/app/services/extractors/stakeholder_map.py:extract_stakeholder_map
   - hp-backend/src/app/services/extractors/stakeholder_map.py:PRIORITY_CONTACT_MIN_COMPOSITE
@@ -943,16 +935,16 @@ rules:
   confidence: high
 - id: hidden_score_use_elsewhere
   parent: stakeholder_score
-  name: Where the hidden score is still used
+  name: Where the stakeholder score is used
   kind: selection
-  summary: Explains why the score is still calculated although the page no longer shows it.
-  purpose: Explains why the score is still calculated although the page no longer shows it.
+  summary: The score selects and orders contacts in Content Studio, Strategy Chat and the Opportunity Map.
+  purpose: The score selects and orders contacts in Content Studio, Strategy Chat and the Opportunity Map.
   logic: 'Content Studio''s named personas: only contacts from the main layout whose relevance band is
     not low and who have a title, ordered Priority Contacts first, then by stakeholder score (high first),
     then by name. Strategy Chat persona dropdown: contacts ordered by stakeholder score, high first. Opportunity
     Map contact matching: the score breaks ties among contacts whose title or department matches a play.
     The opening angles use the influence type to limit the decision power they claim.'
-  output: Ordering and selection in other features; nothing on the Stakeholder Map page.
+  output: Contact selection and ordering in Content Studio, Strategy Chat and the Opportunity Map.
   sources:
   - hp-backend/src/app/services/extractors/content_studio.py:_derive_named_personas
   - hp-backend/src/app/services/strategy/personas.py:options
@@ -965,8 +957,8 @@ rules:
   summary: Lists people most senior first.
   purpose: Lists people most senior first.
   logic: Contacts are sorted by seniority band in the order C-Suite, VP, Director, Manager, Individual
-    Contributor (any unknown band last), then alphabetically by full name. The score and Priority Contact
-    flag do not affect the order.
+    Contributor (any unknown band last), then alphabetically by full name. The order depends only on
+    seniority and name.
   constants:
   - label: Seniority order
     ref: py:app.services.extractors.stakeholder_map:SENIORITY_ORDER
@@ -1004,7 +996,7 @@ rules:
   logic: After the search and filters are applied, contacts whose seniority band is C-Suite or VP are
     shown first under 'Senior contacts' ('N C-Suite & VP'). Everyone else is shown under 'All other contacts',
     in the same seniority order. Each card shows name, LinkedIn link, title, department, seniority badge,
-    email, phone, location, source label, email status and the talking points.
+    email, phone, location, email status and the talking points.
   output: Two card sections on the Stakeholder Map tab.
   sources:
   - hp-frontend/src/app/dashboard/page.tsx
@@ -1019,8 +1011,7 @@ rules:
   purpose: Lets the seller narrow the roster.
   logic: 'Free-text search matches part of the name, title or unified department (capital letters are
     ignored). There are two dropdown filters: Seniority (band) and Department (unified). The options are
-    built from the data, never fixed in advance. The Influence, Priority and HP Relevance filters were
-    removed.'
+    built from the account''s contacts.'
   output: Filtered card and department lists; the CSV export uses the filtered list.
   sources:
   - hp-frontend/src/app/dashboard/page.tsx:matchesFilters
@@ -1035,10 +1026,7 @@ rules:
   purpose: Groups the whole roster by department.
   logic: Contacts are grouped by unified department. Groups are ordered by number of members (largest
     first), with ties in alphabetical order. Inside a group, members are ordered most senior first, then
-    by name. Each group is collapsible and shows its member count after filters. Behind the scenes, each
-    group also records which contacts are 'HP-relevant' (Priority Contacts, or relevance high or medium)
-    and which are 'lower relevance', plus influence and seniority counts and buying-group coverage by
-    influence type. These are not shown.
+    by name. Each group is collapsible and shows its member count after filters.
   output: The 'All departments' collapsible list.
   sources:
   - hp-backend/src/app/services/extractors/stakeholder_map.py:extract_stakeholder_map
@@ -1046,10 +1034,10 @@ rules:
   confidence: high
 - id: raw_department_distribution
   parent: null
-  name: Raw department distribution
+  name: Department counts as listed
   kind: selection
-  summary: Shows the department values exactly as delivered.
-  purpose: Shows the department values exactly as delivered.
+  summary: Shows the department names exactly as they appear in the contact data.
+  purpose: Shows the department names exactly as they appear in the contact data.
   logic: Counts contacts for each department as delivered (not unified); a blank department counts as
     'Unassigned'. Listed most common first.
   output: A strip of department tags at the bottom of the tab.
@@ -1059,16 +1047,16 @@ rules:
   confidence: high
 - id: client_buying_committee_coverage
   parent: null
-  name: Client buying-committee coverage (target roles)
+  name: HP buying-committee coverage (target roles)
   kind: selection
-  summary: Reports which of the client's target roles for the account have a person and which do not.
-  purpose: Reports which of the client's target roles for the account have a person and which do not.
-  logic: 'Read from the client''s list of target roles for the account: every entry with a target role
-    is a role, and it is ''filled'' when a contact name is given. Coverage % = filled roles / total roles
-    × 100, rounded to 1 decimal (shown as none when there are no roles). Reachable = filled roles with
-    a work email or phone. Unfilled roles are listed with their reason (the contact status given, else
-    ''no contact found''). An unfilled role never gets a name. When an account has no usable contacts
-    but does have target roles, the influence map still shows this coverage.'
+  summary: Reports which of HP's target roles for the account have a named person.
+  purpose: Reports which of HP's target roles for the account have a named person.
+  logic: 'Read from HP''s list of target roles for the account: every entry with a target role is a role,
+    and it is ''filled'' when a contact name is given. Coverage % = filled roles / total roles × 100,
+    rounded to 1 decimal (none when there are no roles). Reachable = filled roles with a work email or
+    phone. Unfilled roles are listed with their reason (the contact status given, else ''no contact found'').
+    A name is given only to a filled role. Coverage is recorded even when the account has target roles
+    but no contacts on the roster.'
   formula: Coverage % = 100 × filled roles ÷ target roles, rounded to 1 decimal
   example:
     scenario: '3 roles: Head of Procurement (no name), IT Asset Manager (name + email), CFO (name, no
@@ -1085,7 +1073,7 @@ rules:
       filled_roles: 2
       roles_with_a_contact_detail: 1
       coverage_percent: 66.7
-  output: A coverage summary in the influence map. It is not currently shown on the dashboard page.
+  output: A coverage summary stored with the account's Stakeholder Map data.
   sources:
   - hp-backend/src/app/services/extractors/personas.py:read_roles
   - hp-backend/src/app/services/extractors/personas.py:coverage
@@ -1093,15 +1081,14 @@ rules:
   confidence: high
 - id: hidden_fields_policy
   parent: null
-  name: What is deliberately not shown or exported
+  name: What the page shows and exports
   kind: guardrail
-  summary: Keeps numbers the client did not want to defend off the page.
-  purpose: Keeps numbers the client did not want to defend off the page.
-  logic: 'The page shows only the seniority badge. Influence type, priority, HP relevance, stakeholder
-    score and the Priority Contact flag are not displayed, not filterable and not in the CSV export. The
-    ranked ''Entry Path'' was removed. The CSV export columns are: full name, title, department, seniority
-    band, email, email status, phone, LinkedIn address, source (the label), how to open, HP play focus
-    and decision power.'
+  summary: Sets what each contact card shows and which columns the CSV export carries.
+  purpose: Sets what each contact card shows and which columns the CSV export carries.
+  logic: 'Each card carries one badge: the seniority band. Influence type, priority, HP relevance, stakeholder
+    score and the Priority Contact flag work in the background: they rank and select contacts for other
+    features and guide the opening angles. The CSV export columns are: full name, title, department, seniority band, email, email status,
+    phone, LinkedIn address, how to open, HP play focus and decision power.'
   output: Card badges and CSV columns.
   sources:
   - hp-frontend/src/app/dashboard/page.tsx:handleExportCsv
@@ -1119,14 +1106,13 @@ rules:
     power and potential pain points.
   inputs:
   - 'The roster: ID, name, title, unified department, seniority band, influence type, buying persona,
-    skills (first 180 characters), past roles (first 180 characters) and the list of HP product lines
-    that may not be proposed'
+    skills, past roles and the HP product lines not to propose for that person'
   - Account evidence (see the sub-rule below)
   logic: 'One AI request covers every contact on the roster. The AI writes only four things: how to open,
     HP play focus, decision power and pain points. Everything else (names, bands, influence, scores, contact
-    details) is fixed by the system, and the AI is told not to produce it. The AI''s output is then filtered
-    by the automatic checks in the sub-rules. Where a field is missing or removed, the card shows nothing
-    for it (''No signal'' when there is no opener).'
+    details) comes from the contact data and the rules above. Each entry then passes the automatic checks
+    in the sub-rules. A field appears on the card when it passes the checks; the card shows ''No signal
+    observed'' when there is no opener.'
   output: 'For each contact: how to open, HP play focus, decision power and pain points.'
   sources:
   - hp-backend/src/app/services/extractors/stakeholder_map.py:generate_stakeholder_talking_points
@@ -1138,8 +1124,8 @@ rules:
   parent: talking_points
   name: Account evidence given to the AI
   kind: source
-  summary: Fixes exactly which account facts the opener may draw on.
-  purpose: Fixes exactly which account facts the opener may draw on.
+  summary: Sets which account facts the opening angle draws on.
+  purpose: Sets which account facts the opening angle draws on.
   inputs:
   - Company profile
   - Technology stack (technographics)
@@ -1152,8 +1138,8 @@ rules:
     tech stack, first 40 items; (3) from the intent data: the first 10 topics listed, with each topic''s
     composite score; (4) from news coverage and news events: headlines with duplicates removed (ignoring
     capital letters), sorted newest first (undated last), first 10; (5) qualified Opportunity Map plays
-    (see the sub-rule below). Hiring and filings information is NOT included. Intent topic names and headlines
-    are also kept as ''evidence labels'' for the pain-point repeat check.'
+    (see the sub-rule below). Intent topic names and headlines are also used in the pain-point repeat
+    check.'
   output: The account evidence block given to the AI.
   sources:
   - hp-backend/src/app/services/extractors/stakeholder_map.py:_build_account_context
@@ -1169,29 +1155,29 @@ rules:
   purpose: Gives the AI the HP opportunities that the account's evidence has already earned.
   logic: 'Taken from the stored Opportunity Map plays. Every opportunity play with a title becomes ''title
     | HP: products | earned on: first 60 characters of up to 2 evidence quotes''. Every service play becomes
-    ''title | HP service | earned on: up to 3 matched terms''. Discovery areas (plays that failed their
-    checks) are not offered. The AI is told that these plays satisfy only the ACCOUNT half of the chain,
-    never the person''s remit.'
+    ''title | HP service | earned on: up to 3 matched terms''. Only opportunity and service plays are
+    offered. The AI is instructed that these plays establish the account''s need, and that each person''s
+    fit must still come from their own remit.'
   output: '''Qualified HP opportunities'' lines at the end of the account evidence.'
   sources:
   - hp-backend/src/app/services/extractors/stakeholder_map.py:_qualified_opportunities
   confidence: high
 - id: do_not_propose_list
   parent: talking_points
-  name: Per-contact HP lines that may not be proposed
+  name: HP lines to avoid for each contact
   kind: guardrail
-  summary: Blocks HP product lines that do not follow from a contact's remit, by automatic check rather
-    than by instruction alone.
-  purpose: Blocks HP product lines that do not follow from a contact's remit, by automatic check rather
-    than by instruction alone.
+  summary: Keeps each opening angle to HP product lines that fit the person's remit, checked automatically
+    as well as instructed.
+  purpose: Keeps each opening angle to HP product lines that fit the person's remit, checked automatically
+    as well as instructed.
   logic: If the title contains a no-hardware remit term (employment relations, people experience, human
     resources, recruitment, payroll, tax, legal, audit, corporate communications, industrial relations,
-    branch manager, product owner, business owner), EVERY HP product line is blocked. Otherwise a line
-    is blocked when the title contains one of its listed terms (see the table). The list is given to the
-    AI as 'do not propose' and enforced again after the text is written.
+    branch manager, product owner, business owner), every HP product line goes on the contact's 'do not
+    propose' list. Otherwise a line goes on the list when the title contains one of its terms (see the
+    table). The list is given to the AI and checked again after the text is written.
   table:
     columns:
-    - HP line blocked
+    - HP line not proposed
     - When the title contains
     rows:
     - - HP Enterprise Printing & MPS
@@ -1225,8 +1211,8 @@ rules:
     scenario: Title 'Head of Cloud Operations'.
     steps:
     - No no-hardware term
-    - '''cloud'' is a term that blocks Print/MPS'
-    result: 'Blocked: HP Enterprise Printing & MPS'
+    - '''cloud'' puts Print/MPS on the list'
+    result: 'Not proposed: HP Enterprise Printing & MPS'
     verified: true
     expect:
     - HP Enterprise Printing & MPS
@@ -1239,26 +1225,25 @@ rules:
   confidence: high
 - id: prompt_instructions
   parent: talking_points
-  name: What the AI is instructed to do (judged by AI, not enforced by checks)
+  name: Writing instructions given to the AI
   kind: model
-  summary: Records the instructions whose compliance depends on the AI.
-  purpose: Records the instructions whose compliance depends on the AI.
-  logic: These instructions depend on the AI following them; there is no automatic check. HP plays must
-    be 'earned' through the chain role + persona + account trigger or technology -> product. Otherwise
-    the play focus is 'Account engagement / discovery' and no product is named. How to open is written
-    in the first person, in 40 to 90 words. Every contact gets a different angle, and no trigger is used
-    for more than two contacts. The HP play focus is a short label. Decision power is limited by the supplied
-    influence type (Budget Holder may discuss budget and procurement authority; Decision Maker participates
-    in or owns decisions, not sole authority; Technical Evaluator evaluation and standards only; Influencer
-    advisory only) and is left out for roles whose remit does not reach hardware. Pain points must be
-    hedged ('may', 'could' and similar), name an evidence item and the pressure on the function, otherwise
-    they are left out. No reporting lines are stated. Competitor products are never called 'our'. The
-    40-90 word range is NOT checked automatically.
+  summary: The instructions the AI follows when writing each opening angle.
+  purpose: The instructions the AI follows when writing each opening angle.
+  logic: The AI is instructed as follows. An HP play must be 'earned' through the chain role + persona
+    + account trigger or technology -> product; otherwise the play focus is 'Account engagement / discovery'
+    and no product is named. How to open is written in the first person, in 40 to 90 words. Every contact
+    gets a different angle, and no trigger is used for more than two contacts. The HP play focus is a
+    short label. Decision power stays within the supplied influence type (Budget Holder may discuss budget
+    and procurement authority; Decision Maker participates in or owns decisions, not sole authority; Technical
+    Evaluator evaluation and standards only; Influencer advisory only), and is omitted for roles whose
+    remit does not reach hardware. Each pain point is worded tentatively ('may', 'could' and similar)
+    and names an evidence item and the pressure on the function; otherwise it is omitted. Reporting lines
+    are never stated. Competitor products are never called 'our'.
   constants:
-  - label: Opener minimum words (requested, not checked automatically)
+  - label: Opener length, minimum words
     ref: py:app.services.extractors.stakeholder_map:OPENER_MIN_WORDS
     stated: 40
-  - label: Opener maximum words (requested, not checked automatically)
+  - label: Opener length, maximum words
     ref: py:app.services.extractors.stakeholder_map:OPENER_MAX_WORDS
     stated: 90
   output: The AI's output before the automatic checks.
@@ -1269,37 +1254,38 @@ rules:
   confidence: high
 - id: tp_entry_acceptance
   parent: talking_points
-  name: Which AI entries are accepted at all
+  name: Which AI entries are used
   kind: guardrail
-  summary: Discards unusable entries.
-  purpose: Discards unusable entries.
-  logic: An entry is discarded if it is not a proper entry, if its contact ID is not one of the contacts
-    supplied, or if the how-to-open text is empty. An empty HP play focus is stored as none.
+  summary: Uses only complete entries for contacts on the roster.
+  purpose: Uses only complete entries for contacts on the roster.
+  logic: An entry is used when it is well formed, its contact ID matches one of the contacts supplied,
+    and its how-to-open text is not empty. An empty HP play focus is stored as blank.
   output: Entries passed on to the invented-number check.
   sources:
   - hp-backend/src/app/services/extractors/stakeholder_map.py:_run
   confidence: high
 - id: tp_grounding_check
   parent: talking_points
-  name: No number or link the account's data never held
+  name: Every number and link comes from the account's data
   kind: guardrail
-  summary: Removes a contact's whole entry if it carries an unsourced figure or web link.
-  purpose: Removes a contact's whole entry if it carries an unsourced figure or web link.
-  logic: All four fields are checked against everything in the contact list, company profile, technology
-    data, intent data, news coverage and news events. A percentage must appear as that percentage in the
-    data. Any other number with 2 or more digits must appear as a number in the data. Any web link must
-    appear in the data. One failure drops the whole entry for that contact (it then gets one more attempt).
+  summary: Uses a contact's entry only when every figure and web link in it appears in the account's data.
+  purpose: Uses a contact's entry only when every figure and web link in it appears in the account's data.
+  logic: All four fields are checked against the contact list, company profile, technology data, intent
+    data, news coverage and news events. A percentage must appear as that percentage in the data. Any
+    other number with 2 or more digits must appear as a number in the data. Any web link must appear in
+    the data. If any item is not found, the whole entry for that contact is set aside and the AI writes
+    it once more.
   example:
     scenario: The data holds 'ASII sets IDR 36 trillion capex for 2026'; the opener says '40 trillion
       of capex in 2026, up 36 trillion'.
     steps:
     - 2026 and 36 are in the data
     - 40 is not
-    result: 'Unsourced: [''40''], so the entry is dropped'
+    result: 'Unsourced: [''40''], so the entry is set aside and written again'
     verified: true
     expect:
     - '40'
-  output: The entry is kept or dropped; a record of the check is stored.
+  output: The entry is used or set aside; a record of the check is stored.
   sources:
   - hp-backend/src/app/services/extractors/stakeholder_map.py:_run
   - hp-backend/src/app/services/extractors/grounding.py:check_text
@@ -1307,19 +1293,19 @@ rules:
   confidence: high
 - id: tp_decision_power_echo
   parent: talking_points
-  name: Decision power that just repeats the instruction is removed
+  name: Decision power must go beyond the instruction wording
   kind: guardrail
-  summary: Stops boilerplate authority statements.
-  purpose: Stops boilerplate authority statements.
-  logic: 'Decision power is removed when (after trimming, ignoring capital letters and removing a final
-    full stop) it equals, or starts with, one of: ''this role typically participates in or owns decisions
+  summary: Shows decision power only when it says more than the standard instruction wording.
+  purpose: Shows decision power only when it says more than the standard instruction wording.
+  logic: 'Decision power is left off the card when (ignoring spaces at the ends, capital letters and
+    a final full stop) it equals, or starts with, one of: ''this role typically participates in or owns decisions
     of this kind'', ''evaluation, standards and requirements influence only'', ''may discuss budget ownership
     and procurement authority'', ''advisory input only''. The rest of the entry is kept.'
   example:
     scenario: Decision power = 'This role typically participates in or owns decisions of this kind.'
     steps:
     - The cleaned-up text equals the first of these phrases
-    result: Removed (it is a repeat of the instruction)
+    result: Left off the card (it repeats the instruction)
     verified: true
     expect: true
   output: Decision power is present or absent on the card.
@@ -1329,53 +1315,55 @@ rules:
   confidence: high
 - id: tp_no_hardware_override
   parent: do_not_propose_list
-  name: Product named to a role that does not reach hardware
+  name: Discovery focus for roles outside hardware
   kind: guardrail
-  summary: Replaces the play focus when the AI names an HP line to a non-IT remit.
-  purpose: Replaces the play focus when the AI names an HP line to a non-IT remit.
+  summary: Sets the play focus to discovery when an HP line is mentioned to a role whose remit does not
+    reach hardware.
+  purpose: Sets the play focus to discovery when an HP line is mentioned to a role whose remit does not
+    reach hardware.
   logic: If the contact's title has a no-hardware remit term and the opener plus play focus (ignoring
     capital letters) mention any HP product line name or keyword (for example 'elitebook', 'workstation',
-    'wolf', 'poly', 'print', 'daas'), the play focus is replaced by 'Account engagement / discovery' and
-    the blocked line is recorded. The how-to-open text itself is NOT rewritten or removed.
+    'wolf', 'poly', 'print', 'daas'), the play focus becomes 'Account engagement / discovery' and the
+    HP line is recorded. The how-to-open text stays as written.
   example:
     scenario: Head of Tax Division; the AI's opener mentions 'HP EliteBook' and its play focus is 'PC
       - fleet standardisation'.
     steps:
     - '''tax'' means the remit does not reach hardware'
     - The text contains 'elitebook', which is HP Elite / Pro PCs
-    result: The play focus becomes 'Account engagement / discovery'; the blocked line recorded is 'HP
-      Elite / Pro PCs'; the opener is unchanged
+    result: The play focus becomes 'Account engagement / discovery'; the line recorded is 'HP Elite /
+      Pro PCs'; the opener is unchanged
     verified: true
     expect: HP Elite / Pro PCs
-  output: The HP play focus and the blocked line.
+  output: The HP play focus and the recorded HP line.
   sources:
   - hp-backend/src/app/services/extractors/stakeholder_map.py:_run
   - hp-backend/src/app/services/extractors/grounding.py:HP_LINE_TOKENS
   confidence: high
 - id: tp_blocked_play_override
   parent: do_not_propose_list
-  name: Blocked line named anyway
+  name: Final check against the 'do not propose' list
   kind: guardrail
-  summary: Enforces the 'do not propose' list after the text is written.
-  purpose: Enforces the 'do not propose' list after the text is written.
+  summary: Checks the written text against the contact's 'do not propose' list.
+  purpose: Checks the written text against the contact's 'do not propose' list.
   logic: For each line on the contact's 'do not propose' list, if the full line name (ignoring capital
-    letters) appears in the how-to-open text or play focus, the play focus is replaced by 'Account engagement
-    / discovery' and the blocked line is recorded. Only the exact line name is looked for (for example
-    'hp enterprise printing & mps'); the opener text is not changed.
-  output: The HP play focus and the blocked line.
+    letters) appears in the how-to-open text or play focus, the play focus becomes 'Account engagement
+    / discovery' and the line is recorded. The check looks for the exact line name (for example 'hp enterprise
+    printing & mps'); the opener text stays as written.
+  output: The HP play focus and the recorded HP line.
   sources:
   - hp-backend/src/app/services/extractors/stakeholder_map.py:_run
   confidence: high
 - id: tp_pain_point_filter
   parent: talking_points
-  name: Pain points that only echo a label are removed
+  name: Pain points are full sentences, not repeated labels
   kind: guardrail
-  summary: Keeps only real, sentence-length pain points.
-  purpose: Keeps only real, sentence-length pain points.
-  logic: Each pain point is dropped if it has fewer than 12 words, or (ignoring capital letters and a
-    final full stop) equals an intent topic or news headline, or, for labels longer than 20 characters,
-    starts with the label or is the start of the label. If no pain point survives, pain points are left
-    out. Hedged wording and function-versus-person wording are judged by AI only.
+  summary: Shows pain points that are full sentences rather than a repeated topic or headline.
+  purpose: Shows pain points that are full sentences rather than a repeated topic or headline.
+  logic: A pain point is kept when it has at least 12 words and does not repeat an intent topic or news
+    headline. A repeat means it equals the label (ignoring capital letters and a final full stop) or,
+    for labels longer than 20 characters, starts with the label or is the start of it. The card shows
+    the pain points that pass. Tentative wording and the focus on the function come from the AI instructions.
   constants:
   - label: Minimum words per pain point
     ref: py:app.services.extractors.stakeholder_map:PAIN_POINT_MIN_WORDS
@@ -1384,7 +1372,7 @@ rules:
     scenario: Pain point 'Cloud computing', where 'Cloud computing' is an intent topic.
     steps:
     - 2 words, which is fewer than 12
-    result: Dropped
+    result: Not kept
     verified: true
     expect: true
   output: The list of pain points ('Potential pain points (inferred)' on the card).
@@ -1419,19 +1407,18 @@ rules:
   parent: null
   name: HP's eight buyer personas (reference used by other features)
   kind: selection
-  summary: The fixed persona cards and the HP-line eligibility matrix that Content Studio, the Message
-    Evaluator and Strategy Chat apply to people drawn from this roster or from the client's target roles.
-  purpose: The fixed persona cards and the HP-line eligibility matrix that Content Studio, the Message
-    Evaluator and Strategy Chat apply to people drawn from this roster or from the client's target roles.
-    They do not change anything the three Stakeholder Map sections display.
-  logic: Eight fixed personas, taken from HP's content specification and identical on every account. Each
-    persona is identified by its own persona ID, never by a job title. HP has not yet confirmed the eligibility
-    matrix.
+  summary: The persona cards and HP-line eligibility matrix that Content Studio, the Message Evaluator
+    and Strategy Chat apply to people from this roster or HP's target roles.
+  purpose: The persona cards and HP-line eligibility matrix that Content Studio, the Message Evaluator
+    and Strategy Chat apply to people from this roster or HP's target roles.
+  logic: Eight fixed personas, taken from HP's content specification and the same on every account. Each
+    persona is identified by its own persona ID, never by a job title.
   constants:
   - label: Persona library version
     ref: py:app.services.hp.buyer_personas:PERSONA_PACK_VERSION
     stated: 3
   - label: Matrix confirmed by HP
+    internal: true
     ref: py:app.services.hp.buyer_personas:MATRIX_CONFIRMED_BY_HP
     stated: false
   output: Persona cards and product-line limits in Content Studio, the Message Evaluator and Strategy
@@ -1445,18 +1432,18 @@ rules:
   confidence: high
 - id: persona_role_match
   parent: persona_pack_reference
-  name: Client target role to persona
+  name: HP target role to persona
   kind: selection
-  summary: Maps one of the client's 32 target-role titles to one of the eight personas.
-  purpose: Maps one of the client's 32 target-role titles to one of the eight personas.
+  summary: Maps HP's target-role titles to the eight personas.
+  purpose: Maps HP's target-role titles to the eight personas.
   logic: Titles are put in lower case, '&' becomes 'and', punctuation is removed, and the title is split
-    into words. An exact word-for-word match against the client's titles or the persona titles wins. Otherwise
-    a match where one title is the start of the other counts (so 'Chief Financial Officer (CFO)' is the
-    CFO). The other 24 roles match no persona.
+    into words. An exact word-for-word match against HP's target-role titles or the persona titles wins.
+    Otherwise a match where one title is the start of the other counts (so 'Chief Financial Officer (CFO)'
+    is the CFO). Eight of the 32 target roles map to a persona, as shown in the table.
   table:
     columns:
     - Persona
-    - Client target role title
+    - HP target role title
     - Committee angle
     rows:
     - - VP IT
@@ -1584,10 +1571,10 @@ rules:
   kind: display
   summary: A contact's job title that arrives in Japanese, Korean or Thai is shown in English.
   purpose: A contact's job title that arrives in Japanese, Korean or Thai is shown in English.
-  logic: 'A job title that is not in English is translated once by AI before anything reads it, so the
-    seniority, relevance and influence rules work on the English title. A translation is used only if it is
-    in English and keeps every number the original had; otherwise the original is shown. The title as listed
-    is shown when the reader hovers over it (client, 9 Oct).'
+  logic: 'A job title that is not in English is translated once by AI before the rules read it, so the
+    seniority, relevance and influence rules work on the English title. A translation is used when it is
+    in English and keeps every number the original had; otherwise the original is shown. The title as
+    listed appears when the reader hovers over it.'
   output: The contact's job title in English, with the original on hover.
   sources:
   - hp-backend/src/app/services/extractors/stakeholder_map.py:extract_stakeholder_map
