@@ -19,8 +19,10 @@ Two steps, run from hp-backend (on the VM: inside the backend container):
      shell pointed at the wrong database refuses instead of writing to it.
 
 Safe to run again: an existing user is left as they are (password, role and
-accounts), unless --sync-accounts, which sets each existing seller's accounts
-to the sheet's. The super admin (default bridge@gmail.com) is created if
+accounts), unless --add-accounts, which gives each existing seller the sheet's
+accounts they lack and keeps all their others, or --sync-accounts, which sets
+each existing seller's accounts to exactly the sheet's (removing any an admin
+added since). Prefer --add-accounts on a live site. The super admin (default bridge@gmail.com) is created if
 missing, with SUPER_ADMIN_PASSWORD and no forced change; every other new user
 must set their own password at first sign-in. No email is sent to anyone.
 
@@ -63,7 +65,8 @@ def _target() -> str:
     return "%s/%s" % (u.hostname or settings.MONGODB_URI, settings.DB_NAME)
 
 
-def _print_plan(plan: user_import.Plan, sheet: user_import.Sheet) -> None:
+def _print_plan(plan: user_import.Plan, sheet: user_import.Sheet,
+                existing: dict[str, dict]) -> None:
     exact = sum(1 for m in plan.matched if m[2] == "exact")
     aliased = [m for m in plan.matched if m[2] == "alias"]
     print("\nAccounts: %d sheet rows - %d matched exactly, %d through the alias list, %d unmatched"
@@ -96,6 +99,26 @@ def _print_plan(plan: user_import.Plan, sheet: user_import.Sheet) -> None:
     if none:
         print("  Sellers with no matched account: %s" % ", ".join(none))
 
+    # What --add-accounts would give, and what --sync-accounts would also take
+    # away, per existing seller.
+    gains, losses = [], []
+    for p in plan.people:
+        if p.status != "exists" or p.role != "user":
+            continue
+        have = [str(a) for a in existing[p.email].get("account_ids") or []]
+        add = [plan.account_names.get(a, a) for a in p.account_ids if a not in have]
+        drop = [plan.account_names.get(a, a) for a in have if a not in p.account_ids]
+        if add:
+            gains.append("  + %s: %s" % (p.email, ", ".join(add)))
+        if drop:
+            losses.append("  - %s: %s" % (p.email, ", ".join(drop)))
+    print("\nExisting sellers who would gain accounts (--add-accounts or --sync-accounts): %d"
+          % len(gains))
+    print("\n".join(gains))
+    print("Existing sellers who have accounts the sheet does not give them "
+          "(kept by --add-accounts, removed by --sync-accounts): %d" % len(losses))
+    print("\n".join(losses))
+
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
@@ -105,8 +128,11 @@ def main() -> int:
     ap.add_argument("--apply", action="store_true", help="create the users")
     ap.add_argument("--target-db", help="with --apply: must equal the configured DB_NAME")
     ap.add_argument("--super-admin-email", default="bridge@gmail.com")
-    ap.add_argument("--sync-accounts", action="store_true",
-                    help="set existing sellers' accounts to the sheet's")
+    mode = ap.add_mutually_exclusive_group()
+    mode.add_argument("--sync-accounts", action="store_true",
+                      help="set existing sellers' accounts to exactly the sheet's")
+    mode.add_argument("--add-accounts", action="store_true",
+                      help="give existing sellers the sheet's accounts they lack; remove none")
     args = ap.parse_args()
 
     cred_path = Path(args.credentials).expanduser().resolve()
@@ -123,9 +149,10 @@ def main() -> int:
     sheet = user_import.read_sheet(args.sheet)
     accounts = [{"id": str(a["_id"]), "name": a.get("name") or ""}
                 for a in db["accounts"].find({}, {"name": 1})]
-    existing = {u["email"]: u for u in db["users"].find({}, {"email": 1, "role": 1})}
+    existing = {u["email"]: u for u in db["users"].find(
+        {}, {"email": 1, "role": 1, "account_ids": 1})}
     plan = user_import.build_plan(sheet, accounts, existing)
-    _print_plan(plan, sheet)
+    _print_plan(plan, sheet, existing)
 
     passwords = user_import.load_credentials(cred_path)
     sa_email = args.super_admin_email.strip().lower()
@@ -154,11 +181,12 @@ def main() -> int:
     try:
         counts = user_import.apply(db, plan, passwords, super_admin_email=sa_email,
                                    super_admin_password=os.getenv("SUPER_ADMIN_PASSWORD"),
-                                   sync_accounts=args.sync_accounts)
+                                   sync_accounts=args.sync_accounts,
+                                   add_accounts=args.add_accounts)
     except ValueError as exc:
         print("Refusing: %s" % exc, file=sys.stderr)
         return 2
-    print("\nDone: super admin created %d, users created %d, existing sellers' accounts synced %d."
+    print("\nDone: super admin created %d, users created %d, existing sellers' accounts updated %d."
           % (counts["super_admin_created"], counts["created"], counts["accounts_synced"]))
     return 0
 

@@ -2,8 +2,10 @@
 
 The sheet has two tabs:
   Sales  - one row per account: Country, Sales Territory ID, Sales Territory
-           Name, EAM, IAM. Every EAM and IAM email named on a row becomes a
-           seller with that account; "-" means nobody.
+           Name, EAM, IAM and (from the 19 Oct revision) EAM Manager, IAM
+           Manager. Every email in those columns becomes a seller with that
+           account, so a manager sees the accounts of the rows they manage;
+           "-" means nobody.
   Admin  - one email per row in column A, with no header row.
 
 Accounts are matched by name: our account names are the client's Sales
@@ -33,6 +35,9 @@ EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 # name still matches it directly.
 ALIASES = {
     "BUNNINGS GROUP LIMITED- AU": "BUNNINGS GROUP LIMITED",
+    # The 19 Oct revision renamed territory 216239; the account and its data
+    # are still Bunnings.
+    "WESFARMERS HOLDINGS - AU": "BUNNINGS GROUP LIMITED",
     "INDONESIA FINANCIAL GROUP - ID": "INDONESIA FINANCIAL GROUP - CATEGORY1 - PARTIAL - ID",
     "TIARA MARGA TRAKINDO - ID": "PT TIARA MARGA TRAKINDO - CATEGORY1 - PARTIAL - ID",
     # Production keeps the pilot account under its original name (17 Oct load:
@@ -41,6 +46,10 @@ ALIASES = {
 }
 
 ACTOR = {"id": None, "email": "load_sna_users script"}
+
+# Sales columns whose emails become sellers on that row's account. Read by
+# header, so the original five-column sheet and the revision both load.
+SELLER_COLUMNS = ("EAM", "IAM", "EAM MANAGER", "IAM MANAGER")
 
 
 def norm_name(name) -> str:
@@ -81,17 +90,21 @@ def read_sheet(path: str | Path) -> Sheet:
                 sheet.admins.append(email)
         else:
             sheet.invalid.append("Admin: %r" % value)
-    for r in wb["Sales"].iter_rows(min_row=2, values_only=True):
+    rows = wb["Sales"].iter_rows(values_only=True)
+    header = [str(h or "").strip().upper() for h in next(rows, ())]
+    cols = [i for i, h in enumerate(header) if h in SELLER_COLUMNS] or [3, 4]
+    for r in rows:
         if not r or not any(r):
             continue
         name = str(r[2] or "").strip()
         emails = []
-        for raw in (r[3], r[4]):
+        for raw in (r[i] if i < len(r) else None for i in cols):
             if raw is None or str(raw).strip() in ("", "-"):
                 continue
             email = norm_email(raw)
             if email:
-                emails.append(email)
+                if email not in emails:
+                    emails.append(email)
             else:
                 sheet.invalid.append("%s: %r" % (name, raw))
         sheet.rows.append(SalesRow(str(r[1] or ""), name, emails))
@@ -224,9 +237,12 @@ def write_credentials(path: str | Path, plan: Plan, passwords: dict[str, str]) -
 # -------------------------------------------------------------------- apply
 
 def apply(db, plan: Plan, passwords: dict[str, str], *, super_admin_email: str,
-          super_admin_password: str | None, sync_accounts: bool = False) -> dict[str, int]:
+          super_admin_password: str | None, sync_accounts: bool = False,
+          add_accounts: bool = False) -> dict[str, int]:
     """Create what the plan says is new. Existing users keep their password and
-    role; with `sync_accounts`, existing sellers get the sheet's accounts."""
+    role. With `sync_accounts`, existing sellers get exactly the sheet's
+    accounts; with `add_accounts`, they gain the sheet's accounts they lack and
+    keep every other one (access an admin gave since the last load survives)."""
     missing = [p.email for p in plan.people if p.status == "new" and p.email not in passwords]
     if missing:
         raise ValueError("no password in the credentials file for: %s" % ", ".join(missing))
@@ -260,16 +276,18 @@ def apply(db, plan: Plan, passwords: dict[str, str], *, super_admin_email: str,
             user_audit.record(db, ACTOR, user_audit.USER_CREATED, doc,
                               {"role": p.role, "accounts": p.account_names})
             counts["created"] += 1
-        elif sync_accounts and p.status == "exists" and p.role == "user":
+        elif (sync_accounts or add_accounts) and p.status == "exists" and p.role == "user":
             user = db["users"].find_one({"email": p.email})
             old = [str(a) for a in user.get("account_ids") or []]
-            if old != p.account_ids:
+            want = (p.account_ids if sync_accounts
+                    else old + [a for a in p.account_ids if a not in old])
+            if old != want:
                 db["users"].update_one({"_id": user["_id"]}, {"$set": {
-                    "account_ids": p.account_ids, "updated_at": now}})
+                    "account_ids": want, "updated_at": now}})
                 name = plan.account_names.get
                 user_audit.record(db, ACTOR, user_audit.ACCOUNTS_CHANGED, user, {
-                    "added": [name(i, i) for i in p.account_ids if i not in old],
-                    "removed": [name(i, i) for i in old if i not in p.account_ids],
+                    "added": [name(i, i) for i in want if i not in old],
+                    "removed": [name(i, i) for i in old if i not in want],
                 })
                 counts["accounts_synced"] += 1
     return counts

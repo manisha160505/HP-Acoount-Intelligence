@@ -13,6 +13,7 @@ import { CompanyAccount } from '@/types/account';
 import { NORTHSTAR_SIDEBAR_GROUPS } from '@/lib/features';
 import { activeAccountFrom, dashboardHref } from '@/lib/accountSelection';
 import { NO_SIGNAL, NOT_DISCLOSED } from '@/lib/placeholders';
+import { EmailTag, PhoneTag, emailTag, phoneTag } from '@/components/stakeholder/ContactTags';
 import { displayCase, displayPlace, fmtDate as formatDate } from '@/lib/format';
 import { track, stopFeatureTime } from '@/lib/track';
 import { MyActivityPanel } from '@/components/analytics/MyActivityPanel';
@@ -4479,26 +4480,31 @@ export default function UserDashboardPage() {
                                     </div>
 
                                     {/* Contact details */}
+                                    {(c.email || c.phone || c.contact_location) && (
                                     <div className="border-t border-slate-100 pt-3 space-y-1.5 text-xs">
-                                      <div className="flex items-center gap-2">
-                                        <Mail className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
-                                        {c.email
-                                          ? <a href={`mailto:${c.email}`} className="text-hp-navy font-medium truncate hover:underline">{c.email}</a>
-                                          : <span className="text-slate-400">{NOT_DISCLOSED}</span>}
-                                      </div>
-                                      <div className="flex items-center gap-2 flex-wrap">
-                                        <Phone className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
-                                        {c.phone
-                                          ? <span className="text-slate-700 font-normal">{c.phone}</span>
-                                          : <span className="text-slate-400">{NOT_DISCLOSED}</span>}
-                                        {c.contact_location && (
-                                          <span className="text-[10px] font-medium text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">{c.contact_location}</span>
-                                        )}
-                                      </div>
-                                      {c.email_status && (
-                                        <p className="text-[10px] text-slate-400 italic">Email status: {c.email_status}</p>
+                                      {c.email && (
+                                        <div className="flex items-center gap-2 min-w-0">
+                                          <Mail className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+                                          <a href={`mailto:${c.email}`} className="text-hp-navy font-medium truncate hover:underline">{c.email}</a>
+                                          <EmailTag email={c.email} status={c.email_status} />
+                                        </div>
+                                      )}
+                                      {(c.phone || c.contact_location) && (
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                          {c.phone && (
+                                            <>
+                                              <Phone className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+                                              <span className="text-slate-700 font-normal">{c.phone}</span>
+                                              <PhoneTag phone={c.phone} lineType={c.phone_line_type} />
+                                            </>
+                                          )}
+                                          {c.contact_location && (
+                                            <span className="text-[10px] font-medium text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">{c.contact_location}</span>
+                                          )}
+                                        </div>
                                       )}
                                     </div>
+                                    )}
 
                                     {/* How to open */}
                                     {tp.how_to_open ? (
@@ -4552,11 +4558,16 @@ export default function UserDashboardPage() {
                     // the numbers we agreed on 27 Sep not to stand behind. Nor the
                     // data tool a contact came from (refinements, 6 Oct).
                     const cols = ['full_name', 'title', 'normalized_department', 'seniority_band',
-                      'email', 'email_status', 'phone', 'linkedin_url'];
+                      'email', 'email_status', 'phone', 'phone_line_type', 'linkedin_url'];
                     const esc = (v: any) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+                    // The tags as shown on screen, blanks included.
+                    const cell = (c: any, k: string) => (
+                      k === 'email_status' ? emailTag(c.email, c.email_status)
+                        : k === 'phone_line_type' ? phoneTag(c.phone, c.phone_line_type)
+                          : c[k]);
                     const rows = filteredContacts.map((c: any) => {
                       const tp = talkingPoints[c.contact_id] || {};
-                      return [...cols.map(k => esc(c[k])), esc(tp.how_to_open), esc(tp.hp_play_focus), esc(tp.decision_power)].join(',');
+                      return [...cols.map(k => esc(cell(c, k))), esc(tp.how_to_open), esc(tp.hp_play_focus), esc(tp.decision_power)].join(',');
                     });
                     const header = [...cols, 'how_to_open', 'hp_play_focus', 'decision_power'];
                     const csv = [header.join(','), ...rows].join('\n');
@@ -4591,21 +4602,27 @@ export default function UserDashboardPage() {
                   // Email / phone block, shared by the expandable card once revealed.
                   const renderContactLines = (c: any) => (
                     <div className="space-y-1 text-xs">
-                      <p className="text-slate-600 font-normal">
-                        <span className="text-slate-500">Email: </span>
-                        {c.email
-                          ? <a href={`mailto:${c.email}`} className="text-hp-navy font-medium hover:underline">{c.email}</a>
-                          : <span className="text-slate-400">{NOT_DISCLOSED}</span>}
-                      </p>
-                      <p className="text-slate-600 font-normal flex items-center gap-1.5 flex-wrap">
-                        <span className="text-slate-500">Phone: </span>
-                        {c.phone
-                          ? <span>{c.phone}</span>
-                          : <span className="text-slate-400">{NOT_DISCLOSED}</span>}
-                        {c.contact_location && (
-                          <span className="text-[10px] font-medium text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">{c.contact_location}</span>
-                        )}
-                      </p>
+                      {c.email && (
+                        <p className="text-slate-600 font-normal flex items-center gap-1.5 flex-wrap">
+                          <span className="text-slate-500">Email: </span>
+                          <a href={`mailto:${c.email}`} className="text-hp-navy font-medium hover:underline">{c.email}</a>
+                          <EmailTag email={c.email} status={c.email_status} />
+                        </p>
+                      )}
+                      {(c.phone || c.contact_location) && (
+                        <p className="text-slate-600 font-normal flex items-center gap-1.5 flex-wrap">
+                          {c.phone && (
+                            <>
+                              <span className="text-slate-500">Phone: </span>
+                              <span>{c.phone}</span>
+                              <PhoneTag phone={c.phone} lineType={c.phone_line_type} />
+                            </>
+                          )}
+                          {c.contact_location && (
+                            <span className="text-[10px] font-medium text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">{c.contact_location}</span>
+                          )}
+                        </p>
+                      )}
                     </div>
                   );
 

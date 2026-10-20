@@ -1073,6 +1073,9 @@ def extract_stakeholder_map(account_id: str,
         email = resolve_field(row, ["Contact professions_email", "Email", "apollo_verified_work_email"])
         email_status = resolve_field(row, ["Contact professional_email_status", "Email Status", "apollo_zerobounce_email_status"])
         phone = normalize_phone(resolve_field(row, ["Contact mobile_phone", "Mobile Phone", "apollo_direct_mobile_phone"]))
+        # The shipping list's line type (MOBILE, LANDLINE, VOIP), shown beside
+        # the number; only meaningful when there is one.
+        phone_line_type = resolve_field(row, ["Phone Line Type"]) if phone else None
         linkedin_url = resolve_field(row, ["Prospect linkedin", "Prospect linkedin_url_array", "apollo_linkedin_url"])
         # Shown when the row can say where its persona came from. The old rule
         # was "Source A only", because Apollo carries no persona of its own and
@@ -1122,6 +1125,7 @@ def extract_stakeholder_map(account_id: str,
             "email": email,
             "email_status": email_status,
             "phone": phone,
+            "phone_line_type": phone_line_type,
             "linkedin_url": linkedin_url,
             "buying_committee_persona": buying_persona,
             "buying_committee_persona_source": persona_provenance or None,
