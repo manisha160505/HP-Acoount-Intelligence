@@ -161,3 +161,63 @@ def test_a_429_that_outlasts_every_wait_flags_the_quota(monkeypatch):
     with pytest.raises(RateLimitError):
         llm.create_completion(_Client(), model="m", messages=[])
     assert run_context.quota_exhausted_since(started)
+
+
+# ------------------------------------------- unreadable JSON is asked again
+
+def _json_client(answers):
+    """A client whose completions return `answers` in turn ("RAISE" raises)."""
+    sent = []
+
+    class _Completions:
+        def create(self, **kw):
+            sent.append(kw)
+            answer = answers[len(sent) - 1]
+            if answer == "RAISE":
+                raise RuntimeError("connection reset")
+            msg = type("M", (), {"content": answer})()
+            return type("R", (), {"usage": None, "choices": [type("Ch", (), {"message": msg})()]})()
+
+    class _Client:
+        chat = type("C", (), {"completions": _Completions()})()
+
+    return _Client(), sent
+
+
+def _patch_client(monkeypatch, client):
+    monkeypatch.setattr(llm, "get_openai_client", lambda *_a, **_k: client)
+
+
+def test_broken_json_is_asked_for_once_more(monkeypatch):
+    client, sent = _json_client(['{"contacts": [{"id": "a" "x": 1}]}', '{"contacts": []}'])
+    _patch_client(monkeypatch, client)
+    assert llm.generate_gpt4o_json_completion("sys", "user") == {"contacts": []}
+    assert len(sent) == 2
+
+
+def test_an_empty_answer_is_asked_for_once_more(monkeypatch):
+    client, sent = _json_client(["", '{"ok": true}'])
+    _patch_client(monkeypatch, client)
+    assert llm.generate_gpt4o_json_completion("sys", "user") == {"ok": True}
+    assert len(sent) == 2
+
+
+def test_two_unreadable_answers_fail_after_two_calls(monkeypatch):
+    client, sent = _json_client(['{"a": 1,,}', '{"a" 1}'])
+    _patch_client(monkeypatch, client)
+    assert llm.generate_gpt4o_json_completion("sys", "user") is None
+    assert len(sent) == 2
+
+
+def test_a_readable_answer_is_not_asked_again(monkeypatch):
+    client, sent = _json_client(['{"a": 1}', '{"a": 2}'])
+    _patch_client(monkeypatch, client)
+    assert llm.generate_gpt4o_json_completion("sys", "user") == {"a": 1}
+    assert len(sent) == 1
+
+
+def test_a_failed_call_is_not_retried_here(monkeypatch):
+    client, sent = _json_client(["RAISE", '{"a": 1}'])
+    _patch_client(monkeypatch, client)
+    assert llm.generate_gpt4o_json_completion("sys", "user") is None
+    assert len(sent) == 1

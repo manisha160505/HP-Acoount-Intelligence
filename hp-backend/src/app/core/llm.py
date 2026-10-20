@@ -31,6 +31,10 @@ def get_openai_client() -> OpenAI | None:
 # (29 Sep). The SDK adds its own two quick retries before these.
 RATE_LIMIT_WAITS = (5, 15, 30, 60)
 
+# How often one JSON completion is asked for before an unreadable answer counts
+# as a failure. Also inside one model call, not a pipeline retry.
+JSON_ATTEMPTS = 2
+
 
 # The 400 that says a prompt is too big - and why it is retried rather than fatal.
 #
@@ -376,18 +380,30 @@ def generate_gpt4o_json_completion(system_prompt: str, user_prompt: str) -> dict
         return None
 
     model_name = settings.chat_model
-    started = time.monotonic()
-    try:
-        response = create_completion(
-            client,
-            model=model_name,
-            response_format={"type": "json_object"},
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            temperature=0.2
-        )
+    # Gemini's JSON mode now and then returns JSON it cannot have meant - a
+    # missing comma or colon, or nothing at all. Asking again almost always
+    # gets a readable answer: on the 20 Oct contacts run every one of 41 failed
+    # sections failed this way, and the same prompts succeeded on a retry.
+    # An API error is not retried here; create_completion already waits out a
+    # 429, and anything else is not a bad answer but a failed call.
+    for attempt in range(1, JSON_ATTEMPTS + 1):
+        started = time.monotonic()
+        try:
+            response = create_completion(
+                client,
+                model=model_name,
+                response_format={"type": "json_object"},
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.2
+            )
+        except Exception as e:
+            pipeline.llm_call(model_name, time.monotonic() - started, 0, failed=True)
+            logger.error("Error calling %s JSON completion: %s", model_name, e)
+            run_context.note_llm(failed=True)
+            return None
         # Counted per feature rather than printed per call: an account makes
         # dozens of these, and a line each would bury the pipeline's own
         # output. `pipeline.llm_done` rolls them into one line on the feature's
@@ -396,17 +412,22 @@ def generate_gpt4o_json_completion(system_prompt: str, user_prompt: str) -> dict
         usage = getattr(response, "usage", None)
         pipeline.llm_call(model_name, time.monotonic() - started,
                           getattr(usage, "total_tokens", 0) or 0)
-        content = response.choices[0].message.content
-        parsed = _parse_json(content) if content else None
+        try:
+            content = response.choices[0].message.content
+            parsed = _parse_json(content) if content else None
+        except ValueError as e:          # json.JSONDecodeError is a ValueError
+            parsed, problem = None, e
+        else:
+            problem = "an empty or non-object answer"
         if parsed is not None:
             run_context.note_llm(failed=False)
             return parsed
-        # An empty response is a failure to the caller exactly as an exception
-        # is: it gets None either way and falls back.
-        run_context.note_llm(failed=True)
-        return None
-    except Exception as e:
-        pipeline.llm_call(model_name, time.monotonic() - started, 0, failed=True)
-        logger.error("Error calling %s JSON completion: %s", model_name, e)
-        run_context.note_llm(failed=True)
-        return None
+        if attempt < JSON_ATTEMPTS:
+            logger.warning("%s returned unreadable JSON (%s); asking again", model_name, problem)
+            continue
+        logger.error("Error calling %s JSON completion: %s (after %d attempts)",
+                     model_name, problem, JSON_ATTEMPTS)
+    # An unreadable or empty answer is a failure to the caller exactly as an
+    # exception is: it gets None either way and falls back.
+    run_context.note_llm(failed=True)
+    return None
