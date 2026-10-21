@@ -108,8 +108,12 @@ def matches(doc, query) -> bool:
                     if (actual is not _MISSING) != bool(val):
                         return False
                 elif op == "$regex":
-                    if actual is _MISSING or not re.search(val, str(actual or "")):
+                    flags = re.IGNORECASE if "i" in str(cond.get("$options") or "") else 0
+                    if actual is _MISSING or not re.search(val, str(actual or ""), flags):
                         return False
+                elif op == "$options":
+                    continue                    # read with $regex
+
                 elif op in ("$lt", "$lte", "$gt", "$gte"):
                     if not _cmp_ok(actual, op, val):
                         return False

@@ -87,11 +87,20 @@ def seed_database_if_empty():
             if not os.path.exists(src_file_path):
                 continue
 
-            existing_file = data_files_col.find_one({
-                "account_id": astra_id,
-                "dataset_key": d_key,
-                "status": "active"
-            })
+            # Seeded once, into a database that has never held this dataset
+            # for Astra. Any record - active, replaced or deleted - means
+            # someone has managed it since, and startup must leave it alone.
+            #
+            # This used to "refresh" the active record on every start: it
+            # pointed file_path back at the pilot copy and rewrote its size,
+            # row count and hash. Every deploy silently swapped an uploaded
+            # file for the pilot one - on 21 Oct the #106 deploy put Astra's
+            # 23 pilot contacts back over the client's 17 - and the changed
+            # hash marked 13 sections stale, ready to rebuild from the wrong
+            # contacts. A deleted dataset would likewise have come back.
+            if data_files_col.find_one({"account_id": astra_id, "dataset_key": d_key},
+                                       {"_id": 1}):
+                continue
 
             # Create destination dirs in both backend_root and current working directory
             target_dirs = {
@@ -125,37 +134,23 @@ def seed_database_if_empty():
             except Exception:
                 row_count = 0
 
-            if not existing_file:
-                metadata = {
-                    "account_id": astra_id,
-                    "dataset_key": d_key,
-                    "category": d_key,
-                    "display_name": display_name,
-                    "original_filename": filename,
-                    "stored_filename": filename,
-                    "file_path": rel_file_path,
-                    "file_size": file_size,
-                    "row_count": row_count,
-                    "content_sha256": content_sha256,
-                    "status": "active",
-                    "uploaded_at": now,
-                    "updated_at": now
-                }
-                data_files_col.insert_one(metadata)
-                logger.info("Seeded active dataset '%s' for account %s", d_key, astra_id)
-            else:
-                # Ensure status is active and row_count/size are up to date
-                data_files_col.update_one(
-                    {"_id": existing_file["_id"]},
-                    {"$set": {
-                        "status": "active",
-                        "file_path": rel_file_path,
-                        "file_size": file_size,
-                        "row_count": row_count,
-                        "content_sha256": content_sha256,
-                        "updated_at": now
-                    }}
-                )
+            metadata = {
+                "account_id": astra_id,
+                "dataset_key": d_key,
+                "category": d_key,
+                "display_name": display_name,
+                "original_filename": filename,
+                "stored_filename": filename,
+                "file_path": rel_file_path,
+                "file_size": file_size,
+                "row_count": row_count,
+                "content_sha256": content_sha256,
+                "status": "active",
+                "uploaded_at": now,
+                "updated_at": now
+            }
+            data_files_col.insert_one(metadata)
+            logger.info("Seeded active dataset '%s' for account %s", d_key, astra_id)
 
     # 4. Nothing is generated here.
     #
