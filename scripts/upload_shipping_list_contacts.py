@@ -14,12 +14,13 @@ Decisions (19-21 Oct email thread):
      seniority, country and city (when the tab has them), email, phone, LinkedIn.
      Personas come from the job titles, as for every other account, so
      `committee_angle` is not loaded;
-  3. email tag (column J, `email_status`): shown as provided - could_not_verify
-     included - but
+  3. email tag (column J, `email_status`): shown as provided, but
        - only when there is an email address;
        - catch_all and CATCH_ALL are one tag, CATCH_ALL;
-       - "unavailable", "unknown", "not found" and the like are left blank, as
-         is a blank status;
+       - a status that only says nothing could be found or checked (unknown,
+         unavailable, not found, could_not_verify, unverified, N/A ...) is
+         left blank, as is a blank status. The same rule applies to the phone
+         tag. A contact is never dropped for it;
   4. phone (column K): shown only when there is a number, with its line type
      (column M, `phone_line_type`: MOBILE, LANDLINE, VOIP) as the phone tag. No number, no
      phone and no tag. A number the spreadsheet stored in scientific notation
@@ -76,11 +77,21 @@ DEPARTMENTS = {**DEPARTMENT, "legal": "master_legal", "executive": "c_suite"}
 # Highest first: a cell such as "head; director" bands on the senior value.
 SENIORITY_RANK = ["c_suite", "vp", "director", "head", "manager", "owner"]
 
-# Statuses that say nothing about the mailbox show no tag (21 Oct: "unknown,
-# unavailable, not found - these kinds of things"). Compared after upper-casing
-# and turning spaces and hyphens into underscores.
-EMAIL_TAG_BLANK = {"", "UNKNOWN", "UNAVAILABLE", "INVALID", "NONE", "NULL",
-                   "NOT_FOUND", "NOT_AVAILABLE", "N/A", "NA"}
+# A status that only says nothing could be found or checked - unknown,
+# unavailable, not found, could not verify, unverified, N/A and the like - is
+# no information, so it shows no tag (client, 21 Oct), for email and phone
+# alike. The contact itself is always kept.
+NO_INFO_TAG = re.compile(
+    r"^$|unknown|unavailable|not[\s_-]*(found|available|verified|provided|checked)"
+    r"|could[\s_-]*not|can[\s_-]*not|cannot|unable|unverified|unverifiable|invalid"
+    r"|pending|error|failed|^(n/?a|na|none|null|nil|-+)$",
+    re.IGNORECASE)
+
+
+def no_info(tag: str) -> bool:
+    return bool(NO_INFO_TAG.search(clean(tag)))
+
+
 PHONE_TAGS = {"MOBILE", "LANDLINE", "VOIP"}
 SCIENTIFIC = re.compile(r"\d[eE][+-]?\d+$")
 
@@ -95,7 +106,7 @@ def email_tag(email: str, status) -> str:
     if not email:
         return ""
     tag = clean(status)
-    if re.sub(r"[\s-]+", "_", tag.upper()) in EMAIL_TAG_BLANK:
+    if no_info(tag):
         return ""
     return "CATCH_ALL" if tag.upper() == "CATCH_ALL" else tag
 
@@ -156,7 +167,7 @@ def phone_and_tag(raw, line_type, known: set[str] = frozenset()) -> tuple[str, s
             return "", "", "damaged"
         how = "restored"
     tag = clean(line_type).upper()
-    return number, tag if tag in PHONE_TAGS else "", how
+    return number, tag if tag in PHONE_TAGS and not no_info(tag) else "", how
 
 
 def convert(row: dict, account: dict, known: set[str] = frozenset(),

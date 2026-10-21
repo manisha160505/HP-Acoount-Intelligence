@@ -61,12 +61,25 @@ def test_a_full_row_keeps_every_column_we_load(loader):
 @pytest.mark.parametrize("status, tag", [
     ("catch_all", "CATCH_ALL"), ("CATCH_ALL", "CATCH_ALL"), ("VERIFIED", "VERIFIED"),
     ("VALID_RISKY", "VALID_RISKY"), ("valid", "valid"),
-    ("could_not_verify", "could_not_verify"),          # 21 Oct final file
+    ("could_not_verify", ""), ("Could Not Verify", ""), ("unverified", ""),  # 21 Oct
     ("unknown", ""), ("UNKNOWN", ""), ("unavailable", ""), ("Not Found", ""),
     ("not-found", ""), ("N/A", ""), (None, ""), ("", ""),
 ])
 def test_email_tags_as_provided_except_blank_and_unknown(loader, status, tag):
     assert loader.convert(_row(email_status=status), ACCOUNT)[0]["Email Status"] == tag
+
+
+@pytest.mark.parametrize("line_type", ["unknown", "not found", "N/A", "could_not_verify", "-"])
+def test_a_no_information_phone_tag_is_blank_but_the_number_shows(loader, line_type):
+    out, _ = loader.convert(_row(phone_line_type=line_type), ACCOUNT)
+    assert out["Mobile Phone"] == "81300000000" and out["Phone Line Type"] == ""
+
+
+def test_a_contact_with_nothing_but_a_name_is_still_kept(loader):
+    out, _ = loader.convert(_row(email=None, email_status="could_not_verify", phone=None,
+                                 phone_line_type="unknown", linkedin_url=None), ACCOUNT)
+    assert out["Prospect full_name"] == "Aiko Tanaka" and out["Prospect job_title"] == "CIO"
+    assert out["Email"] == out["Email Status"] == out["Mobile Phone"] == out["Phone Line Type"] == ""
 
 
 def test_no_email_means_no_email_tag(loader):
