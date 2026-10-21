@@ -776,16 +776,9 @@ Output JSON:
         f"Return exactly one entry per supplied id, in JSON matching the schema."
     )
 
-    llm_res = generate_gpt4o_json_completion(system_prompt, user_prompt)
-    returned = (llm_res or {}).get("signals") if isinstance(llm_res, dict) else None
-    returned = returned if isinstance(returned, list) else []
-    if llm_res is not None and not _answers_any(returned, batch):
-        # Parseable but useless - `{}`, `{"signals": []}`, a string, or only ids
-        # that were never sent. The JSON helper counted it a success; it is a
-        # failure to score, and the engine must not let the empty summary it
-        # leads to replace a good one. (None was already counted by the helper.)
-        run_context.note_llm(failed=True)
-    return returned
+    # Not counted as a failure here: `_score_batches` re-sends whatever comes
+    # back unscored and reports what is still unscored after that.
+    return _ask_about(system_prompt, user_prompt, batch, "scoring")
 
 
 def _answers_any(entries: list, batch: list) -> bool:
@@ -793,6 +786,34 @@ def _answers_any(entries: list, batch: list) -> bool:
     wanted = {s["signal_id"] for s in batch}
     return any(isinstance(e, dict) and str(e.get("signal_id") or "").strip() in wanted
                for e in entries)
+
+
+# A readable answer about none of the signals it was asked about - `{}`,
+# `{"signals": []}`, only ids that were never sent - is asked again, the way
+# the JSON helper asks again on unreadable JSON. The same prompt almost always
+# answers on the second try.
+ANSWER_ATTEMPTS = 2
+
+
+def _ask_about(system_prompt: str, user_prompt: str, batch: list, what: str) -> list:
+    """The model's entries for `batch`, asked up to ANSWER_ATTEMPTS times.
+
+    Returns [] when no attempt answered. A failed attempt does not mark the run
+    degraded: the caller decides that once its own recovery is done.
+    """
+    for attempt in range(1, ANSWER_ATTEMPTS + 1):
+        with run_context.failures_not_counted():
+            res = generate_gpt4o_json_completion(system_prompt, user_prompt)
+        entries = (res or {}).get("signals") if isinstance(res, dict) else None
+        entries = entries if isinstance(entries, list) else []
+        if _answers_any(entries, batch):
+            return entries
+        if attempt < ANSWER_ATTEMPTS:
+            logger.warning("recent news signals: %s answer named none of the %d "
+                           "signal(s) asked about; asking again", what, len(batch))
+    logger.warning("recent news signals: %s answer named none of the %d signal(s) "
+                   "asked about after %d attempts", what, len(batch), ANSWER_ATTEMPTS)
+    return []
 
 
 # The model's own gate verdict. Only an unambiguous yes passes: `bool("false")`
@@ -893,6 +914,10 @@ def _score_batches(signals: list, company_name: str, account_context: str,
             logger.warning("recent news signals: %d of %d signal(s) came back "
                            "unscored after a retry: %s", len(still),
                            len(signals), ", ".join(still[:5]))
+            # The one scoring failure the run hears about: retries did not
+            # recover it, and a summary missing these must not replace a
+            # complete one.
+            run_context.note_llm(failed=True)
     return entries
 
 
@@ -1103,17 +1128,17 @@ def score_news_signals(account_id: str, signals: list[dict], company_name: str) 
             sig = by_sid.get(sid)
             if not sig:
                 continue
-            one = generate_gpt4o_json_completion(
+            # A rewrite that still fails is not a failed section: the signal
+            # keeps the angle the first pass wrote (stored above when only its
+            # length missed) or shows without one, and the rest of the fresh
+            # news is published.
+            answered = _ask_about(
                 retry_system,
                 "Rewrite the sales angle for this one signal and return JSON "
                 "containing only it." + NL
                 + f'- id={sid} | {fault} | headline={sig["headline"][:150]}'
-                + NL + f'  evidence={(sig.get("evidence_sentence") or sig["headline"])[:300]}')
-            answered = (one or {}).get("signals") if isinstance(one, dict) else None
-            answered = answered if isinstance(answered, list) else []
-            if one is not None and not _answers_any(answered, [sig]):
-                # A readable answer about nothing it was asked: a failed call.
-                run_context.note_llm(failed=True)
+                + NL + f'  evidence={(sig.get("evidence_sentence") or sig["headline"])[:300]}',
+                [sig], "sales angle rewrite")
             for entry in answered:
                 if isinstance(entry, dict):
                     rewritten.append(entry)
