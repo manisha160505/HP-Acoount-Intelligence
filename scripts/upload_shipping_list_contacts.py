@@ -1,23 +1,26 @@
 #!/usr/bin/env python
-"""Load the contact data from the shipping list (Dhruvi, 19 Oct).
+"""Load the client's final contact file (Dhruvi, 19 and 21 Oct).
 
-`shipping_list_with_four_tabs.xlsx`, tab "Shipping List": 2,736 people for 208
-accounts. The "Missing Accounts" tab names 12 more, still to come; those
-accounts are not in this file and keep the contacts they have.
+`HP220_FINAL_contacts_20Oct2026.xlsx`, tab "finalised columns": 3,371 people
+for 212 accounts, phone numbers checked. Accounts not in the file (about 7,
+mostly government bodies, unlikely to get contacts) keep what they have. The
+19 Oct `shipping_list_with_four_tabs.xlsx` loads too, with --sheet "Shipping List".
 
-Decisions (19 Oct email thread):
+Decisions (19-21 Oct email thread):
 
   1. every account in the file gets the file's contacts, Astra included - its
      pilot contacts are replaced;
   2. the columns we loaded before are loaded again: name, title, department,
-     seniority, country, email, phone, LinkedIn. Personas come from the job
-     titles, as for every other account, so `committee_angle` is not loaded;
-  3. email tag (column `email_status`): shown as provided, but
+     seniority, country and city (when the tab has them), email, phone, LinkedIn.
+     Personas come from the job titles, as for every other account, so
+     `committee_angle` is not loaded;
+  3. email tag (column J, `email_status`): shown as provided - could_not_verify
+     included - but
        - only when there is an email address;
        - catch_all and CATCH_ALL are one tag, CATCH_ALL;
-       - "unknown" is left blank, as is a blank status;
-  4. phone: shown only when there is a number, with its line type
-     (`phone_line_type`: MOBILE, LANDLINE, VOIP) as the phone tag. No number, no
+       - "unavailable" and "unknown" are left blank, as is a blank status;
+  4. phone (column K): shown only when there is a number, with its line type
+     (column M, `phone_line_type`: MOBILE, LANDLINE, VOIP) as the phone tag. No number, no
      phone and no tag. A number the spreadsheet stored in scientific notation
      ("8.17048E+11") has lost its digits; it is treated as no number and listed
      in the report, never shown.
@@ -26,8 +29,7 @@ This converts each account's rows to the `prospect_contacts.csv` layout the
 features already read (see upload_balance_contacts.py), writes them into the
 account's split folder and uploads them. It is a dry run unless --apply:
 
-    hp-backend/.venv/bin/python scripts/upload_shipping_list_contacts.py --source <xlsx> \
-        --previous ~/Desktop/HP_contacts_backup_2026-10-19
+    hp-backend/.venv/bin/python scripts/upload_shipping_list_contacts.py --source <xlsx>
     export HP_BASE_URL=https://hp.abx.220.bridgeai.ai HP_EMAIL=bridge@gmail.com HP_PASSWORD=...
     hp-backend/.venv/bin/python scripts/upload_shipping_list_contacts.py --source <xlsx> --apply
     ... --apply --regenerate     # then one run for the uploaded accounts (super admin)
@@ -60,8 +62,7 @@ from upload_balance_contacts import (
     header,
 )
 
-SHEET = "Shipping List"
-DATA_SOURCE = "Shipping list (shipping_list_with_four_tabs.xlsx, 19 Oct 2026)"
+SHEET = "finalised columns"
 PHONE_TAG_COLUMN = "Phone Line Type"
 
 # The server's account name where it differs from the split's upload name.
@@ -153,7 +154,8 @@ def phone_and_tag(raw, line_type, known: set[str] = frozenset()) -> tuple[str, s
     return number, tag if tag in PHONE_TAGS else "", how
 
 
-def convert(row: dict, account: dict, known: set[str] = frozenset()) -> tuple[dict, str]:
+def convert(row: dict, account: dict, known: set[str] = frozenset(),
+            data_source: str = "Client contact file") -> tuple[dict, str]:
     """One shipping-list row in the prospect_contacts layout, and what happened
     to its phone number ("", "restored" or "damaged"). `known`: the numbers
     this person's earlier record held."""
@@ -182,7 +184,7 @@ def convert(row: dict, account: dict, known: set[str] = frozenset()) -> tuple[di
         "Email Status": email_tag(email, row.get("email_status")),
         "Mobile Phone": phone,
         PHONE_TAG_COLUMN: phone_tag,
-        "data_source": DATA_SOURCE,
+        "data_source": data_source,
         # The same kind of vendor-matched person as every other account's
         # contacts, so the same marker and the same treatment.
         "apollo_matched_contact": name,
@@ -195,18 +197,18 @@ def convert(row: dict, account: dict, known: set[str] = frozenset()) -> tuple[di
     }, how
 
 
-def read_rows(source: Path) -> list[dict]:
+def read_rows(source: Path, sheet: str = SHEET) -> list[dict]:
     import openpyxl
     wb = openpyxl.load_workbook(source, read_only=True, data_only=True)
-    if SHEET not in wb.sheetnames:
-        sys.exit(f"{source.name} has no '{SHEET}' tab (tabs: {', '.join(wb.sheetnames)})")
-    rows = wb[SHEET].iter_rows(values_only=True)
+    if sheet not in wb.sheetnames:
+        sys.exit(f"{source.name} has no '{sheet}' tab (tabs: {', '.join(wb.sheetnames)})")
+    rows = wb[sheet].iter_rows(values_only=True)
     head = [clean(h) for h in next(rows, ())]
     out = [dict(zip(head, r)) for r in rows if r and any(c not in (None, "") for c in r)]
     missing = {"account_name", "account_country", "full_name", "email", "email_status",
                "phone", "phone_line_type"} - set(head)
     if missing:
-        sys.exit(f"'{SHEET}' lacks column(s): {', '.join(sorted(missing))}")
+        sys.exit(f"'{sheet}' lacks column(s): {', '.join(sorted(missing))}")
     return out
 
 
@@ -221,7 +223,8 @@ def match(name: str, country: str, by_folder: dict):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--source", required=True, help="shipping_list_with_four_tabs.xlsx")
+    parser.add_argument("--source", required=True, help="The client's contact workbook.")
+    parser.add_argument("--sheet", default=SHEET, help=f"Tab to read (default: {SHEET}).")
     parser.add_argument("--previous", default="",
                         help="Folder of the earlier contacts (<account>/prospect_contacts.csv), "
                              "to restore damaged phone numbers from.")
@@ -234,7 +237,8 @@ def main():
     source = Path(args.source).expanduser()
     if not source.exists():
         sys.exit(f"{source} not found")
-    rows = read_rows(source)
+    rows = read_rows(source, args.sheet)
+    data_source = f"Client contact file ({source.name} / {args.sheet})"
     previous_dir = Path(args.previous).expanduser() if args.previous else None
     if previous_dir is not None and not previous_dir.is_dir():
         sys.exit(f"--previous {previous_dir} is not a folder")
@@ -264,7 +268,8 @@ def main():
         known_here = previous.get(folder.name, {})
         out = []
         for r in account_rows:
-            converted, how = convert(r, account, known_here.get(person_key(r.get("full_name")), set()))
+            converted, how = convert(r, account, known_here.get(person_key(r.get("full_name")), set()),
+                                     data_source)
             out.append(converted)
             tags["email:" + (converted["Email Status"] or "-")] += 1
             tags["phone:" + (converted[PHONE_TAG_COLUMN] or "-")] += 1
@@ -281,7 +286,7 @@ def main():
         seen[name] = len(out)
 
     print(f"Converted {sum(seen.values())} contacts for {len(seen)} accounts from "
-          f"{source.name} / {SHEET}")
+          f"{source.name} / {args.sheet}")
     print("Email tags: " + ", ".join(f"{k[6:]} {v}" for k, v in sorted(tags.items())
                                      if k.startswith("email:")))
     print("Phone tags: " + ", ".join(f"{k[6:]} {v}" for k, v in sorted(tags.items())
@@ -290,7 +295,8 @@ def main():
     print(f"Phone numbers stored in scientific notation: {sum(restored.values()) + n_bad}. "
           f"Restored from earlier contacts: {sum(restored.values())}. "
           f"Dropped, not shown: {n_bad} in {len(damaged)} accounts"
-          + ("" if previous_dir else " (pass --previous to restore what can be)") + "\n")
+          + ("" if previous_dir or not n_bad else " (pass --previous to restore what can be)")
+          + "\n")
 
     base_url = (args.base_url or __import__("os").getenv("HP_BASE_URL") or "").rstrip("/")
     if not base_url:
@@ -342,7 +348,7 @@ def main():
     elif args.regenerate and uploaded:
         status, body = _api(f"{base_url}/api/v1/regeneration", token, payload={
             "accounts": uploaded, "include_downstream": True,
-            "reason": "contacts from the shipping list (19 Oct)"})
+            "reason": f"contacts from {source.name}"})
         if status in (200, 201, 202):
             totals = (body or {}).get("totals") or {}
             print(f"\nSubmitted run {(body or {}).get('_id')} for {len(uploaded)} account(s): "

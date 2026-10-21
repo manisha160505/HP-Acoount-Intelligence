@@ -61,7 +61,8 @@ def test_a_full_row_keeps_every_column_we_load(loader):
 @pytest.mark.parametrize("status, tag", [
     ("catch_all", "CATCH_ALL"), ("CATCH_ALL", "CATCH_ALL"), ("VERIFIED", "VERIFIED"),
     ("VALID_RISKY", "VALID_RISKY"), ("valid", "valid"),
-    ("unknown", ""), ("UNKNOWN", ""), (None, ""), ("", ""),
+    ("could_not_verify", "could_not_verify"),          # 21 Oct final file
+    ("unknown", ""), ("UNKNOWN", ""), ("unavailable", ""), (None, ""), ("", ""),
 ])
 def test_email_tags_as_provided_except_blank_and_unknown(loader, status, tag):
     assert loader.convert(_row(email_status=status), ACCOUNT)[0]["Email Status"] == tag
