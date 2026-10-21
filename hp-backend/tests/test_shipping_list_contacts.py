@@ -150,3 +150,13 @@ def test_an_account_matches_by_name_or_name_and_country(loader):
     assert loader.match("ADVANTEST  CORPORATION", "JP", folders) == ("dir", {})
     assert loader.match("BUNNINGS GROUP LIMITED", "AU", folders) == ("dir2", {})
     assert loader.match("UNKNOWN CO", "JP", folders) is None
+
+
+def test_the_contact_id_belongs_to_the_person_not_the_row(loader):
+    a, _ = loader.convert(_row(), ACCOUNT)
+    b, _ = loader.convert(_row(job_title="Chief Information Officer", phone=None), ACCOUNT)
+    other, _ = loader.convert(_row(full_name="Kenji Sato", email="kenji@example.com"), ACCOUNT)
+    assert a["Prospect prospect_id"].startswith("c-")
+    # Same person, other details changed: same id. Another person: another id.
+    assert a["Prospect prospect_id"] == b["Prospect prospect_id"]
+    assert a["Prospect prospect_id"] != other["Prospect prospect_id"]

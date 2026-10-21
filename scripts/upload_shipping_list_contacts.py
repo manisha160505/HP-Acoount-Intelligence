@@ -170,6 +170,17 @@ def phone_and_tag(raw, line_type, known: set[str] = frozenset()) -> tuple[str, s
     return number, tag if tag in PHONE_TAGS and not no_info(tag) else "", how
 
 
+def stable_id(account: dict, row: dict) -> str:
+    """An id for the person, not for their row. Talking points, Strategy Chat
+    personas, Content Studio and the Message Evaluator join on it; a row
+    number ("contact_3") names someone else after the next upload, so a kept
+    older output would show one person's talking points on another."""
+    key = "|".join(clean(v).lower() for v in (
+        account.get("vendor_company_name"), row.get("full_name"),
+        row.get("email"), row.get("linkedin_url")))
+    return "c-" + hashlib.sha1(key.encode("utf-8")).hexdigest()[:12]
+
+
 def convert(row: dict, account: dict, known: set[str] = frozenset(),
             data_source: str = "Client contact file") -> tuple[dict, str]:
     """One shipping-list row in the prospect_contacts layout, and what happened
@@ -187,6 +198,7 @@ def convert(row: dict, account: dict, known: set[str] = frozenset(),
     return {
         "Company Name": account["vendor_company_name"],
         "Company Domain": account.get("domain") or "",
+        "Prospect prospect_id": stable_id(account, row),
         "Prospect first_name": first,
         "Prospect last_name": last,
         "Prospect full_name": name,
@@ -286,6 +298,11 @@ def main():
         for r in account_rows:
             converted, how = convert(r, account, known_here.get(person_key(r.get("full_name")), set()),
                                      data_source)
+            # The same person listed twice keeps two distinct ids.
+            pid = converted["Prospect prospect_id"]
+            n = sum(1 for o in out if o["Prospect prospect_id"].split("~")[0] == pid)
+            if n:
+                converted["Prospect prospect_id"] = f"{pid}~{n + 1}"
             out.append(converted)
             tags["email:" + (converted["Email Status"] or "-")] += 1
             tags["phone:" + (converted[PHONE_TAG_COLUMN] or "-")] += 1
