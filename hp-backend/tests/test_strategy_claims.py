@@ -388,21 +388,38 @@ class TestTheRefusalSaysWhichThingWentWrong:
         from app.services.strategy import chat
         return chat._unavailable("Astra", "q", "topic", "reason", cause=cause)
 
-    def test_no_data_says_nothing_is_published(self):
+    def test_no_data_is_the_approved_line_alone(self):
+        # Client-approved wording (21 Oct): the approved line, nothing about
+        # why - the reason stays in generation.reason. No pointer: with nothing
+        # published there is nothing to point at.
         from app.services.strategy import chat
-        body = self._body(chat.CAUSE_NO_DATA)["answer"]
-        assert "No feature has published anything" in body
+        payload = self._body(chat.CAUSE_NO_DATA)
+        assert payload["answer"] == chat.NOT_COVERED_MESSAGE
+        assert payload["generation"]["reason"] == "reason"
 
     def test_a_model_failure_says_it_is_ours(self):
         from app.services.strategy import chat
         body = self._body(chat.CAUSE_MODEL)["answer"]
-        assert "fault on our side, not a gap in the data" in body
+        # Client-approved wording (21 Oct): neutral, no "fault" or technical
+        # detail, and no pointer to other sections - the data was not the cause.
+        assert body == chat.MODEL_FAILURE_MESSAGE
 
-    def test_an_unevidenced_answer_says_it_was_drafted(self):
+    def test_an_unevidenced_answer_is_the_approved_line_and_one_pointer(self):
         from app.services.strategy import chat
         body = self._body(chat.CAUSE_UNEVIDENCED)["answer"]
-        assert "drafted an answer" in body
-        assert "could not evidence" in body
+        assert body == "%s\n\n%s" % (chat.NOT_COVERED_MESSAGE, chat.CLOSEST_SECTIONS)
+        for gone in ("held the answer back", "Rather than show you",
+                     "cannot trace", "No feature has published"):
+            assert gone not in body
+
+    def test_a_prompt_too_large_says_start_a_new_conversation(self):
+        from app.services.strategy import chat
+        payload = chat._unavailable("Astra", "q", "t", "over the window",
+                                    cause=chat.CAUSE_MODEL,
+                                    message=chat.PROMPT_TOO_LARGE_MESSAGE)
+        assert payload["answer"] == ("This conversation has grown too long. "
+                                     "Please start a new conversation.")
+        assert payload["unavailable_cause"] == chat.CAUSE_MODEL
 
     def test_the_three_differ(self):
         from app.services.strategy import chat
@@ -419,14 +436,15 @@ class TestTheRefusalSaysWhichThingWentWrong:
         assert payload["available"] is False
         assert payload["citations"] == []
 
-    def test_the_persona_refusal_is_unchanged(self):
-        """Roleplay breaks character on purpose here, and that wording was
-        reasoned about - dressing a platform failure as the character
-        stonewalling teaches the seller something that never happened."""
+    def test_the_persona_refusal_breaks_character(self):
+        """Roleplay breaks character on purpose here - dressing a platform
+        failure as the character stonewalling teaches the seller something
+        that never happened. Approved wording (21 Oct)."""
         from app.services.strategy import chat
         body = chat._unavailable("Astra", "q", "t", "r",
                                  persona={"title": "CFO"})["answer"]
-        assert "The rehearsal stopped here" in body
+        assert body == ("That isn't covered in this account's intelligence yet."
+                        "\n\nTry rephrasing, or switch to Strategy Advisor.")
 
 
 class TestThePublishedPayloadKeepsThemApart:

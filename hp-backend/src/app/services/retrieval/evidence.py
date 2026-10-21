@@ -176,10 +176,17 @@ def resolve(account_id: str, index: str, ids) -> tuple:
     An id belonging to another account simply does not resolve here - it is
     reported as invalid rather than returned, so a cross-account citation can
     never reach a seller.
+
+    `ids` must be a list (or tuple) of ids. Anything else - None, a bare
+    string, a number, a dict - is no citation list and resolves nothing: a
+    string would otherwise be read one character at a time. An id cited more
+    than once is one source, so repeats are dropped and the first-cited order
+    is kept (the first source is the one a seller reads first).
     """
+    if not isinstance(ids, list | tuple):
+        return [], []
     wanted, invalid = [], []
-    for raw in (ids or []):
-        candidate = _text(raw)
+    for candidate in dict.fromkeys(_text(raw) for raw in ids):
         if EVIDENCE_ID_RE.match(candidate):
             wanted.append(candidate)
         else:

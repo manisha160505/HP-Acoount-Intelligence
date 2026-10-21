@@ -296,6 +296,21 @@ def _candidate_challenges(account_id: str, mode: str | None = None) -> tuple:
     return (raw.get("challenges") or []), result
 
 
+def _cited_ids(value) -> list | None:
+    """The evidence ids a model answer cites: de-duplicated, first-cited order
+    kept. None when the value is not a list - a bare string or a number is not
+    a citation list (a string would be read one character at a time). A
+    missing value is an empty list. Same rule as dashboard/priorities.py.
+
+    One id cited four times is one source; repeats would show the same source
+    chip several times and count as extra support."""
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        return None
+    return list(dict.fromkeys(_text(i) for i in value))
+
+
 def _resolve_challenges(account_id: str, candidates: list) -> tuple:
     """Keep only challenges whose evidence actually resolves.
 
@@ -312,8 +327,13 @@ def _resolve_challenges(account_id: str, candidates: list) -> tuple:
         if not text:
             continue
 
-        resolved, invalid = ev.resolve(account_id, INDEX,
-                                       candidate.get("evidence_ids") or [])
+        ids = _cited_ids(candidate.get("evidence_ids"))
+        if ids is None:
+            dropped.append({"challenge": text[:160],
+                            "reason": "evidence_ids is not a list",
+                            "invalid_ids": [_text(candidate.get("evidence_ids"))[:80]]})
+            continue
+        resolved, invalid = ev.resolve(account_id, INDEX, ids)
         invalid_total += len(invalid)
         if len(resolved) < MIN_EVIDENCE_PER_PILLAR:
             dropped.append({"challenge": text[:160],
@@ -413,14 +433,25 @@ def _account_evidence_block(db, account_id: str, limit: int = 90) -> str:
         for row in rows[:limit])
 
 
+def _role_key(text) -> str:
+    """A role title compared as words: lower case, punctuation and repeated
+    spaces removed, "&" read as "and"."""
+    low = str(text or "").lower().replace("&", " and ")
+    return " ".join(re.sub(r"[^\w]+", " ", low).split())
+
+
 def _matched_role(written: str, roles: list) -> str:
-    """The roster role this text names, or "" when it names none."""
-    want = " ".join(str(written or "").split()).lower()
+    """The roster role this text names, or "" when it names none.
+
+    Exact, once both are normalised (_role_key). A substring match in either
+    direction attached a pillar to the wrong person's title: "IT" was found
+    inside "Chief Information Security Officer", and "Director of Finance"
+    matched a roster's bare "Director"."""
+    want = _role_key(written)
     if not want:
         return ""
     for role in roles:
-        low = role.lower()
-        if want == low or want in low or low in want:
+        if _role_key(role) == want:
             return role
     return ""
 
@@ -561,8 +592,9 @@ def _build_pillar(account_id: str, challenge: dict, hp_facts: str,
         text = _text(item.get("proof"))
         if not text:
             continue
-        resolved, invalid = ev.resolve(account_id, INDEX,
-                                       item.get("evidence_ids") or [])
+        ids = _cited_ids(item.get("evidence_ids"))
+        resolved, invalid = (ev.resolve(account_id, INDEX, ids) if ids is not None
+                             else ([], [_text(item.get("evidence_ids"))[:80]]))
         if not resolved:
             dropped_proofs.append({"proof": text[:160], "invalid_ids": invalid[:3]})
             continue

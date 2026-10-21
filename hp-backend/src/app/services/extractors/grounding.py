@@ -266,9 +266,18 @@ def assert_enum(value, allowed: list[str]):
 
 
 def filter_enum_list(values, allowed: list[str]) -> tuple[list[str], list[str]]:
-    """Split a model-supplied list into (kept, rejected) against an allow-list."""
+    """Split a model-supplied list into (kept, rejected) against an allow-list.
+
+    Anything that is not a list - a bare string, a number - is rejected whole
+    rather than iterated: a number would raise and fail the caller's whole
+    feature, and a string would be read one character at a time.
+    """
     kept, rejected = [], []
-    for v in (values or []):
+    if values is None or values == "":
+        return kept, rejected
+    if not isinstance(values, (list, tuple)):
+        return kept, [str(values)]
+    for v in values:
         # Products resolve by HP line; other enums stay exact.
         hit = normalize_hp_product(v) if allowed is HP_PRODUCT_LINES else assert_enum(v, allowed)
         if hit:

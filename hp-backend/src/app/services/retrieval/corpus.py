@@ -30,6 +30,7 @@ import re
 
 from app.config import account_overrides
 from app.database.mongodb import get_db
+from app.services import talking_points as talking_points_reader
 from app.services.regen import store as widget_store
 from app.services.retrieval.evidence import EvidenceBuilder
 
@@ -1717,8 +1718,7 @@ def _strategy_people_documents(db, account_id, index, company) -> list:
     """
     grid = _widget(db, account_id, "stakeholder_contacts_grid")
     influence = _widget(db, account_id, "stakeholder_influence_map")
-    points = (_widget(db, account_id, "stakeholder_talking_points")
-              .get("talking_points") or {})
+    points = _widget(db, account_id, "stakeholder_talking_points").get("talking_points")
     docs = []
 
     if influence:
@@ -1752,7 +1752,8 @@ def _strategy_people_documents(db, account_id, index, company) -> list:
         contact_id = _text(contact.get("contact_id"))
         if not name:
             continue
-        talking = points.get(contact_id) or {}
+        # Joined by id, and only kept when it was written for this person.
+        talking = talking_points_reader.for_contact(points, contact_id, name)
 
         def fill_contact(b, contact=contact, name=name, talking=talking):
             out = []

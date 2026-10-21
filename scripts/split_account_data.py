@@ -1381,6 +1381,17 @@ def apollo_review_flags(row: dict, company_domains: set[str]) -> list[str]:
     return flags
 
 
+def person_contact_id(company, name, email, linkedin) -> str:
+    """An id for the person, not for their row, for a contact the vendor gave
+    no id. The formula of upload_shipping_list_contacts.stable_id and of the
+    Stakeholder Map's own fallback (stakeholder_map.person_contact_id), so the
+    three agree: talking points and personas join on this id, and a row number
+    ("contact_3") names someone else after the next upload."""
+    key = "|".join(" ".join(str(v or "").split()).lower()
+                   for v in (company, name, email, linkedin))
+    return "c-" + hashlib.sha1(key.encode("utf-8")).hexdigest()[:12]
+
+
 def apollo_to_prospect(row: dict, company_domains: set[str], sister: bool) -> dict:
     """One Apollo row in the prospect_contacts layout."""
     def v(key):
@@ -1401,7 +1412,8 @@ def apollo_to_prospect(row: dict, company_domains: set[str], sister: bool) -> di
     return {
         "Company Name": v("Company Name"),
         "Company Domain": v("Website Domain"),
-        "Prospect prospect_id": v("Apollo Id"),
+        "Prospect prospect_id": v("Apollo Id") or person_contact_id(
+            v("Company Name"), name, email, linkedin),
         "Prospect first_name": first,
         "Prospect last_name": last,
         "Prospect full_name": name,

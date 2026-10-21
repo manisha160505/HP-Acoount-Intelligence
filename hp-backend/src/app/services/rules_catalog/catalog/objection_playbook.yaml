@@ -235,7 +235,9 @@ rules:
     than someone who raised the objection.
   inputs:
   - 'The contact list: each contact''s job title and department'
-  logic: For each area, every contact's job title is checked for the area's strong title words (whole
+  logic: Contacts whose matching status is Pending or Review are excluded first - the same contacts the
+    Stakeholder Map withholds - so none of them can be named. For each area, every remaining contact's
+    job title is checked for the area's strong title words (whole
     words only). Only contacts whose title contains a strong word are considered; a department match
     alone does not qualify a contact. Rank = the number of strong words matched, plus 1 if the contact's
     department is one of the area's owner departments. The highest rank wins; on a tie the contact listed
@@ -305,6 +307,8 @@ rules:
     the area name.
   sources:
   - hp-backend/src/app/services/extractors/objection_playbook.py:_resolve_likely_raiser
+  - hp-backend/src/app/services/extractors/objection_playbook.py:extract_objection_playbook
+  - hp-backend/src/app/services/extractors/stakeholder_map.py:_drop_unmatched_contacts
   - hp-backend/src/app/services/extractors/objection_playbook.py:AREA_OWNER_STRONG_TOKENS
   - hp-backend/src/app/services/extractors/objection_playbook.py:AREA_OWNER_DEPARTMENTS
   - hp-backend/src/app/services/extractors/objection_playbook.py:AREA_OWNER_WEAK_TOKENS

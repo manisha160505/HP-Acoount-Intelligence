@@ -178,10 +178,13 @@ def _priority_for(has_initiative: bool, has_supporting_signal: bool,
 # string if the client changes position (the decision is still with Sahaj).
 NO_PROOF_POINT = None
 
-# Composed in Python when the model will not return a timing note. It states
-# exactly what the checks already record, so nothing is invented.
-DEFAULT_TIMING_NOTE = ("No timing signal for this play appears in this account's data - "
-                       "confirm current plans and budget timing before positioning.")
+# What a play carries when the model will not return a timing note. It used to
+# be a Python sentence ("No timing signal for this play appears in this
+# account's data - confirm ..."), which is gap wording the client must never
+# see (21 Oct). Now nothing is shown - the UI hides an empty field - and the
+# reason stays internal, in the run's `dropped` notes. None rather than deleted,
+# like NO_PROOF_POINT, so the field still exists for anything reading it.
+DEFAULT_TIMING_NOTE = None
 
 # How many rewrites a play gets for a prose fault before it is published anyway.
 MAX_PROSE_REWRITES = 2
@@ -363,6 +366,23 @@ def _play_relevance_fault(verified: list, texts) -> tuple:
     for text in texts:
         faults.extend(tier_language_faults(text, tier["tier"]))
     return tier, rung, faults
+
+
+def _play_shape_fault(play: dict, play_key: str, eligible_keys) -> str | None:
+    """Why one model play cannot be read at all, or None.
+
+    Only the families the prompt offered: an invented key has no signal
+    vocabulary, so the HP-fit check would wave it through and publish it as a
+    High/Critical opportunity. And a wrong-typed field drops this play alone -
+    iterating a number raised and took the whole Opportunity Map down.
+    """
+    if play_key not in PLAY_SIGNAL_TOKENS or play_key not in eligible_keys:
+        return "not one of the eligible play families offered"
+    for field in ("account_evidence", "hp_products"):
+        value = play.get(field)
+        if value not in (None, "") and not isinstance(value, list):
+            return "%s is not a list" % field
+    return None
 
 
 def _play_length_fault(play: dict) -> tuple:
@@ -1292,6 +1312,10 @@ Output JSON:
             title = str(p.get("title") or "").strip()
             if not play_key or not title:
                 continue
+            shape_fault = _play_shape_fault(p, play_key, eligible_keys)
+            if shape_fault:
+                dropped.append(f"{play_key}: {shape_fault} - play dropped")
+                continue
 
             # --- validate every evidence quote against the source corpus ----
             verified = []
@@ -1474,11 +1498,13 @@ Output JSON:
                         "the inference exploratory"))
                     continue
                 # Evidence and fit are sound; only the prose is missing. Publish
-                # with a note Python composes, rather than deleting the play.
+                # without a timing note rather than deleting the play; the
+                # reason is kept here, not on the card.
                 timing_note = DEFAULT_TIMING_NOTE
                 dropped.append(f"{play_key}: no timing_note returned after "
-                               f"{language_attempts[play_key]} rewrites - default note applied")
-                logger.warning("opportunity map: %s published with the default timing note",
+                               f"{language_attempts[play_key]} rewrites - published "
+                               f"without one")
+                logger.warning("opportunity map: %s published without a timing note",
                                play_key)
 
             # Where a real owner was resolved, the chain must reach them.
@@ -1644,8 +1670,21 @@ Output JSON:
         logger.warning("opportunity map: dropped %d item(s): %s", len(dropped), dropped)
         pipeline.guardrail(len(dropped), "see the WARNING lines above")
 
+    def _plays_in(answer):
+        """The answer's play list, noting a readable but schema-wrong answer as a
+        failed call. The JSON helper already counted None; `{}`, a missing key,
+        a non-list or a list with no play object in it scored as a success
+        there, and must not let an empty map replace a good one. An empty list
+        is a legitimate "no chain holds" and is not a failure."""
+        raw = answer.get("opportunity_plays") if isinstance(answer, dict) else None
+        if answer is not None and eligible_keys and (
+                not isinstance(raw, list)
+                or (raw and not any(isinstance(x, dict) for x in raw))):
+            run_context.note_llm(failed=True)
+        return raw
+
     llm_res = generate_gpt4o_json_completion(system_prompt, user_prompt)
-    _process((llm_res or {}).get("opportunity_plays") if isinstance(llm_res, dict) else None)
+    _process(_plays_in(llm_res))
 
     # One bounded retry for plays rejected purely for language. The model is told
     # exactly which words it used, rather than being asked again blindly.
@@ -1667,7 +1706,7 @@ Output JSON:
                       + ", ".join(sorted(retry_notes)) + ".")
         retry_notes = {}
         retry_res = generate_gpt4o_json_completion(retry_system, retry_user)
-        _process((retry_res or {}).get("opportunity_plays") if isinstance(retry_res, dict) else None)
+        _process(_plays_in(retry_res))
 
     # "Compare narrative rankings for duplicate plays: combine two tiles that use
     # the same trigger, need and HP solution." Same trigger set + same play
@@ -1724,8 +1763,10 @@ Output JSON:
             opportunities.append(play)
             continue
         entry = dict(play)
-        entry["title"] = (PLAY_DISPLAY_NAMES.get(play["play_key"], play["play_key"].upper())
-                          + " - no supporting evidence in this account's data")
+        # The offering's name alone. It used to carry " - no supporting
+        # evidence in this account's data", gap wording the client must never
+        # see (21 Oct); being listed under Discovery areas already says it.
+        entry["title"] = PLAY_DISPLAY_NAMES.get(play["play_key"], play["play_key"].upper())
         # `hp_proof_point` is listed even though proof points are attached after
         # this split: a discovery area has no HP narrative for a case study to
         # support, and the day the order changes this is what keeps that true.
@@ -1871,8 +1912,9 @@ Output JSON:
                 "total_plays_count": 0,
                 "opportunity_plays": [],
                 "dropped": dropped,
-                "notice": ("No opportunity play met the evidence threshold, or generation "
-                           "requires an LLM API key. No plays are invented."),
+                # Internal reason only (data_gaps; the client UI hides it).
+                "notice": ("No opportunity play met the evidence threshold, or the model "
+                           "returned no usable play. No plays are invented."),
             },
             "source_datasets": ["firmographics", "technographics", "intent_score",
                                 "google_news", "news_events", "prospect_contacts"],

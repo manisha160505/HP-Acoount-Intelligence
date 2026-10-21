@@ -191,6 +191,48 @@ class TestMessageEvaluatorPersonaPaths:
         assert out[0]["is_named_person"] is True
         assert out[0]["name"] == "Adam Neal"
 
+    def test_a_hidden_stakeholder_map_gives_no_contact_personas(self, monkeypatch):
+        """config/account_overrides.yaml hides the Stakeholder Map for some
+        accounts: its roster must not come back as named personas here."""
+        from bson import ObjectId
+
+        from app.services.extractors import message_evaluator as me
+        rows = [{"Prospect full_name": "Adam Neal",
+                 "Prospect job_title": "Chief Technology Officer"}]
+        account_id = str(ObjectId())
+
+        class _AccountDB(self._DB):
+            def find_one(self, query, projection=None):
+                if "_id" in query:
+                    return {"name": "Hidden Map Co"}
+                return super().find_one(query, projection)
+
+        monkeypatch.setattr(me.account_overrides, "is_hidden",
+                            lambda name, feature: (name, feature)
+                            == ("Hidden Map Co", "stakeholder_map"))
+        assert me._personas_from_contacts(_AccountDB(), account_id, rows) == []
+        monkeypatch.setattr(me.account_overrides, "is_hidden", lambda *_a: False)
+        assert len(me._personas_from_contacts(_AccountDB(), account_id, rows)) == 1
+
+    def test_talking_points_for_another_person_are_not_attached(self):
+        from app.services.extractors import message_evaluator as me
+        grid = {"data": {"contacts": [{"contact_id": "c-1", "full_name": "Adam Neal"}]}}
+        talk = {"data": {"talking_points": {"c-1": {
+            "full_name": "Someone Else", "how_to_open": "Open on X",
+            "pain_points": ["P"]}}}}
+        rows = [{"Prospect full_name": "Adam Neal", "contact_id": "c-1",
+                 "Prospect job_title": "Chief Technology Officer"}]
+        out = me._personas_from_contacts(
+            self._DB({"stakeholder_contacts_grid": grid,
+                      "stakeholder_talking_points": talk}), "acct", rows)
+        assert out[0]["opening_angle"] is None and out[0]["pain_points"] == []
+        # Calibration: the same entry written for Adam Neal is attached.
+        talk["data"]["talking_points"]["c-1"]["full_name"] = "adam  NEAL"
+        out = me._personas_from_contacts(
+            self._DB({"stakeholder_contacts_grid": grid,
+                      "stakeholder_talking_points": talk}), "acct", rows)
+        assert out[0]["opening_angle"] == "Open on X"
+
     def test_a_row_with_no_title_is_not_a_persona(self):
         from app.services.extractors import message_evaluator as me
         out = me._personas_from_contacts(self._DB(), "acct",

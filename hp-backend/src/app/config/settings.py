@@ -210,9 +210,11 @@ class Settings(BaseSettings):
     # the happy path would suggest - a timeout that fires on an answer that would
     # have arrived is worse than one that fires late.
     #
-    # Deliberately NOT added to `llm._retryable`: a timeout fails the turn instead
-    # of being retried. Retrying would spend another 300s per region on a request
-    # that has already shown it is stuck, and the seller is waiting.
+    # A timeout IS retried (`llm._retryable`, 21 Oct), but capped: at most
+    # `llm.MAX_TIMED_OUT_ATTEMPTS` (3) attempts of one call may time out, each in a
+    # different region where there is one, with a ladder wait between - so one
+    # call spends at most ~3 x 300s timing out instead of 300s per region per
+    # wait. This value itself is deliberately not shortened by retrying.
     LLM_REQUEST_TIMEOUT_SECONDS: float = 300.0
 
     # --- Observability -----------------------------------------------------

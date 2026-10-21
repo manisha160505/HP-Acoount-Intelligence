@@ -777,8 +777,36 @@ Output JSON:
     )
 
     llm_res = generate_gpt4o_json_completion(system_prompt, user_prompt)
-    returned = (llm_res or {}).get("signals")
-    return returned if isinstance(returned, list) else []
+    returned = (llm_res or {}).get("signals") if isinstance(llm_res, dict) else None
+    returned = returned if isinstance(returned, list) else []
+    if llm_res is not None and not _answers_any(returned, batch):
+        # Parseable but useless - `{}`, `{"signals": []}`, a string, or only ids
+        # that were never sent. The JSON helper counted it a success; it is a
+        # failure to score, and the engine must not let the empty summary it
+        # leads to replace a good one. (None was already counted by the helper.)
+        run_context.note_llm(failed=True)
+    return returned
+
+
+def _answers_any(entries: list, batch: list) -> bool:
+    """True when at least one entry is a dict naming a signal id in `batch`."""
+    wanted = {s["signal_id"] for s in batch}
+    return any(isinstance(e, dict) and str(e.get("signal_id") or "").strip() in wanted
+               for e in entries)
+
+
+# The model's own gate verdict. Only an unambiguous yes passes: `bool("false")`
+# is True, so a wrong-typed "false" used to be published as a pass. A missing
+# key keeps the long-standing default of a pass; an explicit null, a "no" or a
+# number is not a yes.
+_GATE_YES = frozenset({"true", "yes", "1"})
+
+
+def _gate_passed(entry: dict) -> bool:
+    value = entry.get("gate_pass", True)
+    if value is True:
+        return True
+    return isinstance(value, str) and value.strip().lower() in _GATE_YES
 
 
 # Each batch's answer is saved as soon as it comes back, so a run that fails
@@ -835,7 +863,11 @@ def _score_batches(signals: list, company_name: str, account_context: str,
 
     def collect(chunk):
         for entry in _score_batch_saved(chunk, company_name, account_context, now):
-            sid = str((entry or {}).get("signal_id") or "").strip()
+            # A string, number or list in the answer is skipped, not read: one
+            # junk element must not fail the whole feature.
+            if not isinstance(entry, dict):
+                continue
+            sid = str(entry.get("signal_id") or "").strip()
             if sid and sid not in seen:
                 seen.add(sid)
                 entries.append(entry)
@@ -976,7 +1008,7 @@ def score_news_signals(account_id: str, signals: list[dict], company_name: str) 
                 "event_status": (str(entry.get("event_status")).strip().lower()
                                  if str(entry.get("event_status") or "").strip().lower()
                                  in EVENT_STATUSES else DEFAULT_EVENT_STATUS),
-                "gate_pass": bool(entry.get("gate_pass", True)),
+                "gate_pass": _gate_passed(entry),
                 "gate_reject_reason": (str(entry.get("gate_reject_reason")).strip()
                                        if entry.get("gate_reject_reason") else None),
             }
@@ -1077,7 +1109,12 @@ def score_news_signals(account_id: str, signals: list[dict], company_name: str) 
                 "containing only it." + NL
                 + f'- id={sid} | {fault} | headline={sig["headline"][:150]}'
                 + NL + f'  evidence={(sig.get("evidence_sentence") or sig["headline"])[:300]}')
-            for entry in ((one or {}).get("signals") or []):
+            answered = (one or {}).get("signals") if isinstance(one, dict) else None
+            answered = answered if isinstance(answered, list) else []
+            if one is not None and not _answers_any(answered, [sig]):
+                # A readable answer about nothing it was asked: a failed call.
+                run_context.note_llm(failed=True)
+            for entry in answered:
                 if isinstance(entry, dict):
                     rewritten.append(entry)
 
@@ -1146,7 +1183,10 @@ def score_news_signals(account_id: str, signals: list[dict], company_name: str) 
                 "score_weights": SCORE_WEIGHTS,
                 "scoring_config_version": signal_scoring.version_stamp(),
                 "scores": {},
-                "notice": "Signal relevance scoring requires an LLM API key. The signal feed below is shown unscored; no scores are invented.",
+                # Internal reason only (collected into data_gaps; the client UI
+                # hides it). Not "requires an API key": the usual cause is a
+                # model answer that scored nothing, not a missing key.
+                "notice": "No relevance score came back from the model for this signal set; the feed is published unscored and no scores are invented.",
             },
             "source_datasets": ["google_news", "news_events"],
             "extracted_at": now,
@@ -1271,6 +1311,9 @@ def extract_recent_news_signals(account_id: str) -> list[dict]:
         s.pop("_canon", None)
         s.pop("_event_dt", None)
 
+    # Bound before the branch: the feed below reads it whenever anything is
+    # publishable, and with no scores at all nothing was rejected by the model.
+    rejected_by_model: list = []
     if scores:
         # A signal the model scored and failed on its own gate_pass check is
         # rejected - that is the model doing its job, usually on a competitor's

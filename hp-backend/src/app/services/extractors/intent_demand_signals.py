@@ -686,8 +686,11 @@ def _so_what(company: str, categories: list) -> dict:
             logger.exception("intent: So What retry failed for %s", name)
             continue
 
-        for item in (again.get("categories") or []):
-            if not isinstance(item, dict):
+        retried = again.get("categories") if isinstance(again, dict) else None
+        for item in (retried if isinstance(retried, list) else []):
+            # Only an answer about THIS category may replace its So What: a
+            # rewrite about Print must never be published as PC's.
+            if not isinstance(item, dict) or _clean(item.get("category")) != name:
                 continue
             longer = " ".join(str(item.get("so_what") or "").split())
             if longer and _closer_to_band(longer, text):

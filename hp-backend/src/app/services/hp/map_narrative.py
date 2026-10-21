@@ -32,6 +32,7 @@ from app.services.extractors.grounding import (
     corpus_from_texts,
     normalize_hp_product,
 )
+from app.services.regen import context as run_context
 
 logger = logging.getLogger(__name__)
 
@@ -145,15 +146,23 @@ def _retry_meaning(category: dict, account_name: str, current: str,
                              "is_whitespace": bool(v.get("is_whitespace"))}
                             for v in (category.get("vendors") or [])],
             }],
-        }, ensure_ascii=False)) or {}
+        }, ensure_ascii=False))
     except Exception:
         logger.exception("map narrative: meaning retry failed for %s",
                          category.get("category_key"))
         return None
 
-    for entry in (again.get("categories") or []):
-        if not isinstance(entry, dict):
-            continue
+    # Only an entry about THIS category may replace its meaning. A rewrite that
+    # comes back about another category is not attached here.
+    wanted = str(category.get("category_key"))
+    entries = again.get("categories") if isinstance(again, dict) else None
+    entries = [e for e in (entries if isinstance(entries, list) else [])
+               if isinstance(e, dict) and str(e.get("category_key")) == wanted]
+    if again is not None and not entries:
+        # Readable but about nothing it was asked: a failed call, which the
+        # JSON helper (counting only None) scored as a success.
+        run_context.note_llm(failed=True)
+    for entry in entries:
         text = _clean(entry.get("what_it_means"))
         if text and _is_acceptable(text, account_corpus) and miss(text) < miss(current):
             return text
@@ -183,7 +192,11 @@ def generate_map_narrative(categories: list, account_texts: list,
     }, ensure_ascii=False)
 
     result = generate_gpt4o_json_completion(SYSTEM_PROMPT, user_prompt)
-    if not result or not isinstance(result.get("categories"), list):
+    if not isinstance(result, dict) or not isinstance(result.get("categories"), list):
+        if result is not None and categories:
+            # `{}` or a non-list: the JSON helper counted it a success (it
+            # counts only None as a failure), but nothing can be attached.
+            run_context.note_llm(failed=True)
         logger.warning("map narrative: no usable response; leaving fields absent")
         return {"generated": 0, "rejected": [], "strategic_read": None,
                 "prompt_version": MAP_NARRATIVE_PROMPT_VERSION}
@@ -192,6 +205,10 @@ def generate_map_narrative(categories: list, account_texts: list,
     for entry in result["categories"]:
         if isinstance(entry, dict) and entry.get("category_key"):
             by_key[str(entry["category_key"])] = entry
+    if categories and not ({str(c.get("category_key")) for c in categories} & set(by_key)):
+        # Readable, but about no category that was sent: a failed call. The
+        # strategic read may still stand on its own below.
+        run_context.note_llm(failed=True)
 
     account_corpus = corpus_from_texts(account_texts)
     generated, rejected = 0, []
@@ -223,7 +240,14 @@ def generate_map_narrative(categories: list, account_texts: list,
             rejected.append("%s.what_it_means" % category.get("category_key"))
 
         vendor_entries = {}
-        for v in (entry.get("vendors") or []):
+        answered_vendors = entry.get("vendors")
+        if answered_vendors is not None and not isinstance(answered_vendors, list):
+            # Wrong-typed: this category's vendor plays are skipped, the
+            # meaning above stands, and nothing raises half-way through the
+            # in-place writes.
+            rejected.append("%s.vendors" % category.get("category_key"))
+            answered_vendors = []
+        for v in (answered_vendors or []):
             if isinstance(v, dict) and v.get("vendor_name"):
                 vendor_entries[_clean(v["vendor_name"]).lower()] = v
 

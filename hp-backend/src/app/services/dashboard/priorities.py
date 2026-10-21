@@ -507,8 +507,23 @@ def _candidate_priorities(account_id: str, mode: str | None = None) -> tuple:
         "Identify this account's strategic priorities from the context above.",
         "Return JSON only.",
     ])
-    raw = generate_gpt4o_json_completion(CANDIDATE_SYSTEM, user) or {}
-    return (raw.get("priorities") or []), result
+    raw = generate_gpt4o_json_completion(CANDIDATE_SYSTEM, user)
+    return _candidates_in(raw), result
+
+
+def _candidates_in(raw) -> list:
+    """The candidate list a priorities answer carries.
+
+    A readable answer with no list of candidate objects - `{}`, a string, a
+    list of junk - is noted as a failed call: the JSON helper counted it a
+    success (it counts only None), and the engine must not treat what follows
+    as a clean run. An empty list is a legitimate "nothing found".
+    """
+    values = raw.get("priorities") if isinstance(raw, dict) else None
+    if raw is not None and (not isinstance(values, list) or (
+            values and not any(isinstance(v, dict) for v in values))):
+        run_context.note_llm(failed=True)
+    return values if isinstance(values, list) else []
 
 
 def _resolve_priorities(account_id: str, candidates: list) -> tuple:
@@ -528,8 +543,23 @@ def _resolve_priorities(account_id: str, candidates: list) -> tuple:
         if not title:
             continue
 
-        resolved, invalid = ev.resolve(account_id, INDEX,
-                                       candidate.get("evidence_ids") or [])
+        ids = candidate.get("evidence_ids")
+        if ids is None:
+            ids = []
+        if not isinstance(ids, list):
+            # A number or a bare string is not a citation list. Only this
+            # candidate is dropped; iterating it would fail the dashboard (a
+            # number) or read a string one character at a time.
+            dropped.append({"title": title[:160],
+                            "reason": "evidence_ids is not a list",
+                            "invalid_ids": [_text(ids)[:80]]})
+            continue
+        # One id cited four times is one source. Repeats would inflate
+        # support_count - the published ordering measure - and show the same
+        # source chip several times. Order is kept: the first source is the
+        # supporting sentence a seller reads.
+        ids = list(dict.fromkeys(_text(i) for i in ids))
+        resolved, invalid = ev.resolve(account_id, INDEX, ids)
         invalid_total += len(invalid)
         if len(resolved) < MIN_EVIDENCE_PER_PRIORITY:
             dropped.append({"title": title[:160],
@@ -762,10 +792,22 @@ def _validate_description(body: str, evidence_text: str, hp_text: str) -> tuple:
     # strengthening its IT infrastructure". The specifics are what make a card
     # worth reading, so they are allowed and then checked one by one against the
     # material the model was given.
-    haystack = _digits_only(evidence_text) + " " + _digits_only(hp_text)
+    #
+    # Compared as whole number TOKENS, not as a substring of every digit in the
+    # evidence: "20%" used to pass whenever the evidence held "2025". The same
+    # flaw grounding.Corpus already fixed. "83.67%", "83.67 per cent" and
+    # "83.67" still match one another; a one-digit count with no % sign is not
+    # checked, as in Corpus.unsourced_numbers.
+    known = _figure_tokens(evidence_text) | _figure_tokens(hp_text)
     for figure in set(_FIGURE_RE.findall(body)):
-        if _digits_only(figure) and _digits_only(figure) not in haystack:
-            return False, "states %s, which is not in the evidence" % figure
+        token = _figure_token(figure)
+        if not token:
+            continue
+        if len(token.replace(".", "")) < 2 and not figure.endswith("%"):
+            continue
+        if token in known or ("." in token and token.split(".")[0] in known):
+            continue
+        return False, "states %s, which is not in the evidence" % figure
 
     for mention in _HP_MENTION_RE.findall(body):
         if mention.lower() not in hp_text.lower():
@@ -773,17 +815,26 @@ def _validate_description(body: str, evidence_text: str, hp_text: str) -> tuple:
     return True, "ok"
 
 
-def _digits_only(value) -> str:
-    """Comparable form of a figure: digits and decimal points, nothing else.
+def _figure_token(figure: str) -> str:
+    """One figure as a comparable token: separators, a % sign and trailing
+    sentence punctuation removed - "1,234." -> "1234", "83.67%" -> "83.67".
 
-    So "83.67%", "83.67 per cent" and "83.67" all match the evidence's "83.67",
-    while a separator difference cannot cause a false rejection.
+    So "83.67%", "83.67 per cent" and "83.67" all match one another, and a
+    figure ending a sentence ("2025.") still matches the evidence's "2025"."""
+    return re.sub(r"[,\s]", "", str(figure or "")).rstrip("%").rstrip(".,")
 
-    Trailing punctuation is stripped because a figure at the end of a sentence
-    is captured as "2025." - which matched nothing and rejected a description
-    whose figures were all perfectly well grounded.
-    """
-    return re.sub(r"[^\d.]+", " ", str(value or "")).strip(" .")
+
+def _figure_tokens(text) -> set:
+    """Every figure in `text` as a token, plus the whole part of a decimal, so
+    a description's "36" matches evidence written "36.0"."""
+    out = set()
+    for figure in _FIGURE_RE.findall(str(text or "")):
+        token = _figure_token(figure)
+        if token:
+            out.add(token)
+            if "." in token and token.split(".")[0]:
+                out.add(token.split(".")[0])
+    return out
 
 
 def _proof_for(db, priority: dict, industry: str, taken: set, here: set):
@@ -838,14 +889,23 @@ def _points(raw: dict) -> list:
     Accepts the older single-paragraph shape too, so a cached answer written
     before the bullets change still renders rather than falling back.
     """
+    if not isinstance(raw, dict):
+        return []
     values = raw.get("points")
     if isinstance(values, str):
         values = [values]
+    if not isinstance(values, list):
+        # A number or an object is no bullet list; iterating it raised
+        # outside the generation try and failed the whole dashboard.
+        values = []
     if not values:
-        single = _text(raw.get("description"))
+        single = raw.get("description")
+        single = _text(single) if isinstance(single, str) else ""
         values = [single] if single else []
     out = []
     for value in values:
+        if not isinstance(value, str):
+            continue          # never publish "None" or a stringified object
         text = _text(value).lstrip("-\u2013\u2014 ").strip()
         if text:
             out.append(text)
@@ -880,12 +940,16 @@ def _describe(priority: dict, hp_facts: list, company: str = "") -> dict:
     ])
 
     try:
-        raw = generate_gpt4o_json_completion(DESCRIPTION_SYSTEM, user) or {}
+        raw = generate_gpt4o_json_completion(DESCRIPTION_SYSTEM, user)
     except Exception:
         logger.exception("executive_dashboard: description generation failed")
-        raw = {}
+        raw = None
 
     points = _points(raw)
+    if raw is not None and not points:
+        # Readable but no bullet in it: a failed call the JSON helper scored
+        # as a success. The Python fallback is still published below.
+        run_context.note_llm(failed=True)
     body = " ".join(points)
     ok, reason = _validate_description(body, evidence_text, hp_text)
     if ok and not (DESCRIPTION_MIN_POINTS <= len(points) <= DESCRIPTION_MAX_POINTS):
@@ -1339,9 +1403,8 @@ def _news_priorities(account_id: str, mode, already: set) -> tuple:
         "",
         "Identify priorities suggested by these recent events. Return JSON only.",
     ])
-    raw = generate_gpt4o_json_completion(CANDIDATE_SYSTEM, user) or {}
-    kept, dropped, invalid = _resolve_priorities(
-        account_id, raw.get("priorities") or [])
+    raw = generate_gpt4o_json_completion(CANDIDATE_SYSTEM, user)
+    kept, dropped, invalid = _resolve_priorities(account_id, _candidates_in(raw))
 
     out = []
     for priority in kept:

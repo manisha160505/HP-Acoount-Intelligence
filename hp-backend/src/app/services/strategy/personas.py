@@ -37,7 +37,14 @@ before the conversation starts.
 
 import logging
 
+from bson import ObjectId
+from bson.errors import InvalidId
+
+from app.config import account_overrides
 from app.database.mongodb import get_db
+from app.services import talking_points as talking_points_reader
+from app.services.regen import store as widget_store
+from app.services.regen.graph import DEFAULT
 
 logger = logging.getLogger(__name__)
 
@@ -57,17 +64,39 @@ def _text(value) -> str:
     return " ".join(str(value if value is not None else "").split())
 
 
+def _account_name(db, account_id: str):
+    """The account's name, which is what account_overrides is keyed on."""
+    try:
+        oid = ObjectId(account_id)
+    except (InvalidId, TypeError):
+        return None
+    return (db["accounts"].find_one({"_id": oid}, {"name": 1}) or {}).get("name")
+
+
 def _widget(account_id: str, widget_key: str) -> dict:
-    """One published widget's data, scoped to this account, or {}."""
-    found = get_db()["account_widgets"].find_one(
-        {"account_id": account_id, "widget_key": widget_key})
+    """One published widget's data, scoped to this account, or {}.
+
+    Read the way the chat payload reads it (`context.account_widgets`): the
+    committed generation through `regen.store`, never the `account_widgets`
+    rollback mirror, and nothing from a feature the account has hidden
+    (config/account_overrides.yaml). A hidden Stakeholder Map must not come
+    back as a persona menu, or as a role's title and talking points in the
+    roleplay prompt.
+    """
+    db = get_db()
+    name = _account_name(db, account_id)
+    owner = DEFAULT.owner.get(widget_key)
+    if owner is not None and account_overrides.is_hidden(name, DEFAULT[owner].feature):
+        return {}
+    found = widget_store.get(account_id, widget_key, db=db)
     if not found or found.get("status") != "available":
         return {}
-    return found.get("data") or {}
+    return account_overrides.masked(name, widget_key, found.get("data") or {}) or {}
 
 
 def _contacts(account_id: str) -> list:
-    return _widget(account_id, "stakeholder_contacts_grid").get("contacts") or []
+    found = _widget(account_id, "stakeholder_contacts_grid").get("contacts")
+    return [c for c in found if isinstance(c, dict)] if isinstance(found, list) else []
 
 
 def options(account_id: str) -> list:
@@ -109,7 +138,8 @@ def _matching_objections(account_id: str, title: str) -> list:
     if not title:
         return []
     wanted = title.strip().lower()
-    cards = _widget(account_id, "objection_reframe_cards").get("cards") or []
+    cards = _widget(account_id, "objection_reframe_cards").get("cards")
+    cards = [c for c in cards if isinstance(c, dict)] if isinstance(cards, list) else []
     return [{
         "area": _text(card.get("area")),
         "objection": _text(card.get("objection")),
@@ -137,8 +167,12 @@ def resolve(account_id: str, persona_id: str) -> dict | None:
         return None
 
     contact_id = wanted[len(PERSONA_PREFIX):]
-    points = (_widget(account_id, "stakeholder_talking_points")
-              .get("talking_points") or {}).get(contact_id) or {}
+    # Joined by id, and only kept when it was written for this person: an id
+    # reused for someone else after a contacts reload must not hand them the
+    # previous person's pain points.
+    points = talking_points_reader.for_contact(
+        _widget(account_id, "stakeholder_talking_points").get("talking_points"),
+        contact_id, chosen.get("name"))
 
     return {
         **chosen,

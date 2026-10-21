@@ -677,6 +677,20 @@ def _ask(system, user):
         return {}
 
 
+def _text_list(value) -> list:
+    """A list of strings from the model, whatever shape it sent.
+
+    "strengths": "Clear ask" is one strength, not nine letters; anything that
+    is neither a string nor a list carries none.
+    """
+    if isinstance(value, str):
+        value = [value]
+    elif not isinstance(value, (list, tuple)):
+        return []
+    return [verify._text(v) for v in value
+            if not isinstance(v, (dict, list)) and verify._text(v)]
+
+
 def _reusable(stored: dict, text: str) -> bool:
     """Whether a stored evaluation may answer this request without the model.
 
@@ -953,8 +967,8 @@ def evaluate_message(account_id, persona_id, objective, fmt, message,
         "format_notes": verify._text(raw.get("format_notes")
                                      or raw.get("formatNotes")),
         "summary": verify._text(raw.get("summary")),
-        "strengths": [verify._text(s) for s in (raw.get("strengths") or []) if verify._text(s)],
-        "weaknesses": [verify._text(s) for s in (raw.get("weaknesses") or []) if verify._text(s)],
+        "strengths": _text_list(raw.get("strengths")),
+        "weaknesses": _text_list(raw.get("weaknesses")),
         "data_sources": sources.as_panel(),
         "ai_available": not ai_failed,
         "audit_log": audit,

@@ -4394,6 +4394,19 @@ export default function UserDashboardPage() {
                   const gridData = (gridWidget && gridWidget.status === 'available' && gridWidget.data) ? gridWidget.data : null;
                   const influenceData: any = influenceWidget?.data || {};
                   const talkingPoints: Record<string, any> = talkingWidget?.data?.talking_points || {};
+                  // A talking point is joined by contact_id, but an id can be
+                  // reused for another person after a contacts reload. One whose
+                  // stored full_name names someone else is not this contact's.
+                  const sameName = (a: any, b: any) =>
+                    String(a ?? '').toLowerCase().replace(/\s+/g, ' ').trim()
+                    === String(b ?? '').toLowerCase().replace(/\s+/g, ' ').trim();
+                  const talkingPointFor = (c: any): any => {
+                    const tp = talkingPoints[c?.contact_id];
+                    if (!tp || typeof tp !== 'object') return {};
+                    const stored = typeof tp.full_name === 'string' ? tp.full_name.trim() : '';
+                    if (stored && !sameName(stored, c?.full_name)) return {};
+                    return tp;
+                  };
 
                   const contactsList: any[] = gridData?.contacts || [];
                   const deptDist: Record<string, any> = gridData?.department_distribution || {};
@@ -4449,7 +4462,7 @@ export default function UserDashboardPage() {
                   // and two copies of this much JSX drift the first time one
                   // of them is edited.
                   const renderContactCard = (c: any) => {
-                                const tp = talkingPoints[c.contact_id] || {};
+                                const tp = talkingPointFor(c);
                                 return (
                                   <div key={c.contact_id} className="bg-white rounded-xl border border-slate-200 shadow-xs p-4 space-y-3">
 
@@ -4566,7 +4579,7 @@ export default function UserDashboardPage() {
                         : k === 'phone_line_type' ? phoneTag(c.phone, c.phone_line_type)
                           : c[k]);
                     const rows = filteredContacts.map((c: any) => {
-                      const tp = talkingPoints[c.contact_id] || {};
+                      const tp = talkingPointFor(c);
                       return [...cols.map(k => esc(cell(c, k))), esc(tp.how_to_open), esc(tp.hp_play_focus), esc(tp.decision_power)].join(',');
                     });
                     const header = [...cols, 'how_to_open', 'hp_play_focus', 'decision_power'];
@@ -4628,7 +4641,7 @@ export default function UserDashboardPage() {
 
                   // One expandable card, used by both All Departments and Top Contacts.
                   const renderExpandableCard = (c: any) => {
-                    const tp = talkingPoints[c.contact_id] || {};
+                    const tp = talkingPointFor(c);
                     const isOpen = expandedContacts[c.contact_id] || false;
                     const isRevealed = revealedContacts[c.contact_id] || false;
                     const bullets: string[] = [];
@@ -5141,10 +5154,17 @@ export default function UserDashboardPage() {
                                               category, not a technology detection, so it
                                               carries no Tech Landscape confidence. Its
                                               detection status is the honest thing to show. */}
-                                          <div className="text-[9px] font-mono uppercase tracking-wider text-slate-400 border-t border-emerald-200/60 pt-2 flex items-center justify-between">
-                                            <span className="truncate pr-2">{vendor.provenance}</span>
-                                            <span className="font-bold text-slate-500">{vendor.detection_status}</span>
-                                          </div>
+                                          {/* No footer when there is nothing to name:
+                                              the whitespace status ('Unknown') and its
+                                              reason stay internal (21 Oct). */}
+                                          {(vendor.provenance || (vendor.detection_status && vendor.detection_status !== 'Unknown')) && (
+                                            <div className="text-[9px] font-mono uppercase tracking-wider text-slate-400 border-t border-emerald-200/60 pt-2 flex items-center justify-between">
+                                              <span className="truncate pr-2">{vendor.provenance}</span>
+                                              {vendor.detection_status && vendor.detection_status !== 'Unknown' && (
+                                                <span className="font-bold text-slate-500">{vendor.detection_status}</span>
+                                              )}
+                                            </div>
+                                          )}
                                         </div>
                                       );
                                     }
@@ -8070,6 +8090,11 @@ export default function UserDashboardPage() {
                       reading: 0, writing: 1, rewriting: 1, checking: 2,
                     };
 
+                    // Client-approved wording (21 Oct) for every way the turn
+                    // can fail on the way here. No server detail is shown: the
+                    // reason stays in the server's log and generation record.
+                    const CHAT_FAILURE_MESSAGE =
+                      "The assistant couldn't answer right now. Please try again in a moment.";
                     let settled = false;
                     const publish = (
                       text: string, citations: any[], available: boolean,
@@ -8101,15 +8126,18 @@ export default function UserDashboardPage() {
                           } else if (event.type === 'delta') {
                             setChatStreamingText(event.text ?? '');
                           } else if (event.type === 'done') {
+                            // No answer text is a failed turn, whatever the
+                            // `available` flag says.
+                            const answered = event.available !== false && !!event.answer;
                             publish(
-                              (event.answer as string) || 'No answer was returned.',
-                              (event.citations as any[]) || [],
-                              event.available !== false,
+                              (event.answer as string) || CHAT_FAILURE_MESSAGE,
+                              answered ? ((event.citations as any[]) || []) : [],
+                              answered,
                               // From the response, not the current selection:
                               // a rejected rehearsal comes back out of
                               // character and must not be labelled as the
                               // role having said it.
-                              event.available === false
+                              !answered
                                 ? undefined
                                 : (event.persona as any)?.title,
                               (event.answer_clean as string) || undefined,
@@ -8121,11 +8149,7 @@ export default function UserDashboardPage() {
                                 || undefined,
                             );
                           } else if (event.type === 'error') {
-                            publish(
-                              event.detail
-                                || 'The strategy assistant could not be reached.',
-                              [], false,
-                            );
+                            publish(CHAT_FAILURE_MESSAGE, [], false);
                           }
                         },
                       );
@@ -8133,13 +8157,11 @@ export default function UserDashboardPage() {
                       // connection - must not leave the question unanswered in
                       // the thread.
                       if (!settled) {
-                        publish('The strategy assistant could not complete that answer.',
-                                [], false);
+                        publish(CHAT_FAILURE_MESSAGE, [], false);
                       }
                     } catch {
                       if (!settled) {
-                        publish('The strategy assistant could not be reached.',
-                                [], false);
+                        publish(CHAT_FAILURE_MESSAGE, [], false);
                       }
                     } finally {
                       setChatStage(0);

@@ -154,6 +154,24 @@ def _check_finish(reason, max_tokens) -> None:
         raise GeminiUnavailable("the model declined to answer (content filter)")
 
 
+def _first_choice(response):
+    """The first choice of a response or stream chunk, or None when it has none
+    (`choices` missing, None or empty)."""
+    choices = getattr(response, "choices", None)
+    if not choices:
+        return None
+    try:
+        return choices[0]
+    except (IndexError, KeyError, TypeError):
+        return None
+
+
+# How often `generate` asks when the model answers with nothing (no choices, no
+# message, empty text). Bounded: one more ask, then GeminiUnavailable. A cut-off
+# answer or a content-filter refusal is never asked again.
+EMPTY_ANSWER_ATTEMPTS = 2
+
+
 def _unavailable(exc) -> GeminiUnavailable:
     status = getattr(exc, "status_code", None)
     logger.error("strategy chat model call failed (%s): %s", status or "error", exc)
@@ -180,22 +198,37 @@ def generate(system_prompt: str, messages: list, *,
     prompt cache is for - but a cache is per region, and the client rotated
     regions on every call. Passing the account id keeps one conversation on one
     region. See `llm._regional_clients`.
+
+    An empty answer - no choices, no message, or blank text - is asked for once
+    more (EMPTY_ANSWER_ATTEMPTS), then raised as GeminiUnavailable.
     """
     client, request = _request(system_prompt, messages, max_output_tokens,
                                temperature)
-    try:
-        response = llm.create_completion(client, affinity=affinity, **request)
-    except Exception as exc:
-        raise _unavailable(exc) from exc
+    problem = "the model returned no answer"
+    for attempt in range(1, EMPTY_ANSWER_ATTEMPTS + 1):
+        try:
+            response = llm.create_completion(client, affinity=affinity, **request)
+        except Exception as exc:
+            raise _unavailable(exc) from exc
 
-    _record_usage(getattr(response, "usage", None), timer)
-    choice = response.choices[0]
-    _check_finish(choice.finish_reason, request["max_tokens"])
-    text = (choice.message.content or "").strip()
-    if not text:
-        raise GeminiUnavailable("the model returned nothing (%s)"
-                                % (choice.finish_reason or "no finish reason"))
-    return text
+        _record_usage(getattr(response, "usage", None), timer)
+        choice = _first_choice(response)
+        if choice is None:
+            problem = "the model returned no answer"
+        else:
+            finish = getattr(choice, "finish_reason", None)
+            _check_finish(finish, request["max_tokens"])
+            message = getattr(choice, "message", None)
+            content = getattr(message, "content", None)
+            text = (content if isinstance(content, str) else "").strip()
+            if text:
+                return text
+            problem = ("the model returned no answer" if message is None
+                       else "the model returned nothing (%s)"
+                       % (finish or "no finish reason"))
+        if attempt < EMPTY_ANSWER_ATTEMPTS:
+            logger.warning("strategy chat model: %s - asking once more", problem)
+    raise GeminiUnavailable(problem)
 
 
 def generate_stream(system_prompt: str, messages: list, *,
@@ -206,7 +239,9 @@ def generate_stream(system_prompt: str, messages: list, *,
 
     Same request and same checks; the caller sees the answer being written
     instead of waiting for the whole of it. A truncated or refused answer raises
-    after its last delta, exactly as `generate` would have raised.
+    after its last delta, exactly as `generate` would have raised. A stream in
+    which no chunk carries a choice raises GeminiUnavailable; it is not asked
+    again here (the caller's attempts loop decides that).
     """
     client, request = _request(system_prompt, messages, max_output_tokens,
                                temperature)
@@ -215,18 +250,24 @@ def generate_stream(system_prompt: str, messages: list, *,
             client, affinity=affinity, stream=True,
             stream_options={"include_usage": True}, **request)
         finish = None
+        answered = False
         for chunk in stream:
             if getattr(chunk, "usage", None):
                 _record_usage(chunk.usage, timer)
-            if not chunk.choices:
-                continue
-            choice = chunk.choices[0]
-            finish = choice.finish_reason or finish
-            delta = choice.delta
-            if delta and delta.content:
-                yield delta.content
+            choice = _first_choice(chunk)
+            if choice is None:
+                continue                       # e.g. the usage-only last chunk
+            answered = True
+            finish = getattr(choice, "finish_reason", None) or finish
+            delta = getattr(choice, "delta", None)
+            content = getattr(delta, "content", None)
+            if content:
+                yield content
     except GeminiUnavailable:
         raise
     except Exception as exc:
         raise _unavailable(exc) from exc
     _check_finish(finish, request["max_tokens"])
+    if not answered:
+        # Not one chunk carried a choice: the model never answered at all.
+        raise GeminiUnavailable("the model returned no answer")

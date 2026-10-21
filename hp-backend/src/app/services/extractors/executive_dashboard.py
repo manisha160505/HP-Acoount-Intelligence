@@ -22,7 +22,10 @@ from app.services.extractors.grounding import (
     check_text,
 )
 from app.services.hp import company_relationships, translate
-from app.services.regen import store as widget_store
+from app.services.regen import (
+    context as run_context,
+    store as widget_store,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -304,8 +307,18 @@ def _description_points(db, account_id: str, description: str,
     result = generate_gpt4o_json_completion(
         POINTS_SYSTEM,
         "Paragraph:\n%s\n\nReturn JSON only." % description)
-    raw = (result or {}).get("points") or []
-    points = [" ".join(str(p).split()) for p in raw if str(p).strip()]
+    raw = result.get("points") if isinstance(result, dict) else None
+    # Only a list of strings is bullets. A bare string would otherwise be read
+    # one CHARACTER per bullet (and pass the 3-5 count), and str(None) would be
+    # published as the literal text "None".
+    if not isinstance(raw, list):
+        raw = []
+    points = [" ".join(p.split()) for p in raw if isinstance(p, str) and p.strip()]
+    if result is not None and not points:
+        # Readable but unusable - `{}`, a non-list, only blanks. The JSON helper
+        # counted it a success; it is a failed call, so the engine keeps the
+        # previous bullets instead of replacing them with the fallback.
+        run_context.note_llm(failed=True)
     points = points[:DESCRIPTION_POINTS_MAX]
     if len(points) < DESCRIPTION_POINTS_MIN:
         return [], "the model returned %d bullet(s); the paragraph is shown instead" % len(points)
@@ -357,14 +370,17 @@ def extract_executive_dashboard(account_id: str) -> list[dict]:
         region = (row.get("Region Name") or row.get("region_name") or "").strip()
         country = (row.get("Country Name") or row.get("country_name") or "").strip()
         loc_parts = [p for p in [city, region, country] if p]
-        hq_location = ", ".join(loc_parts) if loc_parts else "N/A"
+        # Blank, not "N/A", when the file has nothing: the card hides an empty
+        # field, and every downstream reader (chat corpus, rulebook market
+        # filter, evaluator fallback) already treats blank as absent.
+        hq_location = ", ".join(loc_parts) if loc_parts else ""
 
         # Extract industry
         naics = (row.get("Naics Description") or row.get("naics_description") or "").strip()
         sic = (row.get("Sic Code Description") or row.get("sic_code_description") or "").strip()
         linkedin_ind = (row.get("Linkedin Industry Category") or row.get("linkedin_industry_category") or "").strip()
         ind_parts = [p for p in [linkedin_ind, naics, sic] if p]
-        industry_classification = " / ".join(list(dict.fromkeys(ind_parts))) if ind_parts else "N/A"
+        industry_classification = " / ".join(list(dict.fromkeys(ind_parts))) if ind_parts else ""
 
         business_description = (row.get("Business Description") or "").strip()
         points, points_basis = _description_points(
@@ -459,8 +475,9 @@ def extract_executive_dashboard(account_id: str) -> list[dict]:
         revenue = (row.get("Yearly Revenue Range") or row.get("yearly_revenue_range") or "").strip()
 
         metrics_data = {
-            "employee_count": emp_count if emp_count else "N/A",
-            "revenue": revenue if revenue else "N/A",
+            # Blank when absent (see hq_location above); never "N/A".
+            "employee_count": emp_count,
+            "revenue": revenue,
             "filings_on_record": filings,
         }
         # Filed figures from the filings index (scripts/filings_to_csv.py), one

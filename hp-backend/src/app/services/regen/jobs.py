@@ -211,6 +211,7 @@ def reclaim_expired(db, now=None) -> list:
             logger.warning("regen: lease expired on %s/%s - failed (worker stopped)",
                            job["account_id"], job["node_id"])
             out.append((changed, "failed"))
+    _settle_runs(db, [job for job, _ in out])
     return out
 
 
@@ -337,6 +338,7 @@ def fail_owned(db, worker_id: str = WORKER_ID, now=None) -> list:
                       "lease_owner": None, "lease_expires_at": None}})
         if result.matched_count:
             failed.append(job)
+    _settle_runs(db, failed)
     return failed
 
 
@@ -362,7 +364,26 @@ def finish(db, job: dict, outcome: str, *, result: dict | None = None,
         return False
     if before.get("rerun_requested"):
         _requeue_rerun(db, before)
+    # After the rerun is queued, so a run that asked for it again still has a
+    # live job and stays RUNNING.
+    _settle_runs(db, [before])
     return True
+
+
+def _settle_runs(db, rows: list) -> None:
+    """Make the runs these just-finished jobs belonged to terminal, if this
+    was their last live job (runs.settle). Never raises: the job is already
+    finished, and a run left RUNNING is settled again by `runs.recent`/`get`
+    or by scripts/finalize_stuck_runs.py."""
+    run_ids = [rid for row in rows for rid in (row.get("run_ids") or [])]
+    if not run_ids:
+        return
+    # Imported here: runs imports this module.
+    from app.services.regen import runs
+    try:
+        runs.settle(db, run_ids)
+    except Exception:
+        logger.exception("regen: could not settle the status of run(s) %s", run_ids)
 
 
 def _requeue_rerun(db, row: dict) -> None:
@@ -430,7 +451,10 @@ def set_progress(db, job: dict, done: int, total: int, label: str = "") -> None:
 
 def cancel_run(db, run_id) -> dict:
     """Cancel what this run is still waiting for. A job another run also asked
-    for stays, without this run; RUNNING jobs are left to finish."""
+    for stays, without this run; RUNNING jobs are left to finish.
+
+    Does not settle the run: `runs.cancel` marks it CANCELLED before calling
+    this, and the jobs cancelled here belong to that run alone."""
     col = db[COLLECTION]
     cancelled = col.update_many(
         {"run_ids": [run_id], "status": PENDING},

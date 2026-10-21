@@ -84,6 +84,49 @@ def resolve_field(row: dict, keys: list[str]) -> str | None:
                 return s
     return None
 
+
+# A row-position id ("contact_3") from before contact ids were derived from the
+# person. It names whoever sits in that row today, so nothing keyed by one can
+# be trusted to belong to the same person after a reload.
+POSITIONAL_CONTACT_ID_RE = re.compile(r"^contact_\d+$")
+
+
+def _person_key(value) -> str:
+    """One field of a person, normalised the way every contact loader does it."""
+    return " ".join(str(value or "").split()).lower()
+
+
+def person_contact_id(company, full_name, email, linkedin) -> str:
+    """An id for the person, not for their row, when the file supplies none.
+
+    The same formula as `scripts/upload_shipping_list_contacts.py`
+    (`stable_id`): talking points, Strategy Chat personas, Content Studio and
+    the Message Evaluator join on contact_id, and a row number names someone
+    else after the next upload."""
+    key = "|".join(_person_key(v) for v in (company, full_name, email, linkedin))
+    return "c-" + hashlib.sha1(key.encode("utf-8")).hexdigest()[:12]
+
+
+def _model_text(entry: dict, key: str) -> str:
+    """A model-written string field, stripped. Anything that is not a string -
+    a list, a dict, a number - is treated as missing: str() of it would publish
+    Python repr text ("['...', '...']") on a seller's card."""
+    value = entry.get(key)
+    return value.strip() if isinstance(value, str) else ""
+
+
+def _count_unusable_answer() -> None:
+    """A model call that returned, but returned nothing usable, is a failed call
+    to the regeneration engine: it marks the run degraded so the previous good
+    output is kept, instead of committing an empty widget as COMPLETE.
+
+    `core/llm.py` already counted the call as a success, so only the failure is
+    added - the call count stays the number of requests made. A no-op outside a
+    run."""
+    ctx = run_context.current()
+    if ctx is not None:
+        ctx.llm_failures += 1
+
 # ==============================================================================
 # DETERMINISTIC SCORING TABLES
 # Every band, type and 0-100 score below is computed in Python. The LLM is never
@@ -333,6 +376,12 @@ TALKING_POINTS_PROMPT_VERSION = 10
 # nearly all of the band belongs to the opener.
 OPENER_MIN_WORDS = 40
 OPENER_MAX_WORDS = 90
+# The hard ceiling. Over it the entry is rejected, not trimmed, and the
+# missing-contact retry asks for it again: a cut opener can lose the very
+# clause that says what the seller wants to learn, and trimming would publish
+# text the model never wrote as a whole. Well above OPENER_MAX_WORDS, so a
+# model that runs a little long is not punished for it.
+OPENER_REJECT_WORDS = 150
 
 
 def normalize_department(raw: str | None) -> str:
@@ -717,6 +766,132 @@ def _build_account_context(account_id: str) -> tuple[str, set[str]]:
     return context, labels
 
 
+def talking_points_for_current_contacts(talking_points: dict, contacts: list[dict]) -> dict:
+    """The talking points that still belong to a contact on the current roster.
+
+    Each entry records the full name of the person it was written for. An entry
+    is kept only when its id is on the roster AND that name is the name the
+    roster now holds for the id - so a kept older generation can never show one
+    person's opener on another person's card.
+
+    Entries written before the name was recorded carry none. They are kept only
+    under an id derived from the person (a prospect id, or the "c-" hash); under
+    a row-position id ("contact_3") nothing says who they were written for, so
+    they are dropped."""
+    names = {c.get("contact_id"): _person_key(c.get("full_name")) for c in contacts or []}
+    kept = {}
+    for cid, tp in (talking_points or {}).items():
+        if cid not in names or not isinstance(tp, dict):
+            continue
+        if "full_name" in tp:
+            if _person_key(tp.get("full_name")) != names[cid]:
+                continue
+        elif POSITIONAL_CONTACT_ID_RE.match(str(cid)):
+            continue
+        kept[cid] = tp
+    return kept
+
+
+def _named_line(text: str) -> str | None:
+    """The HP line this text names, by the token map rather than by substring:
+    the prose writes "HP Elite PCs" where the line is "HP Elite / Pro PCs", and
+    a substring test misses it."""
+    low = (text or "").lower()
+    return next((canon for toks, canon in grounding.HP_LINE_TOKENS
+                 if any(tok in low for tok in toks)), None)
+
+
+def _talking_point_record(entry: dict, contact: dict, ground, report: GroundingReport,
+                          evidence_labels: set[str], rejected: list[str]) -> dict | None:
+    """One model entry for `contact`, through every guard. None when a guard
+    rejects it - the missing-contact retry then asks for it again. Each reason
+    is appended to `rejected`."""
+    cid = contact["contact_id"]
+    opener = _model_text(entry, "how_to_open")
+    play_focus = _model_text(entry, "hp_play_focus") or None
+    dp_raw = _model_text(entry, "decision_power")
+    pains_raw = [p.strip() for p in (entry.get("pain_points") or [])
+                 if isinstance(p, str) and p.strip()] \
+        if isinstance(entry.get("pain_points"), list) else []
+
+    if len(opener.split()) > OPENER_REJECT_WORDS:
+        # Asked for 40-90 words. Rejected so the retry rewrites it -
+        # see OPENER_REJECT_WORDS for why it is not trimmed.
+        rejected.append(f"{cid}: opener is {len(opener.split())} words")
+        return None
+
+    bad_nums, bad_urls = check_text(
+        ground, report, cid, opener, play_focus or "", dp_raw, *pains_raw)
+    if bad_nums or bad_urls:
+        # Nothing about a person may carry a figure or link the
+        # account's own files never held.
+        rejected.append(f"{cid}: unsourced {bad_nums or ''}{bad_urls or ''}")
+        return None
+
+    title = contact.get("title")
+    record = {
+        "contact_id": cid,
+        # Who this was written for, so a kept generation can be
+        # checked against whoever holds the id later.
+        "full_name": contact.get("full_name"),
+        "how_to_open": opener,
+        "hp_play_focus": play_focus,
+    }
+    if dp_raw and not _is_rule_echo(dp_raw):
+        record["decision_power"] = dp_raw
+    elif dp_raw:
+        rejected.append(f"decision_power echo: {dp_raw}")
+
+    # A remit that reaches no hardware may not be shown a product
+    # under any name. The opener is what the card shows, so a
+    # product named THERE rejects the entry and the retry rewrites
+    # it; relabelling only the play focus left the pitch on screen.
+    # A product named only in the short focus label is relabelled.
+    if not remit_reaches_hardware(title):
+        named = _named_line(opener)
+        if named:
+            rejected.append(
+                "%s pitched in the opener to a remit that does not reach "
+                "hardware (%s)" % (named, title))
+            return None
+        named = _named_line(record["hp_play_focus"] or "")
+        if named:
+            rejected.append(
+                "%s named to a remit that does not reach hardware (%s)"
+                % (named, title))
+            record["hp_play_focus"] = "Account engagement / discovery"
+            record["play_blocked"] = named
+
+    # Enforce the per-contact block list rather than trusting the
+    # prompt: v6 still opened a Cloud Operations lead on Print/MPS.
+    # Same rule as above: in the opener it is a rejection.
+    blocked_in_opener = None
+    for play in blocked_plays_for(title):
+        needle = play.lower()
+        if needle in opener.lower():
+            blocked_in_opener = play
+            break
+        if needle in (record["hp_play_focus"] or "").lower():
+            rejected.append(f"blocked play {play} proposed for {cid}")
+            record["hp_play_focus"] = "Account engagement / discovery"
+            record["play_blocked"] = play
+            break
+    if blocked_in_opener:
+        rejected.append(f"blocked play {blocked_in_opener} pitched in the "
+                        f"opener for {cid}")
+        return None
+
+    cleaned = []
+    for p in pains_raw:
+        if _is_evidence_label(p, evidence_labels):
+            rejected.append(p)
+            continue
+        cleaned.append(p)
+    if cleaned:
+        record["pain_points"] = cleaned
+    return record
+
+
 def generate_stakeholder_talking_points(account_id: str, contacts: list[dict],
                                         company_name: str) -> dict:
     """One GPT-4o call covering every contact. Returns the four inferred fields
@@ -832,105 +1007,81 @@ CRITICAL RULES:
 }}
 """
 
-    valid_ids = {c["contact_id"] for c in contacts}
     by_id = {c["contact_id"]: c for c in contacts}
     generated: dict = {}
     rejected: list[str] = []
+    # Whether any pass got an answer back, and whether a failure was already
+    # added for an unusable one - see the end of the two passes.
+    answers = {"returned": False, "counted": False}
 
     def _run(subset: list[dict]) -> None:
-        """One model pass over `subset`, merging any usable entries into `generated`."""
+        """One model pass over `subset`, merging any usable entries into `generated`.
+
+        Only ids from `subset` are accepted, and an entry already generated is
+        never replaced: the retry pass is shown only the contacts still missing,
+        so anything it writes about anyone else was written without that
+        person's record in the prompt."""
         if not subset:
             return
+        subset_ids = {c["contact_id"] for c in subset}
         user_prompt = (
             f"Write the opening angle for every contact listed for {company_name}. "
             f"Return exactly one entry per contact id supplied - {len(subset)} entries - "
             f"in JSON matching the schema."
         )
         llm_res = generate_gpt4o_json_completion(_system_prompt(_roster_block(subset)), user_prompt)
-        if not (llm_res and isinstance(llm_res, dict) and isinstance(llm_res.get("contacts"), list)):
+        if llm_res is None:
+            # core/llm.py has already counted this as a failed call.
             return
-        for entry in llm_res["contacts"]:
-                if not isinstance(entry, dict):
-                    continue
-                cid = str(entry.get("contact_id") or "").strip()
-                if cid not in valid_ids:
-                    continue
-                opener = str(entry.get("how_to_open") or "").strip()
-                if not opener:
-                    continue
-                play_focus = str(entry.get("hp_play_focus") or "").strip() or None
-                dp_raw = str(entry.get("decision_power") or "").strip()
-                pains_raw = [str(x).strip() for x in (entry.get("pain_points") or [])
-                             if str(x).strip()]
-
-                bad_nums, bad_urls = check_text(
-                    ground, report, cid, opener, play_focus or "", dp_raw, *pains_raw)
-                if bad_nums or bad_urls:
-                    # Nothing about a person may carry a figure or link the
-                    # account's own files never held.
-                    rejected.append(f"{cid}: unsourced {bad_nums or ''}{bad_urls or ''}")
-                    continue
-
-                record = {
-                    "contact_id": cid,
-                    "how_to_open": opener,
-                    "hp_play_focus": play_focus,
-                }
-                dp = str(entry.get("decision_power") or "").strip()
-                if dp and not _is_rule_echo(dp):
-                    record["decision_power"] = dp
-                elif dp:
-                    rejected.append(f"decision_power echo: {dp}")
-
-                # Enforce the per-contact block list rather than trusting the
-                # prompt: v6 still opened a Cloud Operations lead on Print/MPS.
-                contact = by_id.get(cid)
-                title = contact.get("title") if contact else None
-
-                # A remit that reaches no hardware may not be shown a product
-                # under any name. Checked with the token map rather than by
-                # substring, because the prose writes "HP Elite PCs" where the
-                # line is "HP Elite / Pro PCs" and a substring test misses it.
-                if not remit_reaches_hardware(title):
-                    said = (record["how_to_open"] + " "
-                            + (record["hp_play_focus"] or "")).lower()
-                    named = next((canon for toks, canon in grounding.HP_LINE_TOKENS
-                                  if any(tok in said for tok in toks)), None)
-                    if named:
-                        rejected.append(
-                            "%s named to a remit that does not reach hardware (%s)"
-                            % (named, title))
-                        record["hp_play_focus"] = "Account engagement / discovery"
-                        record["play_blocked"] = named
-
-                for play in blocked_plays_for(title):
-                    needle = play.lower()
-                    if (needle in record["how_to_open"].lower()
-                            or needle in (record["hp_play_focus"] or "").lower()):
-                        rejected.append(f"blocked play {play} proposed for {cid}")
-                        record["hp_play_focus"] = "Account engagement / discovery"
-                        record["play_blocked"] = play
-                        break
-                pains = entry.get("pain_points")
-                if isinstance(pains, list):
-                    cleaned = []
-                    for raw_p in pains:
-                        p = str(raw_p).strip()
-                        if not p:
-                            continue
-                        if _is_evidence_label(p, evidence_labels):
-                            rejected.append(p)
-                            continue
-                        cleaned.append(p)
-                    if cleaned:
-                        record["pain_points"] = cleaned
+        answers["returned"] = True
+        entries = llm_res.get("contacts") if isinstance(llm_res, dict) else None
+        if not isinstance(entries, list):
+            _count_unusable_answer()
+            answers["counted"] = True
+            return
+        # Entries naming a contact of this pass with an opener - the answer's
+        # shape was usable even where a guard below then rejects the text.
+        well_formed = 0
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            raw_id = entry.get("contact_id")
+            # A numeric prospect id may come back as a JSON number; it still
+            # has to match the supplied id exactly once it is text.
+            if isinstance(raw_id, bool) or not isinstance(raw_id, (str, int)):
+                continue
+            cid = str(raw_id).strip()
+            if cid not in subset_ids:
+                continue
+            opener = _model_text(entry, "how_to_open")
+            if not opener:
+                continue
+            well_formed += 1
+            if cid in generated:
+                # A second entry for the same contact in one answer.
+                continue
+            record = _talking_point_record(entry, by_id[cid], ground, report,
+                                           evidence_labels, rejected)
+            if record is not None:
                 generated[cid] = record
+        if not well_formed:
+            # Readable, but nothing in it was for a contact of this pass:
+            # {"talking_points": []}, invented ids only, no opener anywhere.
+            _count_unusable_answer()
+            answers["counted"] = True
 
     _run(contacts)
-    # One bounded retry for any contact the model skipped, so coverage is complete.
+    # One bounded retry for any contact the model skipped or whose entry a
+    # guard rejected, so coverage is complete.
     missing = [c for c in contacts if c["contact_id"] not in generated]
     if missing:
         _run(missing)
+    if not generated and answers["returned"] and not answers["counted"]:
+        # The model answered, and every entry it wrote was rejected by a guard
+        # (an unsourced figure, a product pitched to the wrong remit, an
+        # over-long opener). To the engine that is a failed call, not a
+        # complete run with nothing in it.
+        _count_unusable_answer()
 
     if rejected:
         logger.info(
@@ -961,10 +1112,29 @@ CRITICAL RULES:
         # the legacy paths. Under the engine a model failure is already kept
         # from replacing a complete result, and anything else is the truthful
         # outcome for these inputs.
+        #
+        # Only the entries that still belong to the person now holding their
+        # id are kept (talking_points_for_current_contacts): a reloaded file
+        # can put a different person under an old id.
         if (run_context.current() is None and existing
                 and existing.get("status") == "available"):
-            pipeline.cache_hit("stakeholder_talking_points", "kept - this run produced nothing to replace it")
-            return existing
+            old_points = (existing.get("data") or {}).get("talking_points") or {}
+            still_theirs = talking_points_for_current_contacts(old_points, contacts)
+            if still_theirs and len(still_theirs) == len(old_points):
+                pipeline.cache_hit("stakeholder_talking_points",
+                                   "kept - this run produced nothing to replace it")
+                return existing
+            if still_theirs:
+                pipeline.cache_hit("stakeholder_talking_points",
+                                   "kept %d of %d - the rest no longer match their contact"
+                                   % (len(still_theirs), len(old_points)))
+                kept = {**existing, "data": {**(existing.get("data") or {}),
+                                             "generated_count": len(still_theirs),
+                                             "talking_points": still_theirs},
+                        "updated_at": now}
+                kept.pop("_id", None)
+                widget_store.put(account_id, "stakeholder_talking_points", kept, db=db)
+                return kept
         payload = {
             "account_id": account_id,
             "feature_key": "stakeholder_map",
@@ -975,7 +1145,11 @@ CRITICAL RULES:
                 "contacts_fingerprint": None,
                 "generated_count": 0,
                 "talking_points": {},
-                "notice": "Stakeholder talking points require an LLM API key. No content is generated without it.",
+                # Internal only - recorded in the generation's data_gaps. The
+                # client is never shown why a panel is empty (client rule), so
+                # nothing here is a user-facing notice.
+                "unavailable_reason": ("no talking point survived this run: the model "
+                                       "call failed or returned no usable entry"),
             },
             "source_datasets": ["prospect_contacts", "firmographics", "technographics",
                                 "intent_score", "google_news", "news_events"],
@@ -1051,7 +1225,7 @@ def extract_stakeholder_map(account_id: str,
         [resolve_field(row, ["Prospect job_title", "apollo_title"]) for row in contact_records],
         db, "job_title")
 
-    for idx, row in enumerate(contact_records):
+    for row in contact_records:
         # --- existing deterministic fields, unchanged ---------------------------
         is_apollo = bool(resolve_field(row, ["apollo_requested_contact", "apollo_matched_contact"]))
         source = "Apollo" if is_apollo else "Source A"
@@ -1089,7 +1263,11 @@ def extract_stakeholder_map(account_id: str,
                           if source == "Source A" or persona_provenance else None)
 
         # --- new derived keys (additive only) -----------------------------------
-        contact_id = resolve_field(row, ["Prospect prospect_id"]) or f"contact_{idx + 1}"
+        # The vendor's id where there is one, else an id built from the person
+        # - never the row number, which names someone else after a reload.
+        contact_id = resolve_field(row, ["Prospect prospect_id"]) or person_contact_id(
+            resolve_field(row, ["Company Name", "Prospect company_name"]) or account_id,
+            resolve_field(row, ["Prospect full_name"]) or full_name, email, linkedin_url)
         persona_raw = resolve_field(row, ["Prospect buying_committee_personas"])
         skills = resolve_field(row, ["Prospect skills"])
         career_history = resolve_field(row, ["Prospect experience"])

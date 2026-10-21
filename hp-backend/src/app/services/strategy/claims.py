@@ -156,15 +156,30 @@ def parse(raw) -> list:
             "type": _as_type(raw_segment.get("type")),
             "block": str(raw_segment.get("block") or BLOCK_PARAGRAPH).strip().lower(),
             "text": text,
-            "sections": [str(s).strip() for s in (raw_segment.get("sections") or [])
-                         if str(s).strip()],
+            "sections": _string_list(raw_segment.get("sections")),
             "quote": " ".join(str(raw_segment.get("quote") or "").split()),
-            "depends_on": [str(d).strip() for d in (raw_segment.get("depends_on") or [])
-                           if str(d).strip()],
+            "depends_on": _string_list(raw_segment.get("depends_on")),
         })
     if not out:
         raise ClaimError("every segment was empty")
     return _infer_dependencies(_unique_ids(out))
+
+
+def _string_list(value) -> list:
+    """A list field as a list of non-empty strings, whatever shape it came in.
+
+    The model sometimes writes `"sections": "exec_strategic_priorities"` - one
+    name, no list. Iterating that string would cite 'e', 'x', 'e', ... and
+    reject a correctly grounded fact; a number or an object would raise out of
+    `parse`. A bare string is the one name it obviously meant; any other
+    non-list is nothing, and `validate` judges the segment on that.
+    """
+    if isinstance(value, str):
+        value = [value]
+    elif not isinstance(value, (list, tuple)):
+        return []
+    return [str(v).strip() for v in value
+            if isinstance(v, (str, int, float)) and str(v).strip()]
 
 
 def _unique_ids(segments: list) -> list:

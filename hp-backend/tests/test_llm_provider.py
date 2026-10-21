@@ -45,8 +45,31 @@ def test_a_retrieval_model_override_moves_only_retrieval():
 
 def test_a_fenced_json_answer_is_still_read():
     assert llm._parse_json('```json\n{"a": 1}\n```') == {"a": 1}
+    assert llm._parse_json('```json {"a": 1}```') == {"a": 1}          # one line
+    assert llm._parse_json('```{"a": 1}```') == {"a": 1}               # no tag
     assert llm._parse_json('{"a": 1}') == {"a": 1}
     assert llm._parse_json("") is None
+    assert llm._parse_json("```json\n```") is None
+
+
+def test_what_is_retried_and_what_is_not():
+    import httpx
+    import openai
+
+    req = httpx.Request("POST", "http://x")
+
+    def status(cls, code, msg="no"):
+        return cls(msg, response=httpx.Response(code, request=req), body=None)
+
+    retried = [status(openai.RateLimitError, 429), status(openai.InternalServerError, 503),
+               openai.APITimeoutError(request=req), openai.APIConnectionError(request=req),
+               httpx.ConnectError("reset"), httpx.ReadTimeout("slow"),
+               status(openai.BadRequestError, 400, "maximum number of tokens allowed")]
+    raised = [status(openai.BadRequestError, 400, "bad field"),
+              status(openai.AuthenticationError, 401), status(openai.NotFoundError, 404),
+              status(openai.UnprocessableEntityError, 422), RuntimeError("bug")]
+    assert all(llm._retryable(e) and llm._moves_to_next_region(e) for e in retried)
+    assert not any(llm._retryable(e) or llm._moves_to_next_region(e) for e in raised)
 
 
 def test_vertex_sends_the_key_as_a_query_parameter_not_a_bearer_token():
@@ -221,3 +244,102 @@ def test_a_failed_call_is_not_retried_here(monkeypatch):
     _patch_client(monkeypatch, client)
     assert llm.generate_gpt4o_json_completion("sys", "user") is None
     assert len(sent) == 1
+
+
+# --- the timeout cap (21 Oct) ------------------------------------------------
+# A timeout costs the whole 300s request timeout. The region hops and the wait
+# ladder used to repeat it up to ~24 x 5 times in one call; now at most
+# MAX_TIMED_OUT_ATTEMPTS attempts may time out, each in a different region.
+
+class _Regions:
+    """A Vertex client: each per-region copy records its region on `log`."""
+
+    def __init__(self, outcomes, log, base_url="https://x/locations/root/y"):
+        self.outcomes, self.log, self.base_url = outcomes, log, base_url
+        self.chat = self
+        self.completions = self
+
+    def with_options(self, base_url=None, max_retries=None):
+        assert max_retries == 0
+        return _Regions(self.outcomes, self.log, base_url)
+
+    def create(self, **_kw):
+        self.log.append(self.base_url.split("/locations/")[1].split("/")[0])
+        item = self.outcomes(len(self.log))
+        if isinstance(item, BaseException):
+            raise item
+        return item
+
+
+@pytest.fixture
+def _vertex(monkeypatch):
+    sleeps = []
+    monkeypatch.setattr(llm.settings, "LLM_PROVIDER", "vertex")
+    monkeypatch.setattr(llm.settings, "VERTEX_PROJECT", "p")
+    monkeypatch.setattr(llm.settings, "VERTEX_LOCATIONS", ",".join("r%d" % i
+                                                                     for i in range(24)))
+    monkeypatch.setattr(llm.time, "sleep", sleeps.append)
+    return sleeps
+
+
+def _req():
+    import httpx
+    return httpx.Request("POST", "http://x")
+
+
+def test_a_timeout_is_told_apart_from_a_fast_connection_failure():
+    import httpx
+    import openai
+
+    assert llm._is_timeout(openai.APITimeoutError(request=_req()))
+    assert llm._is_timeout(httpx.ReadTimeout("slow"))
+    assert not llm._is_timeout(openai.APIConnectionError(request=_req()))
+    assert not llm._is_timeout(httpx.ConnectError("reset"))
+    assert llm.MAX_TIMED_OUT_ATTEMPTS == 3
+
+
+def test_the_third_timeout_raises(_vertex):
+    import openai
+
+    log = []
+    client = _Regions(lambda _n: openai.APITimeoutError(request=_req()), log)
+    with pytest.raises(openai.APITimeoutError):
+        llm.create_completion(client, affinity="a", model="m", messages=[])
+    assert len(log) == 3 and len(set(log)) == 3      # three different regions
+    assert _vertex == list(llm.RATE_LIMIT_WAITS[:2])  # backoff between them
+
+
+def test_a_connection_reset_still_hops_to_the_next_region(_vertex):
+    import openai
+
+    log = []
+    client = _Regions(lambda n: openai.APIConnectionError(request=_req()) if n < 4
+                      else object(), log)
+    llm.create_completion(client, affinity="a", model="m", messages=[])
+    assert len(log) == 4 and len(set(log)) == 4 and _vertex == []
+
+
+def test_timed_out_attempts_in_one_call_never_exceed_three(_vertex):
+    import httpx
+    import openai
+
+    def status(cls, code):
+        return cls(str(code), response=httpx.Response(code, request=_req()), body=None)
+
+    log, kinds = [], []
+
+    def outcome(n):
+        # timeouts interleaved with resets, 429s and 5xx, for ever
+        exc = [openai.APITimeoutError(request=_req()),
+               openai.APIConnectionError(request=_req()),
+               status(openai.RateLimitError, 429),
+               status(openai.InternalServerError, 503)][n % 4]
+        kinds.append(type(exc).__name__)
+        return exc
+
+    client = _Regions(outcome, log)
+    with pytest.raises(openai.APIError):
+        llm.create_completion(client, affinity="a", model="m", messages=[])
+    assert kinds.count("APITimeoutError") == 3
+    timed_regions = [r for r, k in zip(log, kinds) if k == "APITimeoutError"]
+    assert len(set(timed_regions)) == 3

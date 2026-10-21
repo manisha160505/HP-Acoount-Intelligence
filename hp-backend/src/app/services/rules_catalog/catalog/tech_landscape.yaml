@@ -419,10 +419,12 @@ rules:
   inputs:
   - The vendor's detected names
   - The installed technology record's category columns
-  logic: 'Whitespace row: ''Unknown'', with provenance ''installed technology -> no vendor found for this
-    category''. Vendor with matched entries: ''Confirmed'', with provenance listing up to 3 of the installed
-    technology''s category columns (alphabetical) whose text contains a matched entry; if none, ''the
-    full technology list''. Vendor found by a keyword rule without a named source entry: ''Likely''.'
+  logic: 'Whitespace row: status ''Unknown'' (kept for internal use; the card shows no footer for it)
+    and no provenance - the card footer is left empty and the reason is kept internally. Vendor with
+    matched entries: ''Confirmed'', with provenance listing up to 3 of the installed technology''s category
+    columns (alphabetical) whose text contains a matched entry; if none, ''the full technology list''.
+    Vendor found by a keyword rule without a named source entry: ''Likely'', with provenance
+    ''technographics'' and no evidence tooltip.'
   example:
     scenario: Symantec / Kaspersky row matched 'Kaspersky'; the installed technology's 'It Security' category
       contains Kaspersky.

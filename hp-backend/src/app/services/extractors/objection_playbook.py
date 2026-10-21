@@ -36,6 +36,9 @@ from app.services.extractors.datasets import (
     requires_local_datasets,
 )
 from app.services.extractors.stakeholder_map import (
+    _count_unusable_answer,
+    _drop_unmatched_contacts,
+    _model_text,
     normalize_department,
     resolve_field,
 )
@@ -915,17 +918,27 @@ def generate_objection_cards(account_id: str, areas: list[dict],
 
     by_area = {a["area"]: a for a in areas}
     cards = []
+    # Whether the model answered at all, and whether an unusable answer was
+    # already counted as a failure - see the end of the two passes.
+    answered = llm_res is not None
+    unusable_counted = False
+    if answered and not (isinstance(llm_res, dict) and isinstance(llm_res.get("cards"), list)):
+        _count_unusable_answer()
+        unusable_counted = True
     if llm_res and isinstance(llm_res, dict) and isinstance(llm_res.get("cards"), list):
         for entry in llm_res["cards"]:
             if not isinstance(entry, dict):
                 continue
-            area = str(entry.get("area") or "").strip()
+            # Strings only: a list here would be published as Python repr.
+            area = _model_text(entry, "area")
             src_area = by_area.get(area)
-            if not src_area:
+            if not src_area or any(c["area"] == area for c in cards):
+                # An unknown area, or a second card for one already written:
+                # card_id is the area's hash, so a duplicate would collide.
                 continue
-            objection = str(entry.get("objection") or "").strip()
-            reframe = str(entry.get("reframe") or "").strip()
-            counter = str(entry.get("counter_question") or "").strip()
+            objection = _model_text(entry, "objection")
+            reframe = _model_text(entry, "reframe")
+            counter = _model_text(entry, "counter_question")
             if not (objection and reframe and counter):
                 continue
 
@@ -957,8 +970,8 @@ def generate_objection_cards(account_id: str, areas: list[dict],
                 "objection": objection,
                 "reframe": reframe,
                 "counter_question": counter,
-                "why_expected": str(entry.get("why_expected") or "").strip() or None,
-                "recommended_next_step": str(entry.get("recommended_next_step") or "").strip() or None,
+                "why_expected": _model_text(entry, "why_expected") or None,
+                "recommended_next_step": _model_text(entry, "recommended_next_step") or None,
                 # No HP proof-point corpus is supplied to this system, so the
                 # spec's empty state is shown rather than an unrelated case study.
                 "hp_proof_point": (proof_by_area.get(area) or {}).get("text"),
@@ -1012,18 +1025,20 @@ def generate_objection_cards(account_id: str, areas: list[dict],
                       + ", ".join(retry_areas) + ".")
         rejected_sectors = []
         retry_res = generate_gpt4o_json_completion(retry_system, retry_user)
+        answered = answered or retry_res is not None
         if retry_res and isinstance(retry_res, dict) and isinstance(retry_res.get("cards"), list):
             have = {c["area"] for c in cards}
             for entry in retry_res["cards"]:
                 if not isinstance(entry, dict):
                     continue
-                area = str(entry.get("area") or "").strip()
+                area = _model_text(entry, "area")
                 src_area = by_area.get(area)
+                # One card per area: card_id is the area's hash.
                 if not src_area or area in have:
                     continue
-                objection = str(entry.get("objection") or "").strip()
-                reframe = str(entry.get("reframe") or "").strip()
-                counter = str(entry.get("counter_question") or "").strip()
+                objection = _model_text(entry, "objection")
+                reframe = _model_text(entry, "reframe")
+                counter = _model_text(entry, "counter_question")
                 if not (objection and reframe and counter):
                     continue
                 if _sector_terms_used(reframe + " " + counter, business_description):
@@ -1034,14 +1049,15 @@ def generate_objection_cards(account_id: str, areas: list[dict],
                     # Twice is enough. The area keeps no card rather than one
                     # carrying an HP claim nothing approved.
                     continue
+                have.add(area)
                 cards.append({
                     "card_id": hashlib.sha1(area.encode("utf-8")).hexdigest()[:12],
                     "area": area,
                     "objection": objection,
                     "reframe": reframe,
                     "counter_question": counter,
-                    "why_expected": str(entry.get("why_expected") or "").strip() or None,
-                    "recommended_next_step": str(entry.get("recommended_next_step") or "").strip() or None,
+                    "why_expected": _model_text(entry, "why_expected") or None,
+                    "recommended_next_step": _model_text(entry, "recommended_next_step") or None,
                     "hp_proof_point": (proof_by_area.get(area) or {}).get("text"),
                     "hp_proof_point_note": (None if proof_by_area.get(area)
                                             else NO_PROOF_POINT),
@@ -1059,6 +1075,12 @@ def generate_objection_cards(account_id: str, areas: list[dict],
                     "likely_raiser": src_area["likely_raiser"],
                     "likely_raiser_source": src_area["likely_raiser_source"],
                 })
+
+    if not cards and answered and not unusable_counted:
+        # The model answered and nothing in it survived. To the engine that is
+        # a failed call: the run is degraded and the previous cards are kept,
+        # rather than an empty widget committed as COMPLETE.
+        _count_unusable_answer()
 
     # "If two objections differ only in wording, merge them and preserve
     # persona-specific variants inside one entry."
@@ -1196,8 +1218,12 @@ def extract_objection_playbook(account_id: str) -> list[dict]:
     area_evidence = []
     if evidence_source != EVIDENCE_SOURCE_NONE:
         area_evidence = _build_area_evidence(evidence_row, evidence_source)
+        # The same contacts the Stakeholder Map shows: a row the vendor has not
+        # finished matching (Pending / Review) is withheld there, so it cannot
+        # be named as a topic owner here either.
+        owner_contacts, _withheld = _drop_unmatched_contacts(contact_records)
         for a in area_evidence:
-            raiser, raiser_source = _resolve_likely_raiser(a["area"], contact_records)
+            raiser, raiser_source = _resolve_likely_raiser(a["area"], owner_contacts)
             a["likely_raiser"] = raiser
             a["likely_raiser_source"] = raiser_source
 
@@ -1266,9 +1292,11 @@ def extract_objection_playbook(account_id: str) -> list[dict]:
                 "cards_count": 0,
                 "cards": [],
                 "technology_evidence_source": evidence_source,
-                "notice": ("No technology evidence available: neither 4_Technographics nor "
-                           "tech_breakdown has data for this account, so no objections "
-                           "are written."),
+                # Internal only (data_gaps reads it); nothing is shown to the
+                # seller in its place - 21 Oct, no gap wording on the page.
+                "unavailable_reason": ("no technology evidence: neither "
+                                       "4_Technographics nor tech_breakdown has data "
+                                       "for this account, so no objections are written"),
             },
             "source_datasets": ["technographics", "tech_breakdown"],
             "extracted_at": now,
@@ -1285,8 +1313,10 @@ def extract_objection_playbook(account_id: str) -> list[dict]:
                 "evidence_fingerprint": None,
                 "cards_count": 0,
                 "cards": [],
-                "notice": ("Objection generation requires an LLM API key. The incumbent "
-                           "evidence below is shown as extracted; no objections are invented."),
+                # Internal only - recorded in the generation's data_gaps. The
+                # client is never shown why the panel is empty (client rule).
+                "unavailable_reason": ("no objection card survived this run: the model "
+                                       "call failed or returned no usable card"),
                 "technology_evidence_source": evidence_source,
             },
             "source_datasets": ["technographics", "firmographics", "prospect_contacts"],

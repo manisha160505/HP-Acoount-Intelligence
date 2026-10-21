@@ -794,12 +794,18 @@ def generate_hp_recommendations(account_id: str) -> dict | None:
     result = (generate_gpt4o_json_completion(SYSTEM_PROMPT, user_prompt)
               if candidates else None)
     prose = {}
-    if result and isinstance(result.get("recommendations"), list):
+    if isinstance(result, dict) and isinstance(result.get("recommendations"), list):
         for entry in result["recommendations"]:
             if isinstance(entry, dict) and entry.get("rule_id") is not None:
                 # Keyed as a string: Part B ids read "WXP 01" and int() on one
                 # raises. Part A's are numeric but arrive as strings too.
                 prose[str(entry["rule_id"])] = entry
+    if result is not None and not (set(prose) & {str(c["rule_id"]) for c in candidates}):
+        # Readable but carrying prose for no card it was asked about - `{}`, a
+        # non-list, junk, or only unknown rule ids. The JSON helper counted it
+        # a success; the cards still publish (Python decided them) without
+        # prose, and the run is marked degraded rather than silently complete.
+        run_context.note_llm(failed=True)
 
     # ---- verify what it wrote, against two separate corpora -----------------
     account_corpus = build_corpus({"account": [{"t": t} for t in evidence["texts"]]})
@@ -837,6 +843,18 @@ def generate_hp_recommendations(account_id: str) -> dict | None:
             logger.warning("hp recommendations: %s dropped product prose carrying "
                            "figures absent from its approved facts", label)
             why = ""
+        # The same URL check the account prose gets. A link with no digits
+        # passed the figure check above and was published; only a link the
+        # approved facts themselves carry may stand.
+        if why:
+            hp_bad_urls = hp_corpus.unsourced_urls(why)
+            if hp_bad_urls:
+                report.urls_rejected.extend("%s: %s" % (label, u) for u in hp_bad_urls)
+                report.hp_facts_rejected.append("%s: unsourced URL(s) %s"
+                                                % (label, hp_bad_urls))
+                logger.warning("hp recommendations: %s dropped product prose carrying "
+                               "a URL absent from its approved facts", label)
+                why = ""
 
         # Product guardrails 15 and 16. A figure can be correctly sourced and
         # still be used to make a claim the document forbids - "13 TOPS" is a

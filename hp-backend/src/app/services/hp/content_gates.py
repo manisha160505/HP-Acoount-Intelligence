@@ -337,7 +337,15 @@ def g4_line_eligibility(asset: dict, persona_id: str) -> list:
     Prose is checked as well as `hp_products` because the damage is done by
     the sentence a seller reads, not by the machine field beside it.
     """
-    denied = bp.denied_lines(persona_id)
+    try:
+        denied = bp.denied_lines(persona_id)
+    except bp.UnknownPersona:
+        # A legacy persona (a contact, role proxy or archetype from before the
+        # eight) has no matrix row, so there is no denied set to enforce - the
+        # prompt stated the full line list and the general rule for it instead
+        # (content_studio._denied_lines_for). Raising here turned a clean
+        # answer into a server error.
+        return []
     blob = asset_blob(asset).lower()
     named = [str(p).strip() for p in (asset or {}).get("hp_products") or []]
     out = []
@@ -405,7 +413,11 @@ def g6_ask_bound(asset: dict, persona_id: str) -> list:
     ask = str((asset or {}).get("ask") or (asset or {}).get("cta") or "")
     if not ask.strip():
         return []
-    angle = bp.angle(persona_id)
+    try:
+        angle = bp.angle(persona_id)
+    except bp.UnknownPersona:
+        # No committee angle for a legacy persona, so no ask bound to check.
+        return []
     low = ask.lower()
     out = []
 
