@@ -12,7 +12,6 @@ import api, { API_URL, postStream } from '@/services/api';
 import { CompanyAccount } from '@/types/account';
 import { NORTHSTAR_SIDEBAR_GROUPS } from '@/lib/features';
 import { activeAccountFrom, dashboardHref } from '@/lib/accountSelection';
-import { NO_SIGNAL, NOT_DISCLOSED } from '@/lib/placeholders';
 import { EmailTag, PhoneTag, emailTag, phoneTag } from '@/components/stakeholder/ContactTags';
 import { displayCase, displayPlace, fmtDate as formatDate } from '@/lib/format';
 import { track, stopFeatureTime } from '@/lib/track';
@@ -209,8 +208,28 @@ const SOURCE_TIERS: Record<number, string> = {
   8: 'Established news outlet',
   6: 'Business data provider',
   3: 'Smaller or less established site',
-  0: 'Source could not be verified',
+  // 0 (unverifiable) has no line: the client sees no gap wording (21 Oct).
 };
+
+// Gap tokens a data value can arrive as. Such a value is treated as absent, so
+// the field, row or chip it would fill is not rendered (client, 21 Oct: never
+// show gap or error wording on the dashboard). Whole-value match only - a word
+// like "unknown" inside a sentence is left alone.
+const GAP_TOKENS = new Set([
+  'unknown', 'n/a', 'na', 'n.a.', 'none', 'null', 'nil', 'undefined', 'nan',
+  'not available', 'not provided', 'not disclosed', 'not found', 'unavailable',
+  'tbd', 'no data', 'no signal observed', 'missing', 'pending', '-', '--', '—', '–',
+]);
+
+function hasValue(v: unknown): boolean {
+  if (v == null) return false;
+  if (typeof v === 'number') return Number.isFinite(v);
+  if (typeof v === 'boolean') return true;
+  if (Array.isArray(v)) return v.some(hasValue);
+  if (typeof v === 'object') return true;
+  const s = String(v).trim();
+  return s !== '' && !GAP_TOKENS.has(s.toLowerCase());
+}
 
 function sourceReliabilityLine(points: unknown, publisher: unknown): string {
   const head = SOURCE_TIERS[Number(points)];
@@ -316,34 +335,14 @@ function ProofPoint({ proof }: { proof: any }) {
   );
 }
 
-// Client ruling, 24 Sep, on what to show when a dataset is missing: "leave it
-// out, do not write anything as of now". They asked us to stay flexible because
-// the decision is still with Sahaj, so this is one flag rather than deleted
-// code - flip it back to true and every empty state returns exactly as it was.
-const SHOW_EMPTY_STATE_NOTICES = false;
+// The one message an API failure ever shows the seller, for actions they
+// triggered (client, 21 Oct). Never the server's `detail` or err.message.
+const ACTION_ERROR_MESSAGE = 'Something went wrong. Please try again.';
 
 // The "Data as of" date in the header, on every feature (client, 15 Oct: one
 // date, Sept 2026, for all features for now). One constant so the next data
 // refresh is a one-line change.
 const DATA_AS_OF_LABEL = 'Sept 2026';
-
-// A widget that never generated stores the reason on its payload. Showing it
-// turns an unexplained empty panel into something a reader can act on - most
-// often a missing OPENAI_API_KEY, or source files absent from this machine.
-function PendingNotice({ widget, title }: { widget: any; title: string }) {
-  const notice = widget?.data?.notice;
-  if (!SHOW_EMPTY_STATE_NOTICES) return null;
-  if (!widget || widget.status === 'available' || !notice) return null;
-  return (
-    <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
-      <Sparkles className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
-      <div className="space-y-0.5">
-        <p className="text-xs font-bold uppercase tracking-wider text-amber-900">{title}</p>
-        <p className="text-xs leading-relaxed text-amber-800">{notice}</p>
-      </div>
-    </div>
-  );
-}
 
 // Which account's files a source chip may open, and which of its filings can
 // actually be opened. Supplied once around the dashboard rather than threaded
@@ -800,6 +799,10 @@ export default function UserDashboardPage() {
   const [stimulusText, setStimulusText] = useState<string>('');
   const [copiedRewrite, setCopiedRewrite] = useState<boolean>(false);
   const [evalOptionsError, setEvalOptionsError] = useState<string | null>(null);
+  // Bumped by the options error's retry button to load the lists again.
+  const [evalOptionsReload, setEvalOptionsReload] = useState(0);
+  // What the evaluator error's retry button re-runs (the last action that failed).
+  const evalRetryRef = useRef<(() => void) | null>(null);
   // An evaluation belongs to the account it was made for. Left in place across
   // an account switch it showed account A's scores and ticks under account B,
   // and Rewrite then failed with "no evaluation found".
@@ -920,7 +923,7 @@ export default function UserDashboardPage() {
       } catch {
         if (cancelled) return;
         setEvalOptions({ objectives: [], formats: [], personas: [], modes: ['LITE', 'DEEP'] });
-        setEvalOptionsError("The persona, objective and format lists couldn't be loaded. Refresh the page to try again.");
+        setEvalOptionsError(ACTION_ERROR_MESSAGE);
       }
     })();
     (async () => {
@@ -932,7 +935,7 @@ export default function UserDashboardPage() {
       }
     })();
     return () => { cancelled = true; };
-  }, [activeFeatureKey, selectedAccountId]);
+  }, [activeFeatureKey, selectedAccountId, evalOptionsReload]);
 
   const [isEvaluatorInfoOpen, setIsEvaluatorInfoOpen] = useState<boolean>(false);
 
@@ -961,9 +964,9 @@ export default function UserDashboardPage() {
       } else {
         router.replace('/accounts');
       }
-    } catch (err: any) {
-      const msg = err.response?.data?.detail || 'Failed to load accessible account list.';
-      setError(msg);
+    } catch {
+      // Never the server's detail (client, 21 Oct); the api client logs it.
+      setError(ACTION_ERROR_MESSAGE);
     } finally {
       setIsLoadingAccounts(false);
     }
@@ -1206,9 +1209,11 @@ export default function UserDashboardPage() {
                             ? selectedAccount.name 
                             : 'No target accounts'}
                         </span>
-                        <span className="text-[10px] font-normal text-gray-400 block font-mono">
-                          {selectedAccount ? `ID: ${selectedAccount.id.substring(0, 8)}...` : 'N/A'}
-                        </span>
+                        {selectedAccount && (
+                          <span className="text-[10px] font-normal text-gray-400 block font-mono">
+                            {`ID: ${selectedAccount.id.substring(0, 8)}...`}
+                          </span>
+                        )}
                       </div>
                     </div>
                     <ChevronDown className="w-4 h-4 text-gray-400 flex-shrink-0 ml-1" />
@@ -1435,7 +1440,11 @@ export default function UserDashboardPage() {
             {error && (
               <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-r-lg flex items-center space-x-2 text-red-800 text-xs font-semibold">
                 <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0" />
-                <span>{error}</span>
+                <span className="flex-1">{error}</span>
+                <button type="button" onClick={fetchUserAccounts}
+                  className="shrink-0 rounded-lg bg-red-600 px-3 py-1.5 text-white">
+                  Try again
+                </button>
               </div>
             )}
 
@@ -1571,27 +1580,29 @@ export default function UserDashboardPage() {
                   // Figures the company actually filed, as opposed to the
                   // firmographic bands beside them. Each carries its own period,
                   // unit and page, so the card can say where it came from.
-                  const reportedMetrics: any[] = (metricsData?.reported_metrics || prioritiesData?.reported_metrics || []) as any[];
+                  const reportedMetrics: any[] = ((metricsData?.reported_metrics || prioritiesData?.reported_metrics || []) as any[])
+                    .filter((m: any) => hasValue(m?.value_text));
                   // A band the vendor did not supply is a box with nothing in it (Sahaj 1.c).
-                  const isBand = (v: any) => !!v && !['n/a', 'na', 'none', '-', ''].includes(String(v).trim().toLowerCase());
+                  const isBand = (v: any) => hasValue(v);
                   const hasEmployeeBand = isBand(metricsData?.employee_count);
                   const hasRevenueBand = isBand(metricsData?.revenue);
                   const bandCount = (hasEmployeeBand ? 1 : 0) + (hasRevenueBand ? 1 : 0);
-                  const priorityList: any[] = (prioritiesData?.priorities || []) as any[];
+                  const priorityList: any[] = ((prioritiesData?.priorities || []) as any[])
+                    .filter((p: any) => hasValue(p?.title));
 
                   const displayName = summaryData?.company_name || selectedAccount.name;
-                  const displayDesc = summaryData?.business_description || NOT_DISCLOSED;
-                  const domainVal = summaryData?.domain || null;
+                  const displayDesc = hasValue(summaryData?.business_description) ? summaryData?.business_description : null;
+                  const domainVal = hasValue(summaryData?.domain) ? summaryData?.domain : null;
                   // Explorium sends these in lowercase ("tokyo, japan"); cased
                   // for display only, the stored values stay as supplied.
-                  const locationVal = summaryData?.hq_location && summaryData.hq_location !== 'N/A'
-                    ? displayPlace(summaryData.hq_location) : null;
+                  const locationVal = hasValue(summaryData?.hq_location)
+                    ? displayPlace(summaryData!.hq_location) : null;
                   // LinkedIn / NAICS / SIC usually say the same thing three ways
                   // ("semiconductor manufacturing / Semiconductor and Related
                   // Device Manufacturing / Semiconductors and related devices"):
                   // the first is shown, all three on hover.
                   const industryParts: string[] = String(summaryData?.industry_classification || '')
-                    .split(' / ').map((p: string) => p.trim()).filter((p: string) => p && p !== 'N/A');
+                    .split(' / ').map((p: string) => p.trim()).filter((p: string) => hasValue(p));
                   const industryVal = industryParts.length ? displayCase(industryParts[0]) : null;
                   const industryAll = industryParts.map((p: string) => displayCase(p)).join(' / ');
                   // Client, 5 Oct: the parent is the hierarchy sheet's column E
@@ -1600,14 +1611,23 @@ export default function UserDashboardPage() {
                   // supplied. Blank means hidden, not shown as missing.
                   // Client, 7 Oct: its corrected parent where it gave one, and
                   // a company can have two (direct and ultimate) - both shown.
-                  const parentsVal: string[] = summaryData?.parent_companies
-                    || (summaryData?.parent_company ? [summaryData.parent_company] : []);
+                  const parentsVal: string[] = ((summaryData?.parent_companies
+                    || (summaryData?.parent_company ? [summaryData.parent_company] : [])) as string[])
+                    .filter((p: string) => hasValue(p));
                   const parentVal = parentsVal.length
                     ? parentsVal.map(p => displayCase(p, { name: true })).join(' · ') : null;
                   const subsidiariesVal: string[] = (summaryData?.subsidiaries || [])
+                    .filter((s: string) => hasValue(s))
                     .map((s: string) => displayCase(s, { name: true }));
                   // Feature 1's header CEO, read from the newest filing naming one.
-                  const ceoVal: any = metricsData?.ceo || null;
+                  const ceoVal: any = hasValue(metricsData?.ceo?.name) ? metricsData?.ceo : null;
+                  // Sections whose content is entirely empty are not rendered,
+                  // heading included (client, 21 Oct).
+                  const hasKeyMetrics = hasEmployeeBand || hasRevenueBand
+                    || !!(hiringData && hiringData.job_postings > 0) || reportedMetrics.length > 0;
+                  const urgencyDrivers: any[] = (urgencyData?.drivers ?? [])
+                    .filter((d: any) => urgencyData?.score != null || Number(d.value) > 0);
+                  const hasUrgency = !!urgencyData && (urgencyData.score != null || urgencyDrivers.length > 0);
 
                   return (
                     <div className="space-y-6">
@@ -1637,11 +1657,11 @@ export default function UserDashboardPage() {
                                   </li>
                                 ))}
                               </ul>
-                            ) : (
-                              <p className={`text-xs leading-relaxed max-w-5xl ${summaryData?.business_description ? 'text-slate-600' : 'text-slate-400'}`}>
+                            ) : displayDesc ? (
+                              <p className="text-xs leading-relaxed max-w-5xl text-slate-600">
                                 {displayDesc}
                               </p>
-                            )}
+                            ) : null}
 
                             <div className="flex flex-wrap items-center gap-4 text-xs font-medium text-slate-500 pt-3 border-t border-slate-100">
                               {domainVal && (
@@ -1671,7 +1691,7 @@ export default function UserDashboardPage() {
                               )}
 
                               {ceoVal?.name && (
-                                <div className="flex items-center space-x-1.5 text-slate-700" title={`${ceoVal.title} · ${ceoVal.filing_label || ceoVal.source}${ceoVal.name_original ? ` · As printed: ${ceoVal.name_original}` : ''}`}>
+                                <div className="flex items-center space-x-1.5 text-slate-700" title={[ceoVal.title, ceoVal.filing_label || ceoVal.source, ceoVal.name_original ? `As printed: ${ceoVal.name_original}` : ''].filter((x: any) => hasValue(x)).join(' · ') || undefined}>
                                   <User className="w-4 h-4 text-hp-navy" />
                                   <span>CEO: <strong className="font-bold text-slate-900">{ceoVal.name}</strong></span>
                                 </div>
@@ -1727,6 +1747,7 @@ export default function UserDashboardPage() {
                           assigned. Presenting a band as though it were a filed
                           figure is exactly the confusion ABX's pre-display check
                           exists to prevent, so the badge names which it is. */}
+                      {hasKeyMetrics && (
                       <div data-tour="exec-metrics" className="space-y-3">
                         <div className="flex items-center space-x-3">
                           <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700">
@@ -1810,8 +1831,8 @@ export default function UserDashboardPage() {
                           {reportedMetrics.map((m: any, i: number) => (
                             <div key={m.evidence_id || i} className="as-lift relative bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col justify-between min-h-[7rem]">
                               <div className="flex items-start justify-between gap-1">
-                                <span className="text-[11px] text-slate-500 block leading-snug" title={`${m.metric} (${m.period})`}>
-                                  {m.period} {m.metric}
+                                <span className="text-[11px] text-slate-500 block leading-snug" title={[m.metric, hasValue(m.period) ? `(${m.period})` : ''].filter((x: any) => hasValue(x)).join(' ') || undefined}>
+                                  {[m.period, m.metric].filter((x: any) => hasValue(x)).join(' ')}
                                 </span>
                                 {/* The arrow carries the direction in colour -
                                     it is the one place a glance should pick up
@@ -1823,7 +1844,7 @@ export default function UserDashboardPage() {
 
                               <span className="text-lg font-semibold text-slate-900 leading-tight break-words">
                                 <CountUpText text={m.value_text} />
-                                {m.change_text && (
+                                {hasValue(m.change_text) && (
                                   <span className={`ml-1.5 text-[11px] font-normal ${m.direction === 'up' ? 'text-emerald-700' : m.direction === 'down' ? 'text-rose-700' : 'text-slate-500'}`}>
                                     {m.change_text}
                                   </span>
@@ -1837,7 +1858,7 @@ export default function UserDashboardPage() {
                                   onClick={() => setActiveMetricPopover(activeMetricPopover === `rep${i}` ? null : `rep${i}`)}
                                   className="inline-flex items-center gap-1 text-slate-500 hover:text-hp-navy hover:underline transition min-w-0"
                                 >
-                                  <span className="truncate max-w-[6rem]">p.{m.page}</span>
+                                  <span className="truncate max-w-[6rem]">{hasValue(m.page) ? `p.${m.page}` : 'Filing'}</span>
                                 </button>
                               </div>
 
@@ -1849,11 +1870,15 @@ export default function UserDashboardPage() {
                                     </span>
                                   </div>
                                   <p className="text-slate-700 leading-relaxed">
-                                    <strong>{m.metric}</strong> for <strong>{m.period}</strong>: {m.value_text}
+                                    {hasValue(m.metric) && <strong>{m.metric}</strong>}
+                                    {hasValue(m.period) && <> for <strong>{m.period}</strong></>}
+                                    {(hasValue(m.metric) || hasValue(m.period)) && ': '}{m.value_text}
                                   </p>
-                                  {m.change_text && (
+                                  {hasValue(m.change_text) && (
                                     <p className="text-[10px] text-slate-600 mt-1.5">
-                                      {m.change_text} against {m.previous_period} ({m.previous_value_text}). {m.change_basis}.
+                                      {m.change_text}
+                                      {hasValue(m.previous_period) && <> against {m.previous_period}{hasValue(m.previous_value_text) && <> ({m.previous_value_text})</>}</>}.
+                                      {hasValue(m.change_basis) && <> {m.change_basis}.</>}
                                     </p>
                                   )}
                                   {m.series?.length > 1 && (
@@ -1861,9 +1886,11 @@ export default function UserDashboardPage() {
                                       {m.series.map((s: any) => `${s.period} ${s.value_text}`).join('  ·  ')}
                                     </p>
                                   )}
-                                  <p className="text-[10px] text-slate-500 mt-2">
-                                    {m.filing_label}{m.page ? `, page ${m.page}` : ''}
-                                  </p>
+                                  {hasValue(m.filing_label) && (
+                                    <p className="text-[10px] text-slate-500 mt-2">
+                                      {m.filing_label}{hasValue(m.page) ? `, page ${m.page}` : ''}
+                                    </p>
+                                  )}
                                   {/* Our own copy of the filing, opened at the page the
                                       figure was read from. `source` is "<file>.pdf p.15";
                                       the file name is what the backend serves by. */}
@@ -1906,6 +1933,7 @@ export default function UserDashboardPage() {
                           </p>
                         )}
                       </div>
+                      )}
 
                       {/* Section 4: URGENCY SCORE
                           Quick Stats sat beside this in a three-column grid
@@ -1914,6 +1942,7 @@ export default function UserDashboardPage() {
                           together for all accounts"), so the card is now the
                           full width rather than two thirds of a row with a
                           hole in it. */}
+                        {hasUrgency && (
                         <div data-tour="exec-urgency" className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-4">
                           <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                             <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700 flex items-center gap-2">
@@ -1942,11 +1971,10 @@ export default function UserDashboardPage() {
                             )}
 
                             <div className="flex-1 w-full space-y-3 text-xs">
-                              {(urgencyData?.drivers ?? [])
+                              {urgencyDrivers
                                 // Withheld score (below the 60% gate): a driver
                                 // with nothing behind it shows an empty bar, so
                                 // it is left out (client, 8 Oct).
-                                .filter((d: any) => urgencyData?.score != null || Number(d.value) > 0)
                                 .map((d: any) => {
                                   // A component with no input on file scores 0
                                   // under the client's missing-input rule and
@@ -1982,11 +2010,7 @@ export default function UserDashboardPage() {
                                 </div>
                               ))}
 
-                              {!urgencyData && (
-                                <p className="text-[11px] text-slate-400 leading-relaxed">
-                                  The urgency score has not been computed for this account yet.
-                                </p>
-                              )}
+                              {/* No urgency data: the card is not rendered (client, 21 Oct). */}
                             </div>
                           </div>
 
@@ -2018,6 +2042,7 @@ export default function UserDashboardPage() {
                               printed here. The ⓘ in the header explains the score
                               in plain language instead (client, 6 Oct). */}
                         </div>
+                        )}
 
                       {/* Section 5: STRATEGIC PRIORITIES
                           Catalyst cards grouped by theme, as in the northstar
@@ -2036,6 +2061,7 @@ export default function UserDashboardPage() {
                           specification. So the same four measures are shown as
                           the counts they actually are, and the composite says
                           it is undefined. */}
+                      {priorityList.length > 0 && (
                       <div data-tour="exec-priorities" className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-5">
                         <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                           <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700 flex items-center gap-2">
@@ -2101,13 +2127,9 @@ export default function UserDashboardPage() {
                                                 compared without opening four
                                                 drawers. The working stays in
                                                 the drawer. */}
-                                            {p.evidence_strength && (
-                                              p.evidence_strength.zero_reason ? (
-                                                /* Gap reason lives in the backend (data_gaps); the client sees neutral wording. */
-                                                <span className="text-[10px] font-medium text-slate-400 flex-shrink-0 whitespace-nowrap">
-                                                  {NO_SIGNAL}
-                                                </span>
-                                              ) : (
+                                            {p.evidence_strength && hasValue(p.evidence_strength.score) && (
+                                              /* No score (zero_reason): the score element is not rendered. */
+                                              p.evidence_strength.zero_reason ? null : (
                                                 <span className="inline-flex items-center gap-0.5 flex-shrink-0">
                                                   <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full border whitespace-nowrap bg-blue-50 text-hp-navy border-blue-200">
                                                     {`${p.evidence_strength.score}/${p.evidence_strength.max_score}`}
@@ -2161,8 +2183,8 @@ export default function UserDashboardPage() {
                                               <p className="text-[11px] text-amber-900 leading-relaxed">{p.hp_proof_point}</p>
                                               {p.hp_proof_point_detail && (
                                                 <p className="text-[10px] text-amber-800">
-                                                  <span className="font-semibold">{p.hp_proof_point_detail.customer}</span>
-                                                  {p.hp_proof_point_detail.industry && (
+                                                  {hasValue(p.hp_proof_point_detail.customer) && <span className="font-semibold">{p.hp_proof_point_detail.customer}</span>}
+                                                  {hasValue(p.hp_proof_point_detail.industry) && (
                                                     <span className="text-amber-700"> &middot; {p.hp_proof_point_detail.industry}</span>
                                                   )}
                                                   {openableUrl(p.hp_proof_point_detail.source_url, sourceLinkCtx) && (
@@ -2206,22 +2228,20 @@ export default function UserDashboardPage() {
                                                   Strategy Chat corpus, and verify_executive_dashboard.py
                                                   asserts the whole evidence_strength structure. This is a
                                                   display change and only a display change. */}
+                                              {!p.evidence_strength?.zero_reason && hasValue(p.evidence_strength?.score) && (
                                               <div className="flex items-center justify-between">
                                                 <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 inline-flex items-center gap-1">
                                                   <BarChart3 className="w-3 h-3" />
                                                   Evidence strength
                                                 </span>
-                                                {p.evidence_strength?.zero_reason ? (
-                                                  <span className="text-[11px] text-slate-400">{NO_SIGNAL}</span>
-                                                ) : (
-                                                  <span className="inline-flex items-center gap-0.5">
-                                                    <span className="text-[11px] font-extrabold text-slate-700">
-                                                      {`${p.evidence_strength?.score ?? 0}/${p.evidence_strength?.max_score ?? 100}`}
-                                                    </span>
-                                                    <ScoreInfo topic="evidenceStrength" align="right" />
+                                                <span className="inline-flex items-center gap-0.5">
+                                                  <span className="text-[11px] font-extrabold text-slate-700">
+                                                    {`${p.evidence_strength?.score}/${p.evidence_strength?.max_score ?? 100}`}
                                                   </span>
-                                                )}
+                                                  <ScoreInfo topic="evidenceStrength" align="right" />
+                                                </span>
                                               </div>
+                                              )}
 
 {/* The heading goes with its content: it used to stand over
                                                   an empty list reading "Supporting claims (0)". */}
@@ -2238,9 +2258,9 @@ export default function UserDashboardPage() {
                                                   {(p.sources || []).map((s: any, si: number) => {
                                                     // One point for a short source, 3-6 for a long
                                                     // paragraph (priorities.claim_points).
-                                                    const points: string[] = s.claim_points?.length
+                                                    const points: string[] = (s.claim_points?.length
                                                       ? s.claim_points
-                                                      : [s.claim_point || s.source_text];
+                                                      : [s.claim_point || s.source_text]).filter((x: any) => hasValue(x));
                                                     return (
                                                       <div key={si} title={s.claim_points?.length || s.claim_point ? s.source_text : undefined}>
                                                         <ul className="space-y-1">
@@ -2275,14 +2295,15 @@ export default function UserDashboardPage() {
                               );
                             })}
 
-                            <p className="text-[10px] text-slate-500 leading-relaxed pt-1 border-t border-slate-100">
-                              {prioritiesData?.ordering_basis}
-                            </p>
+                            {hasValue(prioritiesData?.ordering_basis) && (
+                              <p className="text-[10px] text-slate-500 leading-relaxed pt-1 border-t border-slate-100">
+                                {prioritiesData?.ordering_basis}
+                              </p>
+                            )}
                           </div>
-                        ) : (
-                          <p className="text-xs text-slate-400">{NO_SIGNAL}</p>
-                        )}
+                        ) : null}
                       </div>
+                      )}
 
                     </div>
                   );
@@ -2430,12 +2451,12 @@ export default function UserDashboardPage() {
                     return acc;
                   }, {});
 
-                  const fmtDate = (d: string) => formatDate(d, NOT_DISCLOSED);
+                  // An absent date renders nothing (client, 21 Oct).
+                  const fmtDate = (d: string) => (hasValue(d) ? formatDate(d) : '');
+                  const noSignals = signals.length === 0;
 
                   return (
                     <div className="space-y-5 animate-fade-in">
-                      <PendingNotice widget={scoreWidget} title="Signal scoring unavailable" />
-
                       {/* Header */}
                       <div data-tour="signals-header" className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
                         <div>
@@ -2461,6 +2482,8 @@ export default function UserDashboardPage() {
                         </button>
                       </div>
 
+                      {/* No signals at all: the body stays blank (client, 21 Oct). */}
+                      {!noSignals && (<>
                       {/* Summary bar */}
                       <div className="flex flex-wrap items-center gap-2 text-xs">
                         <span className="font-semibold text-slate-700">{filteredSignals.length} Signals</span>
@@ -2595,9 +2618,11 @@ export default function UserDashboardPage() {
                                 <div className="p-4">
                                   {/* badges + date + score */}
                                   <div className="flex flex-wrap items-center gap-2 mb-2">
-                                    <span className={`text-[11px] px-2 py-0.5 rounded-full font-semibold ${typeColors[s.category] || 'bg-slate-100 text-slate-700'}`}>
-                                      {s.category}
-                                    </span>
+                                    {hasValue(s.category) && (
+                                      <span className={`text-[11px] px-2 py-0.5 rounded-full font-semibold ${typeColors[s.category] || 'bg-slate-100 text-slate-700'}`}>
+                                        {s.category}
+                                      </span>
+                                    )}
                                     {urgency && (
                                       <span className={`text-[11px] px-2 py-0.5 rounded-full font-semibold border ${urgency.cls} ${urgency.pulse ? 'animate-pulse' : ''}`}>
                                         {urgency.label}
@@ -2616,19 +2641,19 @@ export default function UserDashboardPage() {
                                         </span>
                                       ) : null;
                                     })()}
-                                    <span className="text-xs text-slate-400">{fmtDate(s.event_date)}</span>
-                                    {s.publication_date && s.publication_date !== s.event_date && (
+                                    {fmtDate(s.event_date) && (
+                                      <span className="text-xs text-slate-400">{fmtDate(s.event_date)}</span>
+                                    )}
+                                    {hasValue(s.publication_date) && s.publication_date !== s.event_date && (
                                       <span className="text-[10px] text-slate-400" title="Publication date, where it differs from the event date">
                                         published {fmtDate(s.publication_date)}
                                       </span>
                                     )}
                                     <span className="ml-auto flex items-center gap-2 text-xs font-semibold text-slate-600">
-                                      {s.confidence !== null && s.confidence !== undefined ? (
+                                      {typeof s.confidence === 'number' && Number.isFinite(s.confidence) && (
                                         <>{s.confidence.toFixed(1)}<span className="text-slate-400 font-normal">/10</span><ScoreInfo topic="liveSignal" align="right" /></>
-                                      ) : (
-                                        <span className="text-slate-400 font-normal">{NO_SIGNAL}</span>
                                       )}
-                                      {s.tier && (
+                                      {hasValue(s.tier) && (
                                         <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">{s.tier}</span>
                                       )}
                                       {(() => {
@@ -2653,7 +2678,7 @@ export default function UserDashboardPage() {
                                     </span>
                                   </div>
 
-                                  {s.amount && (
+                                  {hasValue(s.amount) && (
                                     <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                                       <span className="text-[10px] font-medium text-slate-600 bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded">
                                         {s.amount}
@@ -2662,9 +2687,9 @@ export default function UserDashboardPage() {
                                   )}
 
                                   {/* Implication for HP */}
-                                  {sc?.sales_angle && (
+                                  {hasValue(sc?.sales_angle) && (
                                     <div className="mt-2 text-xs text-sky-800 bg-sky-50 border border-sky-200 rounded-lg px-2.5 py-1.5">
-                                      {sc.hp_play && (
+                                      {hasValue(sc.hp_play) && (
                                         <span className="inline-block mb-1 text-[10px] font-bold uppercase tracking-wider text-sky-700 bg-sky-100 border border-sky-200 px-1.5 py-0.5 rounded">
                                           {sc.hp_play}
                                         </span>
@@ -2682,7 +2707,7 @@ export default function UserDashboardPage() {
                                     const detail: string = s.evidence_sentence || '';
                                     // Some exports repeat the headline in the body column; the
                                     // extractor blanks those, so there is simply nothing to add.
-                                    if (!detail) return null;
+                                    if (!hasValue(detail)) return null;
                                     const needsClamp = detail.length > DETAIL_CLAMP;
                                     const detailOpen = expandedSignalDetailId === s.signal_id;
                                     const shown = (needsClamp && !detailOpen)
@@ -2792,7 +2817,7 @@ export default function UserDashboardPage() {
                                       <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1">Score breakdown <ScoreInfo topic="liveSignal" /></p>
                                       {Object.entries(dimLabels).map(([dim, label]) => {
                                         const val = sc.scores?.[dim];
-                                        if (val === undefined) return null;
+                                        if (val == null || !Number.isFinite(Number(val))) return null;
                                         const weight = scoreWeights[dim];
                                         return (
                                           <div key={dim} className="space-y-0.5">
@@ -2824,17 +2849,19 @@ export default function UserDashboardPage() {
                                                 ? (sourceReliabilityLine(val, s.source_publisher)
                                                    || sc.rationales?.[dim])
                                                 : sc.rationales?.[dim];
-                                              return line ? (
+                                              return hasValue(line) ? (
                                                 <p className="text-[10px] text-slate-400 pl-[8.5rem] leading-relaxed">{line}</p>
                                               ) : null;
                                             })()}
                                           </div>
                                         );
                                       })}
-                                      <p className="text-[10px] text-slate-500 pt-1 border-t border-slate-200">
-                                        Weighted total <span className="font-semibold text-slate-700">{s.confidence?.toFixed(2)}</span> /10
-                                        {s.tier && <> &middot; tier {s.tier}</>}
-                                      </p>
+                                      {typeof s.confidence === 'number' && Number.isFinite(s.confidence) && (
+                                        <p className="text-[10px] text-slate-500 pt-1 border-t border-slate-200">
+                                          Weighted total <span className="font-semibold text-slate-700">{s.confidence.toFixed(2)}</span> /10
+                                          {hasValue(s.tier) && <> &middot; tier {s.tier}</>}
+                                        </p>
+                                      )}
                                     </div>
                                   )}
                                 </div>
@@ -2843,6 +2870,7 @@ export default function UserDashboardPage() {
                           })}
                         </div>
                       )}
+                      </>)}
                     </div>
                   );
                 })()}
@@ -2886,13 +2914,6 @@ export default function UserDashboardPage() {
                     : hpCategories;
                   const chartCats = hpCategories.filter((c: any) => c.primary).sort((a: any, b: any) => (b.primary.score ?? -1) - (a.primary.score ?? -1));
                   const disclaimer: string = summaryData?.disclaimer || topicsData?.disclaimer || 'Intent indicates research activity, not confirmed purchase intent.';
-                  // Source A that is missing or belongs to another domain is stated, never drawn as zero scores.
-                  // Client ruling, 24 Sep: when a dataset is missing, leave the section
-                  // out and write nothing. Behind the same flag as the other empty
-                  // states so the whole behaviour reverses in one place.
-                  const sourceAMessage: string | null = (topicsData || !SHOW_EMPTY_STATE_NOTICES)
-                    ? null
-                    : (topicsWidget?.data?.message || 'Intent unavailable: no intent topics have been extracted for this account.');
                   const otherTheme = themes.find((t: any) => t.theme === 'Other / Low Relevance');
                   const includedCount: number = topicsData?.included_topics_count || 0;
                   const unmappedPct = includedCount && otherTheme ? Math.round((otherTheme.topic_count / includedCount) * 100) : 0;
@@ -2938,32 +2959,32 @@ export default function UserDashboardPage() {
                   // The category file's own detail for one category, shown as received.
                   const renderFileDetails = (p: any) => (
                     <div className="space-y-2">
-                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Signal Topics (category file)</span>
-                      {p.topics_researched?.length ? (
+                      {p.topics_researched?.length > 0 && (<>
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Signal Topics (category file)</span>
                         <div className="flex flex-wrap gap-1.5">
                           {p.topics_researched.map((t: string) => (
                             <span key={t} className="px-2 py-0.5 rounded-full border border-slate-200 text-[11px] text-slate-700 font-medium">{t}</span>
                           ))}
                         </div>
-                      ) : (
-                        <span className="text-[11px] text-slate-400 block">{NO_SIGNAL}</span>
-                      )}
+                      </>)}
                       {p.keywords_matched?.length > 0 && (
                         <p className="text-[10px] text-slate-500"><span className="font-bold text-slate-400 uppercase mr-1">Keywords</span>{p.keywords_matched.join(' · ')}</p>
                       )}
                       {p.related_technologies?.length > 0 && (
                         <p className="text-[10px] text-slate-500"><span className="font-bold text-slate-400 uppercase mr-1">Technologies</span>{p.related_technologies.join(' · ')}</p>
                       )}
-                      <p className="text-[10px] text-slate-400">
-                        {p.first_intent_date ? `Observed ${formatDate(p.first_intent_date)} → ${formatDate(p.latest_intent_date || p.first_intent_date)}` : NO_SIGNAL}
-                      </p>
+                      {hasValue(p.first_intent_date) && (
+                        <p className="text-[10px] text-slate-400">
+                          {`Observed ${formatDate(p.first_intent_date)} → ${formatDate(p.latest_intent_date || p.first_intent_date)}`}
+                        </p>
+                      )}
                       {/* quality_flags are review notes; they live in the backend, not on the client's screen. */}
                     </div>
                   );
 
                   // Steps 2-4: Bombora signals with exact scores, and the technologies that confirm them.
                   const renderSignals = (signals: any[], topicLimit: number) => {
-                    if (!signals?.length) return <p className="text-[11px] text-slate-400">{NO_SIGNAL}</p>;
+                    if (!signals?.length) return null;
                     return (
                       <div className="space-y-2">
                         {signals.map((sg: any) => (
@@ -2973,9 +2994,9 @@ export default function UserDashboardPage() {
                                 {sg.confirmed ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> : <Minus className="w-3.5 h-3.5 text-slate-300" />}
                                 {sg.signal}
                               </span>
-                              {sg.max != null
-                                ? <span className="font-mono text-xs font-extrabold text-slate-900"><CountUpText text={sg.max} />/100</span>
-                                : <span className="text-[10px] font-medium text-slate-400">{NO_SIGNAL}</span>}
+                              {sg.max != null && (
+                                <span className="font-mono text-xs font-extrabold text-slate-900"><CountUpText text={sg.max} />/100</span>
+                              )}
                             </div>
                             {sg.topics.length > 0 && (
                               <div className="flex flex-wrap gap-1 mt-1.5">
@@ -2989,19 +3010,15 @@ export default function UserDashboardPage() {
                                 )}
                               </div>
                             )}
-                            <p className="text-[10px] mt-1.5 text-slate-500">
-                              {sg.technologies.length > 0 ? (
-                                <>
-                                  <span className="font-bold text-slate-400 uppercase mr-1">Technologies</span>
-                                  {/* Where each came from (export sheet and column) is on hover, not in the text. */}
-                                  <span title={Array.from(new Set(sg.technologies.map((t: any) => `${t.sheet} · ${t.column}`))).join('; ')}>
-                                    {sg.technologies.map((t: any) => t.name).join(', ')}
-                                  </span>
-                                </>
-                              ) : (
-                                <span className="text-slate-400">{NO_SIGNAL}</span>
-                              )}
-                            </p>
+                            {(sg.technologies || []).length > 0 && (
+                              <p className="text-[10px] mt-1.5 text-slate-500">
+                                <span className="font-bold text-slate-400 uppercase mr-1">Technologies</span>
+                                {/* Where each came from (export sheet and column) is on hover, not in the text. */}
+                                <span title={Array.from(new Set(sg.technologies.map((t: any) => `${t.sheet} · ${t.column}`))).join('; ')}>
+                                  {sg.technologies.map((t: any) => t.name).join(', ')}
+                                </span>
+                              </p>
+                            )}
                           </div>
                         ))}
                       </div>
@@ -3055,7 +3072,7 @@ export default function UserDashboardPage() {
                               the payload; nothing renders it. */}
                           {/* Only a verified match is shown; a mismatch or an unverified
                               domain is a backend review item, not a client-facing chip. */}
-                          {accountMatch?.status === 'matched' && (
+                          {accountMatch?.status === 'matched' && hasValue(accountMatch.provider_domain) && (
                             <span className="px-3 py-1 rounded-full text-[11px] border flex items-center gap-1 bg-emerald-50 text-emerald-800 border-emerald-200">
                               <ShieldCheck className="w-3.5 h-3.5" />
                               {`${accountMatch.provider_domain} verified`}
@@ -3067,7 +3084,7 @@ export default function UserDashboardPage() {
                       {/* The read leads the tab (Sahaj, 28 Sep: "move this
                           box to the top in intent n demand"). It is the answer;
                           the unit summary and the topics below are the working. */}
-                      {summaryData && (
+                      {summaryData && (summaryData.so_what || []).some((l: any) => hasValue(l)) && (
                       <div data-tour="intent-sowhat" className="bg-blue-50/80 border border-blue-200/90 rounded-2xl p-6 text-xs text-blue-950 space-y-3 shadow-xs">
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <h3 className="text-xs font-black uppercase tracking-wider text-hp-navy flex flex-wrap items-center gap-2">
@@ -3080,11 +3097,11 @@ export default function UserDashboardPage() {
                             )}
                           </h3>
                           <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200">
-                            Rule-based · {dictionaryVersion}
+                            Rule-based{hasValue(dictionaryVersion) ? ` · ${dictionaryVersion}` : ''}
                           </span>
                         </div>
                         <div className="space-y-2.5">
-                          {(summaryData.so_what || []).map((line: string, i: number) => (
+                          {(summaryData.so_what || []).filter((l: any) => hasValue(l)).map((line: string, i: number) => (
                             <p key={i} className="text-[12px] leading-relaxed text-slate-700 font-medium flex items-start gap-2.5">
                               <Target className="w-4 h-4 text-hp-navy flex-shrink-0 mt-0.5" />
                               <span>{line}</span>
@@ -3143,7 +3160,7 @@ export default function UserDashboardPage() {
                               <span className="text-[10px] text-slate-400">{sourceNote}</span>
                             </div>
 
-                            {byBombora && bu.overview && (
+                            {byBombora && hasValue(bu.overview) && (
                               <p className="text-xs text-slate-700 leading-relaxed bg-slate-50 border border-slate-200 rounded-xl p-3">
                                 {bu.overview}
                               </p>
@@ -3187,9 +3204,7 @@ export default function UserDashboardPage() {
                                     {bu.units.map((u: any) => (
                                       <div key={u.category} className="w-20 text-center">
                                         <span className="text-xs block font-semibold text-slate-600">{categoryLabel(u.category)}</span>
-                                        {unitScore(u) == null ? (
-                                          <span className="text-[10px] font-medium text-slate-400 block">{NO_SIGNAL}</span>
-                                        ) : averaged && (
+                                        {unitScore(u) != null && averaged && (
                                           <span className="text-[10px] font-medium text-slate-400 block">
                                             avg of {u.bombora_topic_count} topic{u.bombora_topic_count === 1 ? '' : 's'}
                                           </span>
@@ -3220,7 +3235,7 @@ export default function UserDashboardPage() {
                                               {' '}&middot; {hovered.bombora_topic_count} topic{hovered.bombora_topic_count === 1 ? '' : 's'} &middot; {hovered.bombora_score_sum} / {hovered.bombora_topic_count} = {hovered.score}
                                             </span>
                                           )}
-                                          {hovered.score_basis === 'category_file' && hovered.category_file_stage && (
+                                          {hovered.score_basis === 'category_file' && hasValue(hovered.category_file_stage) && (
                                             <span className="text-slate-500 font-semibold"> &middot; {hovered.category_file_stage}</span>
                                           )}
                                         </p>
@@ -3228,9 +3243,7 @@ export default function UserDashboardPage() {
                                           <p className="text-[10px] text-slate-500 leading-snug">
                                             {listed.map((t: any) => `${shortTopic(t.topic)} (${Math.round(Number(t.score) || 0)})`).join(' · ')}
                                           </p>
-                                        ) : hovered.score_basis !== 'category_file' && (
-                                          <p className="text-[10px] text-slate-400">{NO_SIGNAL}</p>
-                                        )}
+                                        ) : null}
                                         <p className="text-[9px] text-slate-400">
                                           {hovered.score_basis === 'category_file' ? 'Score as received from the research provider.' : 'Topic scores as received from the research provider.'}
                                         </p>
@@ -3268,19 +3281,19 @@ export default function UserDashboardPage() {
                                           </span>
                                         )}
                                       </div>
-                                      {u.hp_play && (
+                                      {hasValue(u.hp_play) && (
                                         <p className="text-[11px] text-slate-400 leading-snug">{u.hp_play}</p>
                                       )}
 
+                                      {(u.score_basis === 'bombora_average' || u.score_basis === 'category_file' || scored) && (
                                       <p className="text-[11px] font-semibold text-slate-600">
                                         {u.score_basis === 'bombora_average'
                                           ? <>Average of {u.bombora_topic_count} research topic{u.bombora_topic_count === 1 ? '' : 's'}</>
                                           : u.score_basis === 'category_file'
-                                            ? <>Buying-interest data{u.category_file_stage ? ` · ${u.category_file_stage}` : ''}</>
-                                            : scored
-                                              ? <>{u.bombora_topic_count} researched topic{u.bombora_topic_count === 1 ? '' : 's'}</>
-                                              : <span className="text-slate-400 font-normal">{NO_SIGNAL}</span>}
+                                            ? <>Buying-interest data{hasValue(u.category_file_stage) ? ` · ${u.category_file_stage}` : ''}</>
+                                            : <>{u.bombora_topic_count} researched topic{u.bombora_topic_count === 1 ? '' : 's'}</>}
                                       </p>
+                                      )}
 
                                       {listed.length > 0 && (
                                         <div className="flex flex-wrap gap-1">
@@ -3296,7 +3309,7 @@ export default function UserDashboardPage() {
                                         </div>
                                       )}
 
-                                      {u.read && (
+                                      {hasValue(u.read) && (
                                         <p className="text-[11px] text-slate-700 leading-relaxed pt-1 border-t border-slate-100">
                                           {u.read}
                                         </p>
@@ -3311,7 +3324,7 @@ export default function UserDashboardPage() {
                                 {bu.units.map((u: any) => (
                                   <li key={u.category} className="text-xs text-slate-700 leading-relaxed">
                                     <span className="font-semibold text-slate-900">{categoryLabel(u.category)}</span>
-                                    <span className="text-slate-400"> &middot; {u.hp_play}</span>
+                                    {hasValue(u.hp_play) && <span className="text-slate-400"> &middot; {u.hp_play}</span>}
                                     {u.category_file_score !== null && u.category_file_score !== undefined && (
                                       <span className="text-slate-500"> - category score {u.category_file_score}/100</span>
                                     )}
@@ -3349,7 +3362,7 @@ export default function UserDashboardPage() {
                                   <div key={`x-${t.topic_name}`}><span className="font-semibold capitalize">{t.topic_name}</span></div>
                                 ))}
                                 {duplicatesRemoved.map((d: any, i: number) => (
-                                  <div key={`d-${i}`}><span className="font-semibold capitalize">{d.topic_name}</span>: duplicate row (score {d.composite_score ?? NO_SIGNAL}) removed; kept score {d.kept_score ?? NO_SIGNAL}</div>
+                                  <div key={`d-${i}`}><span className="font-semibold capitalize">{d.topic_name}</span>: duplicate row{d.composite_score != null ? ` (score ${d.composite_score})` : ''} removed{d.kept_score != null ? `; kept score ${d.kept_score}` : ''}</div>
                                 ))}
                               </div>
                             )}
@@ -3357,18 +3370,6 @@ export default function UserDashboardPage() {
                         );
                       })()}
 
-                      {/* Unavailable states: stated, never drawn as zeros */}
-                      {sourceAMessage && (
-                        <div className="bg-white rounded-2xl p-5 border border-amber-200 shadow-sm flex items-start gap-3">
-                          <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
-                          <div className="space-y-1">
-                            <h3 className="text-sm font-extrabold text-slate-900">
-                              {topicsWidget?.data?.availability === 'no_matched_signal' ? 'No Matched Signal' : 'Intent Unavailable'}
-                            </h3>
-                            <p className="text-xs text-slate-600 leading-relaxed">{sourceAMessage}</p>
-                          </div>
-                        </div>
-                      )}
                       {/* Gap reason lives in the backend (data_gaps); the client sees neutral wording. */}
 
                       {summaryData && (
@@ -3381,6 +3382,7 @@ export default function UserDashboardPage() {
                           {!leadWithBombora && (
                           <>
                           {/* Step 1 - HP Category Intent Scores, as received from the category file */}
+                          {chartCats.length > 0 && (
                           <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-4">
                             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                               <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700 flex items-center gap-2">
@@ -3418,9 +3420,9 @@ export default function UserDashboardPage() {
                                               className={`as-grow-y w-14 rounded-t-md cursor-default ${CATEGORY_STYLE[c.category]?.bar || 'bg-slate-400'} ${noisy ? 'opacity-40' : ''}`}
                                               style={{ height: `${pct}%`, ['--as-d' as string]: `${growDelay(colIdx, 120, 70)}ms` }}
                                             ></div>
-                                            {c.primary.score != null
-                                              ? <span className="absolute text-[11px] font-bold text-slate-700" style={{ bottom: `calc(${pct}% + 6px)` }}><CountUpText text={c.primary.score} delay={growDelay(colIdx, 120, 70)} /></span>
-                                              : <span className="absolute text-[10px] font-medium text-slate-400 text-center leading-tight" style={{ bottom: `calc(${pct}% + 6px)` }}>{NO_SIGNAL}</span>}
+                                            {c.primary.score != null && (
+                                              <span className="absolute text-[11px] font-bold text-slate-700" style={{ bottom: `calc(${pct}% + 6px)` }}><CountUpText text={c.primary.score} delay={growDelay(colIdx, 120, 70)} /></span>
+                                            )}
 
                                             {/* Hover detail: the category file's own fields for this category,
                                                 each attributed and taken as supplied. */}
@@ -3433,9 +3435,6 @@ export default function UserDashboardPage() {
                                     {chartCats.map((c: any) => (
                                       <div key={c.category} className="w-20 text-center">
                                         <span className="text-xs block font-semibold text-slate-600">{categoryLabel(c.category)}</span>
-                                        {!c.primary.has_signal && c.primary.score != null && (
-                                          <span className="text-[10px] font-medium text-slate-400 block">{NO_SIGNAL}</span>
-                                        )}
                                       </div>
 
                                     ))}
@@ -3459,14 +3458,16 @@ export default function UserDashboardPage() {
                                     return (
                                               <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-left space-y-1.5">
                                                 <p className="text-[11px] font-extrabold text-slate-900">
-                                                  {categoryLabel(c.category)} &middot; {p.score != null ? `${p.score}/100` : <span className="font-medium text-slate-400">{NO_SIGNAL}</span>}
+                                                  {categoryLabel(c.category)}{p.score != null ? <> &middot; {`${p.score}/100`}</> : null}
                                                 </p>
-                                                <div className="space-y-1">
-                                                  <p className="flex items-baseline justify-between gap-2 text-[10px]">
-                                                    <span className="font-bold text-slate-400 uppercase tracking-wider">Buying Stage</span>
-                                                    <span className={`text-right ${p.stage ? 'font-semibold text-slate-600' : 'text-slate-400'}`}>{p.stage || NO_SIGNAL}</span>
-                                                  </p>
-                                                </div>
+                                                {hasValue(p.stage) && (
+                                                  <div className="space-y-1">
+                                                    <p className="flex items-baseline justify-between gap-2 text-[10px]">
+                                                      <span className="font-bold text-slate-400 uppercase tracking-wider">Buying Stage</span>
+                                                      <span className="text-right font-semibold text-slate-600">{p.stage}</span>
+                                                    </p>
+                                                  </div>
+                                                )}
 
                                                 {/* The rest of this category's block in the intent file. */}
                                                 {p.topics_researched?.length > 0 && (
@@ -3487,12 +3488,12 @@ export default function UserDashboardPage() {
                                                     {p.related_technologies.join(' \u00b7 ')}
                                                   </p>
                                                 )}
-                                                <p className="text-[10px] text-slate-500 leading-snug">
-                                                  <span className="font-bold text-slate-400 uppercase tracking-wider block">Observed</span>
-                                                  {p.first_intent_date
-                                                    ? `${formatDate(p.first_intent_date)} \u2192 ${formatDate(p.latest_intent_date || p.first_intent_date)}`
-                                                    : NO_SIGNAL}
-                                                </p>
+                                                {hasValue(p.first_intent_date) && (
+                                                  <p className="text-[10px] text-slate-500 leading-snug">
+                                                    <span className="font-bold text-slate-400 uppercase tracking-wider block">Observed</span>
+                                                    {`${formatDate(p.first_intent_date)} \u2192 ${formatDate(p.latest_intent_date || p.first_intent_date)}`}
+                                                  </p>
+                                                )}
                                                 <p className="text-[9px] text-slate-400 leading-snug pt-0.5 border-t border-slate-100">
                                                   All values as received from the research provider.
                                                 </p>
@@ -3501,13 +3502,12 @@ export default function UserDashboardPage() {
                                   })()}
                                 </div>
                               </div>
-                            ) : (
-                              <p className="text-xs text-slate-400">{NO_SIGNAL}</p>
-                            )}
+                            ) : null}
                             <p className="text-[11px] text-slate-500">
                               Buying interest in each HP area, highest first. Hover a bar for that area&apos;s buying stage and the topics and keywords behind it. Other research signals add context and never change these scores.
                             </p>
                           </div>
+                          )}
 
 
                           {/* Other HP categories */}
@@ -3546,9 +3546,7 @@ export default function UserDashboardPage() {
                                           </p>
                                         )}
                                       </div>
-                                    ) : (
-                                      <p className="text-[11px] text-slate-400">{NO_SIGNAL}</p>
-                                    );
+                                    ) : null;
                                   })()}
 
                                   {/* Score bar */}
@@ -3560,53 +3558,47 @@ export default function UserDashboardPage() {
                                       <div className="flex-1 bg-slate-100 h-2.5 rounded-full overflow-hidden">
                                         <div className={`as-grow ${style.bar} h-2.5 rounded-full ${noisy ? 'opacity-40' : ''}`} style={{ width: `${Math.min(100, Math.max(0, p.score ?? 0))}%`, ['--as-d' as string]: '120ms' }}></div>
                                       </div>
-                                      {p.score != null
-                                        ? <span className="text-base font-extrabold text-slate-900 flex-shrink-0"><CountUpText text={p.score} delay={120} />/100</span>
-                                        : <span className="text-[11px] text-slate-400 flex-shrink-0">{NO_SIGNAL}</span>}
+                                      {p.score != null && (
+                                        <span className="text-base font-extrabold text-slate-900 flex-shrink-0"><CountUpText text={p.score} delay={120} />/100</span>
+                                      )}
                                     </div>
-                                  ) : (
-                                    // No category score for this account. The card still carries the
-                                    // Bombora research and the HP play, so it is shown, not collapsed.
-                                    <p className="text-[11px] text-slate-400">{NO_SIGNAL}</p>
-                                  )}
+                                  ) : null /* No category score: the card still carries the
+                                    Bombora research and the HP play, so it is shown, not collapsed. */}
 
                                   {/* Signal topics as pills */}
-                                  {p && (
+                                  {p && signalTopics.length > 0 && (
                                     <div className="space-y-2.5">
                                       <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Signal Topics</span>
-                                      {signalTopics.length ? (
-                                        <div className="flex flex-wrap gap-2">
-                                          {signalTopics.map((t: string) => (
-                                            <span key={t} className="px-3 py-1 rounded-full border border-slate-200 bg-white text-[12px] text-slate-700">{t}</span>
-                                          ))}
-                                        </div>
-                                      ) : (
-                                        <p className="text-[11px] text-slate-400">{NO_SIGNAL}</p>
-                                      )}
+                                      <div className="flex flex-wrap gap-2">
+                                        {signalTopics.map((t: string) => (
+                                          <span key={t} className="px-3 py-1 rounded-full border border-slate-200 bg-white text-[12px] text-slate-700">{t}</span>
+                                        ))}
+                                      </div>
                                     </div>
                                   )}
 
                                   {/* Mapped HP play + research volume */}
+                                  {hasValue(cat.hp_play) && (
                                   <div className="flex items-start justify-between gap-2 pt-3.5 border-t border-slate-100">
                                     <div className="flex items-start gap-2 min-w-0">
                                       <Target className="w-4 h-4 text-slate-400 mt-0.5 flex-shrink-0" />
                                       <div className="min-w-0">
                                         <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Mapped HP Play</span>
-                                        {cat.hp_play
-                                          ? <span className="text-sm font-bold text-slate-900 leading-tight block">{cat.hp_play}</span>
-                                          : <span className="text-sm text-slate-400 leading-tight block">{NO_SIGNAL}</span>}
+                                        <span className="text-sm font-bold text-slate-900 leading-tight block">{cat.hp_play}</span>
                                       </div>
                                     </div>
                                   </div>
+                                  )}
 
                                   {/* Observation window */}
-                                  {p?.first_intent_date && (
+                                  {hasValue(p?.first_intent_date) && (
                                     <p className="text-[11px] text-slate-400">
                                       Observed {formatDate(p.first_intent_date)} → {formatDate(p.latest_intent_date || p.first_intent_date)}
                                     </p>
                                   )}
 
                                   {/* Supporting Bombora signals, kept visibly apart from the file's own numbers */}
+                                  {(cat.supporting_signals || []).length > 0 && (
                                   <details open={!p} className="pt-3 border-t border-slate-100 group">
                                     <summary className="text-[10px] font-bold text-slate-400 uppercase tracking-wider cursor-pointer list-none flex items-center gap-1.5 hover:text-slate-600">
                                       <ChevronDown className="w-3.5 h-3.5 transition-transform group-open:rotate-180" />
@@ -3614,8 +3606,11 @@ export default function UserDashboardPage() {
                                     </summary>
                                     <div className="mt-2.5">{renderSignals(cat.supporting_signals, 3)}</div>
                                   </details>
+                                  )}
 
-                                  <p className="text-[11px] text-slate-600 leading-relaxed mt-auto">{cat.explanation}</p>
+                                  {hasValue(cat.explanation) && (
+                                    <p className="text-[11px] text-slate-600 leading-relaxed mt-auto">{cat.explanation}</p>
+                                  )}
                                 </div>
                               );
                             })}
@@ -3788,7 +3783,7 @@ export default function UserDashboardPage() {
                                   <div key={`x-${t.topic_name}`}><span className="font-semibold">{displayCase(t.topic_name)}</span></div>
                                 ))}
                                 {duplicatesRemoved.map((d: any, i: number) => (
-                                  <div key={`d-${i}`}><span className="font-semibold">{displayCase(d.topic_name)}</span>: duplicate row (score {d.composite_score ?? NO_SIGNAL}) removed; kept score {d.kept_score ?? NO_SIGNAL}</div>
+                                  <div key={`d-${i}`}><span className="font-semibold">{displayCase(d.topic_name)}</span>: duplicate row{d.composite_score != null ? ` (score ${d.composite_score})` : ''} removed{d.kept_score != null ? `; kept score ${d.kept_score}` : ''}</div>
                                 ))}
                               </div>
                             )}
@@ -3829,14 +3824,14 @@ export default function UserDashboardPage() {
                                 <h2 className="text-lg font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
                                   <Briefcase className="w-5 h-5 text-hp-navy" />
                                   <span>Hiring Signals</span>
-                                  {summary.country_code && (
+                                  {hasValue(summary.country_code) && (
                                     <span className="px-1.5 py-0.5 rounded bg-blue-50 text-hp-navy border border-blue-200 text-[10px] font-bold">
                                       {summary.country_code}
                                     </span>
                                   )}
                                 </h2>
                                 <p className="text-xs text-slate-500 mt-0.5">
-                                  Job openings{summary.domain ? ` · ${summary.domain}` : ''}
+                                  Job openings{hasValue(summary.domain) ? ` · ${summary.domain}` : ''}
                                 </p>
                               </div>
                             </div>
@@ -3987,8 +3982,6 @@ export default function UserDashboardPage() {
 
                   return (
                     <div className="space-y-6 animate-fade-in">
-                      <PendingNotice widget={playsWidget} title="Opportunity plays unavailable" />
-                      
                       {/* Header Banner */}
                       <div data-tour="opportunity-header" className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 pb-4">
                         <div>
@@ -3996,9 +3989,11 @@ export default function UserDashboardPage() {
                             <Lightbulb className="w-6 h-6 text-hp-navy" />
                             <span>Opportunity Map</span>
                           </h2>
-                          <p className="text-xs text-slate-500 mt-0.5">
-                            {isAvailable ? generatedPlays.length : 0} HP {isAvailable && generatedPlays.length === 1 ? 'opportunity' : 'opportunities'} mapped for {selectedAccount?.name} &mdash; business outcome, HP products, entry path, and evidence in one view.
-                          </p>
+                          {isAvailable && (
+                            <p className="text-xs text-slate-500 mt-0.5">
+                              {generatedPlays.length} HP {generatedPlays.length === 1 ? 'opportunity' : 'opportunities'} mapped for {selectedAccount?.name} &mdash; business outcome, HP products, entry path, and evidence in one view.
+                            </p>
+                          )}
                           {discoveryAreas.length > 0 && (
                             <p className="text-xs text-slate-500 mt-0.5">
                               {discoveryAreas.length} additional discovery {discoveryAreas.length === 1 ? 'area' : 'areas'} identified &mdash; listed separately below, not presented as HP opportunities.
@@ -4008,24 +4003,18 @@ export default function UserDashboardPage() {
                               The first sentence used to say no proof-point source was
                               connected; HP's published case studies now are. The second
                               is unchanged and still matters. */}
-                          <p className="text-[11px] text-slate-400 mt-1 max-w-3xl leading-relaxed">
+                          {isAvailable && <p className="text-[11px] text-slate-400 mt-1 max-w-3xl leading-relaxed">
                             Proof points are published HP case studies about other customers, shown
                             only where one supports an HP product this play already names. The HP
                             links on each play are product reference pages, not evidence about this
                             account, and a play without a proof point simply has none in the corpus.
-                          </p>
+                          </p>}
                         </div>
 
                         <div className="flex items-center space-x-2 text-xs font-bold">
-                          <span className="px-3 py-1 bg-white border border-slate-200 shadow-xs rounded-full text-slate-700">
-                            {isAvailable ? generatedPlays.length : 0} HP Plays
-                          </span>
-                          {/* Nothing is badged while it is working, and under
-                              the client's "write nothing" ruling the not-ready
-                              badge is suppressed too. */}
-                          {!isAvailable && SHOW_EMPTY_STATE_NOTICES && (
-                            <span className="px-3 py-1 rounded-full bg-purple-50 text-purple-800 border border-purple-200">
-                              Inferred TBD
+                          {isAvailable && (
+                            <span className="px-3 py-1 bg-white border border-slate-200 shadow-xs rounded-full text-slate-700">
+                              {generatedPlays.length} HP Plays
                             </span>
                           )}
                         </div>
@@ -4033,13 +4022,15 @@ export default function UserDashboardPage() {
 
                       {/* Opportunity Plays List */}
                       <div data-tour="opportunity-plays" className="space-y-5">
+                        {isAvailable && (
                         <div className="flex items-center justify-between">
                           <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700 flex items-center gap-2">
                             <span>HP OPPORTUNITY PLAYS</span>
-                            <span className="text-slate-400">({isAvailable ? generatedPlays.length : 0} PRODUCT LINES)</span>
+                            <span className="text-slate-400">({generatedPlays.length} PRODUCT LINES)</span>
                           </h3>
                           {getClassificationBadge('inferred')}
                         </div>
+                        )}
 
                         {isAvailable ? (
                           /* Render generated plays, matching the Northstar UI */
@@ -4071,7 +4062,7 @@ export default function UserDashboardPage() {
                                       </div>
 
                                       <div className="flex flex-col items-start sm:items-end gap-0.5 flex-shrink-0">
-                                        {play.priority && (
+                                        {hasValue(play.priority) && (
                                           <span className="inline-flex items-center gap-0.5">
                                           <span className={`text-[11px] font-semibold px-2 py-0.5 rounded border ${
                                             play.priority === 'Critical' ? 'text-rose-700 bg-rose-50 border-rose-200'
@@ -4159,8 +4150,8 @@ export default function UserDashboardPage() {
                                         <p className="text-sm text-amber-900 leading-relaxed">{play.hp_proof_point}</p>
                                         {play.hp_proof_point_detail && (
                                           <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-amber-700">
-                                            <span className="font-semibold">{play.hp_proof_point_detail.customer}</span>
-                                            {play.hp_proof_point_detail.industry && (
+                                            {hasValue(play.hp_proof_point_detail.customer) && <span className="font-semibold">{play.hp_proof_point_detail.customer}</span>}
+                                            {hasValue(play.hp_proof_point_detail.industry) && (
                                               <span>{play.hp_proof_point_detail.industry}</span>
                                             )}
                                             {/* `hp_product` is deliberately NOT shown - see the
@@ -4205,44 +4196,7 @@ export default function UserDashboardPage() {
                               );
                             })}
                           </div>
-                        ) : !SHOW_EMPTY_STATE_NOTICES ? null : (
-                          /* Inferred TBD Placeholder State */
-                          <div className="space-y-4">
-                            {[
-                              { key: 'workstation', name: 'Z by HP Workstations', group: 'WORKSTATION' },
-                              { key: 'poly', name: 'Poly collaboration hardware', group: 'POLY' },
-                              { key: 'pc', name: 'HP Elite & Pro PCs', group: 'PC' },
-                              { key: 'print', name: 'HP Enterprise Printing & Managed Print Services', group: 'PRINT' },
-                              { key: '3d', name: 'HP Multi Jet Fusion (3D)', group: '3D' }
-                            ].map((play) => (
-                              <div key={play.key} className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-4">
-                                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                                  <div className="flex items-center space-x-3">
-                                    <h4 className="text-base font-extrabold text-slate-900">{play.name}</h4>
-                                    <span className="text-[10px] font-mono text-slate-400 bg-slate-100 px-2 py-0.5 rounded uppercase">
-                                      {play.group}
-                                    </span>
-                                  </div>
-                                  <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200">
-                                    Inferred TBD
-                                  </span>
-                                </div>
-
-                                <div className="bg-amber-50/60 border border-amber-200/80 rounded-xl p-6 text-center space-y-2">
-                                  <div className="w-8 h-8 rounded-full bg-amber-100 text-amber-800 flex items-center justify-center mx-auto border border-amber-300">
-                                    <Sparkles className="w-4 h-4 text-amber-600" />
-                                  </div>
-                                  <h5 className="text-xs font-black text-amber-900 uppercase tracking-wider">
-                                    Opportunity Narrative Play Generation — Inferred TBD
-                                  </h5>
-                                  <p className="text-[11px] text-amber-800 max-w-md mx-auto leading-relaxed">
-                                    The business outcome and the recommended HP product family for <strong className="text-amber-950">{play.name}</strong> will be generated automatically when account datasets are uploaded.
-                                  </p>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
+                        ) : null}
                       </div>
 
                       {/* HP services the account's evidence earns, from the HP 220
@@ -4277,9 +4231,11 @@ export default function UserDashboardPage() {
                                         {play.rule_label}
                                       </span>
                                     )}
-                                    <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                                      {play.opportunity_type}
-                                    </span>
+                                    {hasValue(play.opportunity_type) && (
+                                      <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                                        {play.opportunity_type}
+                                      </span>
+                                    )}
                                     {play.selection === 'secondary' && (
                                       <span className="text-[10px] font-semibold text-slate-500">
                                         second play &middot; separate evidence
@@ -4352,7 +4308,7 @@ export default function UserDashboardPage() {
                             <div key={area.play_key || i} className="bg-slate-50 rounded-xl border border-dashed border-slate-300 p-4 space-y-2.5">
                               <div className="flex flex-wrap items-start justify-between gap-2">
                                 <p className="text-sm font-semibold text-slate-700">{area.title}</p>
-                                {area.priority && (
+                                {hasValue(area.priority) && (
                                   <span className="text-[11px] font-semibold text-slate-600 bg-white border border-slate-200 px-2 py-0.5 rounded flex-shrink-0">
                                     {area.priority}
                                   </span>
@@ -4413,7 +4369,7 @@ export default function UserDashboardPage() {
                   const departmentGroups: any[] = influenceData.department_groups || [];
 
                   // Filter option lists are derived from the data, never hardcoded.
-                  const uniq = (vals: any[]) => Array.from(new Set(vals.filter(Boolean))).sort() as string[];
+                  const uniq = (vals: any[]) => Array.from(new Set(vals.filter((v: any) => hasValue(v)))).sort() as string[];
                   const seniorityOptions = uniq(contactsList.map(c => c.seniority_band));
                   const departmentOptions = uniq(contactsList.map(c => c.normalized_department));
 
@@ -4448,6 +4404,8 @@ export default function UserDashboardPage() {
                     (name || '?').split(' ').filter(Boolean).map(n => n[0]).join('').substring(0, 2).toUpperCase();
 
                   const linkedinHref = (url: string) => url.startsWith('http') ? url : `https://${url}`;
+                  // A contact field that arrived as a gap token renders nothing.
+                  const val = (v: any): string => (hasValue(v) ? String(v) : '');
 
                   const seniorityBadge: Record<string, string> = {
                     'C-Suite': 'bg-purple-100 text-purple-700',
@@ -4469,12 +4427,12 @@ export default function UserDashboardPage() {
                                     {/* Identity */}
                                     <div className="flex items-start gap-3">
                                       <div className="w-10 h-10 rounded-full bg-sky-50 text-hp-navy flex items-center justify-center text-xs font-bold flex-shrink-0">
-                                        {initialsOf(c.full_name)}
+                                        {initialsOf(val(c.full_name))}
                                       </div>
                                       <div className="min-w-0 flex-1">
                                         <div className="flex items-center gap-1.5">
-                                          <h5 className="text-sm font-bold text-slate-900 truncate">{c.full_name}</h5>
-                                          {c.linkedin_url && (
+                                          {val(c.full_name) && <h5 className="text-sm font-bold text-slate-900 truncate">{c.full_name}</h5>}
+                                          {val(c.linkedin_url) && (
                                             <a href={linkedinHref(c.linkedin_url)} target="_blank" rel="noreferrer"
                                                title="Open LinkedIn profile"
                                                className="text-slate-400 hover:text-hp-navy flex-shrink-0">
@@ -4482,36 +4440,44 @@ export default function UserDashboardPage() {
                                             </a>
                                           )}
                                         </div>
-                                        <p className="text-xs text-slate-500 font-normal leading-snug" title={c.title_original ? `As listed: ${c.title_original}` : undefined}>{c.title || NOT_DISCLOSED}</p>
-                                        <p className="text-[11px] text-slate-400 font-normal">{c.normalized_department}</p>
+                                        {/* A contact with no name shows its title as the name
+                                            (name_is_title); it is not repeated below. */}
+                                        {val(c.title) && !c.name_is_title && (
+                                          <p className="text-xs text-slate-500 font-normal leading-snug" title={val(c.title_original) ? `As listed: ${c.title_original}` : undefined}>{c.title}</p>
+                                        )}
+                                        {val(c.normalized_department) && (
+                                          <p className="text-[11px] text-slate-400 font-normal">{c.normalized_department}</p>
+                                        )}
                                       </div>
                                     </div>
 
                                     {/* Badges */}
-                                    <div className="flex flex-wrap gap-1.5">
-                                      {renderBadges(c)}
-                                    </div>
+                                    {val(c.seniority_band) && (
+                                      <div className="flex flex-wrap gap-1.5">
+                                        {renderBadges(c)}
+                                      </div>
+                                    )}
 
                                     {/* Contact details */}
-                                    {(c.email || c.phone || c.contact_location) && (
+                                    {(val(c.email) || val(c.phone) || val(c.contact_location)) && (
                                     <div className="border-t border-slate-100 pt-3 space-y-1.5 text-xs">
-                                      {c.email && (
+                                      {val(c.email) && (
                                         <div className="flex items-center gap-2 min-w-0">
                                           <Mail className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
                                           <a href={`mailto:${c.email}`} className="text-hp-navy font-medium truncate hover:underline">{c.email}</a>
                                           <EmailTag email={c.email} status={c.email_status} />
                                         </div>
                                       )}
-                                      {(c.phone || c.contact_location) && (
+                                      {(val(c.phone) || val(c.contact_location)) && (
                                         <div className="flex items-center gap-2 flex-wrap">
-                                          {c.phone && (
+                                          {val(c.phone) && (
                                             <>
                                               <Phone className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
                                               <span className="text-slate-700 font-normal">{c.phone}</span>
                                               <PhoneTag phone={c.phone} lineType={c.phone_line_type} />
                                             </>
                                           )}
-                                          {c.contact_location && (
+                                          {val(c.contact_location) && (
                                             <span className="text-[10px] font-medium text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">{c.contact_location}</span>
                                           )}
                                         </div>
@@ -4520,25 +4486,23 @@ export default function UserDashboardPage() {
                                     )}
 
                                     {/* How to open */}
-                                    {tp.how_to_open ? (
+                                    {val(tp.how_to_open) && (
                                       <div className="bg-sky-50/70 border border-sky-100 rounded-lg p-3 space-y-1">
                                         <span className="text-[11px] font-semibold text-hp-navy uppercase tracking-wider block">How to open</span>
                                         <p className="text-xs text-slate-700 font-normal leading-relaxed">{tp.how_to_open}</p>
                                       </div>
-                                    ) : (
-                                      <p className="text-[11px] text-slate-400">{NO_SIGNAL}</p>
                                     )}
 
                                     {/* Label / value rows */}
-                                    {(tp.hp_play_focus || tp.decision_power) && (
+                                    {(val(tp.hp_play_focus) || val(tp.decision_power)) && (
                                       <div className="space-y-1.5">
-                                        {tp.hp_play_focus && (
+                                        {val(tp.hp_play_focus) && (
                                           <div className="flex gap-2">
                                             <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider w-24 flex-shrink-0 pt-0.5">HP play focus:</span>
                                             <span className="text-xs text-slate-700 font-normal leading-relaxed">{tp.hp_play_focus}</span>
                                           </div>
                                         )}
-                                        {tp.decision_power && (
+                                        {val(tp.decision_power) && (
                                           <div className="flex gap-2">
                                             <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider w-24 flex-shrink-0 pt-0.5">Decision power:</span>
                                             <span className="text-xs text-slate-700 font-normal leading-relaxed">{tp.decision_power}</span>
@@ -4547,11 +4511,11 @@ export default function UserDashboardPage() {
                                       </div>
                                     )}
 
-                                    {Array.isArray(tp.pain_points) && tp.pain_points.length > 0 && (
+                                    {Array.isArray(tp.pain_points) && tp.pain_points.some((p: any) => hasValue(p)) && (
                                       <div className="space-y-1">
                                         <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">Potential pain points <span className="normal-case font-normal">(inferred)</span></span>
                                         <ul className="space-y-0.5">
-                                          {tp.pain_points.map((p: string, i: number) => (
+                                          {tp.pain_points.filter((p: any) => hasValue(p)).map((p: string, i: number) => (
                                             <li key={i} className="text-[11px] text-slate-600 font-normal flex gap-1.5">
                                               <span className="text-red-400 flex-shrink-0">&bull;</span>
                                               <span>{p}</span>
@@ -4615,23 +4579,23 @@ export default function UserDashboardPage() {
                   // Email / phone block, shared by the expandable card once revealed.
                   const renderContactLines = (c: any) => (
                     <div className="space-y-1 text-xs">
-                      {c.email && (
+                      {val(c.email) && (
                         <p className="text-slate-600 font-normal flex items-center gap-1.5 flex-wrap">
                           <span className="text-slate-500">Email: </span>
                           <a href={`mailto:${c.email}`} className="text-hp-navy font-medium hover:underline">{c.email}</a>
                           <EmailTag email={c.email} status={c.email_status} />
                         </p>
                       )}
-                      {(c.phone || c.contact_location) && (
+                      {(val(c.phone) || val(c.contact_location)) && (
                         <p className="text-slate-600 font-normal flex items-center gap-1.5 flex-wrap">
-                          {c.phone && (
+                          {val(c.phone) && (
                             <>
                               <span className="text-slate-500">Phone: </span>
                               <span>{c.phone}</span>
                               <PhoneTag phone={c.phone} lineType={c.phone_line_type} />
                             </>
                           )}
-                          {c.contact_location && (
+                          {val(c.contact_location) && (
                             <span className="text-[10px] font-medium text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">{c.contact_location}</span>
                           )}
                         </p>
@@ -4645,9 +4609,10 @@ export default function UserDashboardPage() {
                     const isOpen = expandedContacts[c.contact_id] || false;
                     const isRevealed = revealedContacts[c.contact_id] || false;
                     const bullets: string[] = [];
-                    if (tp.how_to_open) bullets.push(tp.how_to_open);
-                    if (tp.hp_play_focus) bullets.push(`HP play focus: ${tp.hp_play_focus}`);
-                    if (tp.decision_power) bullets.push(`Decision power: ${tp.decision_power}`);
+                    if (val(tp.how_to_open)) bullets.push(tp.how_to_open);
+                    if (val(tp.hp_play_focus)) bullets.push(`HP play focus: ${tp.hp_play_focus}`);
+                    if (val(tp.decision_power)) bullets.push(`Decision power: ${tp.decision_power}`);
+                    const hasContactLines = !!(val(c.email) || val(c.phone) || val(c.contact_location));
 
                     return (
                       <div key={c.contact_id} className="bg-white rounded-xl border border-slate-200 overflow-hidden">
@@ -4657,20 +4622,30 @@ export default function UserDashboardPage() {
                           className="w-full flex items-center gap-3 p-4 text-left hover:bg-slate-50/60 transition"
                         >
                           <div className="w-9 h-9 rounded-full bg-slate-100 text-slate-600 flex items-center justify-center text-[11px] font-semibold flex-shrink-0">
-                            {initialsOf(c.full_name)}
+                            {initialsOf(val(c.full_name))}
                           </div>
                           <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-sm font-bold text-slate-900">{c.full_name}</span>
+                            {val(c.full_name) && (
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-sm font-bold text-slate-900">{c.full_name}</span>
+                              </div>
+                            )}
+                            {/* The title is the name already when there is no name
+                                (name_is_title), so it is not repeated here. */}
+                            {((val(c.title) && !c.name_is_title) || val(c.normalized_department)) && (
+                              <p className="text-xs text-slate-500 font-normal leading-snug">
+                                {val(c.title) && !c.name_is_title && <span title={val(c.title_original) ? `As listed: ${c.title_original}` : undefined}>{c.title}</span>}
+                                {val(c.title) && !c.name_is_title && val(c.normalized_department) && <> &middot; </>}
+                                {val(c.normalized_department) && <span className="text-slate-400">{c.normalized_department}</span>}
+                              </p>
+                            )}
+                          </div>
+                          {val(c.seniority_band) && (
+                            <div className="hidden sm:flex items-center gap-1.5 flex-wrap justify-end flex-shrink-0">
+                              {renderBadges(c)}
                             </div>
-                            <p className="text-xs text-slate-500 font-normal leading-snug">
-                              <span title={c.title_original ? `As listed: ${c.title_original}` : undefined}>{c.title || NOT_DISCLOSED}</span> &middot; <span className="text-slate-400">{c.normalized_department}</span>
-                            </p>
-                          </div>
-                          <div className="hidden sm:flex items-center gap-1.5 flex-wrap justify-end flex-shrink-0">
-                            {renderBadges(c)}
-                          </div>
-                          {c.linkedin_url && (
+                          )}
+                          {val(c.linkedin_url) && (
                             <a
                               href={linkedinHref(c.linkedin_url)}
                               target="_blank"
@@ -4689,7 +4664,7 @@ export default function UserDashboardPage() {
 
                         {isOpen && (
                           <div className="border-t border-slate-100 bg-slate-50/50 px-4 py-3 space-y-3">
-                            {bullets.length > 0 ? (
+                            {bullets.length > 0 && (
                               <div className="space-y-1.5">
                                 <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">Talking points</span>
                                 <ul className="space-y-1">
@@ -4701,15 +4676,13 @@ export default function UserDashboardPage() {
                                   ))}
                                 </ul>
                               </div>
-                            ) : (
-                              <p className="text-[11px] text-slate-400">{NO_SIGNAL}</p>
                             )}
 
-                            {Array.isArray(tp.pain_points) && tp.pain_points.length > 0 && (
+                            {Array.isArray(tp.pain_points) && tp.pain_points.some((p: any) => hasValue(p)) && (
                               <div className="space-y-1">
                                 <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">Potential pain points <span className="normal-case font-normal text-slate-400">(inferred)</span></span>
                                 <ul className="space-y-0.5">
-                                  {tp.pain_points.map((p: string, i: number) => (
+                                  {tp.pain_points.filter((p: any) => hasValue(p)).map((p: string, i: number) => (
                                     <li key={i} className="text-xs text-slate-600 font-normal flex gap-2">
                                       <span className="text-red-400 flex-shrink-0">&bull;</span>
                                       <span>{p}</span>
@@ -4719,7 +4692,7 @@ export default function UserDashboardPage() {
                               </div>
                             )}
 
-                            {isRevealed ? renderContactLines(c) : (
+                            {!hasContactLines ? null : isRevealed ? renderContactLines(c) : (
                               <button
                                 type="button"
                                 onClick={() => setRevealedContacts(prev => ({ ...prev, [c.contact_id]: true }))}
@@ -4736,8 +4709,6 @@ export default function UserDashboardPage() {
 
                   return (
                     <div className="space-y-6 animate-fade-in">
-                      <PendingNotice widget={talkingWidget} title="Talking points unavailable" />
-
                       {/* Header */}
                       <div data-tour="stakeholder-header" className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 border-b border-slate-200 pb-4">
                         <div>
@@ -4745,10 +4716,13 @@ export default function UserDashboardPage() {
                             <Users className="w-5 h-5 text-hp-navy" />
                             <span>Stakeholder Map</span>
                           </h3>
-                          <p className="text-sm text-slate-500 mt-0.5">
-                            {contactsList.length} contact{contactsList.length === 1 ? '' : 's'} identified for {selectedAccount?.name}
-                          </p>
+                          {contactsList.length > 0 && (
+                            <p className="text-sm text-slate-500 mt-0.5">
+                              {contactsList.length} contact{contactsList.length === 1 ? '' : 's'} identified for {selectedAccount?.name}
+                            </p>
+                          )}
                         </div>
+                        {contactsList.length > 0 && (
                         <button data-tour="stakeholder-export"
                           type="button"
                           onClick={handleExportCsv}
@@ -4758,8 +4732,11 @@ export default function UserDashboardPage() {
                           <FileSpreadsheet className="w-3.5 h-3.5" />
                           <span>Export CSV</span>
                         </button>
+                        )}
                       </div>
 
+                      {/* No contacts: the body stays blank (client, 21 Oct). */}
+                      {contactsList.length > 0 && (<>
                       {/* Filters */}
                       <div data-tour="stakeholder-filters" className="flex flex-wrap items-center gap-2">
                         <div className="relative flex-1 min-w-[220px]">
@@ -4862,7 +4839,7 @@ export default function UserDashboardPage() {
                                       onClick={() => setExpandedDepts(prev => ({ ...prev, [g.department]: !prev[g.department] }))}
                                       className="flex items-center gap-2 text-left group"
                                     >
-                                      <h5 className="text-sm font-bold text-slate-800 group-hover:text-hp-navy transition">{g.department}</h5>
+                                      <h5 className="text-sm font-bold text-slate-800 group-hover:text-hp-navy transition">{hasValue(g.department) ? g.department : 'Other'}</h5>
                                       <span className="text-[11px] font-normal text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
                                         {members.length} contact{members.length === 1 ? '' : 's'}
                                       </span>
@@ -4884,21 +4861,28 @@ export default function UserDashboardPage() {
                         </div>
 
                       {/* Department distribution, straight from the uploaded file */}
+                      {(() => {
+                        const deptEntries = Object.entries(deptDist).filter(([dept]) => hasValue(dept));
+                        if (deptEntries.length === 0) return null;
+                        return (
                       <div className="bg-white rounded-xl border border-slate-200 shadow-xs p-4 space-y-2">
                         <div className="flex items-center justify-between">
                           <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-                            Raw department distribution ({Object.keys(deptDist).length})
+                            Raw department distribution ({deptEntries.length})
                           </h4>
                           {getClassificationBadge('deterministic')}
                         </div>
                         <div className="flex flex-wrap gap-1.5">
-                          {Object.entries(deptDist).map(([dept, count]: [string, any]) => (
+                          {deptEntries.map(([dept, count]: [string, any]) => (
                             <span key={dept} className="text-[11px] font-medium text-slate-600 bg-slate-50 border border-slate-200 px-2 py-0.5 rounded-full">
                               {dept} <span className="text-slate-400">{count}</span>
                             </span>
                           ))}
                         </div>
                       </div>
+                        );
+                      })()}
+                      </>)}
 
                     </div>
                   );
@@ -4958,7 +4942,7 @@ export default function UserDashboardPage() {
                                 subset a rule matched into the HP categories below. They are
                                 not equal - saying so here stops a reader assuming the cards
                                 account for the whole stack. */}
-                            {mapData.total_detected_technologies == null ? NO_SIGNAL : <>{mapData.total_detected_technologies} technologies detected in {selectedAccount?.name || 'Target Account'}&apos;s technographics export</>}
+                            {mapData.total_detected_technologies != null && <>{mapData.total_detected_technologies} technologies detected in {selectedAccount?.name || 'Target Account'}&apos;s technographics export</>}
                             {typeof mapData.mapped_signal_count === 'number' && mapData.total_detected_technologies != null && (
                               <> &middot; {mapData.mapped_signal_count} map to the {mapData.total_categories ?? 7} HP categories below</>
                             )}
@@ -4983,7 +4967,10 @@ export default function UserDashboardPage() {
 
                       {/* Technographic Map Content View */}
                       <div className="space-y-6">
-                          {/* STRATEGIC READ Banner */}
+                          {/* STRATEGIC READ Banner - not rendered when the account has
+                              no technology data at all (client, 21 Oct). */}
+                          {(categoriesList.length > 0 || mapData.total_detected_technologies != null
+                            || hasValue(mapData.strategic_read) || hpRecs.length > 0) && (
                           <div data-tour="tech-read" className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
                             <div className="flex items-center justify-between">
                               <span className="text-[10px] font-mono font-extrabold uppercase tracking-widest text-slate-400">
@@ -5023,8 +5010,11 @@ export default function UserDashboardPage() {
                             )}
 
 
-                            {/* 4 Stat Cards */}
+                            {/* 4 Stat Cards - a tile with no value is not rendered. */}
+                            {(mapData.total_detected_technologies != null || mapData.hp_mapped_categories != null
+                              || mapData.whitespace_categories != null) && (
                             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
+                              {mapData.total_detected_technologies != null && (
                               <div className="bg-slate-50/80 p-3.5 rounded-xl border border-slate-200 space-y-1">
                                 {/* Relabelled: this is the whole export, not the subset the
                                     category cards below count. The tile beside it carries
@@ -5037,26 +5027,33 @@ export default function UserDashboardPage() {
                                     (see tech_landscape.py: "No hardcoded fallback"); an
                                     absent value now reads as absent. */}
                                 <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider block">TECHNOLOGIES IN EXPORT</span>
-                                <div className="text-xl font-black font-mono text-slate-900">{mapData.total_detected_technologies ?? <span className="text-xs font-normal font-sans text-slate-400">{NO_SIGNAL}</span>}</div>
+                                <div className="text-xl font-black font-mono text-slate-900">{mapData.total_detected_technologies}</div>
                               </div>
+                              )}
+                              {typeof mapData.mapped_signal_count === 'number' && typeof mapData.total_detected_technologies === 'number' && (
                               <div className="bg-slate-50/80 p-3.5 rounded-xl border border-slate-200 space-y-1">
                                 <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider block">MAPPED TO HP CATEGORIES</span>
                                 <div className="text-xl font-black font-mono text-slate-900">
-                                  {typeof mapData.mapped_signal_count === 'number' && typeof mapData.total_detected_technologies === 'number'
-                                    ? `${mapData.mapped_signal_count}/${mapData.total_detected_technologies}`
-                                    : <span className="text-xs font-normal font-sans text-slate-400">{NO_SIGNAL}</span>}
+                                  {`${mapData.mapped_signal_count}/${mapData.total_detected_technologies}`}
                                 </div>
                               </div>
+                              )}
+                              {mapData.hp_mapped_categories != null && (
                               <div className="bg-blue-50/60 p-3.5 rounded-xl border border-blue-200/80 space-y-1">
                                 <span className="text-[10px] font-extrabold text-blue-800 uppercase tracking-wider block">HP-MAPPED CATEGORIES</span>
-                                <div className="text-xl font-black font-mono text-hp-navy">{mapData.hp_mapped_categories ?? <span className="text-xs font-normal font-sans text-slate-400">{NO_SIGNAL}</span>}</div>
+                                <div className="text-xl font-black font-mono text-hp-navy">{mapData.hp_mapped_categories}</div>
                               </div>
+                              )}
+                              {mapData.whitespace_categories != null && (
                               <div className="bg-emerald-50/60 p-3.5 rounded-xl border border-emerald-200/80 space-y-1">
                                 <span className="text-[10px] font-extrabold text-emerald-800 uppercase tracking-wider block">WHITESPACE CATEGORIES</span>
-                                <div className="text-xl font-black font-mono text-emerald-700">{mapData.whitespace_categories ?? <span className="text-xs font-normal font-sans text-slate-400">{NO_SIGNAL}</span>}</div>
+                                <div className="text-xl font-black font-mono text-emerald-700">{mapData.whitespace_categories}</div>
                               </div>
+                              )}
                             </div>
+                            )}
                           </div>
+                          )}
 
                           {/* Category Blocks List */}
                           <div data-tour="tech-categories" className="space-y-6">
@@ -5128,14 +5125,16 @@ export default function UserDashboardPage() {
                                           <div>
                                             <div className="flex items-center justify-between gap-2 border-b border-emerald-200/60 pb-2 mb-2">
                                               <h5 className="text-xs font-black text-slate-900">{vendor.vendor_name}</h5>
-                                              <span className="inline-flex items-center gap-0.5">
-                                                <span className="text-[10px] font-extrabold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-300">
-                                                  {vendor.risk_level}
+                                              {hasValue(vendor.risk_level) && (
+                                                <span className="inline-flex items-center gap-0.5">
+                                                  <span className="text-[10px] font-extrabold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-300">
+                                                    {vendor.risk_level}
+                                                  </span>
+                                                  <ScoreInfo topic="techRisk" align="right" />
                                                 </span>
-                                                <ScoreInfo topic="techRisk" align="right" />
-                                              </span>
+                                              )}
                                             </div>
-                                            <p className="text-xs text-slate-600 font-medium">{vendor.description}</p>
+                                            {hasValue(vendor.description) && <p className="text-xs text-slate-600 font-medium">{vendor.description}</p>}
 
                                             {vendor.hp_play && (
                                               <div className="mt-3 bg-white border border-emerald-200 rounded-xl p-2.5 text-xs text-emerald-900 font-semibold space-y-0.5 shadow-sm">
@@ -5157,10 +5156,10 @@ export default function UserDashboardPage() {
                                           {/* No footer when there is nothing to name:
                                               the whitespace status ('Unknown') and its
                                               reason stay internal (21 Oct). */}
-                                          {(vendor.provenance || (vendor.detection_status && vendor.detection_status !== 'Unknown')) && (
+                                          {(hasValue(vendor.provenance) || hasValue(vendor.detection_status)) && (
                                             <div className="text-[9px] font-mono uppercase tracking-wider text-slate-400 border-t border-emerald-200/60 pt-2 flex items-center justify-between">
-                                              <span className="truncate pr-2">{vendor.provenance}</span>
-                                              {vendor.detection_status && vendor.detection_status !== 'Unknown' && (
+                                              <span className="truncate pr-2">{hasValue(vendor.provenance) ? vendor.provenance : ''}</span>
+                                              {hasValue(vendor.detection_status) && (
                                                 <span className="font-bold text-slate-500">{vendor.detection_status}</span>
                                               )}
                                             </div>
@@ -5176,7 +5175,7 @@ export default function UserDashboardPage() {
                                             <h5 className="text-xs font-black text-slate-900">{vendor.vendor_name}</h5>
                                             <div>
                                               <div className="flex items-center gap-1.5">
-                                                {vendor.risk_level && (
+                                                {hasValue(vendor.risk_level) && (
                                                   <span
                                                     className={`text-[10px] font-extrabold px-2 py-0.5 rounded-md border ${
                                                       vendor.risk_level === 'High risk'
@@ -5189,21 +5188,21 @@ export default function UserDashboardPage() {
                                                     {vendor.risk_level}
                                                   </span>
                                                 )}
-                                                {vendor.hp_relationship_label && (
+                                                {hasValue(vendor.hp_relationship_label) && (
                                                   <span
                                                     className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200"
                                                   >
                                                     {vendor.hp_relationship_label}
                                                   </span>
                                                 )}
-                                                {(vendor.risk_level || vendor.hp_relationship_label) && (
+                                                {(hasValue(vendor.risk_level) || hasValue(vendor.hp_relationship_label)) && (
                                                   <ScoreInfo topic="techRisk" align="right" />
                                                 )}
                                               </div>
                                             </div>
                                           </div>
 
-                                          <p className="text-xs text-slate-500 font-medium">{vendor.description}</p>
+                                          {hasValue(vendor.description) && <p className="text-xs text-slate-500 font-medium">{vendor.description}</p>}
 
                                           {vendor.hp_play && (
                                             <div className="mt-3 bg-blue-50/80 border border-blue-200/80 rounded-xl p-2.5 text-xs text-hp-navy font-semibold space-y-0.5">
@@ -5249,8 +5248,9 @@ export default function UserDashboardPage() {
                                           )}
                                         </div>
 
+                                        {(hasValue(vendor.provenance) || hasValue(vendor.detection_status)) && (
                                         <div className="text-[9px] font-mono uppercase tracking-wider text-slate-400 border-t border-slate-100 pt-2 flex items-center justify-between">
-                                          <span className="truncate pr-2">{vendor.provenance}</span>
+                                          <span className="truncate pr-2">{hasValue(vendor.provenance) ? vendor.provenance : ''}</span>
                                           {/* Was the Tech Landscape confidence percentage.
                                               The client, 27 Sep: "I would stay away from
                                               this, hence, let's drop the confidence score."
@@ -5258,13 +5258,16 @@ export default function UserDashboardPage() {
                                               named this vendor, which is the whitespace
                                               card's footer too. The score is still computed
                                               - it decides which cards exist at all. */}
-                                          <span
-                                            className="font-bold text-slate-500 whitespace-nowrap"
-                                            title={vendor.evidence_basis || undefined}
-                                          >
-                                            {vendor.detection_status}
-                                          </span>
+                                          {hasValue(vendor.detection_status) && (
+                                            <span
+                                              className="font-bold text-slate-500 whitespace-nowrap"
+                                              title={hasValue(vendor.evidence_basis) ? vendor.evidence_basis : undefined}
+                                            >
+                                              {vendor.detection_status}
+                                            </span>
+                                          )}
                                         </div>
+                                        )}
                                       </div>
                                     );
                                   })}
@@ -5460,17 +5463,17 @@ export default function UserDashboardPage() {
                                           className={`rounded-lg border px-3 py-2.5 space-y-1.5 ${t.hp ? 'border-blue-200 bg-white' : 'border-slate-200 bg-white'}`}>
                                           <div className="flex items-start justify-between gap-2">
                                             <span className="text-sm font-semibold text-slate-900 leading-tight">{t.name}</span>
-                                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-50 text-slate-500 border border-slate-200 whitespace-nowrap">{t.source}</span>
+                                            {hasValue(t.source) && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-50 text-slate-500 border border-slate-200 whitespace-nowrap">{t.source}</span>}
                                           </div>
                                           {t.hp && (
                                             <>
                                               <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-slate-100">
-                                                {t.hp.risk_level && (
+                                                {hasValue(t.hp.risk_level) && (
                                                   <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${riskChip(t.hp.risk_level)}`}>{t.hp.risk_level}</span>
                                                 )}
                                                 <span className="text-[11px] font-semibold text-hp-navy">{t.hp.hp_play}</span>
                                               </div>
-                                              {t.hp.reason && (
+                                              {hasValue(t.hp.reason) && (
                                                 <p className="text-[11px] text-slate-500 leading-snug">{t.hp.reason}</p>
                                               )}
                                             </>
@@ -5604,10 +5607,9 @@ export default function UserDashboardPage() {
                   // run sat on "Evaluating..." indefinitely. The server keeps going
                   // after this fires and stores what it finishes - hence the wording.
                   const EVALUATOR_TIMEOUT_MS = 240000;
-                  const evaluatorErrorText = (err: any, fallback: string) =>
-                    err?.code === 'ECONNABORTED'
-                      ? 'This is taking longer than expected. It may still finish - look under Previous evaluations in a minute, or try again.'
-                      : (err?.response?.data?.detail || err?.message || fallback);
+                  // Never the server's detail or err.message (client, 21 Oct): the
+                  // api client logs the failure; the seller sees one neutral line.
+                  const evaluatorErrorText = (_err: any) => ACTION_ERROR_MESSAGE;
 
                   const refreshHistory = async () => {
                     try {
@@ -5639,7 +5641,9 @@ export default function UserDashboardPage() {
                       setEvaluatorStep('scores');
                       refreshHistory();
                     } catch (err: any) {
-                      setEvalError(evaluatorErrorText(err, 'Evaluation failed.'));
+                      // null: the retry runs the current inputs, not a stale copy.
+                      evalRetryRef.current = null;
+                      setEvalError(evaluatorErrorText(err));
                     } finally {
                       setIsEvaluating(false);
                     }
@@ -5662,7 +5666,7 @@ export default function UserDashboardPage() {
                       );
                       setEvaluation(res.data);
                     } catch (err: any) {
-                      setRewriteError(evaluatorErrorText(err, 'Rewrite failed.'));
+                      setRewriteError(evaluatorErrorText(err));
                       // The server has cleared the stored rewrite; so must the page.
                       // The previous rewrite used to stay on screen under the error,
                       // with Copy and "Evaluate the rewrite" still working on it.
@@ -5692,7 +5696,8 @@ export default function UserDashboardPage() {
                       setEvalError(null);
                       setEvaluatorStep('scores');
                     } catch {
-                      setEvalError("That evaluation couldn't be opened. Try again.");
+                      evalRetryRef.current = () => { loadPrevious(fingerprint); };
+                      setEvalError(ACTION_ERROR_MESSAGE);
                     }
                   };
 
@@ -5752,9 +5757,9 @@ export default function UserDashboardPage() {
                         {evaluation && (
                           <div className="pl-12">
                             <span
-                              title={`Evaluation ${evaluation.version} for this persona on this account. ${evaluation.composite_available ? `Overall score ${evaluation.composite} out of 100.` : 'No overall score.'}`}
-                              className={`inline-block rounded-full border px-3 py-1 text-xs font-semibold ${scoreBadge(evaluation.composite)}`}>
-                              Evaluation {evaluation.version} &middot; {evaluation.composite_available ? `score ${evaluation.composite}` : 'no overall score'}
+                              title={`Evaluation ${evaluation.version} for this persona on this account.${evaluation.composite_available ? ` Overall score ${evaluation.composite} out of 100.` : ''}`}
+                              className={`inline-block rounded-full border px-3 py-1 text-xs font-semibold ${scoreBadge(evaluation.composite_available ? evaluation.composite : null)}`}>
+                              Evaluation {evaluation.version}{evaluation.composite_available ? <> &middot; {`score ${evaluation.composite}`}</> : null}
                             </span>
                           </div>
                         )}
@@ -5787,14 +5792,25 @@ export default function UserDashboardPage() {
                       </div>
 
                       {evalError && (
-                        <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs font-semibold text-rose-700">
-                          {evalError}
+                        <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs font-semibold text-rose-700 flex items-center justify-between gap-3">
+                          <span>{evalError}</span>
+                          <button type="button"
+                            onClick={() => { setEvalError(null); (evalRetryRef.current || runEvaluation)(); }}
+                            disabled={isEvaluating}
+                            className="shrink-0 rounded-lg bg-rose-600 px-3 py-1.5 text-white disabled:opacity-50">
+                            Try again
+                          </button>
                         </div>
                       )}
 
                       {evalOptionsError && (
-                        <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs font-semibold text-rose-700">
-                          {evalOptionsError}
+                        <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs font-semibold text-rose-700 flex items-center justify-between gap-3">
+                          <span>{evalOptionsError}</span>
+                          <button type="button"
+                            onClick={() => { setEvalOptionsError(null); setEvalOptions(null); setEvalOptionsReload(n => n + 1); }}
+                            className="shrink-0 rounded-lg bg-rose-600 px-3 py-1.5 text-white">
+                            Try again
+                          </button>
                         </div>
                       )}
 
@@ -5802,21 +5818,12 @@ export default function UserDashboardPage() {
                           one of these used to read "No signal observed" in the place the
                           missing thing would have been, which told the seller nothing. */}
                       {evaluation && evaluatorStep !== 'inputs' && (() => {
-                        const notes: string[] = [];
-                        if (evaluation.ai_available === false) {
-                          notes.push('AI scoring was unavailable when this message was evaluated, so it has no scores yet.');
-                        } else if ((evaluation.dimension_problems || []).length > 0) {
-                          notes.push('AI scoring was incomplete, so there is no overall score. The scores that did come back are shown.');
-                        }
-                        if ((evaluation.dimensions_padded || []).length > 0) {
-                          notes.push(`The AI returned no score for ${evaluation.dimensions_padded.map((d: string) => MESSAGE_LABELS[d] || d.replace(/_/g, ' ')).join(', ')}. It is counted as 50 in the overall score.`);
-                        }
-                        if (evaluation.mode === 'DEEP' && evaluation.ai_available !== false
-                          && !evaluation.reaction && (evaluation.reaction_withheld || []).length > 0) {
-                          notes.push("A simulated reaction couldn't be produced for this message.");
-                        }
+                        // Which parts of the scoring did not come back stays in the
+                        // evaluation record; the seller sees the neutral line and a
+                        // retry, never a list of faults (client, 21 Oct).
                         const retryable = evaluation.ai_available === false
                           || (evaluation.dimension_problems || []).length > 0;
+                        const notes: string[] = retryable ? [ACTION_ERROR_MESSAGE] : [];
                         if (evaluationOutdated) {
                           return (
                             <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-semibold text-amber-800 flex items-center justify-between gap-3">
@@ -6003,10 +6010,10 @@ export default function UserDashboardPage() {
                               <div>
                                 <p className="text-sm font-semibold text-slate-700 mb-1.5">Role</p>
                                 <ul className="space-y-1 text-xs text-slate-600">
-                                  <li>&ndash; {chosenPersona.title}</li>
-                                  {chosenPersona.department && <li>&ndash; Department: {chosenPersona.department}</li>}
-                                  {chosenPersona.seniority_band && <li>&ndash; Seniority: {chosenPersona.seniority_band}</li>}
-                                  {chosenPersona.influence_type && <li>&ndash; Influence: {chosenPersona.influence_type}</li>}
+                                  {hasValue(chosenPersona.title) && <li>&ndash; {chosenPersona.title}</li>}
+                                  {hasValue(chosenPersona.department) && <li>&ndash; Department: {chosenPersona.department}</li>}
+                                  {hasValue(chosenPersona.seniority_band) && <li>&ndash; Seniority: {chosenPersona.seniority_band}</li>}
+                                  {hasValue(chosenPersona.influence_type) && <li>&ndash; Influence: {chosenPersona.influence_type}</li>}
                                 </ul>
                               </div>
 
@@ -6031,22 +6038,21 @@ export default function UserDashboardPage() {
                                 );
                               })}
 
+                              {(evalOptions.account_context?.triggers || []).length > 0 && (
                               <div>
                                 <p className="text-sm font-semibold text-slate-700 mb-1.5">Account Signals</p>
-                                {(evalOptions.account_context?.triggers || []).length > 0 ? (
-                                  <ul className="space-y-1 text-xs text-slate-600">
-                                    {evalOptions.account_context.triggers.slice(0, 4).map((x: string, i: number) => (
-                                      <li key={i}>&ndash; {x}</li>
-                                    ))}
-                                  </ul>
-                                ) : (
-                                  <p className="text-xs text-slate-400">{NO_SIGNAL}</p>
-                                )}
+                                <ul className="space-y-1 text-xs text-slate-600">
+                                  {evalOptions.account_context.triggers.slice(0, 4).map((x: string, i: number) => (
+                                    <li key={i}>&ndash; {x}</li>
+                                  ))}
+                                </ul>
                               </div>
+                              )}
                             </div>
 
                             {chosenPersona.card && (
                               <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-5">
+                                {(chosenPersona.card.does_not_resonate || []).length > 0 && (
                                 <div>
                                   <p className="text-sm font-semibold text-slate-700 mb-1.5">
                                     What does not land
@@ -6057,6 +6063,8 @@ export default function UserDashboardPage() {
                                     ))}
                                   </ul>
                                 </div>
+                                )}
+                                {(chosenPersona.card.typical_objections || []).length > 0 && (
                                 <div>
                                   <p className="text-sm font-semibold text-slate-700 mb-1.5">
                                     Objections they raise
@@ -6067,31 +6075,40 @@ export default function UserDashboardPage() {
                                     ))}
                                   </ul>
                                 </div>
+                                )}
                                 <div className="md:col-span-2 text-xs text-slate-600 space-y-1">
+                                  {hasValue(chosenPersona.card.content_preferences?.tone) && (
                                   <p>
                                     <span className="font-semibold text-slate-700">Preferred tone:</span>{' '}
                                     {chosenPersona.card.content_preferences?.tone}
                                   </p>
+                                  )}
+                                  {hasValue(chosenPersona.card.content_preferences?.format) && (
                                   <p>
                                     <span className="font-semibold text-slate-700">Preferred format:</span>{' '}
                                     {chosenPersona.card.content_preferences?.format}
                                   </p>
+                                  )}
+                                  {(chosenPersona.card.content_preferences?.key_metrics || []).some((m: any) => hasValue(m)) && (
                                   <p>
                                     <span className="font-semibold text-slate-700">Measured on:</span>{' '}
-                                    {(chosenPersona.card.content_preferences?.key_metrics || []).join(', ')}
+                                    {(chosenPersona.card.content_preferences?.key_metrics || []).filter((m: any) => hasValue(m)).join(', ')}
                                   </p>
+                                  )}
+                                  {hasValue(chosenPersona.card.hp_opportunity) && (
                                   <p>
                                     <span className="font-semibold text-slate-700">
                                       What HP can and cannot address for this role:
                                     </span>{' '}
                                     {chosenPersona.card.hp_opportunity}
                                   </p>
+                                  )}
                                 </div>
                                 <p className="md:col-span-2 rounded-lg bg-slate-50 border border-slate-200 px-3 py-2 text-[11px] text-slate-600">
-                                  <span className="font-semibold">
+                                  {hasValue(chosenPersona.card.evidence_grade) && (<><span className="font-semibold">
                                     Evidence grade: {chosenPersona.card.evidence_grade}.
-                                  </span>{' '}
-                                  {chosenPersona.card.confidence_explanation}{' '}
+                                  </span>{' '}</>)}
+                                  {hasValue(chosenPersona.card.confidence_explanation) && <>{chosenPersona.card.confidence_explanation}{' '}</>}
                                   This card is a persona reference, identical on every account
                                   &mdash; not intelligence about this buyer. The account reaches
                                   the evaluation through the evidence below and through the
@@ -6100,6 +6117,7 @@ export default function UserDashboardPage() {
                               </div>
                             )}
 
+                            {(evalOptions.account_context?.hp_opportunity || []).length > 0 && (
                             <div>
                               <p className="text-sm font-semibold text-slate-700 mb-1.5">
                                 HP Opportunity at this account
@@ -6109,11 +6127,12 @@ export default function UserDashboardPage() {
                                   {evalOptions.account_context.hp_opportunity.map((o: any, i: number) => (
                                     <span key={i}>
                                       {i > 0 && ' '}
-                                      {o.hp_family}{o.category_name ? ` (${o.category_name})` : ''} &mdash;{' '}
+                                      {o.hp_family}{hasValue(o.category_name) ? ` (${o.category_name})` : ''}
+                                      {hasValue(o.confidence) && (<>{' '}&mdash;{' '}
                                       <span className={o.confidence === 'Confirmed' ? 'text-green-700 font-medium' : 'text-slate-500'}>
                                         {o.confidence}
                                       </span>
-                                      , {o.fact_count} approved fact{o.fact_count === 1 ? '' : 's'}.
+                                      ,</>)} {o.fact_count} approved fact{o.fact_count === 1 ? '' : 's'}.
                                     </span>
                                   ))}
                                   {(evalOptions.account_context?.competitive_vendors || []).length > 0 && (
@@ -6122,12 +6141,9 @@ export default function UserDashboardPage() {
                                     </span>
                                   )}
                                 </p>
-                              ) : (
-                                <p className="text-xs text-slate-400">
-                                  {NO_SIGNAL}
-                                </p>
-                              )}
+                              ) : null}
                             </div>
+                            )}
 
                             {/* DATA SOURCES — the honesty panel. Each line is the real
                                 provenance recorded when the persona was built. */}
@@ -6136,25 +6152,27 @@ export default function UserDashboardPage() {
                                 Data Sources
                               </p>
                               <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-1.5 text-xs">
-                                {Object.entries(chosenPersona.sources || {}).map(([field, src]: any) => (
+                                {/* A field with no source is not listed (client, 21 Oct). */}
+                                {Object.entries(chosenPersona.sources || {})
+                                  .filter(([, src]: any) => src !== 'not_available' && hasValue(src))
+                                  .map(([field, src]: any) => (
                                   <p key={field} className="text-slate-700">
                                     <span className="font-medium capitalize">{field.replace(/_/g, ' ')}:</span>{' '}
-                                    <span className={src === 'not_available' ? 'text-slate-400' : 'text-indigo-600'}>
+                                    <span className="text-indigo-600">
                                       {src === 'account_contact' ? 'This account’s contact record'
                                         : src === 'account_evidence' ? 'Account evidence'
                                         : src === 'hiring_role_proxy' ? 'Open job postings'
                                         : src === 'company_personas' ? 'The client’s target buying committee'
-                                        : src === 'not_available' ? NO_SIGNAL
                                         : String(src)}
                                     </span>
                                   </p>
                                 ))}
                                 {Object.entries(evalOptions.context_sources || {})
-                                  .filter(([f]: any) => ['hp_opportunity', 'competitive_vendors', 'triggers'].includes(f))
+                                  .filter(([f, src]: any) => ['hp_opportunity', 'competitive_vendors', 'triggers'].includes(f) && hasValue(src))
                                   .map(([field, src]: any) => (
                                     <p key={field} className="text-slate-700">
                                       <span className="font-medium capitalize">{field.replace(/_/g, ' ')}:</span>{' '}
-                                      <span className={src === 'Not available' ? 'text-slate-400' : 'text-indigo-600'}>{src === 'Not available' ? NO_SIGNAL : src}</span>
+                                      <span className="text-indigo-600">{src}</span>
                                     </p>
                                   ))}
                               </div>
@@ -6205,6 +6223,9 @@ export default function UserDashboardPage() {
                                 {Object.entries(evaluation.dimensions).map(([k, v]: any, dimIdx: number) => {
                                   const weight = evaluation.dimension_weights?.[k];
                                   const padded = (evaluation.dimensions_padded || []).includes(k);
+                                  // A dimension the AI returned no score for has no score to
+                                  // show; its row is not rendered (client, 21 Oct).
+                                  if (padded || v == null) return null;
                                   const floored = (evaluation.severe_failures || [])
                                     .find((f: any) => f.dimension === k);
                                   return (
@@ -6225,9 +6246,8 @@ export default function UserDashboardPage() {
                                       {/* The bar used to be drawn empty and labelled "No signal
                                           observed" while 50 was still counted in the total and
                                           printed in the sum beside it. It is shown as counted. */}
-                                      <span className="text-[10px] text-slate-400 w-24"
-                                        title={padded ? 'The AI returned no score for this, so 50 is used in the overall score.' : undefined}>
-                                        {padded ? 'not scored · 50 used' : scoreLabel(v)}
+                                      <span className="text-[10px] text-slate-400 w-24">
+                                        {scoreLabel(v)}
                                       </span>
                                       {/* A dimension outside this objective's formula is scored
                                           and shown and weighs nothing - say so, or a low bar
@@ -6260,29 +6280,25 @@ export default function UserDashboardPage() {
                                   );
                                 })}
                               </div>
-                            ) : (
-                              <p className="text-xs text-slate-500">
-                                {NO_SIGNAL}
-                              </p>
-                            )}
+                            ) : null}
 
                             <div className="border-t border-slate-100 pt-4 mt-4">
                               <div className="flex items-center gap-4 flex-wrap">
+                                {evaluation.composite_available && hasValue(evaluation.composite) && (
                                 <div className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border-2 ${scoreBadge(evaluation.composite)}`}>
                                   <span className="text-2xl font-bold">
-                                    {evaluation.composite_available ? evaluation.composite : <span className="text-sm font-medium">{NO_SIGNAL}</span>}
+                                    {evaluation.composite}
                                   </span>
-                                  {evaluation.composite_available && (
-                                    <div>
-                                      <span className="text-[10px] uppercase tracking-wide font-semibold">/ 100</span>
-                                      <p className="text-xs font-medium">{evaluation.score_band}</p>
-                                    </div>
-                                  )}
+                                  <div>
+                                    <span className="text-[10px] uppercase tracking-wide font-semibold">/ 100</span>
+                                    {hasValue(evaluation.score_band) && <p className="text-xs font-medium">{evaluation.score_band}</p>}
+                                  </div>
                                 </div>
+                                )}
                                 <div className="text-xs text-slate-500">
                                   <p className="font-medium text-slate-600 mb-0.5 flex items-center gap-1">
-                                    Overall score ({evaluation.objective_label}) &middot; V{evaluation.version}
-                                    <ScoreInfo topic="messageScore" worked={messageWorked(evaluation)} />
+                                    {evaluation.composite_available ? 'Overall score' : 'Evaluation'}{hasValue(evaluation.objective_label) ? ` (${evaluation.objective_label})` : ''} &middot; V{evaluation.version}
+                                    {evaluation.composite_available && <ScoreInfo topic="messageScore" worked={messageWorked(evaluation)} />}
                                   </p>
                                 </div>
                               </div>
@@ -6317,27 +6333,18 @@ export default function UserDashboardPage() {
                                     <span className="font-semibold">HP lines named:</span>{' '}
                                     {evaluation.hp_lines_named.join(', ')}
                                   </p>
-                                  {(evaluation.rulebook_positioning || []).length > 0 ? (
+                                  {(evaluation.rulebook_positioning || []).some((r: any) => hasValue(r?.offering)) && (
                                     <p>
                                       <span className="font-semibold">Rulebook positioning:</span>{' '}
                                       {evaluation.rulebook_positioning
                                         .map((r: any) => r.offering)
-                                        .filter(Boolean).join(' · ')}
-                                    </p>
-                                  ) : (
-                                    <p className="text-slate-500">
-                                      The Rulebook carries no positioning for these lines.
+                                        .filter((o: any) => hasValue(o)).join(' · ')}
                                     </p>
                                   )}
-                                  {(evaluation.proof_available || []).length > 0 ? (
+                                  {(evaluation.proof_available || []).length > 0 && (
                                     <p>
                                       <span className="font-semibold">HP proof available:</span>{' '}
                                       {evaluation.proof_available.map((p: any) => p.text).join(' ')}
-                                    </p>
-                                  ) : (
-                                    <p className="text-slate-500">
-                                      No HP case study fits these lines, so an unproved claim
-                                      should be cut rather than softened.
                                     </p>
                                   )}
                                 </div>
@@ -6402,25 +6409,14 @@ export default function UserDashboardPage() {
                               </p>
                             </div>
                           )}
-                          {!evaluation.reaction && (evaluation.reaction_withheld || []).length > 0 && (
-                            <div className="bg-white rounded-xl border border-slate-200 p-5">
-                              <h3 className="text-sm font-semibold text-slate-700 mb-1">
-                                Persona Reaction
-                              </h3>
-                              <p className="text-xs text-slate-400">{NO_SIGNAL}</p>
-                            </div>
-                          )}
+                          {/* A withheld reaction renders nothing (client, 21 Oct). */}
 
                           {/* Step E - phrase table, with the recommendation checkboxes inline. */}
                           <div data-tour="evaluator-panel-phrases" className="bg-white rounded-xl border border-slate-200 p-5 space-y-3">
                             <h3 className="text-sm font-semibold text-slate-800">
                               Step E &mdash; Phrase-Level Analysis
                             </h3>
-                            {(evaluation.phrases || []).length === 0 ? (
-                              <p className="text-xs text-slate-500">
-                                {NO_SIGNAL}
-                              </p>
-                            ) : (
+                            {(evaluation.phrases || []).length === 0 ? null : (
                               <div className="overflow-x-auto">
                                 <table className="w-full text-xs">
                                   <thead>
@@ -6625,11 +6621,13 @@ export default function UserDashboardPage() {
                           )}
 
                           {rewriteError && !isRewriting && (
-                            <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+                            <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-center justify-between gap-3">
                               <p className="text-sm text-red-700">{rewriteError}</p>
-                              <p className="text-xs text-red-500 mt-1">
-                                Your original message is unchanged.
-                              </p>
+                              <button type="button" onClick={runRewrite}
+                                disabled={isRewriting || selectedRecs.length === 0}
+                                className="shrink-0 rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50">
+                                Try again
+                              </button>
                             </div>
                           )}
 
@@ -6797,6 +6795,7 @@ export default function UserDashboardPage() {
                             <ShieldAlert className="w-6 h-6 text-hp-navy" />
                             <span>Objection Playbook</span>
                           </h3>
+                          {objectionsReady && (<>
                           <p className="text-xs text-slate-500 mt-0.5">
                             {objectionCards.length} objection reframes for {selectedAccount?.name || 'Target Account'}
                           </p>
@@ -6807,22 +6806,21 @@ export default function UserDashboardPage() {
                               : 'technographics evidence'}. These are not statements made by
                             any contact.
                           </p>
+                          </>)}
                         </div>
 
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-bold text-hp-navy bg-blue-50 px-3 py-1.5 rounded-xl border border-blue-200">
-                            {totalIncumbentsCount} Incumbents Detected
-                          </span>
-                        </div>
+                        {totalIncumbentsCount > 0 && (
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-bold text-hp-navy bg-blue-50 px-3 py-1.5 rounded-xl border border-blue-200">
+                              {totalIncumbentsCount} Incumbents Detected
+                            </span>
+                          </div>
+                        )}
                       </div>
 
-                      {/* Objection accordion */}
-                      {!objectionsReady ? (
-                        /* reframesData.notice keeps the reason; the client sees neutral wording. */
-                        <div className="bg-slate-50 border border-slate-200 rounded-2xl p-6 text-center">
-                          <p className="text-xs text-slate-400">{NO_SIGNAL}</p>
-                        </div>
-                      ) : (
+                      {/* Objection accordion. Not ready: nothing is rendered
+                          (reframesData.notice keeps the reason; client, 21 Oct). */}
+                      {!objectionsReady ? null : (
                         <div data-tour="objection-cards" className="space-y-3">
                           {objectionCards.map((card: any) => {
                             const isOpen = expandedObjectionId === card.card_id;
@@ -6839,16 +6837,20 @@ export default function UserDashboardPage() {
                                     <p className="text-sm font-semibold text-slate-900">
                                       &ldquo;{card.objection.replace(/^["“]|["”]$/g, '')}&rdquo;
                                     </p>
-                                    <p className="text-xs text-slate-400 mt-0.5">
-                                      Could be raised by: <span className="font-medium text-slate-600">{card.likely_raiser}</span>
-                                      {!raiserIsContact && (
-                                        <span className="text-slate-400"> (owning function)</span>
-                                      )}
-                                    </p>
+                                    {hasValue(card.likely_raiser) && (
+                                      <p className="text-xs text-slate-400 mt-0.5">
+                                        Could be raised by: <span className="font-medium text-slate-600">{card.likely_raiser}</span>
+                                        {!raiserIsContact && (
+                                          <span className="text-slate-400"> (owning function)</span>
+                                        )}
+                                      </p>
+                                    )}
                                   </div>
-                                  <span className="text-[10px] font-medium text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded flex-shrink-0 mt-0.5">
-                                    {card.area}
-                                  </span>
+                                  {hasValue(card.area) && (
+                                    <span className="text-[10px] font-medium text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded flex-shrink-0 mt-0.5">
+                                      {card.area}
+                                    </span>
+                                  )}
                                   {isOpen
                                     ? <ChevronUp className="w-4 h-4 text-slate-400 flex-shrink-0 mt-1" />
                                     : <ChevronDown className="w-4 h-4 text-slate-400 flex-shrink-0 mt-1" />}
@@ -6856,6 +6858,7 @@ export default function UserDashboardPage() {
 
                                 {isOpen && (
                                   <div className="border-t border-slate-100 p-4 bg-slate-50 space-y-4">
+                                    {hasValue(card.reframe) && (
                                     <div className="bg-green-50 border border-green-200 rounded-lg p-4">
                                       <div className="flex items-center gap-2 mb-2">
                                         <Shield className="w-4 h-4 text-green-600" />
@@ -6863,12 +6866,16 @@ export default function UserDashboardPage() {
                                       </div>
                                       <p className="text-sm text-green-900 leading-relaxed">{card.reframe}</p>
                                     </div>
+                                    )}
 
+                                    {hasValue(card.evidence) && (
                                     <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                                       <p className="text-xs font-semibold text-blue-700 uppercase tracking-wider mb-2">Evidence</p>
                                       <p className="text-xs text-blue-900 font-mono leading-relaxed break-words">{card.evidence}</p>
                                     </div>
+                                    )}
 
+                                    {hasValue(card.counter_question) && (
                                     <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
                                       <div className="flex items-center gap-2 mb-2">
                                         <HelpCircle className="w-4 h-4 text-purple-600" />
@@ -6876,6 +6883,7 @@ export default function UserDashboardPage() {
                                       </div>
                                       <p className="text-sm text-purple-900 italic">&ldquo;{card.counter_question}&rdquo;</p>
                                     </div>
+                                    )}
 
                                     {/* An HP customer who already did this. Rendered only when the
                                         case-study corpus actually holds one for this area - the
@@ -6894,8 +6902,8 @@ export default function UserDashboardPage() {
                                         <p className="text-sm text-amber-900 leading-relaxed">{card.hp_proof_point}</p>
                                         {card.hp_proof_point_detail && (
                                           <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-amber-700">
-                                            <span className="font-semibold">{card.hp_proof_point_detail.customer}</span>
-                                            {card.hp_proof_point_detail.industry && (
+                                            {hasValue(card.hp_proof_point_detail.customer) && <span className="font-semibold">{card.hp_proof_point_detail.customer}</span>}
+                                            {hasValue(card.hp_proof_point_detail.industry) && (
                                               <span>{card.hp_proof_point_detail.industry}</span>
                                             )}
                                             {/* `hp_product` is deliberately NOT shown. It is the
@@ -6921,6 +6929,7 @@ export default function UserDashboardPage() {
                                       </div>
                                     )}
 
+                                    {hasValue(card.likely_raiser) && (
                                     <div className="bg-slate-100 border border-slate-200 rounded-lg p-3 flex items-start gap-2">
                                       <User className="w-4 h-4 text-slate-500 flex-shrink-0 mt-0.5" />
                                       <p className="text-xs text-slate-600 leading-relaxed">
@@ -6935,6 +6944,7 @@ export default function UserDashboardPage() {
                                         </span>
                                       </p>
                                     </div>
+                                    )}
                                   </div>
                                 )}
                               </div>
@@ -6985,18 +6995,19 @@ export default function UserDashboardPage() {
                         </p>
                       </div>
 
-                      {cmIndex && (
+                      {/* Only a working index is described. FAILED and BLOCKED (no
+                          source data) - or any status this page does not know - show
+                          nothing: they are the admin Pipeline tab's to show, never the
+                          seller's (client, 21 Oct). */}
+                      {cmIndex && ['READY', 'BUILDING', 'STALE', 'RETIRED'].includes(cmIndex.status) && (
                         <div className={`rounded-xl border px-4 py-2.5 text-xs ${
                           cmIndex.status === 'READY' ? 'border-slate-200 bg-slate-50 text-slate-600'
                             : cmIndex.status === 'RETIRED' ? 'border-slate-300 bg-slate-100 text-slate-600'
                             : cmIndex.status === 'STALE' ? 'border-amber-200 bg-amber-50 text-amber-800'
-                            : cmIndex.status === 'BUILDING' ? 'border-indigo-200 bg-indigo-50 text-indigo-700'
-                            : 'border-rose-200 bg-rose-50 text-rose-700'}`}>
+                            : 'border-indigo-200 bg-indigo-50 text-indigo-700'}`}>
                           <span className="font-semibold">Retrieval index: {cmIndex.status}</span>
                           {cmIndex.documents > 0 && <span> · {cmIndex.documents} documents · v{cmIndex.version}</span>}
-                          {cmIndex.status === 'BUILDING' && <span> — unavailable until the rebuild finishes.</span>}
                           {cmIndex.status === 'STALE' && <span> — answering from the last good build.</span>}
-                          {cmIndex.status === 'FAILED' && <span> — {cmIndex.last_error}</span>}
                           {/* Retired is not a fault: the index was dropped on purpose
                               to free capacity. What is below is the last build, and it
                               is complete - it simply will not refresh until rebuilt. */}
@@ -7011,12 +7022,8 @@ export default function UserDashboardPage() {
                       {/* The index built but the message house did not regenerate.
                           Reported separately from the index's own status, because
                           the index is fine and still answering. */}
-                      {cmIndex?.generation_error && (
-                        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
-                          <span className="font-semibold">The message house could not be rebuilt.</span>{' '}
-                          {cmIndex.generation_error} The version below is the last one that built.
-                        </div>
-                      )}
+                      {/* cmIndex.generation_error is not shown (client, 21 Oct); the
+                          version below is the last one that built. */}
 
                       {hasHouse ? (
                         <>
@@ -7170,12 +7177,12 @@ export default function UserDashboardPage() {
                                         </div>
 
                                         <div className="border-t border-slate-200 mt-5 pt-4">
+                                          {sourced.total > 0 && (
                                           <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400 mb-2.5">
                                             Proof points ({sourced.total} shown, {sourced.sourced} sourced)
                                           </p>
-                                          {sourced.total === 0 ? (
-                                            <p className="text-xs text-slate-400">{NO_SIGNAL}</p>
-                                          ) : (
+                                          )}
+                                          {sourced.total === 0 ? null : (
                                             <ul className="space-y-2">
                                               {(p.proof_points || []).map((pr: any, j: number) => (
                                                 <li key={j} className="flex items-start gap-2.5">
@@ -7215,8 +7222,8 @@ export default function UserDashboardPage() {
                                             <p className="text-[13px] text-slate-700 leading-[1.7]">{p.hp_proof_point}</p>
                                             {p.hp_proof_point_detail && (
                                               <p className="mt-1.5 text-[11px] text-slate-500">
-                                                {p.hp_proof_point_detail.customer}
-                                                {p.hp_proof_point_detail.industry && ` · ${p.hp_proof_point_detail.industry}`}
+                                                {hasValue(p.hp_proof_point_detail.customer) ? p.hp_proof_point_detail.customer : ''}
+                                                {hasValue(p.hp_proof_point_detail.industry) && ` · ${p.hp_proof_point_detail.industry}`}
                                                 {openableUrl(p.hp_proof_point_detail.source_url, sourceLinkCtx) && (
                                                   <>
                                                     {' · '}
@@ -7235,10 +7242,10 @@ export default function UserDashboardPage() {
                                           </div>
                                         )}
 
-                                        {(p.target_role || p.next_step) && (
+                                        {(hasValue(p.target_role) || hasValue(p.next_step)) && (
                                           <div className="border-t border-slate-200 mt-4 pt-3 text-[12px] text-slate-600 space-y-0.5">
-                                            {p.target_role && <p><span className="font-semibold text-slate-700">Target role:</span> {p.target_role}</p>}
-                                            {p.next_step && <p><span className="font-semibold text-slate-700">Next step:</span> {p.next_step}</p>}
+                                            {hasValue(p.target_role) && <p><span className="font-semibold text-slate-700">Target role:</span> {p.target_role}</p>}
+                                            {hasValue(p.next_step) && <p><span className="font-semibold text-slate-700">Next step:</span> {p.next_step}</p>}
                                           </div>
                                         )}
                                       </div>
@@ -7300,12 +7307,8 @@ export default function UserDashboardPage() {
                             );
                           })()}
                         </>
-                      ) : (
-                        <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center">
-                          {/* Index status and blocked_reason are in the admin Pipeline tab. */}
-                          <p className="text-sm text-slate-400">{NO_SIGNAL}</p>
-                        </div>
-                      )}
+                      ) : null /* No message house: nothing is rendered; index status and
+                          blocked_reason are in the admin Pipeline tab. */}
                     </div>
                   );
                 })()}
@@ -7359,7 +7362,6 @@ export default function UserDashboardPage() {
                         }
                       );
                       const latest = response.data?.data?.latest || null;
-                      const lastError = response.data?.data?.last_error || null;
                       setWidgets(prev => prev.map(w => (w.widget_key === 'content_generated_assets' ? response.data : w)));
                       if (latest) {
                         setGeneratedAsset(latest);
@@ -7368,10 +7370,12 @@ export default function UserDashboardPage() {
                       } else {
                         setGeneratedAsset(null);
                         setHasGeneratedContent(false);
-                        setGenerateError(lastError || { notice: 'Generation did not return an asset.' });
+                        // last_error (attempts, faults, the backend's notice) stays in
+                        // the widget record; the seller sees the neutral line only.
+                        setGenerateError({ notice: ACTION_ERROR_MESSAGE });
                       }
-                    } catch (err: any) {
-                      setGenerateError({ notice: err?.response?.data?.detail || err?.message || 'Generation failed.' });
+                    } catch {
+                      setGenerateError({ notice: ACTION_ERROR_MESSAGE });
                     } finally {
                       setIsGeneratingContent(false);
                     }
@@ -7588,17 +7592,16 @@ export default function UserDashboardPage() {
                               <div className="w-14 h-14 rounded-2xl bg-rose-50 border border-rose-200 flex items-center justify-center mx-auto text-rose-500 shadow-xs">
                                 <Sparkles className="w-7 h-7" />
                               </div>
-                              <h4 className="text-base font-extrabold text-slate-800">
-                                Draft not published{Array.isArray(generateError.attempts) && generateError.attempts.length > 0 ? ` after ${generateError.attempts.length} attempt${generateError.attempts.length === 1 ? '' : 's'}` : ''}
-                              </h4>
-                              <p className="text-xs text-slate-500 leading-relaxed font-medium">{generateError.notice}</p>
-                              {Array.isArray(generateError.faults) && generateError.faults.length > 0 && (
-                                <ul className="text-left text-[11px] text-rose-800 bg-rose-50 border border-rose-200 rounded-xl p-3 space-y-1">
-                                  {generateError.faults.map((f: string, i: number) => (
-                                    <li key={i}>&bull; {f}</li>
-                                  ))}
-                                </ul>
-                              )}
+                              <p className="text-sm text-slate-600 leading-relaxed font-medium">{ACTION_ERROR_MESSAGE}</p>
+                              <button
+                                type="button"
+                                onClick={handleGenerateClick}
+                                disabled={isGeneratingContent}
+                                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-hp-navy text-white text-xs font-bold disabled:opacity-50"
+                              >
+                                <RotateCcw className="w-3.5 h-3.5" />
+                                Try again
+                              </button>
                             </div>
                           ) : !hasGeneratedContent || !generatedAsset ? (
                             <div className="w-full max-w-md animate-fade-in">
@@ -7631,13 +7634,10 @@ export default function UserDashboardPage() {
                               ? new Date(generatedAsset.generated_at).toLocaleDateString(undefined,
                                   { year: 'numeric', month: 'long', day: 'numeric' })
                               : '';
-                            // G12 is the overflow rule. 3.5 says an overflowing 1-Pager is out of
-                            // budget rather than something to shrink, and 3.4 fixes the budget at
-                            // 350-500 words because that is "what fits on one page at readable
-                            // body size" - so the word-budget warning IS the overflow warning.
-                            const onePagerOverBudget = (generatedAsset.style_warnings || [])
-                              .find((w: string) => w.startsWith('G12'));
-                            const gr = generatedAsset.grounding_report || {};
+                            // The grounding report and style_warnings (incl. G12, the one-page
+                            // budget) are quality-gate output: kept on the stored asset for the
+                            // backend, never shown to the seller (client
+                            // rule, 21 Oct: no fault wording on screen).
                             const labels: [string, any][] = Object.entries(
                               (activeVariant?.evidence_labels) || generatedAsset.evidence_labels || {});
                             return (
@@ -7668,19 +7668,6 @@ export default function UserDashboardPage() {
                                       Variant {v.variant_index}
                                     </button>
                                   ))}
-                                </div>
-                              )}
-
-                              {/* Spec 3.5: an overflowing 1-Pager "is out of budget - fail it
-                                  back to regeneration rather than shrinking the type". The budget
-                                  is G12's, because 3.4 sets 350-500 words as what fits on one
-                                  page. Surfaced here rather than blocking: the seller asked for
-                                  this asset, and a one-word overrun is theirs to judge. */}
-                              {generatedAsset.content_type === 'one_pager' && onePagerOverBudget && (
-                                <div className="no-print rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                                  {onePagerOverBudget}. The one-page budget is what fits on A4 and
-                                  US Letter at readable size &mdash; regenerate rather than shrink
-                                  the type.
                                 </div>
                               )}
 
@@ -7947,14 +7934,11 @@ export default function UserDashboardPage() {
                                     {(g.hp_products || []).length > 0 ? g.hp_products.join(', ') : 'Discovery-led'}
                                   </div>
                                   {g.persona_framing && <div className="italic text-slate-600">{g.persona_framing}</div>}
-                                  <div className="text-slate-500">
-                                    Grounding: {gr.numbers_checked ?? 0} number(s) checked, {(gr.numbers_rejected || []).length} rejected &middot; {(gr.urls_rejected || []).length} URL(s) stripped
-                                  </div>
                                   {/* Where the Proof Points section came from. The sentence
                                       itself is already in the copy above; what a seller needs
                                       here is the customer and the public HP page behind it,
                                       so the claim can be checked before it is sent. */}
-                                  {g.hp_proof_point_detail && (
+                                  {g.hp_proof_point_detail && hasValue(g.hp_proof_point_detail.customer) && (
                                     <div className="text-slate-600">
                                       Proof point:{' '}
                                       <span className="font-semibold text-slate-800">{g.hp_proof_point_detail.customer}</span>
@@ -7975,13 +7959,6 @@ export default function UserDashboardPage() {
                                           </a>
                                         </>
                                       )}
-                                    </div>
-                                  )}
-                                  {Array.isArray(generatedAsset.style_warnings) && generatedAsset.style_warnings.length > 0 && (
-                                    <div className="text-amber-800">
-                                      <span className="font-bold">Style to fix before sending:</span>{' '}
-                                      {generatedAsset.style_warnings.join('; ')}
-                                      {generatedAsset.attempts ? ` (kept after ${generatedAsset.attempts} attempts)` : ''}
                                     </div>
                                   )}
                                 </div>
@@ -8130,7 +8107,9 @@ export default function UserDashboardPage() {
                             // `available` flag says.
                             const answered = event.available !== false && !!event.answer;
                             publish(
-                              (event.answer as string) || CHAT_FAILURE_MESSAGE,
+                              // An unanswered turn shows only the approved line,
+                              // never the server's own explanation (21 Oct).
+                              answered ? (event.answer as string) : CHAT_FAILURE_MESSAGE,
                               answered ? ((event.citations as any[]) || []) : [],
                               answered,
                               // From the response, not the current selection:
@@ -8140,7 +8119,7 @@ export default function UserDashboardPage() {
                               !answered
                                 ? undefined
                                 : (event.persona as any)?.title,
-                              (event.answer_clean as string) || undefined,
+                              answered ? ((event.answer_clean as string) || undefined) : undefined,
                               // How much of the answer was thrown away for
                               // want of evidence. Shown, because a gutted
                               // answer that looks whole is worse than a short
@@ -8516,15 +8495,7 @@ export default function UserDashboardPage() {
                         <Loader2 className="w-8 h-8 text-hp-navy animate-spin" />
                         <p className="text-xs text-slate-500 font-medium">Loading feature widget contracts...</p>
                       </div>
-                    ) : widgets.length === 0 ? (
-                      <div className="bg-white rounded-2xl p-12 text-center border border-slate-200 shadow-sm">
-                        <Info className="w-10 h-10 text-slate-300 mx-auto mb-2" />
-                        <h3 className="text-sm font-bold text-slate-800">No Widget Contracts Defined</h3>
-                        <p className="text-xs text-slate-500 mt-1">
-                          No widget contracts registered for feature "{activeFeatureDef.label}".
-                        </p>
-                      </div>
-                    ) : (
+                    ) : widgets.length === 0 ? null : (
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         {widgets.map((widget) => (
                           <div key={widget.widget_key} className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
@@ -8573,13 +8544,7 @@ export default function UserDashboardPage() {
                               </div>
                             )}
 
-                            {/* Widget Contract Empty Placeholder */}
-                            <div className="bg-slate-50 border border-dashed border-slate-200 rounded-xl p-6 text-center space-y-2">
-                              <div className="w-8 h-8 rounded-full bg-slate-200/70 text-slate-500 flex items-center justify-center mx-auto">
-                                <Info className="w-4 h-4" />
-                              </div>
-                              <p className="text-xs text-slate-400">{NO_SIGNAL}</p>
-                            </div>
+                            {/* The empty-contract placeholder was removed (client, 21 Oct). */}
 
                           </div>
                         ))}

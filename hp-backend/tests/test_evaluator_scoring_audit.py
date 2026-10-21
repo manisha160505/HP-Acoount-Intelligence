@@ -74,7 +74,7 @@ class TestAFailedEvaluationIsNotServedForEver:
         run, _asked = evaluate
         first = run([])                                    # the model is down
         assert first["ai_available"] is False and first["composite"] is None
-        assert "Evaluate again" in first["summary"]
+        assert first["summary"] == "Something went wrong. Please try again."
 
         second = run([_answer(SEVEN)])                     # the model is back
         assert second["ai_available"] is True and second["composite"] == 70.0
@@ -140,9 +140,10 @@ class TestATotalIsNotMadeOfPads:
     def test_an_answer_with_no_scores_publishes_no_total(self, evaluate):
         run, _asked = evaluate
         out = run([{"summary": "no dimensions"}, {"summary": "again none"}])
-        assert out["composite"] is None and out["score_band"] == "Unavailable"
+        assert out["composite"] is None and out["score_band"] == ""
         assert out["dimensions_padded"] == [] and out["dimensions"] == {}
-        assert "AI scoring was incomplete" in out["summary"]
+        assert out["summary"].startswith("Something went wrong. Please try again.")
+        assert "missing" not in out["summary"]
 
     def test_three_missing_scores_are_not_padded(self):
         valid = dict.fromkeys(S.ALL_DIMENSIONS[:4], 70.0)
@@ -171,7 +172,10 @@ class TestValidScoresAreShownEvenWithoutATotal:
         out = run([_answer(bad), _answer(bad)])
         assert out["composite"] is None
         assert len(out["dimensions"]) == 6 and S.CLARITY not in out["dimensions"]
-        assert "Clarity" in out["summary"] and "no overall score" in out["summary"]
+        # The seller sees the neutral line; which score is missing stays internal.
+        assert out["summary"].startswith("Something went wrong. Please try again.")
+        assert "Clarity" not in out["summary"]
+        assert any(p.startswith(S.CLARITY) for p in out["dimension_problems"])
 
     def test_nan_is_not_a_score(self):
         valid, problems = S.validate_dimensions({**SEVEN, S.CLARITY: "nan"}, "awareness")

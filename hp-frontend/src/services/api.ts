@@ -203,7 +203,9 @@ export async function postStream(
   }
 
   if (!res.ok || !res.body) {
-    throw new Error(`stream request failed: ${res.status}`);
+    // For the console and the caller's catch only - never rendered: Strategy
+    // Chat, the one caller, shows its own approved line for any failure.
+    throw new Error(`stream request: HTTP ${res.status}`);
   }
 
   const reader = res.body.getReader();

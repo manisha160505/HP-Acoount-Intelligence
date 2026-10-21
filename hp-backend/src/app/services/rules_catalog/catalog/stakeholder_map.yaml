@@ -97,15 +97,16 @@ rules:
     fixes which source wins for each detail.
   logic: 'For each detail, the possible sources are tried in order and the first non-blank value is used.
     The values ''none'', ''null'', ''nan'' and ''[]'' (in any capitalisation) count as blank. Name: the
-    contact''s full name, else first plus last name, else the title from the second provider''s layout,
-    else ''Unknown Contact''. Title: the job title, then the title from the second provider''s layout.
+    contact''s full name, else first plus last name, else the contact''s title (a contact with neither a
+    name nor a title has nothing to show and is left off the map). Title: the job title, then the title from the second provider''s layout.
     Department: the main job department, then the department from the second provider''s layout. Seniority:
     the main job level, then the seniority from the second provider''s layout. Email: the professional
     email, then the plain email, then the verified work email. Email status: the professional email status,
     then the plain email status, then the email verification status. Phone: the mobile phone, then the
     plain mobile phone, then the direct mobile phone. LinkedIn: the LinkedIn address, then the list of
     LinkedIn addresses, then the LinkedIn address from the second provider''s layout. Contact ID: the
-    contact''s own identifier, otherwise one based on its position in the list. Location: city and country
+    contact''s own identifier, otherwise one built from the company, name, email and LinkedIn address (the
+    title stands in for the name only when there is no name, email or LinkedIn address). Location: city and country
     joined with a comma.'
   table:
     columns:
@@ -113,7 +114,7 @@ rules:
     - Sources tried in order
     rows:
     - - Full name
-      - Full name -> first name + last name -> title from the second provider's layout -> 'Unknown Contact'
+      - Full name -> first name + last name -> title (no name and no title -> contact left off)
     - - Title
       - Job title -> title from the second provider's layout
     - - Department (as delivered)

@@ -419,8 +419,8 @@ rules:
   inputs:
   - The vendor's detected names
   - The installed technology record's category columns
-  logic: 'Whitespace row: status ''Unknown'' (kept for internal use; the card shows no footer for it)
-    and no provenance - the card footer is left empty and the reason is kept internally. Vendor with
+  logic: 'Whitespace row: status left blank (the card shows no status and no footer for it) and no
+    provenance - the reason is kept internally in the detection note. Vendor with
     matched entries: ''Confirmed'', with provenance listing up to 3 of the installed technology''s category
     columns (alphabetical) whose text contains a matched entry; if none, ''the full technology list''.
     Vendor found by a keyword rule without a named source entry: ''Likely'', with provenance

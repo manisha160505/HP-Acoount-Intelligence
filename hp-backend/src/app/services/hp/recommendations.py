@@ -199,7 +199,7 @@ def _confidence_for(category_status: str, has_trigger: bool, dropped: dict) -> t
     """
     status = (category_status or "").lower()
     basis = {
-        "technology_status": category_status or "unknown",
+        "technology_status": category_status or "",
         "timing_trigger_present": bool(has_trigger),
         "facts_dropped_by_guardrail": dropped or {},
     }

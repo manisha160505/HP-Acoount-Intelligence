@@ -104,9 +104,10 @@ FORMULA_AUTHORITY = (
     "Logic', supplied by the client. This supersedes the delivery-authored "
     "20/25/15/15/25 formula that stood here previously.")
 
-# Client-facing wording for a component with no input (client, 1 Oct). Matches
-# the frontend's NO_SIGNAL placeholder.
-NO_SIGNAL = "No signal observed"
+# A component with no input used to read "No signal observed" (client, 1 Oct).
+# Superseded by the client rule of 21 Oct: no gap wording in front of the
+# client, so its line carries the points alone and the reason stays on the
+# term's `basis` and in the generation's data_gaps.
 
 MISSING_INPUT_RULE = (
     "Missing inputs contribute 0 points only to the affected component; the "
@@ -484,11 +485,12 @@ def rationale_lines(driver: dict) -> list:
     """
     lines = ["Weight %s%% of the total." % _round_half_up(driver.get("weight", 0) * 100, 1)]
     for term in driver.get("terms") or []:
-        # A component with no input reads "No signal observed" (client, 1 Oct);
-        # its real basis stays on the term and in the generation's data_gaps.
-        basis = NO_SIGNAL if term.get("missing_input") else term.get("basis")
-        lines.append("%s: %s/%s - %s" % (term.get("label"), term.get("points"),
-                                         term.get("max_points"), basis))
+        # A component with no input shows its points alone (client rule,
+        # 21 Oct); its real basis stays on the term and in data_gaps.
+        line = "%s: %s/%s" % (term.get("label"), term.get("points"), term.get("max_points"))
+        if not term.get("missing_input") and term.get("basis"):
+            line += " - %s" % term.get("basis")
+        lines.append(line)
     lines.extend(driver.get("notes") or [])
     lines.extend("Caveat: %s" % c for c in (driver.get("caveats") or []))
     # A basis can quote the account's own data, which may carry typographic
@@ -861,9 +863,7 @@ def hp_solution_intent(categories: list) -> dict:
                 _term("Research volume", 0, RESEARCH_VOLUME_MAX,
                       "no category on file", missing=True),
             ],
-            [],
-            notes=["Scores 0 under the PDF's missing-input rule, not because "
-                   "the account researched nothing."])
+            [])
 
     clean, flagged = [], []
     for entry in entries:
@@ -944,8 +944,8 @@ def hp_solution_intent(categories: list) -> dict:
 
 FORMULA = ("Urgency = (Workplace Technology and OS x 20%) + (AI and "
            "Workstation x 25%) + (Growth and Expansion x 30%) + (HP Solution "
-           "Intent x 25%). Each driver is scored out of 100. Missing inputs "
-           "contribute 0 to their own component only; the remaining components "
+           "Intent x 25%). Each driver is scored out of 100. A component with "
+           "no input contributes 0 to itself only; the remaining components "
            "are still calculated.")
 
 
@@ -969,8 +969,7 @@ def score(drivers: list, scored_on: date | None = None) -> dict:
                 [_term("All components", 0, DRIVER_MAX,
                        "driver was not computed for this account",
                        missing=True)],
-                [],
-                notes=["Scores 0 under the PDF's missing-input rule."])
+                [])
         ordered.append(driver)
         for term in driver.get("terms") or []:
             if term.get("missing_input"):

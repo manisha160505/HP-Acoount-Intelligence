@@ -42,6 +42,7 @@ from app.services.hp import (
     job_titles,
     translate,
 )
+from app.services.hp.client_copy import ACTION_FAILED
 from app.services.regen import context as run_context, store as widget_store
 
 logger = logging.getLogger(__name__)
@@ -191,6 +192,10 @@ def _derive_named_personas(db, account_id: str) -> list[dict]:
 
     personas = []
     for c in eligible[:NAMED_PERSONA_MAX]:
+        # A nameless contact is labelled by its title on the grid; here it has
+        # no name, so no greeting or Name line addresses the title as one.
+        if c.get("name_is_title"):
+            c = {**c, "full_name": None}
         cid = str(c.get("contact_id") or "").strip()
         # Always prefixed. Leaving an id that already began "contact_" as it
         # was gave contact ids "2" and "contact_2" the same persona id, and the
@@ -204,7 +209,10 @@ def _derive_named_personas(db, account_id: str) -> list[dict]:
             "kind": "named",
             "source": "Source A",
             "title": str(c.get("title")).strip(),
-            "subtitle": f"{c.get('full_name') or 'Unknown Contact'} \u00b7 {dept} \u00b7 {band}",
+            # No name: the line is the department and band alone (client rule,
+            # 21 Oct: no "Unknown Contact" wording in front of the client).
+            "subtitle": " \u00b7 ".join(
+                p for p in (str(c.get("full_name") or "").strip(), dept, band) if p),
             "contact_id": cid,
             "full_name": c.get("full_name"),
             "department": dept,
@@ -782,15 +790,17 @@ def _persona_evidence(persona: dict) -> list[tuple[str, str]]:
             if persona.get("buying_committee_persona"):
                 items.append(("Buying-committee angle",
                               persona["buying_committee_persona"]))
-        if persona.get("is_filled"):
-            items.append(("Name", persona.get("full_name") or "Unknown Contact"))
+        if persona.get("is_filled") and persona.get("full_name"):
+            items.append(("Name", persona["full_name"]))
             if persona.get("actual_job_title"):
                 items.append(("Actual job title", persona["actual_job_title"]))
         # [P6] and [P7] are omitted entirely when unfilled - not emitted empty.
         # An empty slot invites the model to fill it.
         return items
     if kind == "named":
-        items.append(("Name", persona.get("full_name") or "Unknown Contact"))
+        # No name, no Name line - never an "Unknown Contact" placeholder.
+        if persona.get("full_name"):
+            items.append(("Name", persona["full_name"]))
         items.append(("Department", persona.get("department") or UNASSIGNED_DEPT))
         items.append(("Seniority band", persona.get("seniority") or "Individual Contributor"))
         if persona.get("influence_type"):
@@ -1728,7 +1738,7 @@ def _build_generation_context(db, account_id: str, persona_id: str, content_type
     banned_names = []
     for c in (((grid or {}).get("data") or {}).get("contacts") or []):
         n = str(c.get("full_name") or "").strip().lower()
-        if n and " " in n and n != "unknown contact":
+        if n and " " in n and not c.get("name_is_title"):
             banned_names.append(n)
     for r in contacts_records:
         n = str(r.get("Prospect full_name") or "").strip().lower()
@@ -1855,8 +1865,11 @@ def suggest_content_angles(account_id: str, persona_id: str, content_type: str,
     if not options:
         # No angles is not a failure to hide: the seller can still generate
         # directly, so the widget says so rather than blocking the feature.
+        logger.info("content studio: no usable angle for %s/%s/%s",
+                    account_id, persona_id, content_type)
         return _payload("empty", [], {
-            "notice": "No angles could be proposed for this brief. You can generate directly instead.",
+            "notice": ACTION_FAILED,
+            "unavailable_reason": "no angle survived the model call and the grounding gate",
             "at": now.isoformat(),
         })
 
@@ -2037,23 +2050,25 @@ def generate_content_asset(account_id: str, persona_id: str, content_type: str,
         asset = _safe_fallback_asset(contract, persona, company_name, topic, labels)
         is_fallback = asset is not None
         if not is_fallback:
+            # The client sees one neutral line (client rule, 21 Oct) and no
+            # fault list: the faults are in the warning logged above and in
+            # `generation`, which the UI never renders.
             last_error = {
-                "faults": faults,
-                "attempts": attempts,
                 "persona_id": persona_id,
                 "content_type": content_type,
                 "topic": topic,
                 "at": now.isoformat(),
-                "notice": "The generated draft did not pass the grounding and style checks and was not published. "
-                          "Earlier assets are kept.",
+                "notice": ACTION_FAILED,
+                "generation": {"faults": faults, "attempts": attempts},
             }
             payload = _payload("available" if existing_assets else "pending", None, existing_assets, last_error)
             db["account_widgets"].update_one(
                 {"account_id": account_id, "widget_key": "content_generated_assets"},
                 {"$set": payload}, upsert=True)
             return payload
-        soft = ["live generation did not produce a grounded draft - this is the deterministic "
-                "template, composed from verified account fields only"]
+        # Why this is the template stays internal (`generation_note`, plus
+        # `is_fallback` and data_gaps); style_warnings is printed on the card.
+        soft = []
         variants = []
     else:
         is_fallback = False
@@ -2115,6 +2130,9 @@ def generate_content_asset(account_id: str, persona_id: str, content_type: str,
         # True when live generation failed and this is the deterministic
         # template. The UI must not present it as generated copy.
         "is_fallback": is_fallback,
+        "generation_note": (
+            "live generation did not produce a grounded draft - this is the deterministic "
+            "template, composed from verified account fields only") if is_fallback else None,
         "generated_at": now.isoformat(),
     }
     # Spec Section 6: "Every gate produces a machine-readable audit row."

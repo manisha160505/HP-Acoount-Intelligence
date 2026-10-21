@@ -463,7 +463,7 @@ class TestT22NonJsonFromTheModel:
         assert all("passed" in c for c in checks["checks"])
 
     def test_an_unavailable_composite_has_no_band(self):
-        assert S.score_band(None) == "Unavailable"
+        assert S.score_band(None) == ""
 
 
 # --- the rubric -------------------------------------------------------------

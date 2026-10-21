@@ -8,6 +8,8 @@ import { ROW_BUTTON, RowMenu } from '@/components/common/RowMenu';
 import { dashboardHref } from '@/lib/accountSelection';
 import { useAuth } from '@/providers/AuthProvider';
 import api from '@/services/api';
+import { TryAgain } from '@/components/common/TryAgain';
+import { ACTION_FAILED, serverSaid } from '@/lib/uiCopy';
 import { CompanyAccount, AccountStatus } from '@/types/account';
 import { 
   Building2, 
@@ -50,7 +52,7 @@ const LIVE_POLL_MS = 4000;
 const SUMMARY_POLL_MS = 60000;
 
 function PipelineCell({ row, live, liveLoaded }: { row?: PipelineSummaryRow; live?: LiveRow; liveLoaded: boolean }) {
-  if (!row && !live) return <span className="text-gray-400">—</span>;
+  if (!row && !live) return null;
   // Running and queued come from the live poll once it has answered; the
   // summary may be a minute old.
   const c = { ...(row?.counts || {}) };
@@ -69,7 +71,7 @@ function PipelineCell({ row, live, liveLoaded }: { row?: PipelineSummaryRow; liv
     ['never run', c.NEVER_RUN || 0, 'bg-slate-200 text-slate-700'],
   ];
   const shown = chips.filter(([, n]) => n > 0);
-  if (!shown.length && !row) return <span className="text-gray-400">—</span>;
+  if (!shown.length && !row) return null;
   const p = running?.progress;
   return (
     <div className="flex flex-wrap gap-1">
@@ -101,13 +103,14 @@ export default function ManagePlatformPage() {
   const [live, setLive] = useState<Record<string, LiveRow>>({});
   const [liveLoaded, setLiveLoaded] = useState(false);
   const [pipelineLoading, setPipelineLoading] = useState(false);
-  const [pipelineError, setPipelineError] = useState<string | null>(null);
+  const [pipelineLoadFailed, setPipelineLoadFailed] = useState(false);
   const [pipelineUpdatedAt, setPipelineUpdatedAt] = useState<Date | null>(null);
   const summaryInFlight = useRef(false);
   const liveSignature = useRef<string | null>(null);
   const [queuePaused, setQueuePaused] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
@@ -133,11 +136,11 @@ export default function ManagePlatformPage() {
         '/regeneration/accounts-summary');
       setPipeline(Object.fromEntries(res.data.accounts.map(r => [r.account_id, r])));
       setQueuePaused(res.data.queue?.paused ? (res.data.queue.reason || 'paused') : null);
-      setPipelineError(null);
+      setPipelineLoadFailed(false);
       setPipelineUpdatedAt(new Date());
-    } catch (err: any) {
-      // The table still works without the column, but say so.
-      setPipelineError(err.response?.data?.detail || err.message || 'Could not load pipeline status.');
+    } catch {
+      // The table still works without the column; the header offers Try again.
+      setPipelineLoadFailed(true);
     } finally {
       summaryInFlight.current = false;
       setPipelineLoading(false);
@@ -171,14 +174,14 @@ export default function ManagePlatformPage() {
 
   const fetchAccounts = useCallback(async (search = '') => {
     setIsLoading(true);
-    setError(null);
+    setLoadFailed(false);
     try {
       const url = search.trim() ? `/accounts?search=${encodeURIComponent(search.trim())}` : '/accounts';
       const response = await api.get<CompanyAccount[]>(url);
       setAccounts(response.data);
-    } catch (err: any) {
-      const msg = err.response?.data?.detail || 'Failed to fetch account list.';
-      setError(msg);
+    } catch {
+      // No error text on screen (client rule): a neutral Try again instead.
+      setLoadFailed(true);
     } finally {
       setIsLoading(false);
     }
@@ -229,9 +232,11 @@ export default function ManagePlatformPage() {
       setIsModalOpen(false);
       fetchAccounts(searchQuery);
       setTimeout(() => setSuccessMsg(null), 4000);
-    } catch (err: any) {
-      const msg = err.response?.data?.detail || 'Failed to create account.';
-      setModalError(msg);
+    } catch (err) {
+      // A duplicate name is the user's to fix; anything else is not.
+      setModalError(serverSaid(err, /already exists/i)
+        ? 'An account with that name already exists.'
+        : ACTION_FAILED);
     } finally {
       setIsSubmitting(false);
     }
@@ -240,6 +245,7 @@ export default function ManagePlatformPage() {
   const handleStatusToggle = async (account: CompanyAccount) => {
     const newStatus: AccountStatus = account.status === 'active' ? 'hidden' : 'active';
     setTogglingId(account.id);
+    setError(null);
     try {
       await api.patch(`/accounts/${account.id}/status`, { status: newStatus });
       setSuccessMsg(`Account "${account.name}" is now ${newStatus}.`);
@@ -247,16 +253,15 @@ export default function ManagePlatformPage() {
         prev.map(a => (a.id === account.id ? { ...a, status: newStatus } : a))
       );
       setTimeout(() => setSuccessMsg(null), 3000);
-    } catch (err: any) {
-      const msg = err.response?.data?.detail || 'Failed to update account status.';
-      setError(msg);
+    } catch {
+      setError(ACTION_FAILED);
     } finally {
       setTogglingId(null);
     }
   };
 
   const formatDate = (isoString: string) => {
-    if (!isoString) return 'N/A';
+    if (!isoString) return '';
     try {
       const d = new Date(isoString);
       return d.toLocaleDateString('en-US', {
@@ -355,13 +360,14 @@ export default function ManagePlatformPage() {
               <Loader2 className="w-8 h-8 text-hp-navy animate-spin" />
               <p className="text-xs text-gray-500 font-medium">Loading target enterprise accounts...</p>
             </div>
+          ) : loadFailed ? (
+            <TryAgain onRetry={() => fetchAccounts(searchQuery)} className="p-12" />
           ) : accounts.length === 0 ? (
             <div className="p-12 text-center">
               <Building2 className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-              <h3 className="text-sm font-bold text-gray-800">No accounts found</h3>
               <p className="text-xs text-gray-500 mt-1">
                 {searchQuery
-                  ? `No account matches the query "${searchQuery}".`
+                  ? `No accounts match "${searchQuery}".`
                   : 'Get started by creating your first enterprise company account.'}
               </p>
               {searchQuery && (
@@ -391,7 +397,9 @@ export default function ManagePlatformPage() {
                         </button>
                         {liveLoaded && <span className="normal-case font-semibold text-emerald-700" title={`Running and queued update every ${LIVE_POLL_MS / 1000}s`}>· live</span>}
                         {queuePaused && <span className="normal-case text-amber-700" title={queuePaused}>· queue paused</span>}
-                        {pipelineError && <span className="normal-case text-red-700" title={pipelineError}>· status failed to load</span>}
+                        {pipelineLoadFailed && (
+                          <button type="button" onClick={refreshPipeline} className="normal-case font-semibold text-hp-navy hover:underline">· Try again</button>
+                        )}
                       </span>
                     </th>
                     )}

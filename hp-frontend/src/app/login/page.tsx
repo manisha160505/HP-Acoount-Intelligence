@@ -9,6 +9,7 @@ import { ParallaxBand } from '@/components/common/motion';
 import { Mail, AlertCircle, Loader2 } from 'lucide-react';
 import { PasswordInput } from '@/components/common/PasswordInput';
 import HpLogo from '@/components/common/HpLogo';
+import { ACTION_FAILED } from '@/lib/uiCopy';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -52,7 +53,7 @@ export default function LoginPage() {
     if (result.success) {
       router.push(landingRouteFor(result.user));
     } else {
-      setError(result.error || 'Authentication failed. Please check credentials.');
+      setError(result.error || ACTION_FAILED);
     }
   };
 

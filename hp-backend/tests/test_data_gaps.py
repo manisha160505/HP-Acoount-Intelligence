@@ -68,5 +68,5 @@ def test_urgency_popover_line_hides_the_missing_reason():
 
     lines = urgency.rationale_lines(driver)
 
-    assert lines[1] == "Workforce growth proxy: 0/25 - No signal observed"
+    assert lines[1] == "Workforce growth proxy: 0/25"
     assert not any("on file" in line or "missing-input" in line for line in lines)

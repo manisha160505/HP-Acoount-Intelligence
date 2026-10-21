@@ -17,6 +17,7 @@ import {
   matchesUrgency,
   pageNumbers,
   paginate,
+  URGENCY_FILTERS,
 } from '../src/lib/accountSelection.ts';
 
 type Acc = { id: string; name: string; urgency_score: number | null };
@@ -135,21 +136,22 @@ test('range edges are inclusive and every score falls in exactly one range', () 
   assert.ok(matchesUrgency(20, '0-20') && matchesUrgency(21, '21-40') && matchesUrgency(100, '81-100'));
 });
 
-test('unscored accounts appear under All and Not scored, never in a range', () => {
+test('unscored accounts appear under All only, never in a range, with no filter of their own', () => {
   assert.ok(matchesUrgency(null, 'all'));
-  assert.ok(matchesUrgency(undefined, 'unscored'));
-  assert.ok(!matchesUrgency(null, '0-20'));
-  assert.ok(!matchesUrgency(0, 'unscored'));
-  const unscored = filterAccounts(ALL, '', 'unscored');
-  assert.equal(unscored.length, 20);
-  assert.ok(unscored.every((a) => a.urgency_score === null));
+  assert.ok(matchesUrgency(undefined, 'all'));
+  for (const r of ['0-20', '21-40', '41-60', '61-80', '81-100'] as const) {
+    assert.ok(!matchesUrgency(null, r) && !matchesUrgency(undefined, r), r);
+  }
+  // No chip names the gap (client rule): the options are All and the ranges.
+  assert.deepEqual(URGENCY_FILTERS.map((f) => f.value), ['all', '81-100', '61-80', '41-60', '21-40', '0-20']);
+  const all = filterAccounts(ALL, '', 'all');
+  assert.equal(all.filter((a) => a.urgency_score === null).length, 20);
 });
 
 test('search and urgency filter combine', () => {
   // Jabil scores: Inc 0 (i=0 -> unscored), Circuit 1, Mexico 2, Malaysia 3.
   assert.deepEqual(filterAccounts(ALL, 'jabil', '0-20').map((a) => a.name),
     ['Jabil Circuit', 'Jabil Mexico', 'Jabil Malaysia']);
-  assert.deepEqual(filterAccounts(ALL, 'jabil', 'unscored').map((a) => a.name), ['Jabil Inc']);
   assert.deepEqual(filterAccounts(ALL, 'jabil', '61-80'), []);
 });
 

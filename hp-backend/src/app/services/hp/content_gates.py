@@ -707,7 +707,7 @@ def g13_pillar_count(asset: dict, content_type: str) -> list:
         cited = (pillar or {}).get("evidence_used") if isinstance(pillar, dict) else None
         if not cited:
             out.append(_finding("G13", ACTION_REGENERATE, AUDIT_OTHER,
-                                detail="pillar %d cites no evidence" % index,
+                                detail="pillar %d cites none of the evidence labels - cite at least one" % index,
                                 sentence=""))
     return out
 

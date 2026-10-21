@@ -1,15 +1,18 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Loader2, Users } from 'lucide-react';
 import api from '@/services/api';
 import type { AccountUser } from '@/types/analytics';
+import { TryAgain } from '@/components/common/TryAgain';
 
 /** The sellers assigned to one account. Admins see every account and are not listed. */
 export function AccountSellersPanel({ accountId }: { accountId: string }) {
   const [rows, setRows] = useState<AccountUser[] | null>(null);
   const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  const retry = useCallback(() => { setFailed(false); setRows(null); setAttempt((n) => n + 1); }, []);
 
   useEffect(() => {
     let live = true;
@@ -17,7 +20,7 @@ export function AccountSellersPanel({ accountId }: { accountId: string }) {
       .then((r) => { if (live) setRows(r.data); })
       .catch(() => { if (live) setFailed(true); });
     return () => { live = false; };
-  }, [accountId]);
+  }, [accountId, attempt]);
 
   return (
     <div data-tour="admin-account-sellers" className="mt-10 pt-6 border-t border-gray-200">
@@ -29,7 +32,7 @@ export function AccountSellersPanel({ accountId }: { accountId: string }) {
       </div>
       <p className="text-xs text-gray-500 mb-3">Admins see every account and are not listed.</p>
       {failed ? (
-        <p className="text-xs text-red-700">Could not load who has access.</p>
+        <TryAgain onRetry={retry} size="sm" align="start" />
       ) : rows === null ? (
         <Loader2 className="w-5 h-5 text-hp-navy animate-spin" />
       ) : rows.length === 0 ? (

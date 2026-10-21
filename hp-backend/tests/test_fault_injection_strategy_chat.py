@@ -1201,8 +1201,8 @@ class TestMessageEvaluator:
     def test_a_failed_model_publishes_the_coded_checks_and_says_so(self, evaluator, failure):
         out = evaluator([failure])
         assert out["ai_available"] is False and out["composite"] is None
-        assert out["score_band"] == "Unavailable"
-        assert out["summary"].startswith("AI scoring was unavailable")
+        assert out["score_band"] == ""
+        assert out["summary"] == "Something went wrong. Please try again."
         assert out["structure_checks"], "the format checks still publish"
 
     def test_malformed_json_is_asked_for_again_inside_one_call(self, evaluator, model):
@@ -1213,7 +1213,8 @@ class TestMessageEvaluator:
     def test_missing_scores_publish_no_total_and_say_which(self, evaluator):
         out = evaluator([json.dumps({"summary": "no scores"})])
         assert out["ai_available"] is True and out["composite"] is None
-        assert out["summary"].startswith("AI scoring was incomplete")
+        assert out["summary"].startswith("Something went wrong. Please try again.")
+        assert out["dimension_problems"], "which scores are missing stays internal"
         assert out["dimensions_padded"] == []
 
     def test_scores_out_of_range_or_of_the_wrong_type_are_never_published(self, evaluator):

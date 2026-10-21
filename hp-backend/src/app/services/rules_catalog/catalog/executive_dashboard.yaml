@@ -905,7 +905,8 @@ rules:
   - The information behind each component
   logic: A component whose input is absent scores 0, and the other components are still calculated. A
     driver with no input at all scores 0, recorded as one 'All components' item. These components
-    are listed, and in the driver's explanation lines they read 'No signal observed'. The card shows the
+    are listed, and in the driver's explanation lines they show their points alone, with no reason
+    text (the reason is kept internally). The card shows the
     driver score with no separate flag. The card status is 'partial' when any component has no input,
     otherwise 'available'.
   conditions:

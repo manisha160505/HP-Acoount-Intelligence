@@ -10,6 +10,7 @@ from app.config import account_overrides
 from app.core.sse import with_keepalive
 from app.database.mongodb import get_db
 from app.errors import APIError, ErrorCode
+from app.services import links
 from app.services.dashboard import priorities
 from app.services.extractors.datasets import account_data_as_of
 from app.services.regen import store as widget_store
@@ -112,6 +113,25 @@ def _generation_by_widget(account_id: str) -> dict:
 def _jsonable(value):
     from app.api.v1.regeneration import jsonable
     return jsonable(value)
+
+
+def _strip_broken_links(db, account_id: str, responses: list) -> list:
+    """Remove every link `link_checks` records as broken (client: only
+    verified links are clickable). One lookup for the whole response; a link
+    never checked is kept. A lookup that fails returns the widgets unchanged
+    - a missing link check must not take the dashboard down with it."""
+    try:
+        urls: set = set()
+        for r in responses:
+            urls.update(links.collect_urls(r.get("data")))
+        broken = links.broken_urls(db, urls)
+        if not broken:
+            return responses
+        return [{**r, "data": links.strip_broken(r.get("data"), broken)} for r in responses]
+    except Exception:
+        logger.exception("link check lookup failed for %s; links returned unchanged",
+                         account_id)
+        return responses
 
 WIDGET_REGISTRY = {
     "executive_dashboard": [
@@ -687,7 +707,7 @@ def get_account_feature_widgets(
                                    as_of, contract["source_datasets"])},
             })
 
-    return responses
+    return _strip_broken_links(db, account_id, responses)
 
 @router.post("/accounts/{account_id}/widgets/{feature_key}/regenerate", response_model=list[WidgetResponse])
 def regenerate_account_feature_widgets(

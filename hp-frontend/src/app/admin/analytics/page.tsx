@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { ProtectedRoute } from '@/components/common/ProtectedRoute';
 import api from '@/services/api';
-import { parseApiError } from '@/lib/apiError';
+import { TryAgain } from '@/components/common/TryAgain';
 import { featureLabel } from '@/lib/features';
 import { AnalyticsResponse, UserUsage } from '@/types/analytics';
 import {
@@ -11,7 +11,7 @@ import {
   formatDateTime, formatDuration, utcDay,
 } from '@/components/analytics/AnalyticsParts';
 import { ParallaxBand } from '@/components/common/motion';
-import { Loader2, AlertCircle, RefreshCw, Users, Activity, LogIn, Eye, Clock } from 'lucide-react';
+import { Loader2, RefreshCw, Users, Activity, LogIn, Eye, Clock } from 'lucide-react';
 
 type FeatureMeasure = 'users' | 'views' | 'time';
 type CellMeasure = 'views' | 'time';
@@ -89,7 +89,7 @@ export default function AdminAnalyticsPage() {
   const [to, setTo] = useState(utcDay(0));
   const [data, setData] = useState<AnalyticsResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [featureMeasure, setFeatureMeasure] = useState<FeatureMeasure>('users');
   const [cellMeasure, setCellMeasure] = useState<CellMeasure>('views');
   const [drill, setDrill] = useState<Drill | null>(null);
@@ -97,12 +97,13 @@ export default function AdminAnalyticsPage() {
 
   const fetchAnalytics = useCallback(async (f: string, t: string) => {
     setIsLoading(true);
-    setError(null);
+    setLoadFailed(false);
     try {
       const res = await api.get<AnalyticsResponse>('/admin/analytics', { params: { from: f, to: t } });
       setData(res.data);
-    } catch (err) {
-      setError(parseApiError(err, 'Failed to load analytics.').message);
+    } catch {
+      // No error text on screen (client rule): a neutral Try again instead.
+      setLoadFailed(true);
     } finally {
       setIsLoading(false);
     }
@@ -146,11 +147,8 @@ export default function AdminAnalyticsPage() {
           </div>
         )}
 
-        {error && (
-          <div className="mb-6 as-fade bg-red-50 border border-red-200 p-4 rounded-xl flex items-center space-x-2 text-red-800 text-xs font-semibold shadow-sm">
-            <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0" />
-            <span>{error}</span>
-          </div>
+        {loadFailed && !isLoading && (
+          <TryAgain onRetry={() => !rangeInvalid && fetchAnalytics(from, to)} className="mb-6 as-fade" />
         )}
 
         {isLoading && !data ? (
@@ -195,7 +193,7 @@ export default function AdminAnalyticsPage() {
                     label: featureLabel(f.feature_key),
                     value,
                     display: featureMeasure === 'time' ? formatDuration(value) : String(value),
-                    title: `${featureLabel(f.feature_key)}: ${f.unique_users} user(s), ${f.total_views} view(s), ${formatDuration(f.time_seconds)} spent, last used ${formatDateTime(f.last_used_at)}`,
+                    title: `${featureLabel(f.feature_key)}: ${f.unique_users} user(s), ${f.total_views} view(s), ${formatDuration(f.time_seconds)} spent${f.last_used_at ? `, last used ${formatDateTime(f.last_used_at)}` : ''}`,
                     onClick: () => setDrill(d!.feature(f.feature_key, featureMeasure)),
                   };
                 })} />

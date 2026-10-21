@@ -276,10 +276,12 @@ def _read_dataset_records(account_id: str, dataset_key: str) -> list[dict]:
     return read_dataset_records(account_id, dataset_key, strict=False)
 
 # ABX Feature 5 status vocabulary. Technographics is an install-base provider
-# export, so a vendor it names is a Confirmed finding. Absence is Unknown and
-# never "competitor absent" - the spec is explicit about that.
+# export, so a vendor it names is a Confirmed finding. Absence is unknown and
+# never "competitor absent" - the spec is explicit about that. It is published
+# blank (client rule, 21 Oct: no "Unknown" in front of the client); the reason
+# sits in the vendor's `detection_note`, which the UI never renders.
 STATUS_CONFIRMED = "Confirmed"
-STATUS_UNKNOWN = "Unknown"
+STATUS_UNKNOWN = ""
 
 # HP relationship, also from ABX Feature 5. Short label for the vendor chip,
 # long form for the explanation - the long string was being rendered inside a

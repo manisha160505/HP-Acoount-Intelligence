@@ -7,6 +7,7 @@ import { ParallaxBand } from '@/components/common/motion';
 import { AlertCircle, Loader2, KeyRound } from 'lucide-react';
 import { PasswordInput } from '@/components/common/PasswordInput';
 import HpLogo from '@/components/common/HpLogo';
+import { ACTION_FAILED } from '@/lib/uiCopy';
 import { RecoveryCodeNotice } from '@/components/common/RecoveryCodeNotice';
 import { clearSession } from '@/lib/session';
 
@@ -70,7 +71,7 @@ export default function ChangePasswordPage() {
       // Every session was ended, this one included.
       window.location.href = '/login?changed=1';
     } else {
-      setError(result.error || 'Could not change the password.');
+      setError(result.error || ACTION_FAILED);
     }
   };
 

@@ -4,6 +4,8 @@ import React, { createContext, useCallback, useContext, useEffect, useState } fr
 import { User, AuthState } from '@/types/auth';
 import api from '@/services/api';
 import { flushOnExit } from '@/lib/track';
+import { parseApiError } from '@/lib/apiError';
+import { ACTION_FAILED, NEW_PASSWORD_REFUSED } from '@/lib/uiCopy';
 import {
   clearSession,
   getAccessToken,
@@ -27,8 +29,21 @@ interface AuthContextType extends AuthState {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-function errorMessage(err: any, fallback: string): string {
-  return err?.response?.data?.error?.message || err?.response?.data?.detail || fallback;
+// Refusals the user must act on get this app's own wording, keyed on the
+// error code; anything else is ACTION_FAILED. Never the server's text
+// (client rule, approved).
+function loginRefusal(err: unknown): string {
+  const e = parseApiError(err);
+  if (e.code === 'INVALID_CREDENTIALS' || e.status === 401) return 'Invalid email or password';
+  if (e.code === 'FORBIDDEN') return 'This account has been deactivated. Contact your administrator.';
+  return ACTION_FAILED;
+}
+
+function changePasswordRefusal(err: unknown): string {
+  const e = parseApiError(err);
+  if (e.code === 'INVALID_CREDENTIALS') return 'Your old password is not correct.';
+  if (e.code === 'VALIDATION_ERROR' && e.fields?.new_password) return NEW_PASSWORD_REFUSED;
+  return ACTION_FAILED;
 }
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -55,8 +70,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const response = await api.post<TokenBody>('/auth/login', { email, password: pass });
       setSession(response.data);
       return { success: true, user: response.data.user };
-    } catch (err: any) {
-      return { success: false, error: errorMessage(err, 'Invalid email or password') };
+    } catch (err) {
+      return { success: false, error: loginRefusal(err) };
     }
   };
 
@@ -81,8 +96,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // The session is already ended on the server. It is cleared here once the
       // user has seen their recovery code (see the change-password page).
       return { success: true, recoveryCode: res.data.recovery_code };
-    } catch (err: any) {
-      return { success: false, error: errorMessage(err, 'Could not change the password.') };
+    } catch (err) {
+      return { success: false, error: changePasswordRefusal(err) };
     }
   };
 
