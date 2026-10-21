@@ -34,6 +34,7 @@ Everything is computed in one `$facet` aggregation on the server; the event
 collection is never loaded into the application.
 """
 
+import logging
 from datetime import UTC, date, datetime, timedelta
 
 from bson import ObjectId
@@ -58,8 +59,11 @@ from app.services.usage import (
     HEARTBEAT_SECONDS,
     USAGE_EVENTS,
     feature_keys,
+    is_tracked,
 )
 from app.services.users_admin import is_user_active
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_WINDOW_DAYS = 30
 MAX_WINDOW_DAYS = 366
@@ -345,3 +349,66 @@ def build_my_activity(db, user: dict, date_from: str | None = None,
         recent=recent,
         recent_logins=logins,
     )
+
+
+# ---------------------------------------------------------------------------
+# Strategy Chat outcomes
+# ---------------------------------------------------------------------------
+
+# One event per answered chat turn, in `usage_events` beside the views and
+# heartbeats, so "how often does a seller get an answer" is a query rather than
+# a log search. No question or answer text is stored - only who, which account,
+# which mode, how it ended and how long it took. Written under the same rule as
+# every usage event: admin activity is not recorded.
+EVENT_CHAT_ANSWERED = "strategy_chat.answered"
+EVENT_CHAT_FAILED = "strategy_chat.failed"
+CHAT_FEATURE_KEY = "strategy_chat"
+
+# `unavailable_cause` as it is recorded. "ok" is a published answer.
+CHAT_CAUSE_OK = "ok"
+_CHAT_CAUSE_NAMES = {"off_topic": "out_of_scope"}
+
+
+def chat_outcome(result: dict | None) -> tuple[str, str]:
+    """(event, cause) for one chat turn's payload.
+
+    `answered` when the seller got a published answer, `failed` when they got
+    a refusal of any kind; `cause` says which: ok, model, unevidenced,
+    out_of_scope or no_data. A payload with no cause is the model's failure.
+    """
+    result = result or {}
+    if result.get("available"):
+        return EVENT_CHAT_ANSWERED, CHAT_CAUSE_OK
+    cause = str(result.get("unavailable_cause") or "model")
+    return EVENT_CHAT_FAILED, _CHAT_CAUSE_NAMES.get(cause, cause)
+
+
+def record_chat_outcome(db, user: dict | None, account_id: str,
+                        result: dict | None, latency_ms: float,
+                        mode: str | None = None) -> None:
+    """Store one chat turn's outcome. Never raises into the answer.
+
+    A failed write is logged as a warning and dropped: the seller's answer
+    matters more than the count of it.
+    """
+    try:
+        if not user or not is_tracked(user):
+            return
+        user_id = user.get("id") or (str(user["_id"]) if user.get("_id") else None)
+        if not user_id:
+            return
+        event, cause = chat_outcome(result)
+        db[USAGE_EVENTS].insert_one({
+            "user_id": str(user_id),
+            "event": event,
+            "feature_key": CHAT_FEATURE_KEY,
+            "account_id": str(account_id),
+            "session_id": user.get("session_id"),
+            "mode": str((result or {}).get("mode") or mode or "advisor"),
+            "cause": cause,
+            "latency_ms": int(max(0.0, float(latency_ms or 0))),
+            "ts": datetime.now(UTC),
+        })
+    except Exception:
+        logger.warning("usage_events: could not record a strategy chat outcome "
+                       "for account %s", account_id, exc_info=True)

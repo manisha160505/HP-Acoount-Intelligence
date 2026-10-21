@@ -1298,20 +1298,37 @@ def strategy_chat_ask(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
                             detail="Company account not found")
 
+    import time
+
+    from app.services import analytics as usage_analytics
     from app.services.strategy import chat as strategy_chat_service
 
     _check_chat_mode(account_id, body)
 
+    messages = [m.model_dump() for m in body.messages]
+    started = time.perf_counter()
     try:
-        return strategy_chat_service.answer(
+        result = strategy_chat_service.answer(
             account_id=account_id,
-            messages=[m.model_dump() for m in body.messages],
+            messages=messages,
             mode=body.mode,
             persona_id=body.persona_id,
         )
     except strategy_chat_service.ChatUnavailable as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                             detail=str(exc)) from exc
+    except Exception as exc:
+        # Whatever escaped the chat - a provider response nobody anticipated,
+        # a bug - the seller still gets the honest "couldn't answer right now"
+        # refusal as a 200, never a 500. The cause is in the log.
+        logger.exception("strategy chat failed for account %s", account_id)
+        result = strategy_chat_service.failure_answer(
+            account_id, messages, mode=body.mode, persona_id=body.persona_id,
+            reason="the turn failed unexpectedly (%s)" % type(exc).__name__)
+    usage_analytics.record_chat_outcome(
+        db, current_user, account_id, result,
+        (time.perf_counter() - started) * 1000, mode=body.mode)
+    return result
 
 
 @router.post("/accounts/{account_id}/widgets/strategy_chat/ask/stream")
@@ -1346,6 +1363,9 @@ def strategy_chat_ask_stream(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
                             detail="Company account not found")
 
+    import time
+
+    from app.services import analytics as usage_analytics
     from app.services.strategy import chat as strategy_chat_service
 
     # Checked before the stream opens, so a bad mode or persona is still a
@@ -1359,19 +1379,29 @@ def strategy_chat_ask_stream(
         # begun, so it cannot become a 400 the way it does on `/ask`. It is sent
         # as a terminal event instead and the client renders it as the refusal
         # it is.
+        started = time.perf_counter()
+
+        def record(result):
+            usage_analytics.record_chat_outcome(
+                db, current_user, account_id, result,
+                (time.perf_counter() - started) * 1000, mode=body.mode)
+
         try:
             for event in strategy_chat_service.answer_stream(
                     account_id=account_id, messages=messages, mode=body.mode,
                     persona_id=body.persona_id):
+                if event.get("type") == "done":
+                    record(event)
                 yield "data: %s\n\n" % json.dumps(event)
         except strategy_chat_service.ChatUnavailable as exc:
             yield "data: %s\n\n" % json.dumps(
                 {"type": "error", "detail": str(exc)})
         except Exception:
             logger.exception("strategy chat stream failed for account %s", account_id)
+            record(None)
             yield "data: %s\n\n" % json.dumps(
                 {"type": "error",
-                 "detail": "The strategy assistant could not complete that answer."})
+                 "detail": strategy_chat_service.MODEL_FAILURE_MESSAGE})
 
     return StreamingResponse(
         with_keepalive(answer_events),

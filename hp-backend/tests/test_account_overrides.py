@@ -35,11 +35,14 @@ def test_the_client_decisions_are_in_the_shipped_file():
     assert sum("intent_demand_signals" in e["hidden_features"] for e in entries) == 16
     assert sum("tech_landscape" in e["hidden_features"] for e in entries) == 3
     assert sum(e["hide_parent_company"] for e in entries) == 9
-    # Client, 11 Oct: no Stakeholder Map on the three accounts no source
-    # returned a contact for.
+    # Client, 11 Oct: no Stakeholder Map on an account no source returned a
+    # contact for - from 21 Oct, the 7 the final contact file has none for.
     assert {n for n, e in ao.OVERRIDES.items() if "stakeholder_map" in e["hidden_features"]} == {
         ao._key(n) for n in ("MINISTRY OF DEFENCE - MY", "MINISTRY OF DEFENCE - VN",
-                             "NATIONAL INTELLIGENCE SERVICE - KR")}
+                             "NATIONAL INTELLIGENCE SERVICE - KR",
+                             "JAPAN POST HOLDINGS CO.,LTD. - JP",
+                             "MINISTRY OF NATIONAL DEFENSE - KR",
+                             "MINISTRY OF PUBLIC SECURITY - VN", "T&D HOLDINGS, INC. - JP")}
 
 
 def test_an_account_not_listed_hides_nothing():

@@ -496,8 +496,8 @@ rules:
     something cites a valid section and shares a meaningful word with it; and every figure has a source.
     Short filler (''ok'', ''go on'', ''hmm'', and so on), questions and sentences with no meaningful words
     need no citation. Bold markers and a speaker label at the start are ignored. There are 3 attempts.
-    If none passes, a message outside the role says ''The rehearsal stopped here'' and suggests rephrasing
-    or switching to Strategy Advisor.'
+    If none passes, a message outside the role says ''That isn''t covered in this account''s intelligence
+    yet.'' and suggests rephrasing or switching to Strategy Advisor.'
   constants:
   - label: Reply must share wording with its cited section
     ref: py:app.services.strategy.chat:ROLEPLAY_REQUIRE_SECTION_OVERLAP
@@ -622,27 +622,41 @@ rules:
   parent: null
   name: Standard chat messages
   kind: selection
-  summary: A short standard message explains the outcome and points the seller to the right section.
-  purpose: A short standard message explains the outcome and points the seller to the right section.
-  logic: 'The message names its cause: the AI service did not return a usable reply, or the drafted
-    answer did not pass the evidence checks. Each message
-    points the seller to the Stakeholder Map, Tech Landscape or Recent Signals. It appears as a normal
-    chat reply. Off-topic questions get their own short reply.'
+  summary: When there is no answer, the chat shows one short standard message, never an error or a reason.
+  purpose: When there is no answer, the chat shows one short standard message, never an error or a reason.
+  logic: 'The message depends on the cause and gives no technical detail; the reason is kept only in the
+    turn''s internal generation record. When the AI service did not return a usable reply, the seller is
+    asked to try again (no pointer to other sections, since the data was not the cause). When the
+    conversation no longer fits the model, the seller is asked to start a new conversation. When the
+    account''s intelligence does not cover the question - nothing has been published yet, or the drafted
+    answer did not pass the evidence checks - the message says so; only the evidence-check case adds one
+    pointer to the nearest related sections. A rehearsal that fails its checks steps out of the role with
+    the same line and suggests rephrasing or switching to Strategy Advisor. Off-topic questions get their
+    own short reply.'
   table:
     columns:
     - Cause
     - What the message says
     rows:
     - - AI service
-      - The AI service did not return a usable answer for {company}. The account's data is not the cause.
+      - The assistant couldn't answer right now. Please try again in a moment.
+    - - Conversation too long
+      - This conversation has grown too long. Please start a new conversation.
+    - - Nothing published yet
+      - That isn't covered in this account's intelligence yet.
     - - Not evidenced
-      - An answer about {company} was drafted, and it is not shown because not every claim in it could
-        be traced to the account's data.
+      - That isn't covered in this account's intelligence yet. The Stakeholder Map, Tech Landscape and
+        Recent Signals hold the nearest related detail.
+    - - Not evidenced (rehearsal)
+      - That isn't covered in this account's intelligence yet. Try rephrasing, or switch to Strategy Advisor.
     - - Off topic
       - I can only help with questions about {company} and how HP can sell to them. (This reply has no
         pointer to other sections.)
   sources:
   - hp-backend/src/app/services/strategy/chat.py:CAUSE_OPENING
+  - hp-backend/src/app/services/strategy/chat.py:MODEL_FAILURE_MESSAGE
+  - hp-backend/src/app/services/strategy/chat.py:PROMPT_TOO_LARGE_MESSAGE
+  - hp-backend/src/app/services/strategy/chat.py:ROLEPLAY_NOT_COVERED_MESSAGE
   - hp-backend/src/app/services/strategy/chat.py:_unavailable
   - hp-backend/src/app/services/strategy/chat.py:OFF_TOPIC_REPLY
   confidence: high

@@ -61,10 +61,25 @@ def test_a_full_row_keeps_every_column_we_load(loader):
 @pytest.mark.parametrize("status, tag", [
     ("catch_all", "CATCH_ALL"), ("CATCH_ALL", "CATCH_ALL"), ("VERIFIED", "VERIFIED"),
     ("VALID_RISKY", "VALID_RISKY"), ("valid", "valid"),
-    ("unknown", ""), ("UNKNOWN", ""), (None, ""), ("", ""),
+    ("could_not_verify", ""), ("Could Not Verify", ""), ("unverified", ""),  # 21 Oct
+    ("unknown", ""), ("UNKNOWN", ""), ("unavailable", ""), ("Not Found", ""),
+    ("not-found", ""), ("N/A", ""), (None, ""), ("", ""),
 ])
 def test_email_tags_as_provided_except_blank_and_unknown(loader, status, tag):
     assert loader.convert(_row(email_status=status), ACCOUNT)[0]["Email Status"] == tag
+
+
+@pytest.mark.parametrize("line_type", ["unknown", "not found", "N/A", "could_not_verify", "-"])
+def test_a_no_information_phone_tag_is_blank_but_the_number_shows(loader, line_type):
+    out, _ = loader.convert(_row(phone_line_type=line_type), ACCOUNT)
+    assert out["Mobile Phone"] == "81300000000" and out["Phone Line Type"] == ""
+
+
+def test_a_contact_with_nothing_but_a_name_is_still_kept(loader):
+    out, _ = loader.convert(_row(email=None, email_status="could_not_verify", phone=None,
+                                 phone_line_type="unknown", linkedin_url=None), ACCOUNT)
+    assert out["Prospect full_name"] == "Aiko Tanaka" and out["Prospect job_title"] == "CIO"
+    assert out["Email"] == out["Email Status"] == out["Mobile Phone"] == out["Phone Line Type"] == ""
 
 
 def test_no_email_means_no_email_tag(loader):
@@ -135,3 +150,13 @@ def test_an_account_matches_by_name_or_name_and_country(loader):
     assert loader.match("ADVANTEST  CORPORATION", "JP", folders) == ("dir", {})
     assert loader.match("BUNNINGS GROUP LIMITED", "AU", folders) == ("dir2", {})
     assert loader.match("UNKNOWN CO", "JP", folders) is None
+
+
+def test_the_contact_id_belongs_to_the_person_not_the_row(loader):
+    a, _ = loader.convert(_row(), ACCOUNT)
+    b, _ = loader.convert(_row(job_title="Chief Information Officer", phone=None), ACCOUNT)
+    other, _ = loader.convert(_row(full_name="Kenji Sato", email="kenji@example.com"), ACCOUNT)
+    assert a["Prospect prospect_id"].startswith("c-")
+    # Same person, other details changed: same id. Another person: another id.
+    assert a["Prospect prospect_id"] == b["Prospect prospect_id"]
+    assert a["Prospect prospect_id"] != other["Prospect prospect_id"]

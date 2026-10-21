@@ -92,7 +92,10 @@ class _Collection:
         self.rows = rows
         self.queries = []
 
-    def find_one(self, query):
+    def find_one(self, query, projection=None):
+        # `projection` because the roster is read through regen.store, which
+        # passes one; no row here has node state, so the store falls back to
+        # these account_widgets rows exactly as a pre-engine account does.
         self.queries.append(query)
         return next((r for r in self.rows
                      if all(r.get(k) == v for k, v in query.items())), None)
@@ -163,7 +166,10 @@ def test_a_persona_from_another_account_does_not_resolve(db):
     installed = db(_widgets(CONTACTS, account_id=OTHER))
     assert personas.resolve(ACCOUNT, mine) is None
     for query in installed.collection.queries:
-        assert query.get("account_id") == ACCOUNT
+        # A mirror read names the account; a committed (node state) read is
+        # keyed by `state_id(account, node)`, which starts with it.
+        assert (query.get("account_id") == ACCOUNT
+                or str(query.get("_id", "")).startswith(ACCOUNT + ":")), query
 
 
 def test_an_unknown_persona_id_resolves_to_nothing(db):
@@ -232,6 +238,26 @@ def test_a_persona_with_no_talking_points_carries_none(db):
     starters = personas.suggested_prompts(persona)
     assert starters, "a persona with no talking points still needs an opener"
     assert all(s["prompt_text"] for s in starters)
+
+
+@pytest.mark.parametrize("stored,kept", [
+    ("Irvan Nr", True),               # the same person
+    ("  irvan   NR ", True),          # case and spacing do not count
+    ("", True),                       # no recorded name: kept as before
+    ("Budi Santoso", False),          # the id now names someone else
+])
+def test_talking_points_written_for_another_person_are_ignored(db, stored, kept):
+    """Joined by contact_id, but an id can be reused for another person after
+    a contacts reload: an entry recording someone else's name is not this
+    contact's (21 Oct)."""
+    entry = {**TALKING["c1"], "full_name": stored}
+    db(_widgets(CONTACTS, {"c1": entry}, CARDS))
+    persona = personas.resolve(ACCOUNT, "contact::c1")
+    assert persona is not None
+    if kept:
+        assert persona["pain_points"] == TALKING["c1"]["pain_points"]
+    else:
+        assert persona["pain_points"] == [] and persona["decision_power"] is None
 
 
 def test_every_roster_name_is_banned_not_just_the_persona(db):

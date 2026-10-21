@@ -695,18 +695,18 @@ rules:
   inputs:
   - Whether the play has a trigger
   - Timing note written by AI
-  logic: A play with no trigger quote carries a timing note. If the AI gives none, the play is sent back
-    (up to 2 rewrites), and then the standard note is added.
+  logic: A play with no trigger quote should carry a timing note saying what to confirm. If the AI gives
+    none, the play is sent back (up to 2 rewrites). If there is still none, the play is published with no
+    timing note - nothing is shown in its place - and the reason is kept in the run's internal notes.
   constants:
-  - label: Standard timing note
+  - label: Timing note when the AI gives none
     ref: py:app.services.extractors.solution_narrative_opportunity_map:DEFAULT_TIMING_NOTE
-    stated: No timing signal for this play appears in this account's data - confirm current plans and
-      budget timing before positioning.
+    stated: null
   example:
     scenario: Print play citing only the business description; the AI returned no timing note in two rewrites.
     steps:
     - Two rewrites used.
-    result: Standard note published.
+    result: Published with no timing note; nothing is shown for it.
   output: The timing note on the play.
   sources:
   - hp-backend/src/app/services/extractors/solution_narrative_opportunity_map.py:_process
@@ -791,14 +791,14 @@ rules:
   inputs:
   - The HP-fit check
   logic: After ordering and the cap, a play without an evidenced HP fit moves to 'Discovery areas'.
-    Its title is the HP offering name followed by 'no supporting evidence in this account's data'. It
+    Its title is the HP offering name alone. It
     carries no sales narrative, HP products, links or case study. The page shows its title, its priority,
-    what the data shows (the scale statement) and what to confirm (the timing note).
+    what the data shows (the scale statement) and what to confirm (the timing note, when there is one).
   example:
     scenario: Print play whose quotes are about property investment.
     steps:
     - No print signal word in the quotes, so the HP-fit check is not met.
-    result: Shown as 'HP Enterprise Print / MPS - no supporting evidence in this account's data'.
+    result: Shown under Discovery areas as 'HP Enterprise Print / MPS'.
   output: The discovery areas and their count.
   sources:
   - hp-backend/src/app/services/extractors/solution_narrative_opportunity_map.py

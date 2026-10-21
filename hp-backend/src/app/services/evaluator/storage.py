@@ -57,14 +57,17 @@ def resolve_persona(account_id: str, persona_id: str) -> dict | None:
     Returns None when the id is unknown here - including when it is a perfectly
     valid persona on a different account, which is the case that matters.
     """
-    db = get_db()
-    widget = db["account_widgets"].find_one({
-        "account_id": account_id,
-        "widget_key": "evaluator_persona_context",
-    }) or {}
-    personas = (widget.get("data") or {}).get("persona_archetypes") or []
+    # The committed generation, through the store - not the `account_widgets`
+    # rollback mirror, which can lag the roster the evaluator menu was built
+    # from (a failed mirror upsert, duplicate rows).
+    from app.services.regen import store as widget_store
+
+    widget = widget_store.get(account_id, "evaluator_persona_context") or {}
+    personas = (widget.get("data") or {}).get("persona_archetypes")
+    if not isinstance(personas, list):
+        return None
     for persona in personas:
-        if str(persona.get("persona_id")) == str(persona_id):
+        if isinstance(persona, dict) and str(persona.get("persona_id")) == str(persona_id):
             return persona
     return None
 

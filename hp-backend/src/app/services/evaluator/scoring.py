@@ -293,7 +293,12 @@ def split_dimension_payload(raw):
                 scores[dimension] = value
         return scores, rationales
 
-    for entry in (raw or []):
+    if not isinstance(raw, (list, tuple)):
+        # A number, a bool, a string: no dimension can be read from it, and
+        # iterating it would raise (or walk a string letter by letter). Every
+        # dimension is then missing, which is reported as incomplete scoring.
+        return scores, rationales
+    for entry in raw:
         if not isinstance(entry, dict):
             continue
         dimension = _match_dimension(entry.get("dimension") or entry.get("name"))

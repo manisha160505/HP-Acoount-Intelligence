@@ -157,7 +157,9 @@ class TestSourcePriority:
         assert cards["status"] == "empty"
         assert cards["data"]["cards"] == []
         assert cards["data"]["technology_evidence_source"] == "none"
-        assert "No technology evidence available" in cards["data"]["notice"]
+        # The reason is internal (unavailable_reason); no seller-facing notice.
+        assert "notice" not in cards["data"]
+        assert "no technology evidence" in cards["data"]["unavailable_reason"]
         assert ctx["technology_evidence_source"] == "none"
         assert ctx["area_evidence"] == []
 

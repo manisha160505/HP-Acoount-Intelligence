@@ -324,7 +324,9 @@ def _derive_provenance(detected_as: list, techno_row: dict) -> str:
     label.
     """
     if not detected_as:
-        return "technographics -> no matching entry"
+        # No entry to name: the source alone, not a "no matching entry" line
+        # on the card footer.
+        return "technographics"
 
     columns = []
     for column, value in (techno_row or {}).items():
@@ -389,16 +391,22 @@ def _normalise_hp_fields(categories: list, techno_row: dict | None = None) -> No
             # named product was not in the export at all - Microsoft Intune on
             # an Azure AD match, NVIDIA on a PyTorch match. Naming the real
             # entries makes any remaining mismatch visible on the card itself.
+            #
+            # `provenance` is the card footer and `evidence_basis` its tooltip,
+            # so both are client-visible. Where there is no source entry to
+            # name they are left empty - the card shows no footer text - and
+            # the reason goes to `detection_note`, which the UI never renders
+            # (21 Oct: no gap wording in front of the client).
             detected_as = [d for d in (vendor.get("detected_as") or []) if d]
-            if not is_whitespace:
-                vendor["provenance"] = _derive_provenance(detected_as, techno_row)
-            else:
-                vendor["provenance"] = "technographics -> no vendor found for this category"
+            vendor["detection_note"] = None
             if is_whitespace:
-                vendor["evidence_basis"] = (
+                vendor["provenance"] = ""
+                vendor["evidence_basis"] = ""
+                vendor["detection_note"] = (
                     "no vendor for this category appears in the supplied "
                     "technographics export")
             elif detected_as:
+                vendor["provenance"] = _derive_provenance(detected_as, techno_row)
                 vendor["evidence_basis"] = "detected as %s in the technographics export" % (
                     ", ".join(detected_as[:4]))
             else:
@@ -406,7 +414,9 @@ def _normalise_hp_fields(categories: list, techno_row: dict | None = None) -> No
                 # Without the matched entry the claim cannot be substantiated,
                 # so it is Likely rather than Confirmed.
                 vendor["detection_status"] = "Likely"
-                vendor["evidence_basis"] = (
+                vendor["provenance"] = _derive_provenance(detected_as, techno_row)
+                vendor["evidence_basis"] = ""
+                vendor["detection_note"] = (
                     "matched a technographics keyword rule; the specific source "
                     "entry was not recorded")
             # Displacement risk for the chip; the relationship label and its
@@ -1413,6 +1423,16 @@ def extract_tech_landscape(account_id: str,  # noqa: PLR0912, PLR0915 - branch-h
     except Exception:
         logger.exception("tech landscape: map narrative generation failed for %s",
                          account_id)
+        # The narrative writes onto the categories in place. A failure part-way
+        # must not leave some of it published while the report says none was
+        # generated, so every narrative field goes back to the absent state
+        # `_normalise_hp_fields` set just above.
+        for category in hp_categories:
+            category["what_it_means"] = None
+            category.pop("what_it_means_word_count", None)
+            for vendor in category.get("vendors") or []:
+                if isinstance(vendor, dict):
+                    vendor["hp_play"] = None
 
     # The client's Tech Landscape confidence. Last, because Driver 1 scores the
     # technology against the HP opportunity on the card, and `hp_play` only

@@ -5,7 +5,8 @@ import re
 import threading
 import time
 
-from openai import APIStatusError, OpenAI, RateLimitError
+import httpx
+from openai import APIConnectionError, APIStatusError, APITimeoutError, OpenAI, RateLimitError
 
 from app.config.settings import settings
 from app.observability import pipeline
@@ -26,10 +27,26 @@ def get_openai_client() -> OpenAI | None:
 
 
 # Waits inside ONE model call before sending it again, when the provider
-# answers 429 or 5xx for a moment. Not a retry of a failed pipeline: a section
+# answers 429 or 5xx for a moment, or the request never got an answer (a
+# connection reset or a timeout). Not a retry of a failed pipeline: a section
 # that still fails after these fails with its reason and is never re-queued
-# (29 Sep). The SDK adds its own two quick retries before these.
+# (29 Sep). With several Vertex regions every region is tried before each wait;
+# with one region (or another provider) the SDK adds its own two quick retries.
 RATE_LIMIT_WAITS = (5, 15, 30, 60)
+
+# How many attempts of ONE create_completion call may time out before the
+# timeout is raised. A timeout costs the whole LLM_REQUEST_TIMEOUT_SECONDS
+# (300s), so without a cap the region hops and the wait ladder above multiplied
+# it - 24 regions x 5 passes x 300s is ~10 hours for one call. With the cap a
+# call spends at most 3 x 300s timing out. Each timed-out attempt goes to a
+# region that has not timed out in this call (where there is one), and a wait
+# from the ladder comes between them. Fast failures - a reset, a refused
+# connection, a 5xx, a 429 - are not counted here and keep the hop + ladder.
+MAX_TIMED_OUT_ATTEMPTS = 3
+
+# How often one JSON completion is asked for before an unreadable answer counts
+# as a failure. Also inside one model call, not a pipeline retry.
+JSON_ATTEMPTS = 2
 
 
 # The 400 that says a prompt is too big - and why it is retried rather than fatal.
@@ -65,10 +82,72 @@ def _is_capacity_refusal(exc) -> bool:
     return _CAPACITY_400 in text.lower()
 
 
+def _is_server_error(exc) -> bool:
+    return isinstance(exc, APIStatusError) and exc.status_code >= 500
+
+
+def _is_network_error(exc) -> bool:
+    """The request got no answer at all: a reset, a refused connection, a
+    timeout. `APITimeoutError` is an `APIConnectionError`; a raw httpx transport
+    error is caught too, in case one reaches here unwrapped.
+
+    The per-request timeout itself (LLM_REQUEST_TIMEOUT_SECONDS) is not changed
+    by retrying: each attempt still gets the whole of it."""
+    return isinstance(exc, APIConnectionError | httpx.TransportError)
+
+
+def _is_timeout(exc) -> bool:
+    """The request was sent and no answer came within the timeout."""
+    return isinstance(exc, APITimeoutError | httpx.TimeoutException)
+
+
+class _TimeoutBudget:
+    """Timed-out attempts of one create_completion call, and where they were.
+
+    A client that keeps the SDK's own retries (one region, or another provider)
+    may have sent the request up to 1 + max_retries times before the timeout
+    reaches here, so a timeout from it counts that many attempts."""
+
+    def __init__(self):
+        self.count = 0
+        self.regions = set()
+
+    def note(self, client, region) -> None:
+        sdk_retries = getattr(client, "max_retries", 0)
+        self.count += 1 + (sdk_retries if isinstance(sdk_retries, int)
+                           and sdk_retries > 0 else 0)
+        self.regions.add(region)
+
+    @property
+    def spent(self) -> bool:
+        return self.count >= MAX_TIMED_OUT_ATTEMPTS
+
+    def skips(self, region, n_regions: int) -> bool:
+        """Leave out a region that already timed out in this call - unless every
+        region has, when there is nowhere else to send it."""
+        return region in self.regions and len(self.regions) < n_regions
+
+
+def _region_key(client, index: int):
+    """Which region a regional client sends to: its base URL, or its place in
+    the walk for a client without one."""
+    url = getattr(client, "base_url", None)
+    return str(url) if url else index
+
+
+def _moves_to_next_region(exc) -> bool:
+    """Worth sending to the next region straight away, before any wait: the
+    failure belongs to this region at this moment, not to the request."""
+    return (isinstance(exc, RateLimitError) or _is_capacity_refusal(exc)
+            or _is_server_error(exc) or _is_network_error(exc))
+
+
 def _retryable(exc) -> bool:
-    return (isinstance(exc, RateLimitError)
-            or _is_capacity_refusal(exc)
-            or (isinstance(exc, APIStatusError) and exc.status_code >= 500))
+    """Worth waiting out (RATE_LIMIT_WAITS) and sending again. A capacity
+    refusal is in here only so `create_completion` can fail it at once.
+    Anything else - a content filter, a malformed request, a 401/403/404 - is
+    the same answer however often it is asked, and is raised."""
+    return _moves_to_next_region(exc)
 
 
 # Response headers worth keeping when a capacity refusal happens. An allowlist,
@@ -166,8 +245,9 @@ def _regional_clients(client, affinity: str = "", estimated_tokens: int = 0) -> 
     hash: pinning an account to a small-window region would turn a failure that
     happened on ~8% of calls into one that happened on every single one.
 
-    The copies skip the SDK's own retries: a 429 should move on at once. One
-    region (or another provider) is just the client as it was.
+    The copies skip the SDK's own retries: a 429, a 5xx, a reset or a timeout
+    should move on to the next region at once. One region (or another provider)
+    is just the client as it was, with the SDK's retries.
     """
     global _chat_turn
     locations = settings.vertex_chat_locations_for(estimated_tokens)
@@ -184,21 +264,35 @@ def _regional_clients(client, affinity: str = "", estimated_tokens: int = 0) -> 
             for loc in locations[start:] + locations[:start]]
 
 
-def _create_in_some_region(client, kwargs, affinity=""):
-    """One chat call, moving to the next region on a 429; the last region's
-    429 is raised so the waits in create_completion take over."""
+def _create_in_some_region(client, kwargs, affinity="", timeouts=None):
+    """One chat call, moving to the next region on a 429, a capacity 400, a
+    5xx or a connection error; the last region's error is raised so the waits in
+    create_completion take over. Anything else is raised at once.
+
+    A timeout is not hopped past straight away: it is noted in `timeouts` and
+    raised, so create_completion waits before the next timed-out attempt could
+    start, and that attempt goes to a region that has not timed out yet."""
+    timeouts = timeouts if timeouts is not None else _TimeoutBudget()
     clients = _regional_clients(client, affinity,
                                _prompt_tokens_estimate(kwargs))
     reported = False
+    last = None
     for i, regional in enumerate(clients):
+        region = _region_key(regional, i)
+        if timeouts.skips(region, len(clients)):
+            continue
         try:
             return regional.chat.completions.create(**kwargs)
         except Exception as exc:
             # A capacity refusal moves on like a 429 does. It is a property of
             # the REGION (see VERTEX_SMALL_WINDOW_LOCATIONS), so the next region
             # will normally take the same prompt - and the hop costs one fast
-            # failure, not a wait.
-            if not (isinstance(exc, RateLimitError) or _is_capacity_refusal(exc)):
+            # failure, not a wait. A 5xx or a reset is this region at this
+            # moment too, so it moves on the same way.
+            if not _moves_to_next_region(exc):
+                raise
+            if _is_timeout(exc):
+                timeouts.note(regional, region)
                 raise
             if _is_capacity_refusal(exc) and not reported:
                 # Once per walk, not once per region: the other 23 say the same
@@ -208,8 +302,9 @@ def _create_in_some_region(client, kwargs, affinity=""):
                 reported = True
                 logger.warning("LLM refused a request on token capacity - "
                                "retrying. %s", _refusal_detail(exc))
-            if i == len(clients) - 1:
-                raise
+            last = exc
+    if last is not None:
+        raise last
     raise AssertionError("unreachable")
 
 
@@ -217,6 +312,13 @@ def create_completion(client, affinity: str = "", **kwargs):
     """The SDK's chat completion call with the provider's request options and
     the short in-call waits above. Every model call goes through here, so this
     is also where a regeneration run counts its requests and tokens.
+
+    What is waited out: a 429, a 5xx or a connection error - each after every
+    region has been tried once (see `_create_in_some_region`) - and a timeout,
+    which waits before the next attempt goes to another region. At most
+    MAX_TIMED_OUT_ATTEMPTS attempts may time out; the next timeout is raised. A
+    capacity refusal from every region fails at once, and anything else (a
+    content filter, a bad request, another 4xx) is raised without a retry.
 
     When the provider is still refusing for quota after every wait, the quota
     signal is raised before giving up: the engine then fails the section as
@@ -228,11 +330,18 @@ def create_completion(client, affinity: str = "", **kwargs):
     is what regeneration wants. See `_regional_clients`.
     """
     kwargs = {**settings.llm_request_extra, **kwargs}
+    timeouts = _TimeoutBudget()
     for wait in (*RATE_LIMIT_WAITS, None):
         try:
-            response = _create_in_some_region(client, kwargs, affinity)
+            response = _create_in_some_region(client, kwargs, affinity, timeouts)
         except Exception as exc:
             if not _retryable(exc):
+                raise
+            # Each timed-out attempt cost the whole request timeout; after
+            # MAX_TIMED_OUT_ATTEMPTS of them the call stops (see that constant).
+            if _is_timeout(exc) and timeouts.spent:
+                logger.warning("LLM timed out on %d attempt(s) - giving up",
+                               timeouts.count)
                 raise
             # Every region refused on size. Waiting changes nothing about a
             # region's input window, so the 5/15/30/60s ladder would only make
@@ -244,7 +353,8 @@ def create_completion(client, affinity: str = "", **kwargs):
                     run_context.note_quota_exhausted()
                 raise
             logger.info("LLM answered %s (%d region(s) tried) - waiting %ds before "
-                        "sending it again", getattr(exc, "status_code", "error"),
+                        "sending it again",
+                        getattr(exc, "status_code", None) or type(exc).__name__,
                         len(settings.vertex_chat_locations), wait)
             time.sleep(wait)
             continue
@@ -257,18 +367,39 @@ def create_completion(client, affinity: str = "", **kwargs):
     raise AssertionError("unreachable")
 
 
+# The opening of a fenced answer: the backticks and an optional language tag
+# ("json", "JSON", "json5"...), on its own line or not - Gemini also writes the
+# whole thing on one line, ```json {"a": 1}```.
+_FENCE_OPEN = re.compile(r"^```[A-Za-z0-9_+-]*")
+
+
 def _parse_json(content: str) -> dict | None:
     """The model's JSON answer. Gemini sometimes wraps it in a ```json fence even
     in JSON mode; the fence is removed rather than the answer thrown away."""
     text = (content or "").strip()
     if text.startswith("```"):
-        text = text.split("\n", 1)[1] if "\n" in text else ""
+        text = _FENCE_OPEN.sub("", text, count=1)
         text = text.rsplit("```", 1)[0]
     text = text.strip()
     if not text:
         return None
     parsed = json.loads(text)
     return parsed if isinstance(parsed, dict) else None
+
+
+def _answer_text(response) -> str | None:
+    """The text of the first choice, or None when the response has none - no
+    `choices`, an empty list, a None message or None content. A 200 shaped like
+    that is an empty answer, never an IndexError/AttributeError for the caller."""
+    choices = getattr(response, "choices", None)
+    if not choices:
+        return None
+    try:
+        first = choices[0]
+    except (IndexError, KeyError, TypeError):
+        return None
+    content = getattr(getattr(first, "message", None), "content", None)
+    return content if isinstance(content, str) else None
 
 def generate_chat_completion(system_prompt: str, messages: list,
                              temperature: float = 0.3) -> str | None:
@@ -312,7 +443,7 @@ def generate_chat_completion(system_prompt: str, messages: list,
     try:
         response = create_completion(
             client, model=model_name, messages=turns, temperature=temperature)
-        text = (response.choices[0].message.content or "").strip() or None
+        text = (_answer_text(response) or "").strip() or None
         run_context.note_llm(failed=text is None)
         return text
     except Exception as exc:
@@ -376,18 +507,32 @@ def generate_gpt4o_json_completion(system_prompt: str, user_prompt: str) -> dict
         return None
 
     model_name = settings.chat_model
-    started = time.monotonic()
-    try:
-        response = create_completion(
-            client,
-            model=model_name,
-            response_format={"type": "json_object"},
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            temperature=0.2
-        )
+    # Gemini's JSON mode now and then returns JSON it cannot have meant - a
+    # missing comma or colon, or nothing at all. Asking again almost always
+    # gets a readable answer: on the 20 Oct contacts run every one of 41 failed
+    # sections failed this way, and the same prompts succeeded on a retry.
+    # Treated the same way: a response with no choices, no message or no
+    # content, and a parsed but empty object `{}` - none of them is an answer.
+    # An API error is not retried here; create_completion already waits out a
+    # 429/5xx/timeout, and anything else is not a bad answer but a failed call.
+    for attempt in range(1, JSON_ATTEMPTS + 1):
+        started = time.monotonic()
+        try:
+            response = create_completion(
+                client,
+                model=model_name,
+                response_format={"type": "json_object"},
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.2
+            )
+        except Exception as e:
+            pipeline.llm_call(model_name, time.monotonic() - started, 0, failed=True)
+            logger.error("Error calling %s JSON completion: %s", model_name, e)
+            run_context.note_llm(failed=True)
+            return None
         # Counted per feature rather than printed per call: an account makes
         # dozens of these, and a line each would bury the pipeline's own
         # output. `pipeline.llm_done` rolls them into one line on the feature's
@@ -396,17 +541,23 @@ def generate_gpt4o_json_completion(system_prompt: str, user_prompt: str) -> dict
         usage = getattr(response, "usage", None)
         pipeline.llm_call(model_name, time.monotonic() - started,
                           getattr(usage, "total_tokens", 0) or 0)
-        content = response.choices[0].message.content
-        parsed = _parse_json(content) if content else None
-        if parsed is not None:
+        try:
+            content = _answer_text(response)
+            parsed = _parse_json(content) if content else None
+        except (ValueError, RecursionError) as e:   # JSONDecodeError is a ValueError
+            parsed, problem = None, e
+        else:
+            problem = ("no answer (no choices or no content)" if not content
+                       else "an empty or non-object answer")
+        if parsed:                       # `{}` is as unreadable as no answer
             run_context.note_llm(failed=False)
             return parsed
-        # An empty response is a failure to the caller exactly as an exception
-        # is: it gets None either way and falls back.
-        run_context.note_llm(failed=True)
-        return None
-    except Exception as e:
-        pipeline.llm_call(model_name, time.monotonic() - started, 0, failed=True)
-        logger.error("Error calling %s JSON completion: %s", model_name, e)
-        run_context.note_llm(failed=True)
-        return None
+        if attempt < JSON_ATTEMPTS:
+            logger.warning("%s returned unreadable JSON (%s); asking again", model_name, problem)
+            continue
+        logger.error("Error calling %s JSON completion: %s (after %d attempts)",
+                     model_name, problem, JSON_ATTEMPTS)
+    # An unreadable or empty answer is a failure to the caller exactly as an
+    # exception is: it gets None either way and falls back.
+    run_context.note_llm(failed=True)
+    return None

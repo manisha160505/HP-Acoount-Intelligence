@@ -1427,8 +1427,12 @@ OPEN_WITH_CLIENT = (
 # Lookups
 # ---------------------------------------------------------------------------
 
-class UnknownPersona(Exception):
-    """The persona id is not one of the eight."""
+class UnknownPersona(ValueError):
+    """The persona id is not one of the eight.
+
+    A ValueError, so an API handler that turns ValueError into a clean 4xx
+    covers it: an unknown persona is a bad request, never a 500. Callers that
+    catch UnknownPersona itself are unaffected."""
 
 
 def card(persona_id: str) -> dict:

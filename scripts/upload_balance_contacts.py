@@ -41,7 +41,13 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from split_account_data import OUTPUT_DIR, _api, _api_token, _api_upload
+from split_account_data import (
+    OUTPUT_DIR,
+    _api,
+    _api_token,
+    _api_upload,
+    person_contact_id,
+)
 
 DATASET_KEY = "prospect_contacts"
 DEFAULT_SOURCE = Path.home() / "Downloads" / "contacts_for_ingest final.csv"
@@ -126,6 +132,11 @@ def convert(row: dict, account: dict) -> dict:
     return {
         "Company Name": account["vendor_company_name"],
         "Company Domain": account.get("domain") or "",
+        # The file carries no person id. Without one the Stakeholder Map falls
+        # back to its own id for the person - the same formula - so this only
+        # makes the id visible in the uploaded file.
+        "Prospect prospect_id": person_contact_id(account["vendor_company_name"], name,
+                                                  email, linkedin),
         "Prospect first_name": first,
         "Prospect last_name": last,
         "Prospect full_name": name,

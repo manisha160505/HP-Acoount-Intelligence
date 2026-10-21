@@ -29,7 +29,8 @@ accounts:
   # Tech Landscape hidden: government accounts with no technology data.
   # Parent hidden: Explorium holds a parent the client has not confirmed.
   # Stakeholder Map hidden: no contact found for the account by any source
-  # (client, 11 Oct: "Drop the contacts tab for these accounts").
+  # (client, 11 Oct: "Drop the contacts tab for these accounts"). From 21 Oct
+  # these are the 7 accounts the final contact file has no contacts for.
   "BANK FOR AGRICULTURE AND AGRICULTURAL COOPERATIVE - TH":
     hidden_features: [intent_demand_signals]
     hide_parent_company: true
@@ -42,7 +43,7 @@ accounts:
   "ISUZU MOTORS LIMITED - JP":
     hidden_features: [intent_demand_signals]
   "JAPAN POST HOLDINGS CO.,LTD. - JP":
-    hidden_features: [intent_demand_signals]
+    hidden_features: [intent_demand_signals, stakeholder_map]
   "JFE HOLDINGS, INC. - JP":
     hidden_features: [intent_demand_signals]
   "MEIJI HOLDINGS CO., LTD. - JP":
@@ -54,9 +55,9 @@ accounts:
   "MINISTRY OF DEFENCE - VN":
     hidden_features: [intent_demand_signals, tech_landscape, stakeholder_map]
   "MINISTRY OF NATIONAL DEFENSE - KR":
-    hidden_features: [intent_demand_signals]
+    hidden_features: [intent_demand_signals, stakeholder_map]
   "MINISTRY OF PUBLIC SECURITY - VN":
-    hidden_features: [intent_demand_signals, tech_landscape]
+    hidden_features: [intent_demand_signals, tech_landscape, stakeholder_map]
   "MITSUBISHI UFJ FINANCIAL GROUP, INC. - JP":
     hide_parent_company: true
   "NATIONAL INTELLIGENCE SERVICE - KR":
@@ -69,7 +70,7 @@ accounts:
   "SUMITOMO MITSUI FINANCIAL GROUP, INC. - JP":
     hide_parent_company: true
   "T&D HOLDINGS, INC. - JP":
-    hidden_features: [intent_demand_signals]
+    hidden_features: [intent_demand_signals, stakeholder_map]
   "THE BANK OF TOKYO-MITSUBISHI LIMITED (BANGKOK BRANCH) - TH":
     hide_parent_company: true
   "UNITED OVERSEAS BANK (MALAYSIA) BHD - MY":

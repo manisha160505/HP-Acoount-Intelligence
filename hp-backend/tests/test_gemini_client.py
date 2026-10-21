@@ -122,9 +122,18 @@ def test_a_content_filter_is_reported_as_a_refusal(api):
 
 
 def test_an_empty_answer_raises_rather_than_returning_none(api):
-    api.script.append(_response("   "))
+    # An empty answer is asked for once more (EMPTY_ANSWER_ATTEMPTS); two in a
+    # row raise.
+    api.script.extend([_response("   "), _response("   ")])
     with pytest.raises(gemini.GeminiUnavailable, match="returned nothing"):
         gemini.generate("S", QUESTION)
+    assert len(api.calls) == gemini.EMPTY_ANSWER_ATTEMPTS == 2
+
+
+def test_one_empty_answer_is_asked_again_and_the_second_kept(api):
+    api.script.extend([_response("   "), _response("call the CIO")])
+    assert gemini.generate("S", QUESTION) == "call the CIO"
+    assert len(api.calls) == 2
 
 
 def test_a_provider_failure_is_raised_with_its_status(api):

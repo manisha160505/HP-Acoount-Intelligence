@@ -192,7 +192,11 @@ def _derive_named_personas(db, account_id: str) -> list[dict]:
     personas = []
     for c in eligible[:NAMED_PERSONA_MAX]:
         cid = str(c.get("contact_id") or "").strip()
-        pid = cid if cid.startswith("contact_") else f"contact_{cid}"
+        # Always prefixed. Leaving an id that already began "contact_" as it
+        # was gave contact ids "2" and "contact_2" the same persona id, and the
+        # lookup served the first person for both. `_persona_by_id` still
+        # resolves the unprefixed form a saved asset may carry.
+        pid = f"contact_{cid}"
         dept = c.get("normalized_department") or c.get("department") or UNASSIGNED_DEPT
         band = c.get("seniority_band") or "Individual Contributor"
         personas.append({
@@ -562,12 +566,20 @@ COMPETITORS_FOR_PROMPT = ", ".join(c.title() for c in COMPETITORS[:-1]) + f" or 
 def _persona_by_id(db, account_id: str, job_records: list[dict], persona_id: str) -> dict | None:
     """Re-derived rather than read back from the context widget, so the persona
     the model is given is the one the account's data supports right now."""
-    for p in (_derive_named_personas(db, account_id)
+    named = _derive_named_personas(db, account_id)
+    for p in (named
               + _derive_client_personas(account_id)
               + _derive_role_proxy_personas(job_records)
               + ARCHETYPE_PERSONAS):
         if p["id"] == persona_id:
             return p
+    # Backward compatible: before ids were always prefixed, a contact whose id
+    # already began "contact_" had that id as its persona id. An exact match
+    # above wins, so this never takes an id from another person.
+    if str(persona_id or "").startswith("contact_"):
+        for p in named:
+            if p["contact_id"] == persona_id:
+                return p
     return None
 
 
@@ -1145,7 +1157,10 @@ def _validate_asset(raw, contract: dict, persona: dict, labels: dict[str, str], 
     fields = set(_content_fields(contract))
 
     def _s(key) -> str:
-        v = str(a.get(key) or "").strip()
+        # Strings only: str() of a list or dict would publish Python repr
+        # ("['...']") as copy. Anything else is treated as missing.
+        v = a.get(key)
+        v = v.strip() if isinstance(v, str) else ""
         return "" if _PLACEHOLDER_RE.match(v) else v
 
     # Only the fields this content type uses survive - a subject line on a
@@ -1244,14 +1259,24 @@ def _validate_asset(raw, contract: dict, persona: dict, labels: dict[str, str], 
     if "!" in blob:
         soft.append("exclamation mark used")
     # A filled client role is a person the client named, so its own contact may
-    # be addressed. Every other kind is a role type, and a public post names
-    # nobody whatever the kind.
-    if not _is_named_person(persona) or contract.get("public"):
-        why = "a public post never names a contact" if contract.get("public") \
-            else "copy written to a role type, not a person"
-        for name in banned_names:
-            if name in blob:
-                faults.append(f"names a contact (\"{name}\") - {why}")
+    # be addressed - and only its own contact: copy for one person that names
+    # another of the account's contacts is as wrong as copy for a role type
+    # that names anyone. Every other kind is a role type, and a public post
+    # names nobody whatever the kind.
+    own_name = ""
+    if _is_named_person(persona) and not contract.get("public"):
+        why = "copy written for one contact names a different one"
+        own_name = " ".join(str(persona.get("full_name") or "").split()).lower()
+    elif contract.get("public"):
+        why = "a public post never names a contact"
+    else:
+        why = "copy written to a role type, not a person"
+    # The persona's own name is taken out before the others are looked for, so
+    # "ann lee" is not found inside the reader's own "joann lee".
+    others_blob = blob.replace(own_name, " ") if own_name else blob
+    for name in banned_names:
+        if name != own_name and name in others_blob:
+            faults.append(f"names a contact (\"{name}\") - {why}")
     for comp in COMPETITORS:
         if f"our {comp}" in blob:
             faults.append(f"refers to {comp} as \"our\" product - you represent HP")
@@ -1940,7 +1965,7 @@ def generate_content_asset(account_id: str, persona_id: str, content_type: str,
 
         llm_res = generate_gpt4o_json_completion(sys_prompt, user_prompt)
         if llm_res is None:
-            return None, ["model returned nothing - the LLM API key is missing or the call failed"], []
+            return None, ["model returned no answer (the call failed or the answer was unreadable)"], []
 
         attempt_findings: list = []
         a, f, sf = _validate_asset(llm_res, contract, persona, labels, ground, report,

@@ -148,6 +148,14 @@ Rules:
 Return JSON only: {"question": "...", "topic": "one of: stakeholder, priority, technology, objection, opportunity, evidence, general"}"""
 
 
+def _latest_question(messages) -> str:
+    """The seller's latest question as written, or ""."""
+    for message in reversed(messages or []):
+        if isinstance(message, dict) and _text(message.get("role")) == "user":
+            return _text(message.get("content"))
+    return ""
+
+
 def _resolve_question(messages: list) -> tuple:
     """(standalone_question, topic). History is used here and nowhere else.
 
@@ -156,11 +164,7 @@ def _resolve_question(messages: list) -> tuple:
     a source: whatever it resolves to still has to be found in the account's
     evidence before it can be said back.
     """
-    latest = ""
-    for message in reversed(messages or []):
-        if isinstance(message, dict) and _text(message.get("role")) == "user":
-            latest = _text(message.get("content"))
-            break
+    latest = _latest_question(messages)
     if not latest:
         raise ChatUnavailable("no question was asked")
 
@@ -924,7 +928,7 @@ def _validate_roleplay(answer: str, payload: str, widget_keys: list,
     """
     body = _text_block(answer)
     if not body.strip():
-        return False, "the model returned nothing", [], ""
+        return False, _EMPTY_ANSWER_REASON, [], ""
 
     valid = set(widget_keys or [])
     cited = list(dict.fromkeys(_SECTION_REF_RE.findall(body)))
@@ -1039,7 +1043,7 @@ def _validate(answer: str, payload: str, widget_keys: list) -> tuple:
     """
     body = _text(answer)
     if not body:
-        return False, "the model returned nothing", [], ""
+        return False, _EMPTY_ANSWER_REASON, [], ""
 
     valid = set(widget_keys or [])
     cited = list(dict.fromkeys(_SECTION_REF_RE.findall(answer)))
@@ -1121,27 +1125,52 @@ CAUSE_MODEL = "model"                # the model failed, or hit the token cap
 CAUSE_UNEVIDENCED = "unevidenced"    # it answered; the answer could not be evidenced
 CAUSE_OFF_TOPIC = "off_topic"        # not a question about the account or selling to it
 
+# The seller-facing wording, approved by the client (21 Oct). Neutral on
+# purpose: no "fault", "error" or "not found", and no technical detail - the
+# reason a turn failed goes into `generation.reason` and the log, never into
+# the bubble. A model failure says "try again", because it is worth trying
+# again; it does NOT point at other sections, because nothing about the data
+# was the problem.
+MODEL_FAILURE_MESSAGE = ("The assistant couldn't answer right now. Please try "
+                         "again in a moment.")
+NOT_COVERED_MESSAGE = "That isn't covered in this account's intelligence yet."
+# The conversation (with the account's intelligence) no longer fits the model's
+# input window - gemini.GeminiPromptTooLarge. Still CAUSE_MODEL; trying again in
+# a moment would not help, a new conversation would.
+PROMPT_TOO_LARGE_MESSAGE = ("This conversation has grown too long. Please start "
+                            "a new conversation.")
+# The one neutral pointer an unevidenced refusal may carry.
+CLOSEST_SECTIONS = ("The Stakeholder Map, Tech Landscape and Recent Signals hold "
+                    "the nearest related detail.")
+ROLEPLAY_NOT_COVERED_MESSAGE = (NOT_COVERED_MESSAGE + "\n\n"
+                                "Try rephrasing, or switch to Strategy Advisor.")
+
+# Nothing published (no data) and an answer the checks could not evidence both
+# open with the approved line and say nothing about why - the reason is kept in
+# `generation.reason`. Only the unevidenced one points at other sections: with
+# nothing published there is nothing to point at.
 CAUSE_OPENING = {
-    CAUSE_NO_DATA:
-        "I have nothing to answer from for {company} yet.\n\n"
-        "No feature has published anything for this account, so there is no "
-        "account intelligence to read.",
-    CAUSE_MODEL:
-        "I could not finish that answer for {company}.\n\n"
-        "The model did not return a usable answer, so there is nothing I can "
-        "stand behind. This is a fault on our side, not a gap in the data.",
-    CAUSE_UNEVIDENCED:
-        "I drafted an answer about {company} but could not evidence all of "
-        "it.\n\nRather than show you claims I cannot trace to this account's "
-        "data, I have held it back.",
+    CAUSE_NO_DATA: NOT_COVERED_MESSAGE,
+    CAUSE_MODEL: MODEL_FAILURE_MESSAGE,
+    CAUSE_UNEVIDENCED: NOT_COVERED_MESSAGE,
 }
 
-UNAVAILABLE = (
-    "I could not answer that from {company}'s account intelligence.\n\n"
-    "Everything I say has to come from the data this platform holds for this "
-    "account, and nothing in it supports an answer here.\n\n"
-    "{closest}")
+# Causes whose refusal points at the nearest related sections. A model failure
+# does not: the data was never the problem, and pointing elsewhere would say
+# it was.
+_POINTS_ELSEWHERE = frozenset({CAUSE_UNEVIDENCED})
 
+
+def _model_failure_message(exc) -> str | None:
+    """The bubble for a model failure that is not the plain "try again" one."""
+    if isinstance(exc, gemini.GeminiPromptTooLarge):
+        return PROMPT_TOO_LARGE_MESSAGE
+    return None
+
+# What a validator says about an empty answer. An empty answer is the model
+# failing, not an answer the evidence checks rejected, so a turn whose every
+# attempt came back empty is a model failure.
+_EMPTY_ANSWER_REASON = "the model returned nothing"
 
 def answer(account_id: str, messages: list, mode: str | None = None,
            persona_id: str | None = None) -> dict:
@@ -1229,10 +1258,15 @@ def _answer_advisor(timer, turn, messages) -> dict:
             continue
         except gemini.GeminiUnavailable as exc:
             # The model failed outright - a content filter, a 5xx, an empty
-            # answer. Not retried: nothing about asking again would differ.
+            # answer. Not asked again HERE: the layers below already did
+            # (llm.create_completion waits out a 429/5xx/reset and up to 3
+            # timeouts; gemini.generate re-asks an empty answer once), and a
+            # content filter gives the same answer however often it is asked.
             logger.error("strategy chat: %s", exc)
-            return _unavailable_for(turn, str(exc), attempts,
-                                    cause=CAUSE_MODEL)
+            _log_timings(timer, turn["question"], accepted=False)
+            return _unavailable_for(turn, str(exc), attempts, timer,
+                                    cause=CAUSE_MODEL,
+                                    message=_model_failure_message(exc))
         try:
             with timer.step("validation"):
                 ok, failures, cited, segments = _check_segments(turn, raw)
@@ -1275,6 +1309,14 @@ def _answer_advisor(timer, turn, messages) -> dict:
                               timer, segments=kept, dropped=dropped)
 
     _log_timings(timer, turn["question"], accepted=False)
+    if not last_segments:
+        # No attempt produced a segment list to judge - every one was cut off
+        # at the output limit or was not a segment list at all. That is the
+        # model failing, not an answer the evidence checks held back, and the
+        # last attempt's own reason says how.
+        return _unavailable_for(
+            turn, attempts[-1]["reason"] if attempts else "no attempt was made",
+            attempts, timer, cause=CAUSE_MODEL)
     return _unavailable_for(turn, _reason_for(last_failures), attempts, timer,
                             cause=CAUSE_UNEVIDENCED)
 
@@ -1321,7 +1363,7 @@ def _answer_roleplay(timer, turn, messages, attempts) -> dict:
     like a report, and `_validate_roleplay` carries rules - banned names,
     section overlap - that have nothing to do with the advisor.
     """
-    correction, last_reason = "", "no attempt was made"
+    correction, last_reason, judged = "", "no attempt was made", False
     for attempt in range(MAX_VALIDATION_ATTEMPTS):
         try:
             with timer.step("generation", attempt=attempt + 1):
@@ -1331,20 +1373,33 @@ def _answer_roleplay(timer, turn, messages, attempts) -> dict:
                                    affinity=turn["account_id"])
         except gemini.GeminiUnavailable as exc:
             logger.error("strategy chat: %s", exc)
-            return _unavailable_for(turn, str(exc), attempts, cause=CAUSE_MODEL)
+            _log_timings(timer, turn["question"], accepted=False)
+            return _unavailable_for(turn, str(exc), attempts, timer,
+                                    cause=CAUSE_MODEL,
+                                    message=_model_failure_message(exc))
         with timer.step("validation"):
             ok, reason, cited, cleaned = _check(turn, raw)
         attempts.append({"attempt": attempt + 1, "accepted": ok, "reason": reason})
         if ok:
             _log_timings(timer, turn["question"], accepted=True)
             return _published(turn, cleaned, cited, attempts, timer)
+        judged = judged or reason != _EMPTY_ANSWER_REASON
         last_reason = reason
         correction = reason
         logger.info("strategy chat: attempt %d rejected - %s", attempt + 1, reason)
 
     _log_timings(timer, turn["question"], accepted=False)
     return _unavailable_for(turn, last_reason, attempts, timer,
-                            cause=CAUSE_UNEVIDENCED)
+                            cause=_spent_cause(judged))
+
+
+def _spent_cause(judged: bool) -> str:
+    """Why a roleplay turn that spent its attempts has no answer.
+
+    Unevidenced only when the checks actually rejected something the model
+    wrote. Attempts that all came back empty are the model failing.
+    """
+    return CAUSE_UNEVIDENCED if judged else CAUSE_MODEL
 
 
 def _prepare(db, timer, account_id, messages, mode, persona_id) -> dict:
@@ -1357,7 +1412,10 @@ def _prepare(db, timer, account_id, messages, mode, persona_id) -> dict:
     with timer.step("persona"):
         persona = (strategy_personas.resolve(account_id, persona_id)
                    if persona_id else None)
-    resolved_mode = "roleplay" if persona else (_text(mode) or "advisor")
+    # The label says who actually answered. A persona that did not resolve
+    # means the advisor answers, and the turn must say so rather than echo the
+    # requested mode over an advisor answer.
+    resolved_mode = "roleplay" if persona else "advisor"
 
     with timer.step("company_lookup"):
         company = _text((widget_store.get(account_id, "exec_summary_card", db=db)
@@ -1486,10 +1544,11 @@ def _published(turn: dict, cleaned: str, cited: list, attempts: list,
 
 
 def _unavailable_for(turn: dict, reason: str, attempts=None, timer=None,
-                     cause: str = CAUSE_UNEVIDENCED) -> dict:
+                     cause: str = CAUSE_UNEVIDENCED,
+                     message: str | None = None) -> dict:
     return _unavailable(turn["company"], turn["question"], turn["topic"], reason,
                         attempts, mode=turn["mode"], persona=turn["persona"],
-                        timer=timer, cause=cause)
+                        timer=timer, cause=cause, message=message)
 
 
 def _answer_once_stream(company: str, question: str, context: str, messages: list,
@@ -1579,7 +1638,7 @@ def answer_stream(account_id: str, messages: list, mode: str | None = None,
         yield from _stream_advisor(timer, turn, messages)
         return
 
-    attempts, correction, last_reason = [], "", "no attempt was made"
+    attempts, correction, last_reason, judged = [], "", "no attempt was made", False
     for attempt in range(MAX_VALIDATION_ATTEMPTS):
         # Only the first attempt streams. A retry exists because the previous
         # answer was rejected, and the seller is already reading text from it -
@@ -1615,8 +1674,14 @@ def answer_stream(account_id: str, messages: list, mode: str | None = None,
                                    persona=turn["persona"], timer=timer,
                                    affinity=turn["account_id"])
         except gemini.GeminiUnavailable as exc:
+            # The connection dropped mid-answer, the model refused at connect,
+            # the answer was cut off: the model failed, whatever was already
+            # shown. Never filed as "unevidenced" - that tells the seller the
+            # account holds nothing when the call simply did not finish.
             logger.error("strategy chat: %s", exc)
-            yield {"type": "done", **_unavailable_for(turn, str(exc), attempts)}
+            yield {"type": "done", **_unavailable_for(
+                turn, str(exc), attempts, timer, cause=CAUSE_MODEL,
+                message=_model_failure_message(exc))}
             return
         finally:
             timer.record("generation", (time.perf_counter() - started) * 1000)
@@ -1630,13 +1695,40 @@ def answer_stream(account_id: str, messages: list, mode: str | None = None,
             yield {"type": "done",
                    **_published(turn, cleaned, cited, attempts, timer)}
             return
+        judged = judged or reason != _EMPTY_ANSWER_REASON
         last_reason = reason
         correction = reason
         logger.info("strategy chat: attempt %d rejected - %s", attempt + 1, reason)
 
     _log_timings(timer, turn["question"], accepted=False)
     yield {"type": "done",
-           **_unavailable_for(turn, last_reason, attempts, timer)}
+           **_unavailable_for(turn, last_reason, attempts, timer,
+                              cause=_spent_cause(judged))}
+
+
+def failure_answer(account_id: str, messages, mode: str | None = None,
+                   persona_id: str | None = None,
+                   reason: str = "the turn failed unexpectedly") -> dict:
+    """The honest model-failure refusal, for a turn that crashed on the way.
+
+    For the API layer: whatever escaped `answer`, the seller gets the same
+    neutral "couldn't answer right now" bubble a model failure gets - a 200
+    with `available: false`, never a 500. Best effort on the decoration: if
+    the company name or the persona cannot be read either, the refusal is
+    still returned.
+    """
+    company, persona = "this account", None
+    try:
+        company = _text((widget_store.get(account_id, "exec_summary_card")
+                         or {}).get("data", {}).get("company_name")) or company
+        if persona_id and _text(mode) == "roleplay":
+            persona = strategy_personas.resolve(account_id, persona_id)
+    except Exception:
+        logger.warning("strategy chat: could not decorate the failure answer "
+                       "for account %s", account_id, exc_info=True)
+    return _unavailable(company, _latest_question(messages), "general", reason,
+                        mode="roleplay" if persona else "advisor",
+                        persona=persona, cause=CAUSE_MODEL)
 
 
 def _log_timings(timer, question: str, accepted: bool) -> None:
@@ -1752,15 +1844,17 @@ def _off_topic(company: str, question: str, mode: str, persona: dict | None,
 
 def _unavailable(company, question, topic, reason, attempts=None,  # noqa: PLR0913, PLR0917 - every field of the refusal payload
                  mode: str = "advisor", persona: dict | None = None,
-                 timer=None, cause: str = CAUSE_UNEVIDENCED) -> dict:
-    closest = ("You could look at the Stakeholder Map, Tech Landscape or Recent "
-               "Signals for the nearest related evidence.")
+                 timer=None, cause: str = CAUSE_UNEVIDENCED,
+                 message: str | None = None) -> dict:
     # The opening line says which of the three things went wrong. It used to
     # assert "nothing in it supports an answer" for all of them, including the
     # case where the model answered and the gate rejected the answer.
-    opening = CAUSE_OPENING.get(cause, CAUSE_OPENING[CAUSE_UNEVIDENCED])
-    body = "%s\n\n%s" % (opening.format(company=company), closest)
-    if persona:
+    body = CAUSE_OPENING.get(cause, CAUSE_OPENING[CAUSE_UNEVIDENCED])
+    if cause == CAUSE_MODEL and message:
+        body = message
+    elif cause in _POINTS_ELSEWHERE and not persona:
+        body = "%s\n\n%s" % (body, CLOSEST_SECTIONS)
+    if persona and cause != CAUSE_MODEL:
         # Deliberately OUT of character, and this is the one place the
         # simulation breaks on purpose.
         #
@@ -1769,12 +1863,10 @@ def _unavailable(company, question, topic, reason, attempts=None,  # noqa: PLR09
         # character. Dressing a platform failure as the character stonewalling
         # would read to the seller as an in-scene signal ("he is not biting")
         # and teach them something about a customer that never happened. The
-        # simulation may be empty; it may never be wrong.
-        body = ("The rehearsal stopped here. Nothing in %s's account "
-                "intelligence supports an in-character answer to that, and "
-                "rather than let the role invent one I have stopped. Try "
-                "rephrasing, or switch to Strategy Advisor to ask directly."
-                % company)
+        # simulation may be empty; it may never be wrong. A model failure is
+        # out of character too, with the same words as the advisor's: the
+        # model failing is not something the role did.
+        body = ROLEPLAY_NOT_COVERED_MESSAGE
     return {
         "answer": body,
         "question": question,

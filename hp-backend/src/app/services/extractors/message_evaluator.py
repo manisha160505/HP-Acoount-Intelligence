@@ -1,9 +1,12 @@
 from datetime import UTC, datetime
 
 from bson import ObjectId
+from bson.errors import InvalidId
 
+from app.config import account_overrides
 from app.database.mongodb import get_db
 from app.observability import pipeline
+from app.services import talking_points as talking_points_reader
 from app.services.extractors import personas
 from app.services.extractors.datasets import (
     account_display_name,
@@ -31,6 +34,16 @@ def _clean(value) -> str:
     return " ".join(str(value or "").split())
 
 
+def _stakeholder_map_hidden(db, account_id: str) -> bool:
+    """Whether this account hides the Stakeholder Map (account_overrides)."""
+    try:
+        oid = ObjectId(account_id)
+    except (InvalidId, TypeError):
+        return False
+    account = db["accounts"].find_one({"_id": oid}, {"name": 1}) or {}
+    return account_overrides.is_hidden(account.get("name"), "stakeholder_map")
+
+
 def _personas_from_contacts(db, account_id: str, contacts_records: list) -> list:
     """Named personas, from this account's roster.
 
@@ -39,7 +52,12 @@ def _personas_from_contacts(db, account_id: str, contacts_records: list) -> list
     reused rather than repeated here. Every field is labelled with where it
     came from, so the UI can show provenance the way the reference app does
     instead of implying everything is account intelligence.
+
+    An account whose Stakeholder Map is hidden (config/account_overrides.yaml)
+    gets none: its roster must not come back here as named personas.
     """
+    if _stakeholder_map_hidden(db, account_id):
+        return []
     grid = widget_store.get(account_id, "stakeholder_contacts_grid", db=db) or {}
     scored = {str(c.get("contact_id")): c
               for c in ((grid.get("data") or {}).get("contacts") or [])}
@@ -63,7 +81,10 @@ def _personas_from_contacts(db, account_id: str, contacts_records: list) -> list
         enriched = scored.get(contact_id) or next(
             (c for c in scored.values()
              if _clean(c.get("full_name")).lower() == name.lower()), {})
-        points = talking_points.get(str(enriched.get("contact_id") or contact_id)) or {}
+        # Joined by id, and only kept when it was written for this person.
+        points = talking_points_reader.for_contact(
+            talking_points, enriched.get("contact_id") or contact_id,
+            enriched.get("full_name") or name)
 
         department = _clean(row.get("Prospect job_department") or row.get("department"))
         department_column = "Prospect job_department" if department else None
