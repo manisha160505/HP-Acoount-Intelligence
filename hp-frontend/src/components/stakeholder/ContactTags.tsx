@@ -5,16 +5,20 @@ import React from 'react';
  *
  * Shown as the data provides them, with three rules: no email means no email
  * tag, no phone number means no phone tag, and a blank or "unknown" status is
- * left blank - never a placeholder such as "No Tag". catch_all and CATCH_ALL
- * are one tag.
+ * left blank - never a placeholder such as "No Tag". The same goes for
+ * "unavailable", "not found" and the like. catch_all and CATCH_ALL are one tag.
  */
 
-const EMAIL_BLANK = new Set(['', 'UNKNOWN', 'UNAVAILABLE', 'INVALID', 'NONE', 'NULL']);
+// Statuses that say nothing about the mailbox: "unknown", "unavailable",
+// "not found" and the like (client, 21 Oct). Compared with spaces and hyphens
+// as underscores.
+const EMAIL_BLANK = new Set(['', 'UNKNOWN', 'UNAVAILABLE', 'INVALID', 'NONE', 'NULL',
+  'NOT_FOUND', 'NOT_AVAILABLE', 'N/A', 'NA']);
 
 export function emailTag(email?: string | null, status?: string | null): string | null {
   if (!email) return null;
   const tag = String(status ?? '').trim();
-  if (EMAIL_BLANK.has(tag.toUpperCase())) return null;
+  if (EMAIL_BLANK.has(tag.toUpperCase().replace(/[\s-]+/g, '_'))) return null;
   return tag.toUpperCase() === 'CATCH_ALL' ? 'CATCH_ALL' : tag;
 }
 

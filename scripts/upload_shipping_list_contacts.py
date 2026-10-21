@@ -18,7 +18,8 @@ Decisions (19-21 Oct email thread):
      included - but
        - only when there is an email address;
        - catch_all and CATCH_ALL are one tag, CATCH_ALL;
-       - "unavailable" and "unknown" are left blank, as is a blank status;
+       - "unavailable", "unknown", "not found" and the like are left blank, as
+         is a blank status;
   4. phone (column K): shown only when there is a number, with its line type
      (column M, `phone_line_type`: MOBILE, LANDLINE, VOIP) as the phone tag. No number, no
      phone and no tag. A number the spreadsheet stored in scientific notation
@@ -75,7 +76,11 @@ DEPARTMENTS = {**DEPARTMENT, "legal": "master_legal", "executive": "c_suite"}
 # Highest first: a cell such as "head; director" bands on the senior value.
 SENIORITY_RANK = ["c_suite", "vp", "director", "head", "manager", "owner"]
 
-EMAIL_TAG_BLANK = {"", "UNKNOWN", "UNAVAILABLE", "INVALID", "NONE", "NULL"}
+# Statuses that say nothing about the mailbox show no tag (21 Oct: "unknown,
+# unavailable, not found - these kinds of things"). Compared after upper-casing
+# and turning spaces and hyphens into underscores.
+EMAIL_TAG_BLANK = {"", "UNKNOWN", "UNAVAILABLE", "INVALID", "NONE", "NULL",
+                   "NOT_FOUND", "NOT_AVAILABLE", "N/A", "NA"}
 PHONE_TAGS = {"MOBILE", "LANDLINE", "VOIP"}
 SCIENTIFIC = re.compile(r"\d[eE][+-]?\d+$")
 
@@ -90,7 +95,7 @@ def email_tag(email: str, status) -> str:
     if not email:
         return ""
     tag = clean(status)
-    if tag.upper() in EMAIL_TAG_BLANK:
+    if re.sub(r"[\s-]+", "_", tag.upper()) in EMAIL_TAG_BLANK:
         return ""
     return "CATCH_ALL" if tag.upper() == "CATCH_ALL" else tag
 

@@ -62,7 +62,8 @@ def test_a_full_row_keeps_every_column_we_load(loader):
     ("catch_all", "CATCH_ALL"), ("CATCH_ALL", "CATCH_ALL"), ("VERIFIED", "VERIFIED"),
     ("VALID_RISKY", "VALID_RISKY"), ("valid", "valid"),
     ("could_not_verify", "could_not_verify"),          # 21 Oct final file
-    ("unknown", ""), ("UNKNOWN", ""), ("unavailable", ""), (None, ""), ("", ""),
+    ("unknown", ""), ("UNKNOWN", ""), ("unavailable", ""), ("Not Found", ""),
+    ("not-found", ""), ("N/A", ""), (None, ""), ("", ""),
 ])
 def test_email_tags_as_provided_except_blank_and_unknown(loader, status, tag):
     assert loader.convert(_row(email_status=status), ACCOUNT)[0]["Email Status"] == tag
