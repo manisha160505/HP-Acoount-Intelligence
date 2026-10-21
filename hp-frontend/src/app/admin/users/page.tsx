@@ -7,6 +7,8 @@ import { useAuth } from '@/providers/AuthProvider';
 import { isAdminRole } from '@/types/auth';
 import api from '@/services/api';
 import { parseApiError } from '@/lib/apiError';
+import { ACTION_FAILED } from '@/lib/uiCopy';
+import { TryAgain } from '@/components/common/TryAgain';
 import type { CreatedUser, ManagedUser } from '@/types/analytics';
 import type { CompanyAccount } from '@/types/account';
 import { Modal, ModalActions, dangerButton, primaryButton, secondaryButton } from '@/components/users/Modal';
@@ -49,7 +51,7 @@ export default function AdminUsersPage() {
   const [users, setUsers] = useState<ManagedUser[]>([]);
   const [accounts, setAccounts] = useState<CompanyAccount[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [tab, setTab] = useState<'users' | 'activity'>('users');
   const [query, setQuery] = useState('');
@@ -58,7 +60,7 @@ export default function AdminUsersPage() {
 
   const load = useCallback(async () => {
     setIsLoading(true);
-    setError(null);
+    setLoadFailed(false);
     try {
       const [u, a] = await Promise.all([
         api.get<ManagedUser[]>('/admin/users'),
@@ -66,8 +68,9 @@ export default function AdminUsersPage() {
       ]);
       setUsers(u.data);
       setAccounts([...a.data].sort((x, y) => x.name.localeCompare(y.name)));
-    } catch (err) {
-      setError(parseApiError(err, 'Failed to load users.').message);
+    } catch {
+      // No error text on screen (client rule): a neutral Try again instead.
+      setLoadFailed(true);
     } finally {
       setIsLoading(false);
     }
@@ -132,12 +135,6 @@ export default function AdminUsersPage() {
               <button type="button" aria-label="Dismiss" onClick={() => setNotice(null)}><X className="w-4 h-4" /></button>
             </div>
           )}
-          {error && (
-            <div className="bg-red-50 as-fade border border-red-200 p-4 rounded-xl flex items-center justify-between text-red-800 text-xs font-semibold shadow-sm">
-              <span className="flex items-center gap-2"><AlertCircle className="w-5 h-5 text-red-500" />{error}</span>
-              <button type="button" aria-label="Dismiss" onClick={() => setError(null)}><X className="w-4 h-4" /></button>
-            </div>
-          )}
 
           <div data-tour="admin-users-tabs" className="flex gap-1 bg-white rounded-xl border border-gray-200 p-1 w-fit shadow-sm" role="tablist">
             {(['users', 'activity'] as const).map((t) => (
@@ -174,6 +171,8 @@ export default function AdminUsersPage() {
                   <Loader2 className="w-8 h-8 text-hp-navy animate-spin" />
                   <p className="text-xs text-gray-500 font-medium">Loading users...</p>
                 </div>
+              ) : loadFailed ? (
+                <TryAgain onRetry={load} className="p-12" />
               ) : shown.length === 0 ? (
                 <div className="p-12 text-center">
                   <Users className="w-12 h-12 text-gray-300 mx-auto mb-3" />
@@ -242,7 +241,7 @@ export default function AdminUsersPage() {
                                      title={u.role === 'super_admin'
                                        ? 'The super admin cannot be changed here.'
                                        : 'Only the super admin can manage admins.'}>
-                                  {u.role === 'super_admin' ? '—' : 'Super admin only'}
+                                  {u.role === 'super_admin' ? null : 'Super admin only'}
                                 </div>
                               ) : (
                                 <div data-tour={u.id === firstManageableId ? 'admin-users-actions' : undefined} className="flex items-center justify-end gap-2">
@@ -422,9 +421,11 @@ function CreateUserDialog({ isSuper, accounts, onClose, onCreated }: {
       });
       onCreated(res.data);
     } catch (err) {
-      const parsed = parseApiError(err, 'Could not create the user.');
-      setFields(parsed.code === 'ALREADY_EXISTS' ? { email: 'A user with this email already exists.' } : parsed.fields);
-      setError(parsed.message);
+      // The user's own wording for what they can fix; never the server's text.
+      const parsed = parseApiError(err);
+      if (parsed.code === 'ALREADY_EXISTS') setFields({ email: 'A user with this email already exists.' });
+      else if (parsed.fields?.email) setFields({ email: 'Enter a valid email address.' });
+      else setError(ACTION_FAILED);
     } finally {
       setBusy(false);
     }
@@ -505,8 +506,8 @@ function AccountsDialog({ user, accounts, onClose, onSaved }: {
     try {
       const res = await api.put<ManagedUser>(`/admin/users/${user.id}/accounts`, { account_ids: Array.from(selected) });
       onSaved(res.data);
-    } catch (err) {
-      setError(parseApiError(err, 'Could not save the accounts.').message);
+    } catch {
+      setError(ACTION_FAILED);
     } finally {
       setBusy(false);
     }
@@ -542,8 +543,8 @@ function ResetPasswordDialog({ user, onClose, onDone }: {
       const res = await api.post<{ user: ManagedUser; temporary_password: string | null }>(
         `/admin/users/${user.id}/reset-password`, {});
       onDone(res.data.user, res.data.temporary_password);
-    } catch (err) {
-      setError(parseApiError(err, 'Could not reset the password.').message);
+    } catch {
+      setError(ACTION_FAILED);
       setBusy(false);
     }
   };
@@ -579,8 +580,8 @@ function ConfirmDialog({ title, body, confirm, danger = false, onClose, run }: {
     try {
       await run();
       onClose();
-    } catch (err) {
-      setError(parseApiError(err, 'That did not work.').message);
+    } catch {
+      setError(ACTION_FAILED);
       setBusy(false);
     }
   };

@@ -14,6 +14,12 @@ pandas>=2.2.0
 openpyxl>=3.1.0
 openai>=1.99.0
 
+# The link checker (services/links/checker.py, scripts/check_links.py) calls
+# httpx directly. It was only installed transitively (openai, fastapi's test
+# client); declared so a dependency dropping it cannot break the check.
+# Verified on 0.28.1; nothing used is newer than 0.27.
+httpx>=0.27,<1
+
 # The retrieval layer. Pinned exactly, not floated: LightRAG's storage
 # backends read their own environment variables and its query surface changed
 # shape between releases - 1.5.7 is the version the retrieval layer was written

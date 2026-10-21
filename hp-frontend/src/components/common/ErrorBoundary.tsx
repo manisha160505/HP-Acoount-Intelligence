@@ -11,6 +11,7 @@
 
 import React from 'react';
 import logger, { toErrorField } from '@/lib/logger';
+import { TryAgain } from '@/components/common/TryAgain';
 
 interface Props {
   children: React.ReactNode;
@@ -21,14 +22,15 @@ interface Props {
 
 interface State {
   hasError: boolean;
-  message: string;
 }
 
 export class ErrorBoundary extends React.Component<Props, State> {
-  state: State = { hasError: false, message: '' };
+  state: State = { hasError: false };
 
-  static getDerivedStateFromError(error: Error): State {
-    return { hasError: true, message: error.message };
+  // The cause goes to the log only; the screen shows a neutral Try again
+  // with no error text (client rule, approved).
+  static getDerivedStateFromError(): State {
+    return { hasError: true };
   }
 
   componentDidCatch(error: Error, info: React.ErrorInfo) {
@@ -41,26 +43,13 @@ export class ErrorBoundary extends React.Component<Props, State> {
     });
   }
 
-  private reset = () => this.setState({ hasError: false, message: '' });
+  private reset = () => this.setState({ hasError: false });
 
   render() {
     if (!this.state.hasError) return this.props.children;
     if (this.props.fallback) return <>{this.props.fallback}</>;
 
-    return (
-      <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm">
-        <p className="font-semibold text-red-800">
-          {this.props.name ? `${this.props.name} could not be displayed.` : 'Something went wrong.'}
-        </p>
-        <p className="mt-1 text-red-700">{this.state.message}</p>
-        <button
-          onClick={this.reset}
-          className="mt-3 rounded-md bg-red-600 px-3 py-1.5 text-white hover:bg-red-700"
-        >
-          Try again
-        </button>
-      </div>
-    );
+    return <TryAgain onRetry={this.reset} className="p-4" />;
   }
 }
 

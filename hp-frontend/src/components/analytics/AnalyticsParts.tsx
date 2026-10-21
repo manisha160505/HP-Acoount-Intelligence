@@ -27,10 +27,10 @@ export const PRESETS = [
 ];
 
 export function formatDateTime(value: string | null, withYear = false): string {
-  if (!value) return '—';
+  if (!value) return '';
   // Timestamps are UTC; a naive one from the API is UTC too.
   const d = new Date(/[zZ]|[+-]\d\d:\d\d$/.test(value) ? value : `${value}Z`);
-  return isNaN(d.getTime()) ? '—' : d.toLocaleString(undefined, {
+  return isNaN(d.getTime()) ? '' : d.toLocaleString(undefined, {
     ...(withYear ? { year: 'numeric' } : {}), month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
   });
 }

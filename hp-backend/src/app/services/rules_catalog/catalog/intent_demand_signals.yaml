@@ -114,7 +114,7 @@ rules:
   output: Which intent sections appear
   sources:
   - hp-backend/src/app/services/extractors/intent_demand_signals.py:extract_intent_demand_signals
-  - hp-frontend/src/app/dashboard/page.tsx:sourceAMessage
+  - hp-frontend/src/app/dashboard/page.tsx:topicsData
   confidence: high
 - id: int_topics_table
   parent: null

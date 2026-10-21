@@ -132,7 +132,7 @@ function TableSection({ section, query }: { section: Extract<ReferenceSection, {
             {rows.map((row, i) => (
               <tr key={i} className="align-top hover:bg-sky-50/40">
                 {row.map((cell, j) => (
-                  <td key={j} className={`px-3 py-2 leading-relaxed ${j === 0 ? 'font-semibold text-gray-900' : 'text-gray-700'}`}>{cell || '—'}</td>
+                  <td key={j} className={`px-3 py-2 leading-relaxed ${j === 0 ? 'font-semibold text-gray-900' : 'text-gray-700'}`}>{cell}</td>
                 ))}
               </tr>
             ))}

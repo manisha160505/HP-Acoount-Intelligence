@@ -1217,6 +1217,7 @@ def extract_stakeholder_map(account_id: str,
     # 1. Widget: stakeholder_contacts_grid (deterministic)
     extracted_contacts = []
     dept_counter = Counter()
+    nameless_untitled = 0
 
     # Job titles in English before anything reads them (client, 9 Oct): the
     # seniority, relevance and influence rules match English words, so
@@ -1230,15 +1231,21 @@ def extract_stakeholder_map(account_id: str,
         is_apollo = bool(resolve_field(row, ["apollo_requested_contact", "apollo_matched_contact"]))
         source = "Apollo" if is_apollo else "Source A"
 
-        full_name = resolve_field(row, ["Prospect full_name"])
-        if not full_name:
+        person_name = resolve_field(row, ["Prospect full_name"])
+        if not person_name:
             fname = resolve_field(row, ["Prospect first_name"]) or ""
             lname = resolve_field(row, ["Prospect last_name"]) or ""
-            combined = f"{fname} {lname}".strip()
-            full_name = combined if combined else (resolve_field(row, ["apollo_title"]) or "Unknown Contact")
+            person_name = f"{fname} {lname}".strip()
 
         title_original = resolve_field(row, ["Prospect job_title", "apollo_title"])
         title = titles_english.get(" ".join(str(title_original or "").split()), title_original)
+        # No name: the card is labelled by the title (client rule, 21 Oct: no
+        # "Unknown Contact" in front of the client). Neither: the row has
+        # nothing to show and is dropped, counted in the run log.
+        full_name = person_name or title
+        if not full_name:
+            nameless_untitled += 1
+            continue
         department = resolve_field(row, ["Prospect job_department_main", "apollo_department"])
         dept_key = department if department else "Unassigned"
         dept_counter[dept_key] += 1
@@ -1265,9 +1272,13 @@ def extract_stakeholder_map(account_id: str,
         # --- new derived keys (additive only) -----------------------------------
         # The vendor's id where there is one, else an id built from the person
         # - never the row number, which names someone else after a reload.
+        # A nameless row is keyed on its email / LinkedIn with an empty name,
+        # as the contact loaders key it; the title stands in only when the row
+        # has neither.
         contact_id = resolve_field(row, ["Prospect prospect_id"]) or person_contact_id(
             resolve_field(row, ["Company Name", "Prospect company_name"]) or account_id,
-            resolve_field(row, ["Prospect full_name"]) or full_name, email, linkedin_url)
+            person_name or ("" if (email or linkedin_url) else title_original),
+            email, linkedin_url)
         persona_raw = resolve_field(row, ["Prospect buying_committee_personas"])
         skills = resolve_field(row, ["Prospect skills"])
         career_history = resolve_field(row, ["Prospect experience"])
@@ -1295,6 +1306,10 @@ def extract_stakeholder_map(account_id: str,
         extracted_contacts.append({
             # existing fields - names and values unchanged
             "full_name": full_name,
+            # True when the row has no name and `full_name` is its title, so a
+            # reader that addresses a person (Content Studio's greeting) does
+            # not take "IT Director" for a name.
+            "name_is_title": not person_name,
             "title": title,
             # As supplied, for the hover - only when it was translated.
             **({"title_original": title_original} if title != title_original else {}),
@@ -1327,6 +1342,10 @@ def extract_stakeholder_map(account_id: str,
             "career_history": career_history,
             "is_priority_contact": False,
         })
+
+    if nameless_untitled:
+        pipeline.step("contacts", "dropped: no name and no title",
+                      dropped_unlabelled=nameless_untitled)
 
     # --- Priority Contacts: pure threshold, no hardcoded count -----------------
     for c in extracted_contacts:

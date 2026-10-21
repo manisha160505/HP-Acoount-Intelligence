@@ -9,7 +9,6 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import api from '@/services/api';
-import { parseApiError } from '@/lib/apiError';
 import { featureLabel } from '@/lib/features';
 import { flush } from '@/lib/track';
 import { MyActivityResponse } from '@/types/analytics';
@@ -127,8 +126,10 @@ export function MyActivityPanel({ open, onClose, userName }: {
       await flush();
       const res = await api.get<MyActivityResponse>('/me/activity', { params: { from: f, to: t } });
       setData(res.data);
-    } catch (err) {
-      setError(parseApiError(err, 'Could not load your activity.').message);
+    } catch {
+      // Never the server's detail on the seller's screen (client, 21 Oct);
+      // the api client logs the failure.
+      setError('Something went wrong. Please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -201,7 +202,11 @@ export function MyActivityPanel({ open, onClose, userName }: {
           {error && (
             <div className="as-fade bg-red-50 border border-red-200 p-3 rounded-xl flex items-center gap-2 text-red-800 text-xs font-semibold">
               <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0" />
-              <span>{error}</span>
+              <span className="flex-1">{error}</span>
+              <button type="button" onClick={() => load(from, to)}
+                className="shrink-0 rounded-lg bg-red-600 px-3 py-1 text-white">
+                Try again
+              </button>
             </div>
           )}
           {from > to && (

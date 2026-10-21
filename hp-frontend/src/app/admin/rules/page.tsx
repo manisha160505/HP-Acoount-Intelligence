@@ -4,7 +4,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ProtectedRoute } from '@/components/common/ProtectedRoute';
 import { PageHero } from '@/components/common/motion';
 import api from '@/services/api';
-import { parseApiError } from '@/lib/apiError';
+import { TryAgain } from '@/components/common/TryAgain';
 import { NORTHSTAR_SIDEBAR_GROUPS, featureLabel } from '@/lib/features';
 import type { FeatureRules, ReferenceSet, ReferenceSetSummary, Rule, RulesIndexResponse } from '@/types/rules';
 import {
@@ -12,7 +12,7 @@ import {
 } from '@/components/rules/RuleParts';
 import { ReferenceView } from '@/components/rules/ReferenceParts';
 import {
-  AlertCircle, ArrowLeft, ArrowRight, BookMarked, BookOpen, ChevronRight, Loader2, Monitor, Search, Workflow, X,
+  ArrowLeft, ArrowRight, BookMarked, BookOpen, ChevronRight, Loader2, Monitor, Search, Workflow, X,
 } from 'lucide-react';
 
 const SIDEBAR_ITEMS = NORTHSTAR_SIDEBAR_GROUPS.flatMap(g => g.items);
@@ -32,7 +32,11 @@ export default function AdminRulesPage() {
   const [index, setIndex] = useState<RulesIndexResponse | null>(null);
   const [details, setDetails] = useState<Record<string, FeatureRules>>({});
   const [loading, setLoading] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // Load failures show a neutral Try again, never error text (client rule):
+  // `indexFailed` for the feature list, `failed` for one feature or rule book
+  // ('feature:<key>' / 'book:<key>').
+  const [indexFailed, setIndexFailed] = useState(false);
+  const [failed, setFailed] = useState<string | null>(null);
   const [feature, setFeature] = useState<string | null>(null);
   const [rule, setRule] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -56,37 +60,42 @@ export default function AdminRulesPage() {
   const load = useCallback(async (key: string) => {
     if (details[key]) return details[key];
     setLoading(key);
+    setFailed(null);
     try {
       const res = await api.get<FeatureRules>(`/admin/rules/${encodeURIComponent(key)}`);
       setDetails(prev => ({ ...prev, [key]: res.data }));
       return res.data;
-    } catch (err) {
-      setError(parseApiError(err, 'Failed to load this feature’s rules.').message);
+    } catch {
+      setFailed(`feature:${key}`);
       return null;
     } finally {
       setLoading(null);
     }
   }, [details]);
 
-  useEffect(() => {
+  const loadIndex = useCallback(() => {
+    setIndexFailed(false);
     api.get<RulesIndexResponse>('/admin/rules')
       .then(res => setIndex(res.data))
-      .catch(err => setError(parseApiError(err, 'Failed to load the rules.').message));
+      .catch(() => setIndexFailed(true));
     api.get<{ sets: ReferenceSetSummary[] }>('/admin/rules/reference')
       .then(res => setBooks(res.data.sets))
-      .catch(err => setError(parseApiError(err, 'Failed to load the rule books.').message));
+      .catch(() => setIndexFailed(true));
   }, []);
+
+  useEffect(() => { loadIndex(); }, [loadIndex]);
 
   const openBook = useCallback(async (key: string) => {
     setBook(key);
     setExpanded(null);
     if (bookData[key]) return;
     setLoading(`book:${key}`);
+    setFailed(null);
     try {
       const res = await api.get<ReferenceSet>(`/admin/rules/reference/${encodeURIComponent(key)}`);
       setBookData(prev => ({ ...prev, [key]: res.data }));
-    } catch (err) {
-      setError(parseApiError(err, 'Failed to load this rule book.').message);
+    } catch {
+      setFailed(`book:${key}`);
     } finally {
       setLoading(null);
     }
@@ -192,12 +201,12 @@ export default function AdminRulesPage() {
         />
 
         <div className="relative max-w-[88rem] mx-auto px-4 sm:px-6 lg:px-8 -mt-12 sm:-mt-14 pb-14">
-          {error && (
-            <div className="relative z-10 mb-4 bg-red-50 border border-red-200 p-4 rounded-xl flex items-center gap-2 text-red-800 text-xs font-semibold">
-              <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0" />{error}
+          {indexFailed && (
+            <div className="relative z-10 mb-4 as-glass rounded-2xl p-6">
+              <TryAgain onRetry={loadIndex} />
             </div>
           )}
-          {!index && !error && (
+          {!index && !indexFailed && (
             <div className="relative z-10 as-glass rounded-2xl p-16 flex flex-col items-center gap-3">
               <Loader2 className="w-8 h-8 text-hp-navy animate-spin" />
               <p className="text-xs text-gray-500 font-medium">Loading rules...</p>
@@ -275,17 +284,18 @@ export default function AdminRulesPage() {
                       </ul>
                     </div>
                   )}
-                  {index.missing.length > 0 && (
-                    <p className="mx-2 rounded-lg bg-amber-50 ring-1 ring-amber-200 p-2.5 text-[11px] text-amber-900">
-                      No rule book yet for: {index.missing.map(featureLabel).join(', ')}.
-                    </p>
-                  )}
+                  {/* Features without a rule book are simply not listed
+                      (client rule: no gap wording). */}
                 </nav>
               </aside>
 
               {/* ------------------------------------------------- detail */}
               <div ref={detailRef} className="min-w-0 scroll-mt-4">
-                {book ? (
+                {book && failed === `book:${book}` ? (
+                  <div className="as-glass rounded-2xl p-16"><TryAgain onRetry={() => openBook(book)} /></div>
+                ) : !book && feature && failed === `feature:${feature}` ? (
+                  <div className="as-glass rounded-2xl p-16"><TryAgain onRetry={() => apply(feature, rule)} /></div>
+                ) : book ? (
                   bookData[book]
                     ? <ReferenceView key={book} data={bookData[book]} onOpenFeature={k => navigate(k, null)} />
                     : <div className="as-glass rounded-2xl p-16 flex justify-center"><Loader2 className="w-8 h-8 text-hp-navy animate-spin" /></div>

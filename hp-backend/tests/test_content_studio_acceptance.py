@@ -337,7 +337,7 @@ class TestT6TheOnePagerIsStructured:
         bare = dict(ONE_PAGER["pillars"][1], evidence_used=[])
         asset = {**ONE_PAGER, "pillars": [ONE_PAGER["pillars"][0], bare]}
         _clean, _faults, soft = _judge(asset, _persona("it-security-manager"), "one_pager")
-        assert any("cites no evidence" in m for m in soft)
+        assert any("cites none of the evidence labels" in m for m in soft)
 
     def test_the_structure_is_projected_onto_the_render_envelope(self):
         """Every renderer, the asset history and the Evaluator read

@@ -1,9 +1,9 @@
 'use client';
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { AlertCircle, History, Loader2 } from 'lucide-react';
+import { History, Loader2 } from 'lucide-react';
 import api from '@/services/api';
-import { parseApiError } from '@/lib/apiError';
+import { TryAgain } from '@/components/common/TryAgain';
 import type { AuditEntry, ManagedUser } from '@/types/analytics';
 
 const ACTION_LABEL: Record<string, string> = {
@@ -49,10 +49,10 @@ function describe(e: AuditEntry): string {
 }
 
 export function formatDateTime(value: string | null): string {
-  if (!value) return '—';
+  if (!value) return '';
   // Timestamps are stored in UTC; a naive one from the API is UTC too.
   const d = new Date(/[zZ]|[+-]\d\d:\d\d$/.test(value) ? value : `${value}Z`);
-  return isNaN(d.getTime()) ? '—' : d.toLocaleString(undefined, {
+  return isNaN(d.getTime()) ? '' : d.toLocaleString(undefined, {
     year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
   });
 }
@@ -62,18 +62,19 @@ export function AuditLog({ users }: { users: ManagedUser[] }) {
   const [entries, setEntries] = useState<AuditEntry[]>([]);
   const [userId, setUserId] = useState('');
   const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
 
   const load = useCallback(async () => {
     setIsLoading(true);
-    setError(null);
+    setLoadFailed(false);
     try {
       const res = await api.get<AuditEntry[]>('/admin/audit', {
         params: { limit: 500, ...(userId ? { user_id: userId } : {}) },
       });
       setEntries(res.data);
-    } catch (err) {
-      setError(parseApiError(err, 'Could not load the activity log.').message);
+    } catch {
+      // No error text on screen (client rule): a neutral Try again instead.
+      setLoadFailed(true);
     } finally {
       setIsLoading(false);
     }
@@ -99,8 +100,8 @@ export function AuditLog({ users }: { users: ManagedUser[] }) {
       </div>
       {isLoading ? (
         <div className="p-10 flex justify-center"><Loader2 className="w-6 h-6 text-hp-navy animate-spin" /></div>
-      ) : error ? (
-        <div className="p-6 text-xs text-red-700 flex items-center gap-2"><AlertCircle className="w-4 h-4" />{error}</div>
+      ) : loadFailed ? (
+        <TryAgain onRetry={load} className="p-6" />
       ) : entries.length === 0 ? (
         <p className="p-10 text-center text-xs text-gray-500">No changes recorded yet.</p>
       ) : (
@@ -119,10 +120,10 @@ export function AuditLog({ users }: { users: ManagedUser[] }) {
               {entries.map((e) => (
                 <tr key={e.id} className="align-top">
                   <td className="py-3 px-5 text-gray-500 whitespace-nowrap">{formatDateTime(e.ts)}</td>
-                  <td className="py-3 px-5 text-gray-700">{e.actor_email || '—'}</td>
+                  <td className="py-3 px-5 text-gray-700">{e.actor_email}</td>
                   <td className="py-3 px-5 font-bold text-gray-900 whitespace-nowrap">{ACTION_LABEL[e.action] || e.action}</td>
-                  <td className="py-3 px-5 text-gray-700">{e.target_email || '—'}</td>
-                  <td className="py-3 px-5 text-gray-600">{describe(e) || '—'}</td>
+                  <td className="py-3 px-5 text-gray-700">{e.target_email}</td>
+                  <td className="py-3 px-5 text-gray-600">{describe(e)}</td>
                 </tr>
               ))}
             </tbody>

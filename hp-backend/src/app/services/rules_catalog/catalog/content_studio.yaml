@@ -1180,7 +1180,8 @@ rules:
     with no serious faults and the fewest style warnings; it is published with any remaining warnings
     attached. If no attempt is free of serious faults, the standard template is used (see the standard
     template rule). If the template cannot be built either, the account's earlier assets stay in place
-    and the seller sees a notice. If the same request is made again with unchanged evidence, persona,
+    and the seller sees one neutral line, 'Something went wrong. Please try again.', with the faults kept
+    internally. If the same request is made again with unchanged evidence, persona,
     format, topic, context, instructions and guardrails, the earlier draft is returned. The last 20 assets
     are kept as history.
   constants:
@@ -1209,7 +1210,8 @@ rules:
     frames it as a question. The closing ask requests a short briefing. An email gets the subject ''Re:
     <topic>'' (maximum 80 characters). A one-pager gets two pillars (''What was reported'', ''What it
     depends on'') with no HP response. It names no HP line and carries no case study. A note with the
-    asset says it is the standard template, built from verified account fields only.'
+    asset records internally that it is the standard template, built from verified account fields only
+    (the seller is not shown a failure note).'
   example:
     scenario: 'A CFO email on ''HP Elite & Pro PCs'' where no draft passed the checks; A1 = ''Business
       description: Maker of motorcycles''.'

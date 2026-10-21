@@ -369,8 +369,9 @@ class TestNewsScoringFaults:
         feed, summary = rns.extract_recent_news_signals(news.account_id)
 
         assert set(summary["data"]["scores"]) == {keep}
-        # Asked once in its batch, once on the retry for the two missing.
-        assert len(_scoring_calls(news.calls)) == 2
+        # Asked once in its batch; the retry for the two missing answers about
+        # neither, so it is asked again once.
+        assert len(_scoring_calls(news.calls)) == 1 + rns.ANSWER_ATTEMPTS
         data = feed["data"]
         published = data["signals"]
         assert data["total_signals_count"] == len(published) == len(sigs)
@@ -482,6 +483,121 @@ class TestNewsScoringFaults:
             doc = rns.score_news_signals(news.account_id, sigs, "Acme")
         assert doc["data"]["scored_count"] == 0
         assert ctx.llm_failures >= 1
+
+
+class TestNewsOffTargetAnswers:
+    """A readable answer about none of what was asked is asked again, and one
+    bad answer out of many no longer throws away a whole account's fresh news.
+
+    21 Oct run: News failed on about one account in ten, each over a single
+    such answer among 10-40 calls - most of them sales-angle rewrites - and the
+    engine kept yesterday's news for the account.
+    """
+
+    @staticmethod
+    def _in_run(news, sigs):
+        ctx = run_context.RunContext(account_id=news.account_id, node_id="news",
+                                     owned=frozenset({"news_relevance_summary"}))
+        with run_context.active(ctx):
+            doc = rns.score_news_signals(news.account_id, sigs, "Acme")
+        return doc, ctx
+
+    def test_an_off_target_scoring_answer_is_asked_again(self, news):
+        sigs = news.signals()
+        tries = []
+
+        def model(system, _user):
+            if "SIGNALS TO SCORE" not in system:
+                return None
+            tries.append(1)
+            if len(tries) == 1:
+                return {"signals": [_entry("deadbeefcafe", 0)]}   # never sent
+            return {"signals": [_entry(sid, k) for k, sid in enumerate(_ids_in(system))]}
+
+        news.install(model)
+        doc, ctx = self._in_run(news, sigs)
+        assert len(tries) == 2
+        assert doc["data"]["scored_count"] == len(sigs)
+        assert ctx.llm_failures == 0
+
+    def test_a_scoring_failure_recovered_by_the_resend_is_not_a_failure(self, news):
+        sigs = news.signals()
+        tries = []
+
+        def model(system, _user):
+            if "SIGNALS TO SCORE" not in system:
+                return None
+            tries.append(1)
+            if len(tries) <= rns.ANSWER_ATTEMPTS:              # the first batch, twice
+                return {"signals": []}
+            return {"signals": [_entry(sid, k) for k, sid in enumerate(_ids_in(system))]}
+
+        news.install(model)
+        doc, ctx = self._in_run(news, sigs)
+        assert doc["data"]["scored_count"] == len(sigs)
+        assert ctx.llm_failures == 0
+
+    def test_signals_still_unscored_after_every_retry_fail_the_section(self, news):
+        news.install(lambda s, _u: {"signals": []} if "SIGNALS TO SCORE" in s else None)
+        doc, ctx = self._in_run(news, news.signals())
+        assert doc["data"]["scores"] == {}
+        assert ctx.llm_failures >= 1
+
+    def test_a_failed_angle_rewrite_keeps_the_fresh_news(self, news):
+        sigs = news.signals()
+        def short(k):    # under the brief, and unlike the others in phrasing
+            w = _OPENERS[k]
+            return "%s note on this event: a brief angle for the %s owner." % (w, w.lower())
+        rewrites = []
+
+        def model(system, _user):
+            if "SIGNALS TO SCORE" in system:
+                return {"signals": [_entry(sid, k, sales_angle=short(k))
+                                    for k, sid in enumerate(_ids_in(system))]}
+            if "rewriting ONLY the sales_angle" in system:
+                rewrites.append(1)
+                return {"signals": [{"signal_id": "deadbeefcafe", "sales_angle": "x"}]}
+            return None
+
+        news.install(model)
+        doc, ctx = self._in_run(news, sigs)
+        assert rewrites, "the too-short angles were sent for a rewrite"
+        assert len(rewrites) == rns.ANSWER_ATTEMPTS * len(sigs), "each asked again once"
+        assert ctx.llm_failures == 0
+        assert doc["data"]["scored_count"] == len(sigs)
+        # The first-pass angle stays, rather than none.
+        assert sorted(s["sales_angle"] for s in doc["data"]["scores"].values()) == sorted(
+            short(k) for k in range(len(sigs)))
+
+    def test_an_off_target_rewrite_answered_on_the_second_try_is_used(self, news):
+        sig = news.signals()[0]
+        sid = sig["signal_id"]
+        rewrites = []
+
+        def model(system, _user):
+            if "SIGNALS TO SCORE" in system:
+                return {"signals": [_entry(sid, 0, sales_angle="Too short an angle.")]}
+            if "rewriting ONLY the sales_angle" in system:
+                rewrites.append(1)
+                if len(rewrites) == 1:
+                    return {"signals": []}
+                return {"signals": [{"signal_id": sid, "sales_angle": _angle(1)}]}
+            return None
+
+        news.install(model)
+        doc, ctx = self._in_run(news, [sig])
+        assert len(rewrites) == 2
+        assert doc["data"]["scores"][sid]["sales_angle"] == _angle(1)
+        assert ctx.llm_failures == 0
+
+    def test_failures_not_counted_still_counts_the_calls(self):
+        ctx = run_context.RunContext(account_id="a", node_id="n")
+        with run_context.active(ctx):
+            with run_context.failures_not_counted():
+                run_context.note_llm(failed=True)
+            run_context.note_llm(failed=True)
+        assert ctx.llm_calls == 2
+        assert ctx.llm_failures == 1
 
 
 class TestTranslationFaults:

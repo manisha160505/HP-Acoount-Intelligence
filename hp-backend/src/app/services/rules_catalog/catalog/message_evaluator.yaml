@@ -242,7 +242,7 @@ rules:
     scenario: Scores 90, 89.9, 75, 74, 40, 39, 19, and no score.
     steps:
     - Apply the lowest scores for each band from the top down
-    result: Exceptional, Strong, Strong, Good, Average, Weak, Poor, Unavailable
+    result: Exceptional, Strong, Strong, Good, Average, Weak, Poor, and no band (blank) for no score
     verified: true
     expect:
     - Exceptional
@@ -252,7 +252,7 @@ rules:
     - Average
     - Weak
     - Poor
-    - Unavailable
+    - ''
   sources:
   - hp-backend/src/app/services/evaluator/scoring.py:SCORE_BANDS
   - hp-backend/src/app/services/evaluator/scoring.py:score_band
@@ -715,8 +715,9 @@ rules:
   summary: Format check results are still shown.
   purpose: Format check results are still shown.
   logic: If the AI returns nothing, the evaluation is still saved with the format checks, no scores and
-    no total (band 'Unavailable'). It is marked as AI scoring not available, and the summary reads 'AI
-    scoring was unavailable. The checks below are computed in code and are unaffected.'
+    no total (and a blank band). It is marked internally as AI scoring not available, and the summary
+    reads 'Something went wrong. Please try again.' When only some scores come back, the summary leads
+    with the same line and the missing dimensions are kept internally.
   sources:
   - hp-backend/src/app/services/evaluator/evaluate.py:evaluate_message
   confidence: high

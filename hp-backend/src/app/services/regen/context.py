@@ -80,14 +80,38 @@ class active:
         return False
 
 
+_failures_counted: contextvars.ContextVar = contextvars.ContextVar(
+    "regen_failures_counted", default=True)
+
+
 def note_llm(failed: bool) -> None:
     """Called by `core/llm.py` for every model call. A no-op outside a run."""
     ctx = _current.get()
     if ctx is None:
         return
     ctx.llm_calls += 1
-    if failed:
+    if failed and _failures_counted.get():
         ctx.llm_failures += 1
+
+
+@contextlib.contextmanager
+def failures_not_counted():
+    """`with failures_not_counted():` - model calls inside still count as
+    calls, but a failed one does not mark the run degraded.
+
+    For a caller that retries or recovers on its own and decides afterwards
+    whether the work as a whole failed: News re-sends unscored signals and
+    keeps the first-pass sales angle when a rewrite fails. Counting each
+    failed attempt there discarded a whole account's fresh news over one bad
+    answer out of thirty (21 Oct run: about one account in ten). The caller
+    reports the failure itself, with `note_llm(failed=True)`, when the retries
+    did not recover it.
+    """
+    token = _failures_counted.set(False)
+    try:
+        yield
+    finally:
+        _failures_counted.reset(token)
 
 
 def note_dataset_read(dataset_key: str) -> None:

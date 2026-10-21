@@ -1197,7 +1197,9 @@ class TestContentStudioGeneration:
         assert latest["persona"]["id"] == "contact_zoe"
         assert "Distributes industrial parts" in latest["generated"]["opening"]
         assert latest["generated"]["evidence_used"] == ["A1"]
-        assert any("deterministic template" in w for w in latest["style_warnings"])
+        # Why it is the template is internal; the printed style line stays clean.
+        assert "deterministic template" in latest["generation_note"]
+        assert latest["style_warnings"] == []
         assert len(calls) == 1      # a None is not retried in the feature
 
     def test_provider_exception_falls_back_without_crashing(self, studio, monkeypatch):
@@ -1347,7 +1349,7 @@ class TestContentStudioAngles:
         monkeypatch.setattr(cstudio, "generate_gpt4o_json_completion", lambda *_a: None)
         out = cstudio.suggest_content_angles(ACCOUNT, "contact_zoe", "email", "Device refresh")
         assert out["status"] == "empty" and out["data"]["options"] == []
-        assert out["data"]["last_error"]["notice"]
+        assert out["data"]["last_error"]["notice"] == "Something went wrong. Please try again."
 
     def test_angles_drop_invented_labels_figures_and_duplicates(self, studio, monkeypatch):
         answer = {"options": [

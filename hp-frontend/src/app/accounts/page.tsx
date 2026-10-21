@@ -17,7 +17,8 @@ import {
   pageNumbers,
   paginate,
 } from '@/lib/accountSelection';
-import { AlertCircle, ArrowRight, Building2, ChevronLeft, ChevronRight, Loader2, RefreshCw, Search, X } from 'lucide-react';
+import { ArrowRight, Building2, ChevronLeft, ChevronRight, Loader2, Search, X } from 'lucide-react';
+import { TryAgain } from '@/components/common/TryAgain';
 
 /**
  * Account Selection - the step between sign-in and the dashboard.
@@ -32,7 +33,7 @@ export default function AccountSelectionPage() {
   const { user } = useAuth();
   const [accounts, setAccounts] = useState<CompanyAccount[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [search, setSearch] = useState('');
   const [urgency, setUrgency] = useState<UrgencyFilter>('all');
   const [page, setPage] = useState(1);
@@ -41,12 +42,13 @@ export default function AccountSelectionPage() {
 
   const load = useCallback(async () => {
     setIsLoading(true);
-    setError(null);
+    setLoadFailed(false);
     try {
       const response = await api.get<CompanyAccount[]>('/accounts/user-list');
       setAccounts(response.data);
-    } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to load accessible account list.');
+    } catch {
+      // No error text on screen (client rule): a neutral Try again instead.
+      setLoadFailed(true);
     } finally {
       setIsLoading(false);
     }
@@ -111,7 +113,7 @@ export default function AccountSelectionPage() {
             </h1>
             <p className="as-rise mt-2 text-sm text-slate-300/90 max-w-xl" style={{ ['--as-delay' as string]: '70ms' }}>
               Choose a target account to open its intelligence dashboard.
-              {!isLoading && !error && accounts.length > 0 && (
+              {!isLoading && !loadFailed && accounts.length > 0 && (
                 <span className="as-fade text-slate-400"> {accounts.length} available.</span>
               )}
             </p>
@@ -173,20 +175,8 @@ export default function AccountSelectionPage() {
 
             {isLoading ? (
               <SkeletonRows />
-            ) : error ? (
-              <div className="as-fade p-10 flex flex-col items-center text-center">
-                <div className="w-10 h-10 rounded-full bg-red-50 flex items-center justify-center mb-3">
-                  <AlertCircle className="w-5 h-5 text-red-600" />
-                </div>
-                <p className="text-sm font-semibold text-slate-800">{error}</p>
-                <button
-                  type="button"
-                  onClick={load}
-                  className="mt-4 inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-bold text-white bg-[#0B132B] hover:bg-[#1C2541] transition-colors"
-                >
-                  <RefreshCw className="w-3.5 h-3.5" /> Try again
-                </button>
-              </div>
+            ) : loadFailed ? (
+              <TryAgain onRetry={load} className="as-fade p-10" />
             ) : view.total === 0 ? (
               <div className="as-fade px-6 py-14 text-center">
                 <div className="w-12 h-12 rounded-2xl bg-slate-100 flex items-center justify-center mx-auto mb-3">
@@ -194,7 +184,7 @@ export default function AccountSelectionPage() {
                 </div>
                 <p className="text-sm font-bold text-slate-800">
                   {isFiltering
-                    ? 'No accounts found matching your search and filter.'
+                    ? 'No accounts match this search and filter.'
                     : isAdminRole(user?.role)
                       ? 'No accounts are available yet.'
                       : 'You don\'t have any accounts assigned to you.'}
@@ -232,7 +222,7 @@ export default function AccountSelectionPage() {
           </div>
 
           {/* Pagination */}
-          {!isLoading && !error && view.total > 0 && (
+          {!isLoading && !loadFailed && view.total > 0 && (
             <div className="as-fade flex flex-col sm:flex-row items-center justify-between gap-3 mt-4 text-xs text-slate-600">
               <span className="tabular-nums" aria-live="polite">
                 Showing <b className="text-slate-800">{view.start}–{view.end}</b> of <b className="text-slate-800">{view.total}</b>

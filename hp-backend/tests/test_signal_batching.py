@@ -87,7 +87,9 @@ class TestTheAskIsBatched:
         monkeypatch.setattr(rns, "generate_gpt4o_json_completion", model)
         rns._score_batches(_signals(16), "ACME", "", NOW)
         retried = [c for c in model.calls if "sig03" in c]
-        assert len(retried) == 2, "asked once in its batch, once on the retry"
+        # Once in its batch, then the retry - which answers about nothing it
+        # was asked, so it is asked again once.
+        assert len(retried) == 1 + rns.ANSWER_ATTEMPTS
 
     def test_one_batch_when_there_are_few_signals(self, monkeypatch):
         model = _Model()

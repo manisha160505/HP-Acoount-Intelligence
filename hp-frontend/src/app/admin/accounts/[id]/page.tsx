@@ -9,6 +9,8 @@ import { useAuth } from '@/providers/AuthProvider';
 import { AccountSellersPanel } from '@/components/users/AccountSellersPanel';
 import { ROW_BUTTON, ROW_ICON_BUTTON_DANGER } from '@/components/common/RowMenu';
 import api from '@/services/api';
+import { TryAgain } from '@/components/common/TryAgain';
+import { ACTION_FAILED, UPLOAD_FILE_REJECTED, UPLOAD_PDF_REJECTED, failureStatus, serverSaid } from '@/lib/uiCopy';
 import { 
   CompanyAccount, 
   AccountDataFile, 
@@ -32,7 +34,6 @@ import {
   UploadCloud,
   FileSpreadsheet,
   RefreshCw,
-  Info,
   Check,
   Plus,
   Trash2,
@@ -53,7 +54,7 @@ export default function ManageAccountPage() {
   const [account, setAccount] = useState<CompanyAccount | null>(null);
   const [activeTab, setActiveTab] = useState<TabType>('details');
   const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
 
   // Account Details Form State
   const [accountName, setAccountName] = useState('');
@@ -64,6 +65,7 @@ export default function ManageAccountPage() {
   // Data Management State
   const [dataFiles, setDataFiles] = useState<AccountDataFile[]>([]);
   const [isLoadingData, setIsLoadingData] = useState(false);
+  const [dataLoadFailed, setDataLoadFailed] = useState(false);
   const [selectedDatasetKey, setSelectedCategoryKey] = useState<DatasetKey>('firmographics');
   const [fileToReplaceId, setFileToReplaceId] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -79,6 +81,7 @@ export default function ManageAccountPage() {
   const [isSavingInstructions, setIsSavingInstructions] = useState(false);
   const [instructionsSuccess, setInstructionsSuccess] = useState<string | null>(null);
   const [instructionsError, setInstructionsError] = useState<string | null>(null);
+  const [instructionsLoadFailed, setInstructionsLoadFailed] = useState(false);
 
   // Guardrails State
   const [guardrailsEnabled, setGuardrailsEnabled] = useState(false);
@@ -87,6 +90,7 @@ export default function ManageAccountPage() {
   const [isSavingGuardrails, setIsSavingGuardrails] = useState(false);
   const [guardrailsSuccess, setGuardrailsSuccess] = useState<string | null>(null);
   const [guardrailsError, setGuardrailsError] = useState<string | null>(null);
+  const [guardrailsLoadFailed, setGuardrailsLoadFailed] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uploadCardRef = useRef<HTMLDivElement>(null);
@@ -94,14 +98,14 @@ export default function ManageAccountPage() {
   const fetchAccountDetails = useCallback(async () => {
     if (!accountId) return;
     setIsLoading(true);
-    setError(null);
+    setLoadFailed(false);
     try {
       const response = await api.get<CompanyAccount>(`/accounts/${accountId}`);
       setAccount(response.data);
       setAccountName(response.data.name);
-    } catch (err: any) {
-      const msg = err.response?.data?.detail || 'Failed to load account details.';
-      setError(msg);
+    } catch {
+      // No error text on screen (client rule): a neutral Try again instead.
+      setLoadFailed(true);
     } finally {
       setIsLoading(false);
     }
@@ -110,11 +114,14 @@ export default function ManageAccountPage() {
   const fetchAccountDataFiles = useCallback(async () => {
     if (!accountId) return;
     setIsLoadingData(true);
+    setDataLoadFailed(false);
     try {
       const response = await api.get<AccountDataFile[]>(`/accounts/${accountId}/data`);
       setDataFiles(response.data);
-    } catch (err: any) {
-      // Non-blocking
+    } catch {
+      // Non-blocking for the page; the Data tab offers Try again instead of
+      // showing every dataset as empty.
+      setDataLoadFailed(true);
     } finally {
       setIsLoadingData(false);
     }
@@ -124,12 +131,14 @@ export default function ManageAccountPage() {
     if (!accountId) return;
     setIsLoadingInstructions(true);
     setInstructionsError(null);
+    setInstructionsLoadFailed(false);
     try {
       const response = await api.get<AccountInstructions>(`/accounts/${accountId}/instructions`);
       setInstructionsText(response.data.instructions_text || '');
-    } catch (err: any) {
-      const msg = err.response?.data?.detail || 'Failed to load instructions.';
-      setInstructionsError(msg);
+    } catch {
+      // Try again instead of an empty form that could be saved over the
+      // stored text.
+      setInstructionsLoadFailed(true);
     } finally {
       setIsLoadingInstructions(false);
     }
@@ -139,13 +148,13 @@ export default function ManageAccountPage() {
     if (!accountId) return;
     setIsLoadingGuardrails(true);
     setGuardrailsError(null);
+    setGuardrailsLoadFailed(false);
     try {
       const response = await api.get<AccountGuardrails>(`/accounts/${accountId}/guardrails`);
       setGuardrailsEnabled(response.data.enabled || false);
       setGuardrailsText(response.data.guardrails_text || '');
-    } catch (err: any) {
-      const msg = err.response?.data?.detail || 'Failed to load guardrails.';
-      setGuardrailsError(msg);
+    } catch {
+      setGuardrailsLoadFailed(true);
     } finally {
       setIsLoadingGuardrails(false);
     }
@@ -184,9 +193,8 @@ export default function ManageAccountPage() {
       setAccountName(response.data.name);
       setSaveDetailsSuccess(`Account name successfully updated to "${response.data.name}".`);
       setTimeout(() => setSaveDetailsSuccess(null), 4000);
-    } catch (err: any) {
-      const msg = err.response?.data?.detail || 'Failed to update account name.';
-      setSaveDetailsError(msg);
+    } catch {
+      setSaveDetailsError(ACTION_FAILED);
     } finally {
       setIsSavingDetails(false);
     }
@@ -205,9 +213,8 @@ export default function ManageAccountPage() {
       setInstructionsText(response.data.instructions_text || '');
       setInstructionsSuccess('Account-specific instructions saved successfully.');
       setTimeout(() => setInstructionsSuccess(null), 4000);
-    } catch (err: any) {
-      const msg = err.response?.data?.detail || 'Failed to save instructions.';
-      setInstructionsError(msg);
+    } catch {
+      setInstructionsError(ACTION_FAILED);
     } finally {
       setIsSavingInstructions(false);
     }
@@ -228,9 +235,8 @@ export default function ManageAccountPage() {
       setGuardrailsText(response.data.guardrails_text || '');
       setGuardrailsSuccess('Account-specific guardrails saved successfully.');
       setTimeout(() => setGuardrailsSuccess(null), 4000);
-    } catch (err: any) {
-      const msg = err.response?.data?.detail || 'Failed to save guardrails.';
-      setGuardrailsError(msg);
+    } catch {
+      setGuardrailsError(ACTION_FAILED);
     } finally {
       setIsSavingGuardrails(false);
     }
@@ -301,9 +307,17 @@ export default function ManageAccountPage() {
 
       fetchAccountDataFiles();
       setTimeout(() => setUploadSuccess(null), 9000);
-    } catch (err: any) {
-      const msg = err.response?.data?.detail || 'Failed to upload dataset.';
-      setUploadError(msg);
+    } catch (err) {
+      // The upload route answers 400 (wrong type, empty, unreadable) or 422 (a
+      // malformed request) for a file the admin must fix - say what to do. Its
+      // two 400s about the request itself (account id, dataset key - both set
+      // by this page) and every other failure stay neutral.
+      const status = failureStatus(err);
+      const fileProblem = (status === 400 || status === 422)
+        && !serverSaid(err, /invalid account id|invalid dataset_key/i);
+      setUploadError(!fileProblem
+        ? ACTION_FAILED
+        : selectedFile.name.toLowerCase().endsWith('.pdf') ? UPLOAD_PDF_REJECTED : UPLOAD_FILE_REJECTED);
     } finally {
       setIsUploading(false);
     }
@@ -321,9 +335,8 @@ export default function ManageAccountPage() {
       setUploadSuccess(`Deleted file "${filename}".`);
       fetchAccountDataFiles();
       setTimeout(() => setUploadSuccess(null), 3000);
-    } catch (err: any) {
-      const msg = err.response?.data?.detail || 'Failed to delete file.';
-      setUploadError(msg);
+    } catch {
+      setUploadError(ACTION_FAILED);
     } finally {
       setDeletingFileId(null);
     }
@@ -352,7 +365,7 @@ export default function ManageAccountPage() {
   };
 
   const formatDate = (isoString: string) => {
-    if (!isoString) return 'N/A';
+    if (!isoString) return '';
     try {
       const d = new Date(isoString);
       return d.toLocaleDateString('en-US', {
@@ -401,19 +414,9 @@ export default function ManageAccountPage() {
             <Loader2 className="w-8 h-8 text-hp-navy animate-spin" />
             <p className="text-xs text-gray-500 font-medium">Loading account workspace...</p>
           </div>
-        ) : error ? (
-          <div className="bg-white rounded-2xl p-8 border border-red-200 shadow-sm">
-            <div className="flex items-center space-x-3 text-red-600 mb-2">
-              <AlertCircle className="w-6 h-6" />
-              <h3 className="font-bold text-sm">Error Loading Account</h3>
-            </div>
-            <p className="text-xs text-gray-600 mb-4">{error}</p>
-            <button
-              onClick={() => router.push('/admin/platform')}
-              className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-xs font-bold text-gray-800 rounded-lg transition"
-            >
-              Return to Platform Directory
-            </button>
+        ) : loadFailed ? (
+          <div className="bg-white rounded-2xl p-8 border border-gray-200 shadow-sm">
+            <TryAgain onRetry={fetchAccountDetails} />
           </div>
         ) : account ? (
           <div className="space-y-6 as-feature-in">
@@ -445,14 +448,20 @@ export default function ManageAccountPage() {
                 </div>
               </div>
 
+              {(account.created_at || account.updated_at) && (
               <div className="bg-gray-50 px-4 py-2.5 rounded-xl border border-gray-200 text-right text-xs space-y-0.5">
+                {account.created_at && (
                 <p className="text-gray-500 font-medium">
                   Created: <span className="text-gray-800 font-bold">{formatDate(account.created_at)}</span>
                 </p>
+                )}
+                {account.updated_at && (
                 <p className="text-gray-500 font-medium">
                   Updated: <span className="text-gray-800 font-bold">{formatDate(account.updated_at)}</span>
                 </p>
+                )}
               </div>
+              )}
             </div>
 
             {/* Navigation Tabs */}
@@ -809,7 +818,11 @@ export default function ManageAccountPage() {
                       </form>
                     </div>
 
-                    {/* Dataset directory grid */}
+                    {/* Dataset directory grid. If the stored files did not
+                        load, Try again - not every dataset shown as empty. */}
+                    {dataLoadFailed ? (
+                      <TryAgain onRetry={fetchAccountDataFiles} className="py-8" />
+                    ) : (
                     <div className="space-y-6">
                       {Object.entries(groupedDatasets).map(([groupName, items]) => (
                         <div key={groupName} className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
@@ -885,13 +898,10 @@ export default function ManageAccountPage() {
                                     </div>
                                   </div>
 
-                                  {/* Dataset Storage Status View */}
-                                  {activeFiles.length === 0 ? (
-                                    <div className="mt-2 text-xs text-gray-400 italic flex items-center space-x-1.5 bg-gray-50/80 p-2.5 rounded-lg border border-dashed border-gray-200">
-                                      <Info className="w-3.5 h-3.5 text-gray-400" />
-                                      <span>Not uploaded</span>
-                                    </div>
-                                  ) : (
+                                  {/* Dataset Storage Status View. A dataset with
+                                      no file shows nothing here (client rule: no gap
+                                      wording); its Upload button says it needs one. */}
+                                  {activeFiles.length === 0 ? null : (
                                     <div className="mt-3 space-y-2">
                                       {activeFiles.map((file) => (
                                         <div 
@@ -908,7 +918,7 @@ export default function ManageAccountPage() {
                                                 </span>
                                               </div>
                                               <p className="text-[11px] text-gray-500 mt-0.5">
-                                                {file.row_count} rows • {formatFileSize(file.file_size)} • Uploaded: {formatDate(file.uploaded_at)}
+                                                {file.row_count} rows • {formatFileSize(file.file_size)}{file.uploaded_at ? ` • Uploaded: ${formatDate(file.uploaded_at)}` : ''}
                                               </p>
                                             </div>
                                           </div>
@@ -959,6 +969,7 @@ export default function ManageAccountPage() {
                         </div>
                       ))}
                     </div>
+                    )}
 
                   </div>
                 )}
@@ -1005,6 +1016,8 @@ export default function ManageAccountPage() {
                         <Loader2 className="w-6 h-6 text-hp-navy animate-spin" />
                         <p className="text-xs text-gray-500">Loading stored account instructions...</p>
                       </div>
+                    ) : instructionsLoadFailed ? (
+                      <TryAgain onRetry={fetchInstructions} className="py-8" />
                     ) : (
                       <form onSubmit={handleSaveInstructions} className="space-y-4">
                         <div>
@@ -1100,6 +1113,8 @@ export default function ManageAccountPage() {
                         <Loader2 className="w-6 h-6 text-hp-navy animate-spin" />
                         <p className="text-xs text-gray-500">Loading stored account guardrails...</p>
                       </div>
+                    ) : guardrailsLoadFailed ? (
+                      <TryAgain onRetry={fetchGuardrails} className="py-8" />
                     ) : (
                       <form onSubmit={handleSaveGuardrails} className="space-y-6">
                         

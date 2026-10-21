@@ -376,9 +376,12 @@ def composite(dimensions: dict, objective: str) -> float:
 
 
 def score_band(value) -> str:
-    """The qualitative band shown under the number (spec Section 4.5)."""
+    """The qualitative band shown under the number (spec Section 4.5).
+
+    No score, no band: blank, which the page hides (client rule, 21 Oct - no
+    "Unavailable" in front of the client). `composite_available` says why."""
     if value is None:
-        return "Unavailable"
+        return ""
     for floor, label in SCORE_BANDS:
         if value >= floor:
             return label

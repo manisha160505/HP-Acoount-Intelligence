@@ -442,14 +442,15 @@ class TestAShapeFaultIsRepairedAndExplained:
         assert "needs exactly 4 body sections; you returned 2" in asked[1]
         assert asked[2].startswith("FIX THIS REWRITE")
 
-    def test_a_shape_that_cannot_be_fixed_is_explained_in_plain_words(self, rewrite):
+    def test_a_shape_that_cannot_be_fixed_reads_neutrally(self, rewrite):
+        """Client rule, 21 Oct: a malformed rewrite is the model's failure, and
+        the seller sees one neutral line - no fault list, raw or plain."""
         run, asked = rewrite
         with pytest.raises(E.EvaluationError) as err:
             run([_one_pager(2)] * 6, fmt="one_pager",
                 original="AEON's stores depend on devices that stay up. We can help.")
         message = str(err.value)
-        assert "it needs 4 sections and the rewrite had 2" in message
-        assert "format contract" not in message and "body_sections" not in message
+        assert message == "Something went wrong. Please try again."
         assert len(asked) == 3, "attempt, retry, one repair - and no more"
 
     def test_a_line_the_persona_cannot_be_sent_is_not_repaired_and_is_named(self, rewrite):
@@ -464,7 +465,7 @@ class TestAShapeFaultIsRepairedAndExplained:
 
     def test_no_answer_from_the_model_says_try_again(self, rewrite):
         run, _asked = rewrite
-        with pytest.raises(E.EvaluationError, match="could not be generated just now"):
+        with pytest.raises(E.EvaluationError, match=r"^Something went wrong\. Please try again\.$"):
             run([])
 
 

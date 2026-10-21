@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { AlertCircle, KeyRound, Loader2, Mail, ShieldCheck } from 'lucide-react';
 import api from '@/services/api';
 import { parseApiError } from '@/lib/apiError';
+import { ACTION_FAILED, NEW_PASSWORD_REFUSED } from '@/lib/uiCopy';
 import { ParallaxBand } from '@/components/common/motion';
 import { PasswordInput } from '@/components/common/PasswordInput';
 import { RecoveryCodeNotice } from '@/components/common/RecoveryCodeNotice';
@@ -50,7 +51,11 @@ export default function ForgotPasswordPage() {
       });
       setNewCode(res.data.recovery_code);
     } catch (err) {
-      setError(parseApiError(err, 'Could not set a new password.').message);
+      // This page's own wording for what the user can fix; never the server's.
+      const e = parseApiError(err);
+      setError(e.code === 'INVALID_CREDENTIALS' ? 'That email and recovery code do not match.'
+        : e.code === 'VALIDATION_ERROR' && e.fields?.new_password ? NEW_PASSWORD_REFUSED
+          : ACTION_FAILED);
     } finally {
       setBusy(false);
     }

@@ -35,6 +35,7 @@ from app.services.hp import (
     content_gates,
     rulebook,
 )
+from app.services.hp.client_copy import ACTION_FAILED
 
 logger = logging.getLogger(__name__)
 
@@ -985,22 +986,18 @@ def evaluate_message(account_id, persona_id, objective, fmt, message,
                         for f in severe)
         evaluation["summary"] = (lead + " " + (evaluation["summary"] or "")).strip()
 
+    # Client rule (21 Oct): a failure reads as one neutral line, never as a
+    # list of what went wrong. Which dimensions are missing stays internal, in
+    # `dimension_problems`, `ai_available` and the audit log.
     if ai_failed:
         # The coded checks are still a real result and still publish.
-        evaluation["summary"] = ("AI scoring was unavailable just now, so this message "
-                                 "has no scores yet. The format checks are unaffected. "
-                                 "Evaluate again to score it.")
+        evaluation["summary"] = ACTION_FAILED
         logger.warning("evaluator: publishing coded checks only for account %s", account_id)
     elif problems:
-        # Some scores came back and some did not; there is no total, and the
-        # seller is told which rather than shown a row of blanks.
-        missing = sorted({S.DIMENSION_LABELS.get(str(p).partition(": ")[0],
-                                                 str(p).partition(": ")[0])
-                          for p in problems})
-        evaluation["summary"] = (
-            "AI scoring was incomplete: no usable score came back for %s, so there is "
-            "no overall score. Evaluate again to score it. %s"
-            % (", ".join(missing), evaluation["summary"] or "")).strip()
+        # Some scores came back and some did not; there is no total.
+        logger.warning("evaluator: no usable score for %s on account %s",
+                       "; ".join(str(p) for p in problems), account_id)
+        evaluation["summary"] = ("%s %s" % (ACTION_FAILED, evaluation["summary"] or "")).strip()
 
     return storage.save(evaluation)
 
@@ -1134,8 +1131,9 @@ def _unsupported_message(diff_faults) -> str:
                      % ("a figure" if len(figures) == 1 else "figures", ", ".join(figures)))
     parts += others
     if not parts:
-        return ("the rewrite introduced claims the sources do not support: %s"
-                % "; ".join(diff_faults))
+        # Nothing the seller can act on: the raw faults stay in the stored
+        # evaluation (`rewrite_faults`) and the log; the seller gets one line.
+        return ACTION_FAILED
     return ("The rewrite was not used: %s. Untick the change that adds it, or remove "
             "it from your message, then try again." % "; and ".join(parts))
 
@@ -1152,16 +1150,15 @@ def _refusal_message(faults, label, cap=None, shortest=None) -> str:
                 "shortest rewrite came out at %s. Select fewer changes, or shorten "
                 "the message, then try again." % (label, cap, shortest))
     if any(str(f) == "no rewrite object was returned" for f in faults):
-        return ("The rewrite could not be generated just now. Your message is "
-                "unchanged - try again in a moment.")
+        return ACTION_FAILED
     gates = [str(f).split(": ", 1)[1] for f in faults if F.is_gate_fault(f)]
     if gates:
         return ("The rewrite was not used because it brought in something this "
                 "persona can't be sent: %s. Untick the change that adds it, then "
                 "try again." % "; ".join(gates))
-    reasons = F.structure_plain(faults, label)
-    return ("The rewrite didn't come back in the shape a %s needs (%s). Try again, "
-            "or select fewer changes." % (label, "; ".join(reasons)))
+    # A malformed answer is the model's failure, not the seller's: one neutral
+    # line (client rule, 21 Oct), the faults stay in `rewrite_faults` and the log.
+    return ACTION_FAILED
 
 
 def rewrite_message(account_id, fingerprint, selected_recommendations,
