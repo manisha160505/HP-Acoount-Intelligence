@@ -54,7 +54,7 @@ def env(monkeypatch, tmp_path):
     # used to do so unconditionally - so the route's own header never survived
     # in the running app while the test said it did.
     app.add_middleware(ResponseEnvelopeMiddleware)
-    for dep in (deps.require_admin_role, deps.get_current_user_flexible,
+    for dep in (deps.require_admin_role, deps.require_super_admin, deps.get_current_user_flexible,
                 deps.require_user_role, deps.require_user_role_flexible,
                 deps.require_account_access, deps.require_account_access_flexible):
         app.dependency_overrides[dep] = lambda: USER

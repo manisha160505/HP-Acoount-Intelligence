@@ -392,7 +392,10 @@ export default function ManageAccountPage() {
   const selectedRegistryItem = DATASET_REGISTRY_LIST.find(d => d.key === selectedDatasetKey) || DATASET_REGISTRY_LIST[0];
 
   return (
-    <ProtectedRoute allowedRoles={['admin']}>
+    // BridgeAI only (client, 22 Oct): an account's data files, instructions,
+    // guardrails and details. HP's admins are sent to their home page, and the
+    // API refuses these to them too.
+    <ProtectedRoute allowedRoles={['super_admin']}>
       <div className="as-page">
       <ParallaxBand>
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 pb-24">

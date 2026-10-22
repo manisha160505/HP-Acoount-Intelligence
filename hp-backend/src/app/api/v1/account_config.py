@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.core.deps import require_admin_role
+from app.core.deps import require_super_admin
 from app.database.mongodb import get_db
 from app.schemas.account_config import (
     AccountGuardrailsResponse,
@@ -33,7 +33,7 @@ def _notify_regeneration(account_id: str, what: str, current_user: dict) -> None
 @router.get("/instructions", response_model=AccountInstructionsResponse)
 def get_instructions(
     account_id: str,
-    current_user: dict = Depends(require_admin_role)
+    current_user: dict = Depends(require_super_admin)
 ):
     if not ObjectId.is_valid(account_id):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid account ID format")
@@ -65,7 +65,7 @@ def get_instructions(
 def update_instructions(
     account_id: str,
     payload: AccountInstructionsUpdate,
-    current_user: dict = Depends(require_admin_role)
+    current_user: dict = Depends(require_super_admin)
 ):
     if not ObjectId.is_valid(account_id):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid account ID format")
@@ -103,7 +103,7 @@ def update_instructions(
 @router.get("/guardrails", response_model=AccountGuardrailsResponse)
 def get_guardrails(
     account_id: str,
-    current_user: dict = Depends(require_admin_role)
+    current_user: dict = Depends(require_super_admin)
 ):
     if not ObjectId.is_valid(account_id):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid account ID format")
@@ -137,7 +137,7 @@ def get_guardrails(
 def update_guardrails(
     account_id: str,
     payload: AccountGuardrailsUpdate,
-    current_user: dict = Depends(require_admin_role)
+    current_user: dict = Depends(require_super_admin)
 ):
     if not ObjectId.is_valid(account_id):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid account ID format")

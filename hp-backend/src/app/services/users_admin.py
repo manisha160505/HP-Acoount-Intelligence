@@ -3,7 +3,10 @@
 Who may do what:
   - an admin manages sellers (role "user"): creates them, assigns accounts,
     resets passwords, deactivates and reactivates them;
-  - only the super admin creates admins, changes roles, and manages admins;
+  - an admin also creates admins and makes a seller an admin (client, 22 Oct:
+    all admins equal, every change in the audit log);
+  - only the super admin makes an admin a seller again, and manages admins
+    (resets, deactivates), so no admin can lock another out;
   - nobody changes the super admin through the API, and nobody demotes,
     deactivates or resets themselves here (their own password changes through
     /auth/change-password).
@@ -130,8 +133,8 @@ def _account_names(db, account_ids: list[str]) -> dict[str, str]:
 # ------------------------------------------------------------------ create
 
 def create_user(db, data: AdminUserCreate, actor: dict) -> AdminUserCreated:
-    if data.role in ADMIN_ROLES and actor["role"] != SUPER_ADMIN:
-        raise APIError(ErrorCode.FORBIDDEN, "Only the super admin can create admins.")
+    # Any admin may create a seller or an admin (the router admits admins
+    # only). A super admin is never created here: `AssignableRole` refuses it.
     email = data.email.lower().strip()
     if db[USERS].find_one({"email": email}):
         raise APIError(ErrorCode.ALREADY_EXISTS, "A user with that email already exists.",
@@ -195,10 +198,19 @@ def set_active(db, user_id: str, is_active: bool, actor: dict) -> AdminUserRespo
 
 
 def set_role(db, user_id: str, role: str, actor: dict) -> AdminUserResponse:
-    """Super admin only (the router checks): make a seller an admin or back."""
+    """Make a seller an admin, or an admin a seller.
+
+    Any admin may promote a seller; only the super admin demotes an admin, the
+    same as every other change to an admin (`_may_manage`).
+    """
     user = _load(db, user_id)
-    _may_manage(actor, user)
     old = user.get("role") or "user"
+    promoting = old == "user" and role == "admin"
+    if promoting and actor["role"] != SUPER_ADMIN:
+        if str(user["_id"]) == actor["id"]:
+            raise APIError(ErrorCode.FORBIDDEN, "You cannot change your own account here.")
+    else:
+        _may_manage(actor, user)
     if old == role:
         return to_response(user)
     db[USERS].update_one({"_id": user["_id"]}, {"$set": {"role": role,
