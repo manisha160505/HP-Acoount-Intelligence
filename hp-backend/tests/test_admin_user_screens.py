@@ -1,8 +1,9 @@
 """Admin screens: roles, account assignment, password resets and the audit log.
 
 Who may do what:
-  admin       - manages sellers: create, assign accounts, reset, (de)activate
-  super admin - also creates admins and changes roles
+  admin       - manages sellers: create, assign accounts, reset, (de)activate;
+                also creates admins and promotes a seller to admin (22 Oct)
+  super admin - also demotes admins and manages them (reset, deactivate)
   nobody      - changes the super admin, or demotes/deactivates/resets themselves
 
 Run: python -m pytest tests/test_admin_user_screens.py -v
@@ -51,13 +52,25 @@ def _code(r):
 
 # ------------------------------------------------------------------ create
 
-def test_super_admin_creates_an_admin_but_an_admin_cannot(db, client):
-    boss, admin, _ = _people(db)
+def test_super_admin_and_admins_create_admins(db, client):
+    """Client, 22 Oct (Q1: A): all admins are equal - any admin adds admins,
+    and every addition is in the audit log with who made it."""
+    boss, admin, seller = _people(db)
     r = client.post(U, json={"email": "new.admin@example.com", "role": "admin"}, headers=auth(boss))
     assert r.status_code == 201 and body(r)["role"] == "admin"
-    r = client.post(U, json={"email": "sneaky@example.com", "role": "admin"}, headers=auth(admin))
+    r = client.post(U, json={"email": "x@example.com", "role": "admin"}, headers=auth(admin))
+    assert r.status_code == 201 and body(r)["role"] == "admin"
+    entry = body(client.get("/api/v1/admin/audit", headers=auth(boss)))[0]
+    assert entry["target_email"] == "x@example.com" and entry["actor_email"] == "admin@example.com"
+    # The chain: an admin made by an admin makes admins too.
+    x = db["users"].find_one({"email": "x@example.com"})
+    db["users"].update_one({"_id": x["_id"]}, {"$set": {"must_change_password": False}})
+    r = client.post(U, json={"email": "y@example.com", "role": "admin"}, headers=auth(x))
+    assert r.status_code == 201 and body(r)["role"] == "admin"
+    # A seller makes nobody.
+    r = client.post(U, json={"email": "z@example.com", "role": "admin"}, headers=auth(seller))
     assert r.status_code == 403
-    assert db["users"].find_one({"email": "sneaky@example.com"}) is None
+    assert db["users"].find_one({"email": "z@example.com"}) is None
 
 
 def test_no_request_can_create_a_super_admin(db, client):
@@ -125,18 +138,32 @@ def test_who_has_access_to_an_account(db, client):
 
 # ------------------------------------------------------------------- roles
 
-def test_only_the_super_admin_changes_roles(db, client):
+def test_an_admin_promotes_a_seller_but_only_the_super_admin_demotes(db, client):
+    """Client, 22 Oct (Q2: A): an admin makes a seller an admin; making an
+    admin a seller again stays with the super admin."""
     boss, admin, seller = _people(db)
     url = "%s/%s/role" % (U, seller["_id"])
-    assert client.put(url, json={"role": "admin"}, headers=auth(admin)).status_code == 403
-    r = client.put(url, json={"role": "admin"}, headers=auth(boss))
+    r = client.put(url, json={"role": "admin"}, headers=auth(admin))
     assert r.status_code == 200 and body(r)["role"] == "admin"
+    entry = body(client.get("/api/v1/admin/audit", headers=auth(boss)))[0]
+    assert entry["action"] == "user.role_changed" and entry["actor_email"] == "admin@example.com"
     # Promoted: sees every account at once, with no assignments.
     _account(db, "Astra")
     names = [x["name"] for x in body(client.get("/api/v1/accounts/user-list", headers=auth(seller)))]
     assert names == ["Astra"]
+    # An admin cannot undo it - not for that admin, nor for any other.
+    assert client.put(url, json={"role": "user"}, headers=auth(admin)).status_code == 403
+    assert db["users"].find_one({"_id": seller["_id"]})["role"] == "admin"
     r = client.put(url, json={"role": "user"}, headers=auth(boss))
-    assert body(r)["role"] == "user"
+    assert r.status_code == 200 and body(r)["role"] == "user"
+
+
+def test_a_seller_cannot_promote_anyone(db, client):
+    _, _, seller = _people(db)
+    other = add_user(db, "seller2@example.com")
+    r = client.put("%s/%s/role" % (U, other["_id"]), json={"role": "admin"}, headers=auth(seller))
+    assert r.status_code == 403
+    assert db["users"].find_one({"_id": other["_id"]})["role"] == "user"
 
 
 @pytest.mark.parametrize("action", ["role", "deactivate", "reset", "accounts"])

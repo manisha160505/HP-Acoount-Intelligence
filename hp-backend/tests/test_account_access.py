@@ -222,3 +222,114 @@ def test_the_super_admin_reaches_the_pipeline(db, api):
     boss = add_user(db, "bridge@example.com", role="super_admin")
     r = api.get("/api/v1/accounts/%s/pipeline" % acct, headers=auth(boss))
     assert r.status_code != 403, r.text
+
+
+# ------------------------------------------- backend controls are BridgeAI's
+#
+# Client, 22 Oct: HP admins do not upload or change data files, AI
+# instructions, guardrails or account details, create accounts, hide or show
+# them, or read the internal feature mapping. The screens hide these; the
+# server refuses them too, so a saved link or a script cannot reach them.
+
+BRIDGEAI_ONLY = (
+    ("GET", "/api/v1/accounts/{account_id}/data"),
+    ("POST", "/api/v1/accounts/{account_id}/data"),
+    ("DELETE", "/api/v1/accounts/{account_id}/data/{file_id}"),
+    ("GET", "/api/v1/accounts/{account_id}/instructions"),
+    ("PUT", "/api/v1/accounts/{account_id}/instructions"),
+    ("GET", "/api/v1/accounts/{account_id}/guardrails"),
+    ("PUT", "/api/v1/accounts/{account_id}/guardrails"),
+    ("POST", "/api/v1/accounts"),
+    ("PATCH", "/api/v1/accounts/{account_id}"),
+    ("PATCH", "/api/v1/accounts/{account_id}/status"),
+    ("GET", "/api/v1/features"),
+    ("GET", "/api/v1/features/dependencies/reverse"),
+    ("GET", "/api/v1/features/{feature_key}"),
+)
+
+
+def _deps_by_route():
+    out = {}
+    for r in _routes():
+        for m in r.methods:
+            out.setdefault((m, r.path), set()).update(_top_deps(r))
+    return out
+
+
+def test_every_backend_control_is_super_admin_only():
+    by_route = _deps_by_route()
+    for key in BRIDGEAI_ONLY:
+        assert key in by_route, "route not found (renamed?): %s %s" % key
+        assert "require_super_admin" in by_route[key], (key, by_route[key])
+        assert not by_route[key] & {"require_admin_role", "require_user_role"}, (key, by_route[key])
+
+
+@pytest.mark.parametrize("role", ["admin", "user"])
+def test_hp_admins_and_sellers_are_refused_every_backend_control(db, api, role):
+    acct = _account(db, "Astra")
+    who = add_user(db, "%s@example.com" % role, role=role, account_ids=[acct])
+    for method, path in BRIDGEAI_ONLY:
+        url = path.replace("{account_id}", acct).replace("{file_id}", "0" * 24) \
+                  .replace("{feature_key}", "executive_dashboard")
+        r = api.request(method, url, headers=auth(who), json={})
+        assert r.status_code == 403, (role, method, path, r.status_code)
+
+
+def test_the_super_admin_reaches_the_backend_controls(db, api):
+    acct = _account(db, "Astra")
+    boss = add_user(db, "bridge@example.com", role="super_admin")
+    for method, path in (("GET", "/api/v1/accounts/%s/data" % acct),
+                         ("GET", "/api/v1/accounts/%s/instructions" % acct),
+                         ("GET", "/api/v1/features")):
+        r = api.request(method, path, headers=auth(boss))
+        assert r.status_code == 200, (path, r.status_code, r.text[:200])
+    r = api.patch("/api/v1/accounts/%s/status" % acct, json={"status": "hidden"}, headers=auth(boss))
+    assert r.status_code == 200 and body(r)["status"] == "hidden"
+
+
+def test_hp_admins_still_list_accounts_and_manage_users(db, api):
+    _account(db, "Astra")
+    admin = add_user(db, "admin@example.com", role="admin")
+    for path in ("/api/v1/accounts", "/api/v1/admin/users", "/api/v1/admin/audit"):
+        assert api.get(path, headers=auth(admin)).status_code == 200, path
+
+
+# ------------------------------------------------------- hidden means hidden
+
+def _hidden(db, name="Hidden"):
+    return str(db["accounts"].insert_one({"name": name, "status": "hidden"}).inserted_id)
+
+
+def test_a_hidden_account_cannot_be_opened_from_an_old_link(db, api):
+    """Client, 22 Oct (Q3): hiding an account takes it out of use for HP's
+    sellers and admins; a bookmark to its dashboard no longer opens it."""
+    acct = _hidden(db)
+    seller = add_user(db, "seller@example.com", account_ids=[acct])
+    admin = add_user(db, "admin@example.com", role="admin")
+    for who in (seller, admin):
+        r = api.get("/api/v1/accounts/%s/data/filings" % acct, headers=auth(who))
+        assert r.status_code == 404 and r.json()["error"]["code"] == "ACCOUNT_NOT_FOUND", who["email"]
+
+
+def test_the_super_admin_still_opens_a_hidden_account(db, api):
+    acct = _hidden(db)
+    boss = add_user(db, "bridge@example.com", role="super_admin")
+    assert api.get("/api/v1/accounts/%s/data/filings" % acct, headers=auth(boss)).status_code == 200
+
+
+def test_showing_it_again_restores_access_at_once(db, api):
+    acct = _hidden(db)
+    seller = add_user(db, "seller@example.com", account_ids=[acct])
+    h = auth(seller)
+    assert api.get("/api/v1/accounts/%s/data/filings" % acct, headers=h).status_code == 404
+    db["accounts"].update_one({}, {"$set": {"status": "active"}})
+    assert api.get("/api/v1/accounts/%s/data/filings" % acct, headers=h).status_code == 200
+
+
+def test_only_the_super_admin_lists_hidden_accounts_on_the_platform_page(db, api):
+    _account(db, "Astra")
+    _hidden(db)
+    admin = add_user(db, "admin@example.com", role="admin")
+    boss = add_user(db, "bridge@example.com", role="super_admin")
+    assert sorted(a["name"] for a in body(api.get("/api/v1/accounts", headers=auth(admin)))) == ["Astra"]
+    assert sorted(a["name"] for a in body(api.get("/api/v1/accounts", headers=auth(boss)))) == ["Astra", "Hidden"]

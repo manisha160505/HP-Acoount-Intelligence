@@ -98,6 +98,10 @@ export default function ManagePlatformPage() {
   // polls its status (the API refuses everyone else).
   const { user } = useAuth();
   const showPipeline = user?.role === 'super_admin';
+  // Creating accounts, Manage (data files, instructions, guardrails, details)
+  // and hiding or showing an account are BridgeAI's too (client, 22 Oct); the
+  // API refuses them to HP's admins as well.
+  const isSuperAdmin = user?.role === 'super_admin';
   const [accounts, setAccounts] = useState<CompanyAccount[]>([]);
   const [pipeline, setPipeline] = useState<Record<string, PipelineSummaryRow>>({});
   const [live, setLive] = useState<Record<string, LiveRow>>({});
@@ -279,8 +283,10 @@ export default function ManagePlatformPage() {
       <div className="as-page">
       <PageHero tourId="admin-platform-header"
         title="Manage Platform"
-        subtitle="Enterprise account portfolio management & entity status control"
-        actions={
+        subtitle={isSuperAdmin
+          ? 'Enterprise account portfolio management & entity status control'
+          : 'Every account on the platform, whether sellers can see it, and when it last changed'}
+        actions={isSuperAdmin &&
           <button data-tour="admin-platform-create"
             type="button"
             onClick={() => {
@@ -445,6 +451,7 @@ export default function ManagePlatformPage() {
 
                       <td className="py-4 px-6">
                         <div className="flex items-center justify-end gap-2">
+                          {isSuperAdmin && (
                           <button
                             data-tour={ai === 0 ? 'admin-platform-manage' : undefined}
                             type="button"
@@ -454,6 +461,7 @@ export default function ManagePlatformPage() {
                             <Settings2 className="w-3.5 h-3.5 text-gray-400" />
                             Manage
                           </button>
+                          )}
                           {togglingId === account.id ? (
                             <span className="inline-flex items-center justify-center w-8 h-8">
                               <Loader2 className="w-4 h-4 text-hp-navy animate-spin" />
@@ -465,11 +473,11 @@ export default function ManagePlatformPage() {
                               items={[
                                 { label: 'Open dashboard', icon: <ExternalLink className="w-3.5 h-3.5" />,
                                   onSelect: () => router.push(dashboardHref(account.id)) },
-                                account.status === 'active'
+                                ...(!isSuperAdmin ? [] : [account.status === 'active'
                                   ? { label: 'Hide from sellers', icon: <EyeOff className="w-3.5 h-3.5" />, danger: true,
                                       onSelect: () => handleStatusToggle(account) }
                                   : { label: 'Show to sellers', icon: <Eye className="w-3.5 h-3.5" />,
-                                      onSelect: () => handleStatusToggle(account) },
+                                      onSelect: () => handleStatusToggle(account) }]),
                               ]}
                             />
                             </span>

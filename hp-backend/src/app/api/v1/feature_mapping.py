@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.core.deps import require_admin_role
+from app.core.deps import require_super_admin
 from app.schemas.account_data import DATASET_REGISTRY
 from app.schemas.feature_mapping import (
     FeatureMappingResponse,
@@ -1061,11 +1061,11 @@ FEATURE_MAPPINGS = {
 }
 
 @router.get("", response_model=list[FeatureMappingResponse])
-def list_features_mapping(current_user: dict = Depends(require_admin_role)):
+def list_features_mapping(current_user: dict = Depends(require_super_admin)):
     return list(FEATURE_MAPPINGS.values())
 
 @router.get("/dependencies/reverse", response_model=list[ReverseDependencyResponse])
-def list_reverse_dependencies(current_user: dict = Depends(require_admin_role)):
+def list_reverse_dependencies(current_user: dict = Depends(require_super_admin)):
     result = []
     for key, info in DATASET_REGISTRY.items():
         mapped_feats = []
@@ -1082,7 +1082,7 @@ def list_reverse_dependencies(current_user: dict = Depends(require_admin_role)):
     return result
 
 @router.get("/{feature_key}", response_model=FeatureMappingResponse)
-def get_feature_mapping(feature_key: str, current_user: dict = Depends(require_admin_role)):
+def get_feature_mapping(feature_key: str, current_user: dict = Depends(require_super_admin)):
     key_clean = feature_key.strip().lower()
     if key_clean not in FEATURE_MAPPINGS:
         raise HTTPException(

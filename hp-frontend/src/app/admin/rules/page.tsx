@@ -184,6 +184,7 @@ export default function AdminRulesPage() {
     <ProtectedRoute allowedRoles={['admin']}>
       <div className="as-page min-h-screen">
         <PageHero
+          tourId="admin-rules-header"
           width="max-w-[88rem]"
           title="Rules"
           subtitle="How each feature decides what it shows. Choose a feature on the left, open its rule tree and select a rule to see what it calculates, how, and a worked example."
@@ -216,7 +217,7 @@ export default function AdminRulesPage() {
           {index && (
             <div className="relative z-10 grid grid-cols-1 lg:grid-cols-[20rem_minmax(0,1fr)] gap-6 items-start">
               {/* ------------------------------------------------ sidebar */}
-              <aside className="as-rise as-glass-strong rounded-2xl lg:sticky lg:top-4 flex flex-col max-h-[60vh] lg:max-h-[calc(100vh-2rem)] overflow-hidden">
+              <aside data-tour="admin-rules-features" className="as-rise as-glass-strong rounded-2xl lg:sticky lg:top-4 flex flex-col max-h-[60vh] lg:max-h-[calc(100vh-2rem)] overflow-hidden">
                 <div className="px-4 pt-4 pb-3 border-b border-gray-100/80">
                   <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.14em] text-gray-500">
                     <BookOpen className="w-3.5 h-3.5 text-hp-navy" />Features
@@ -345,12 +346,12 @@ function FeatureOverview({ featureKey, data, index, onNavigate, books, onOpenBoo
       </div>
 
       <div className="as-rise grid grid-cols-1 xl:grid-cols-2 gap-5" style={{ ['--as-delay' as string]: '60ms' }}>
-        <div className="as-glass rounded-2xl p-5">
+        <div data-tour="admin-rules-sees" className="as-glass rounded-2xl p-5">
           <h3 className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-gray-500"><Monitor className="w-3.5 h-3.5 text-hp-navy" />What the seller sees</h3>
           <p className="mt-2 text-[13px] leading-relaxed text-gray-800">{data.final_output}</p>
         </div>
         {data.how_it_combines && (
-          <div className="as-glass rounded-2xl p-5">
+          <div data-tour="admin-rules-combine" className="as-glass rounded-2xl p-5">
             <h3 className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-gray-500"><Workflow className="w-3.5 h-3.5 text-hp-navy" />How the rules combine</h3>
             <p className="mt-2 text-[13px] leading-relaxed text-gray-800 whitespace-pre-line">{data.how_it_combines}</p>
           </div>
@@ -377,7 +378,7 @@ function FeatureOverview({ featureKey, data, index, onNavigate, books, onOpenBoo
         </section>
       )}
 
-      <section className="as-rise as-glass-strong rounded-2xl p-5 sm:p-6" style={{ ['--as-delay' as string]: '110ms' }}>
+      <section data-tour="admin-rules-list" className="as-rise as-glass-strong rounded-2xl p-5 sm:p-6" style={{ ['--as-delay' as string]: '110ms' }}>
         <h3 className="text-sm font-extrabold text-gray-900">Rules in this feature</h3>
         <p className="text-[11px] text-gray-500">{data.rules.length} rules, {index.roots.length} at the top level. Select one here or in the tree on the left.</p>
         <div className="mt-4 space-y-2">

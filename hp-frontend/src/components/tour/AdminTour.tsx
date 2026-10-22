@@ -1,7 +1,7 @@
 'use client';
 
 // The admin pages' tour: Accounts, Platform, Users and Analytics (client,
-// 17 Oct). The same cards and buttons as the dashboard tour
+// 17 Oct); Rules has a Take the tour of its own (22 Oct). The same cards and buttons as the dashboard tour
 // (components/tour/useTour.tsx), but each stop is a page of its own, so the
 // tour lives in the top bar - which stays mounted while the page changes - and
 // moves between pages with the router. Its words are ADMIN_TOURS in
@@ -11,12 +11,12 @@
 // apart from the dashboard tour (admin_tour_completed_at). After that, Take the
 // tour in the top bar shows the tour of the page on screen.
 
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { Compass } from 'lucide-react';
 import { useAuth } from '@/providers/AuthProvider';
 import { isAdminRole } from '@/types/auth';
-import { ADMIN_TOUR_FINISH, ADMIN_TOUR_WELCOME, ADMIN_TOURS } from '@/lib/tourContent';
+import { ADMIN_TOUR_FINISH, ADMIN_TOUR_WELCOME, adminToursFor } from '@/lib/tourContent';
 import { useTour } from './useTour';
 
 export const ADMIN_TOUR_PAGES: { key: string; href: string }[] = [
@@ -27,10 +27,12 @@ export const ADMIN_TOUR_PAGES: { key: string; href: string }[] = [
 ];
 const PAGE_KEYS = ADMIN_TOUR_PAGES.map((p) => p.key);
 
-// Pages with a Take the tour but no place in the first-visit tour: their
-// address names one account, which the tour cannot choose for the admin.
+// Pages with a Take the tour but no place in the first-visit tour: one
+// account's page, whose address the tour cannot choose for the admin, and
+// Rules, added after the first-visit tour was set (client, 22 Oct).
 const ADMIN_HELP_PAGES: { key: string; prefix: string }[] = [
   { key: 'account', prefix: '/admin/accounts/' },
+  { key: 'rules', prefix: '/admin/rules' },
 ];
 
 function pageKeyFor(pathname: string | null): string {
@@ -51,11 +53,14 @@ export function AdminTour() {
     if (page) router.push(page.href);
   }, [router]);
 
+  // HP's admins get no cards for BridgeAI's controls (Manage, Create, Hide).
+  const tours = useMemo(() => adminToursFor(user?.role === 'super_admin'), [user?.role]);
+
   const tour = useTour({
     activeFeatureKey: current,
     setActiveFeatureKey: goTo,
     onTourDone: () => { void markTourCompleted('admin'); },
-    tours: ADMIN_TOURS,
+    tours,
     welcome: ADMIN_TOUR_WELCOME,
     finish: ADMIN_TOUR_FINISH,
     unit: 'Page',
@@ -75,8 +80,8 @@ export function AdminTour() {
   if (!isAdmin) return null;
   return (
     <>
-      {/* Only on a page that has a tour (not Rules). */}
-      {current && (
+      {/* Only on a page that has a tour for this person. */}
+      {current && tours[current] && (
       <button
         type="button"
         data-tour="admin-tour-button"

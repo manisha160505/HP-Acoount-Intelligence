@@ -8,6 +8,8 @@ export interface PickableAccount { id: string; name: string; status?: string }
 /**
  * Tick the accounts a seller may open. Search narrows the list; "Select shown"
  * and "Clear" act on what is visible, so a filtered list can be ticked at once.
+ * "Select all" / "Clear all" beside the count act on every account whatever the
+ * search, for a seller who should see them all.
  */
 export function AccountPicker({ accounts, selected, onChange }: {
   accounts: PickableAccount[];
@@ -34,6 +36,8 @@ export function AccountPicker({ accounts, selected, onChange }: {
     const ids = new Set(shown.map((a) => a.id));
     onChange(new Set(Array.from(selected).filter((id) => !ids.has(id))));
   };
+  const allSelected = accounts.length > 0 && accounts.every((a) => selected.has(a.id));
+  const toggleAll = () => onChange(allSelected ? new Set() : new Set(accounts.map((a) => a.id)));
 
   return (
     <div className="border border-gray-200 rounded-xl overflow-hidden">
@@ -50,7 +54,13 @@ export function AccountPicker({ accounts, selected, onChange }: {
           />
         </div>
         <div className="flex items-center justify-between text-[11px]">
-          <span className="font-bold text-gray-700">{selected.size} selected</span>
+          <span className="flex items-center gap-2.5">
+            <span className="font-bold text-gray-700">{selected.size} of {accounts.length} selected</span>
+            <button type="button" onClick={toggleAll} disabled={accounts.length === 0}
+                    className="font-bold text-hp-navy hover:underline disabled:opacity-40 disabled:no-underline">
+              {allSelected ? 'Clear all' : 'Select all'}
+            </button>
+          </span>
           <div className="flex items-center gap-3">
             <label className="inline-flex items-center gap-1.5 text-gray-600 cursor-pointer">
               <input type="checkbox" checked={onlySelected} onChange={(e) => setOnlySelected(e.target.checked)} />

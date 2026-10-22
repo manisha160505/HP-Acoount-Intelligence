@@ -143,10 +143,28 @@ def can_see_account(user: dict, account_id: str) -> bool:
     return is_admin(user["role"]) or account_id in user.get("account_ids", ())
 
 
+def _is_hidden(account_id: str) -> bool:
+    """True for an account BridgeAI took out of use ("Hide from sellers").
+
+    The account list already leaves it out; this closes the old link or
+    bookmark to its dashboard. An unknown or malformed id is not hidden: the
+    route answers for it as it always has.
+    """
+    try:
+        doc = get_db()["accounts"].find_one({"_id": ObjectId(account_id)}, {"status": 1})
+    except (InvalidId, TypeError):
+        return False
+    return bool(doc) and doc.get("status", "active") == "hidden"
+
+
 def _account_allowed(user: dict, account_id: str) -> dict:
     # Not found rather than forbidden: a seller learns nothing about accounts
     # that are not theirs, not even that the id exists.
     if not can_see_account(user, account_id):
+        raise APIError(ErrorCode.ACCOUNT_NOT_FOUND)
+    # Hidden means hidden for HP's admins and sellers alike; the super admin
+    # still reaches it, to fix whatever it was hidden for.
+    if user["role"] != SUPER_ADMIN and _is_hidden(account_id):
         raise APIError(ErrorCode.ACCOUNT_NOT_FOUND)
     return user
 

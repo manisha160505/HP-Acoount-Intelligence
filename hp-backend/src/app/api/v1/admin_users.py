@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, Query, status
 
-from app.core.deps import require_admin_role, require_super_admin
+from app.core.deps import require_admin_role
 from app.database.mongodb import get_db
 from app.schemas.admin_users import (
     AccountAssignment,
@@ -37,7 +37,9 @@ def update_user_status(user_id: str, body: AdminUserStatusUpdate,
 
 @router.put("/users/{user_id}/role", response_model=AdminUserResponse)
 def update_user_role(user_id: str, body: RoleUpdate,
-                     current_user: dict = Depends(require_super_admin)):
+                     current_user: dict = Depends(require_admin_role)):
+    # An admin may promote a seller; demoting an admin is super admin only.
+    # The service decides.
     return users_admin.set_role(get_db(), user_id, body.role, current_user)
 
 

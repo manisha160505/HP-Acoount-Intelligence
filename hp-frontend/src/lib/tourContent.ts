@@ -506,8 +506,8 @@ export const ADMIN_TOURS: Record<string, FeatureTour> = {
       {
         title: 'Add user',
         body:
-          'Enter their email and role and pick their accounts. You get a temporary password to give them; ' +
-          'they choose their own when they first sign in.',
+          'Enter their email, choose Seller or Admin, and for a seller pick their accounts. ' +
+          'You get a temporary password to give them; they choose their own when they first sign in.',
         target: 'admin-users-add',
       },
       {
@@ -523,8 +523,8 @@ export const ADMIN_TOURS: Record<string, FeatureTour> = {
       {
         title: 'Change a user',
         body:
-          'Accounts changes which accounts a seller can open. The menu next to it resets a password ' +
-          'or deactivates someone. Their history is kept.',
+          'Accounts changes which accounts a seller can open. The menu next to it resets a seller\'s password, ' +
+          'deactivates them, or makes them an admin. Their history is kept.',
         target: 'admin-users-actions',
       },
       {
@@ -566,4 +566,80 @@ export const ADMIN_TOURS: Record<string, FeatureTour> = {
       },
     ],
   },
+
+  // The Rules page (client, 22 Oct). Help only, like `account`: Take the tour
+  // on Rules shows it; the first-visit tour of the admin pages does not.
+  rules: {
+    overview: {
+      title: 'Rules',
+      body:
+        'How each feature decides what it shows. Read only: nothing here changes the dashboards. ' +
+        'The counts on the right show how many features, rules and rule books there are.',
+      target: 'admin-rules-header',
+    },
+    details: [
+      {
+        title: 'Features',
+        body:
+          'Every feature of the dashboard, grouped as on the dashboard menu. Click one to open its rules; ' +
+          'it opens as a tree you can expand, with a search box for that feature\'s rules.',
+        target: 'admin-rules-features',
+      },
+      {
+        title: 'What the seller sees',
+        body: 'In plain words, what this feature shows a seller on the dashboard.',
+        target: 'admin-rules-sees',
+      },
+      {
+        title: 'How the rules combine',
+        body: 'How the parts of this feature work together, step by step.',
+        target: 'admin-rules-combine',
+      },
+      {
+        title: 'Rules in this feature',
+        body:
+          'Select any rule, here or in the tree on the left, to see what it calculates, how, ' +
+          'and a worked example with real numbers.',
+        target: 'admin-rules-list',
+      },
+    ],
+  },
 };
+
+// HP's admins (role "admin") do not create accounts, open Manage, or hide and
+// show accounts: those are BridgeAI's (client, 22 Oct). Their Platform tour
+// leaves those buttons out, since they are not on their screen.
+const PLATFORM_FOR_HP_ADMINS: FeatureTour = {
+  overview: {
+    title: 'Platform',
+    body:
+      'Every account on the platform, with whether sellers can see it and when it last changed. ' +
+      'The accounts and their data are looked after by the BridgeAI team.',
+    target: 'admin-platform-header',
+  },
+  details: [
+    {
+      title: 'Search',
+      body: 'Find an account by name.',
+      target: 'admin-platform-search',
+    },
+    {
+      title: 'The account table',
+      body: 'Status shows if sellers can see the account. Last Updated shows when it last changed.',
+      target: 'admin-platform-table',
+    },
+    {
+      title: 'Open the dashboard',
+      body: "The menu at the end of each row opens that account's dashboard.",
+      target: 'admin-platform-hide',
+    },
+  ],
+};
+
+/** The admin pages' tours for this person: the BridgeAI super admin gets
+ * every card, HP's admins only those for the controls they have. */
+export function adminToursFor(isSuperAdmin: boolean): Record<string, FeatureTour> {
+  if (isSuperAdmin) return ADMIN_TOURS;
+  const { account: _account, ...rest } = ADMIN_TOURS;
+  return { ...rest, platform: PLATFORM_FOR_HP_ADMINS };
+}

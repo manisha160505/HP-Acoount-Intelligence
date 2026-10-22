@@ -17,7 +17,7 @@ from app.config.settings import settings
 from app.core.deps import (
     require_account_access,
     require_account_access_flexible,
-    require_admin_role,
+    require_super_admin,
 )
 from app.database.mongodb import get_db
 from app.schemas.account_data import DATASET_REGISTRY, AccountDataFileResponse
@@ -156,7 +156,7 @@ async def upload_account_data(
     # Default false, so a single upload from the UI behaves exactly as before.
     defer_extraction: bool = Form(False),
     file: UploadFile = File(...),
-    current_user: dict = Depends(require_admin_role)
+    current_user: dict = Depends(require_super_admin)
 ):
     # 1. Validate Account ID
     if not ObjectId.is_valid(account_id):
@@ -319,7 +319,7 @@ async def upload_account_data(
 def get_account_data_files(
     account_id: str,
     status_filter: str = "active",
-    current_user: dict = Depends(require_admin_role)
+    current_user: dict = Depends(require_super_admin)
 ):
     if not ObjectId.is_valid(account_id):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid account ID format")
@@ -340,7 +340,7 @@ def get_account_data_files(
 def delete_account_data_file(
     account_id: str,
     file_id: str,
-    current_user: dict = Depends(require_admin_role)
+    current_user: dict = Depends(require_super_admin)
 ):
     if not ObjectId.is_valid(account_id) or not ObjectId.is_valid(file_id):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid account or file ID format")

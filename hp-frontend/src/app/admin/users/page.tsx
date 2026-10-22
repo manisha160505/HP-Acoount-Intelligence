@@ -257,7 +257,9 @@ export default function AdminUsersPage() {
                                     items={[
                                       { label: 'Reset password', icon: <KeyRound className="w-3.5 h-3.5" />,
                                         onSelect: () => setDialog({ kind: 'reset', user: u }) },
-                                      ...(isSuper ? [{
+                                      // Any admin makes a seller an admin; only the super admin
+                                      // makes an admin a seller again (client, 22 Oct).
+                                      ...(isSuper || u.role === 'user' ? [{
                                         label: u.role === 'admin' ? 'Make seller' : 'Make admin',
                                         icon: <ShieldCheck className="w-3.5 h-3.5" />,
                                         onSelect: () => setDialog({ kind: 'role', user: u }),
@@ -285,7 +287,6 @@ export default function AdminUsersPage() {
 
         {dialog?.kind === 'create' && (
           <CreateUserDialog
-            isSuper={isSuper}
             accounts={accounts}
             onClose={() => setDialog(null)}
             onCreated={(created) => {
@@ -317,7 +318,7 @@ export default function AdminUsersPage() {
             title={dialog.user.role === 'admin' ? 'Make seller' : 'Make admin'}
             body={dialog.user.role === 'admin'
               ? `${dialog.user.email} will see only the accounts assigned to them and lose access to the admin pages.`
-              : `${dialog.user.email} will see every account and get access to the admin pages, including Users, Rules and Regeneration.`}
+              : `${dialog.user.email} will see every account and get access to the admin pages, including Users, Analytics and Rules.`}
             confirm={dialog.user.role === 'admin' ? 'Make seller' : 'Make admin'}
             onClose={() => setDialog(null)}
             run={async () => {
@@ -390,8 +391,7 @@ function FormError({ message }: { message: string | null }) {
 const inputClass = (bad?: string) =>
   `block w-full px-3.5 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:ring-hp-navy text-sm bg-gray-50 focus:bg-white transition ${bad ? 'border-red-400' : 'border-gray-300'}`;
 
-function CreateUserDialog({ isSuper, accounts, onClose, onCreated }: {
-  isSuper: boolean;
+function CreateUserDialog({ accounts, onClose, onCreated }: {
   accounts: CompanyAccount[];
   onClose: () => void;
   onCreated: (u: CreatedUser) => void;
@@ -449,19 +449,18 @@ function CreateUserDialog({ isSuper, accounts, onClose, onCreated }: {
           </div>
         </div>
 
-        {isSuper && (
-          <div>
-            <FieldLabel>Role</FieldLabel>
-            <div className="flex gap-2">
-              {(['user', 'admin'] as const).map((r) => (
-                <button key={r} type="button" onClick={() => setRole(r)}
-                        className={`flex-1 px-3 py-2 rounded-lg border text-xs font-bold ${role === r ? 'border-hp-navy bg-hp-navy/5 text-hp-navy' : 'border-gray-200 text-gray-600'}`}>
-                  {r === 'user' ? 'Seller - assigned accounts only' : 'Admin - every account and admin pages'}
-                </button>
-              ))}
-            </div>
+        {/* Every admin may add a seller or an admin (client, 22 Oct). */}
+        <div>
+          <FieldLabel>Role</FieldLabel>
+          <div className="flex gap-2">
+            {(['user', 'admin'] as const).map((r) => (
+              <button key={r} type="button" onClick={() => setRole(r)}
+                      className={`flex-1 px-3 py-2 rounded-lg border text-xs font-bold ${role === r ? 'border-hp-navy bg-hp-navy/5 text-hp-navy' : 'border-gray-200 text-gray-600'}`}>
+                {r === 'user' ? 'Seller - assigned accounts only' : 'Admin - every account and admin pages'}
+              </button>
+            ))}
           </div>
-        )}
+        </div>
 
         {role === 'user' && (
           <div>

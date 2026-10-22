@@ -5,7 +5,7 @@ from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.config import account_overrides
-from app.core.deps import is_admin, require_admin_role, require_user_role
+from app.core.deps import is_admin, require_admin_role, require_super_admin, require_user_role
 from app.database.mongodb import get_db
 from app.schemas.account import (
     AccountCreate,
@@ -71,6 +71,10 @@ def list_accounts(
     if search and search.strip():
         regex_pattern = re.escape(search.strip())
         query["name"] = {"$regex": regex_pattern, "$options": "i"}
+    if current_user["role"] != "super_admin":
+        # A hidden account is out of use for HP's admins as for its sellers:
+        # only BridgeAI, who hides and shows accounts, still lists it.
+        query["status"] = {"$ne": "hidden"}
 
     cursor = db["accounts"].find(query).sort("updated_at", -1)
     return [serialize_account(doc) for doc in cursor]
@@ -78,7 +82,7 @@ def list_accounts(
 @router.post("", response_model=AccountResponse, status_code=status.HTTP_201_CREATED)
 def create_account(
     account_in: AccountCreate,
-    current_user: dict = Depends(require_admin_role)
+    current_user: dict = Depends(require_super_admin)
 ):
     db = get_db()
     account_name = account_in.name.strip()
@@ -123,7 +127,7 @@ def get_account(
 def update_account(
     account_id: str,
     account_in: AccountCreate,
-    current_user: dict = Depends(require_admin_role)
+    current_user: dict = Depends(require_super_admin)
 ):
     if not ObjectId.is_valid(account_id):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid account ID format")
@@ -158,7 +162,7 @@ def update_account(
 def update_account_status(
     account_id: str,
     status_in: AccountStatusUpdate,
-    current_user: dict = Depends(require_admin_role)
+    current_user: dict = Depends(require_super_admin)
 ):
     if not ObjectId.is_valid(account_id):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid account ID format")
