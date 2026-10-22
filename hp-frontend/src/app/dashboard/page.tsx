@@ -88,6 +88,7 @@ import {
   Briefcase
 } from 'lucide-react';
 import HpLogo from '@/components/common/HpLogo';
+import PoweredByBridgeAI from '@/components/common/PoweredByBridgeAI';
 
 const ICON_MAP: Record<string, React.FC<{ className?: string }>> = {
   LayoutDashboard,
@@ -1329,6 +1330,11 @@ export default function UserDashboardPage() {
                 <ChevronLeft className={`w-4 h-4 transition-transform ${isSidebarCollapsed ? 'rotate-180' : ''}`} />
               </button>
             </div>
+            {!isSidebarCollapsed && (
+              <div className="border-t border-slate-800/80 px-4 pb-4 pt-3">
+                <PoweredByBridgeAI tone="light" />
+              </div>
+            )}
 
           </div>
         </aside>

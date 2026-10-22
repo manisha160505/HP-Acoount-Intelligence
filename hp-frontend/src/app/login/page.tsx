@@ -9,6 +9,7 @@ import { ParallaxBand } from '@/components/common/motion';
 import { Mail, AlertCircle, Loader2 } from 'lucide-react';
 import { PasswordInput } from '@/components/common/PasswordInput';
 import HpLogo from '@/components/common/HpLogo';
+import PoweredByBridgeAI from '@/components/common/PoweredByBridgeAI';
 import { ACTION_FAILED } from '@/lib/uiCopy';
 
 export default function LoginPage() {
@@ -136,6 +137,9 @@ export default function LoginPage() {
             </button>
           </form>
 
+          <div className="mt-6 pt-5 border-t border-slate-700/60">
+            <PoweredByBridgeAI tone="light" center />
+          </div>
         </div>
       </div>
     </ParallaxBand>
