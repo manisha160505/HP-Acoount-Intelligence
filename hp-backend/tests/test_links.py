@@ -101,8 +101,14 @@ def timeout(request):
     (429, True, "access_restricted"),     # rate limited
     (404, False, "not_found"),
     (410, False, "gone"),
-    (400, False, "client_error"),
-    (451, False, "client_error"),
+    # Any other 4xx refuses the request rather than saying the page is gone
+    # (21 Oct: Bangkok Post 451, Betagro 405, USA Today 406 - all open in a
+    # browser), so the link is kept.
+    (400, True, "unverified_client_error"),
+    (402, True, "unverified_client_error"),
+    (405, True, "unverified_client_error"),
+    (406, True, "unverified_client_error"),
+    (451, True, "unverified_client_error"),
     (999, True, "unverified_status"),
 ])
 def test_status_classes(status, ok, reason):

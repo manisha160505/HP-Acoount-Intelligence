@@ -8,7 +8,7 @@ says more about the server or the network than about the page is kept, with an
 `unverified_*` reason an operator can read in the summary.
 
 broken (the link is hidden) - definite breakage only:
-  * 404, 410 and every other 4xx except 401, 403 and 429;
+  * 404 and 410 - the server saying the page is not there;
   * a host that does not exist (NXDOMAIN, or no address for the name);
   * a certificate a browser warns about: expired, self-signed, wrong host;
   * a soft 404: a 2xx whose final address is a "page not found" page, or a deep
@@ -22,6 +22,10 @@ ok (the link is shown):
   * a final 2xx or 3xx;
   * 401, 403 and 429 - paywalls and sites that refuse scripts open in a browser
     (client-approved): `access_restricted`;
+  * any other 4xx - `unverified_client_error`. These answer the request, not
+    the page: the 21 Oct check marked 39 working pages dead this way - Bangkok
+    Post answering the VM 451, Betagro and VietinBank 405, USA Today 406 - and
+    every one re-tested opened from a laptop;
   * kept but unverified - `unverified_timeout`, `unverified_connection_refused`,
     `unverified_connection_dropped` (reset / disconnected),
     `unverified_server_error` (a 5xx on the second try as well),
@@ -199,7 +203,8 @@ def classify_status(status: int) -> tuple[bool, str]:
     if status == 410:
         return False, "gone"
     if 400 <= status < 500:
-        return False, "client_error"
+        # Refused, not missing: only 404 and 410 say the page is not there.
+        return True, "unverified_client_error"
     if 500 <= status < 600:
         return True, "unverified_server_error"
     return True, "unverified_status"
