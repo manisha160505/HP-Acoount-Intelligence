@@ -335,7 +335,7 @@ rules:
   summary: Shows a contact as C-Suite only when the job title confirms an executive role.
   purpose: Shows a contact as C-Suite only when the job title confirms an executive role.
   logic: When the band would be C-Suite, the title must be an executive title (Chief ... Officer, CEO,
-    CIO, COO, CTO, CFO, CISO, President, Managing Director) and must not contain the word 'office'. Otherwise
+    CIO, COO, CTO, CFO, CISO, President, Managing Director, Chairman, Vice Chairman) and must not contain the word 'office'. Otherwise
     the band is Manager and the contact is flagged with a seniority conflict. The original title is kept
     as listed.
   constants:
