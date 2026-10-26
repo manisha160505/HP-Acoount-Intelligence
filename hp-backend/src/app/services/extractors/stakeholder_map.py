@@ -164,9 +164,12 @@ SENIORITY_BAND_MAP = {
 # `\boffice\b` separates a department name ("CIO Office") from a person
 # ("Chief Operating Officer" - "Officer" is a different word).
 OFFICE_NAME_RE = re.compile(r"\boffice\b", re.I)
+# A chairman, chairwoman or chairperson - "Vice Chairman" included - is a board
+# executive too (client, 26 Oct: "Director Vice chairman", tagged c_suite).
 EXECUTIVE_TITLE_RE = re.compile(
     r"\b(chief\s+\w+(\s+\w+)?\s+officer"
-    r"|ceo|cio|coo|cto|cfo|ciso|president|managing\s+director)\b",
+    r"|ceo|cio|coo|cto|cfo|ciso|president|managing\s+director"
+    r"|chairman|chairwoman|chairperson)\b",
     re.I,
 )
 SENIORITY_UNCORROBORATED_BAND = "Manager"
