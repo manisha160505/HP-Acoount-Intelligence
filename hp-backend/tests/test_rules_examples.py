@@ -509,7 +509,7 @@ def ex_message_evaluator__me_rewrite_greeting():
     return [__import__('app.services.evaluator.formats', fromlist=['_'])._short_role(t) for t in ('Head of information technology project procurement', 'Chief Financial Officer', 'VP / Head of Information Technology')]
 
 def ex_message_evaluator__me_rewrite_validation():
-    return __import__('app.services.evaluator.formats', fromlist=['_']).validate_rewrite({'rewrite': {'opening': 'x' * 150, 'body_sections': [{'text': 'y' * 150}], 'cta': 'Open to a chat?'}}, 'linkedin_message', (), {'title': 'CFO'}, '')
+    return __import__('app.services.evaluator.formats', fromlist=['_']).validate_rewrite({'rewrite': {'opening': ' '.join(['x'] * 60), 'body_sections': [{'text': ' '.join(['y'] * 60)}], 'cta': 'Open to a chat?'}}, 'linkedin_message', (), {'title': 'CFO'}, '')
 
 def ex_message_evaluator__me_rewrite_diff():
     return __import__('app.services.evaluator.verify', fromlist=['_']).diff_rewrite('Your 4500 staff deserve better.', 'Your 4500 staff and 12 sites deserve the best PCs from the market-leading vendor.', __import__('app.services.evaluator.sources', fromlist=['_']).EvaluatorSources('a1', 'Astra', 'indonesia', __import__('app.services.extractors.grounding', fromlist=['_']).Corpus(['4500 employees', 'Cikarang plant']), __import__('app.services.extractors.grounding', fromlist=['_']).Corpus(['HP Wolf Security isolates threats in micro-VMs']), {'title': 'CFO', 'name': 'Budi Santoso'}, "We are the world's most secure. HP Wolf Security stops 99% of attacks. Your 4500 staff deserve better.", 1, True), ['tighten'])[1]

@@ -64,16 +64,20 @@ FORMATS = {
         "rewrite": {
             "required": ["opening", "body_sections", "cta"],
             "sections": (1, 1),
-            "max_chars": 300,
+            # Content Studio's budget for the same format (60-110 words) and
+            # spec 4.5. It was 300 characters - LinkedIn's limit for a
+            # connection note, not a message - so every LinkedIn message Content
+            # Studio wrote was over it, and its rewrite was refused (AEON, 12 Nov).
+            "max_words": 110,
             # A direct message, so it opens with a greeting - but it carries no
-            # sign-off: a DM is not a letter, and the 300-character cap counts.
+            # sign-off: a DM is not a letter.
             "greeting": True,
             "greeting_word": "Hi",
             "signoff": False,
             "shape": ("A direct LinkedIn message to one person - NOT a public post, so no headline "
                       "and no hashtags. opening: one personalised line referencing something real "
                       "about their remit. body_sections: exactly one short paragraph. cta: one "
-                      "specific, low-friction ask. The whole message must fit inside 300 characters "
+                      "specific, low-friction ask. The whole message must fit inside 110 words "
                       "including the greeting, which is added automatically - do not write one."),
         },
         "label": "LinkedIn Message",
@@ -85,10 +89,9 @@ FORMATS = {
                      "is a 1:1 private message, not a public post: a generic opener that "
                      "could be sent to anyone is the primary failure mode. Penalise "
                      "anything over ~110 words."),
-        # LinkedIn caps connection notes at 300 characters; a message that
-        # cannot be sent is a structural failure, not a style note.
-        "max_chars": 300,
         # 110, from Section 4.5 and Content Studio's G12 budget for this format.
+        # No character cap: 300 is LinkedIn's limit for a connection note, and
+        # a Content Studio message (60-110 words) always failed it.
         "max_words": 110,
         "wants_next_step": True,
         "wants_subject": False,
@@ -537,12 +540,31 @@ def rewrite_output_schema(fmt: str) -> str:
     return "{\n" + ",\n".join(lines) + "\n}"
 
 
+def length_cap(contract) -> tuple | None:
+    """(cap, unit) for a contract with a length limit, or None.
+
+    The unit is "words" or "characters": a LinkedIn message is capped in words
+    (110), the way Content Studio writes it.
+    """
+    if contract.get("max_words"):
+        return contract["max_words"], "words"
+    if contract.get("max_chars"):
+        return contract["max_chars"], "characters"
+    return None
+
+
+def measure(text, unit: str) -> int:
+    """The length of `text` in a cap's unit."""
+    return len(str(text or "").split()) if unit == "words" else len(str(text or ""))
+
+
 def body_budget(fmt: str, persona=None, original="") -> dict | None:
     """What the model's own text may total in a capped format, or None.
 
-    {"max": the format's cap, "composed": characters Python adds (greeting,
-    sign-off), "separators": characters of blank lines `render_rewrite` puts
-    between blocks, "budget": what is left for opening + body + cta}.
+    {"max": the format's cap, "unit": "words" or "characters", "composed": what
+    Python adds (greeting, sign-off), "separators": characters of blank lines
+    `render_rewrite` puts between blocks (0 for a cap in words), "budget": what
+    is left for opening + body + cta}.
 
     The blank lines count. The budget used to subtract only the greeting, so a
     LinkedIn rewrite that hit its stated budget exactly still came out four
@@ -551,22 +573,26 @@ def body_budget(fmt: str, persona=None, original="") -> dict | None:
     """
     key = normalize_format(fmt)
     contract = rewrite_contract(key)
-    cmax = contract.get("max_chars")
-    if not cmax:
+    cap = length_cap(contract)
+    if not cap:
         return None
+    cmax, unit = cap
     composed_blocks = [b for b in (compose_greeting(persona, contract, original),
                                    compose_signoff(contract, original)) if b]
-    composed = sum(len(b) for b in composed_blocks)
-    fields = set(model_fields(key))
-    model_blocks = sum(1 for f in ("headline", "opening", "cta") if f in fields)
-    if "body_sections" in fields:
-        model_blocks += (contract.get("sections") or (1, 1))[1]
-    separators = 2 * max(len(composed_blocks) + model_blocks - 1, 0)
-    return {"max": cmax, "composed": composed, "separators": separators,
-            "budget": max(cmax - composed - separators, 80)}
+    composed = sum(measure(b, unit) for b in composed_blocks)
+    separators = 0
+    if unit == "characters":
+        fields = set(model_fields(key))
+        model_blocks = sum(1 for f in ("headline", "opening", "cta") if f in fields)
+        if "body_sections" in fields:
+            model_blocks += (contract.get("sections") or (1, 1))[1]
+        separators = 2 * max(len(composed_blocks) + model_blocks - 1, 0)
+    floor = 20 if unit == "words" else 80
+    return {"max": cmax, "unit": unit, "composed": composed, "separators": separators,
+            "budget": max(cmax - composed - separators, floor)}
 
 
-LENGTH_FAULT_RE = re.compile(r"^rewrite is (\d+) characters; ")
+LENGTH_FAULT_RE = re.compile(r"^rewrite is (\d+) (?:characters|words); ")
 
 
 def length_only(faults) -> bool:
@@ -589,15 +615,20 @@ def length_retry_note(fmt: str, draft: dict | None, persona=None, original="") -
     parts += [("body_sections[%d].text" % i, s.get("text") or "")
               for i, s in enumerate(draft.get("body_sections") or [])]
     parts.append(("cta", draft.get("cta") or ""))
-    used = sum(len(text) for _name, text in parts)
+    unit = spec["unit"]
+    used = sum(measure(text, unit) for _name, text in parts)
     over = max(used - spec["budget"], 1)
-    lines = ["Your rewrite was %d characters; the limit is %d, including the "
-             "%d-character salutation and the blank lines that are added for you."
-             % (len(draft.get("plain_text") or ""), spec["max"], spec["composed"]),
-             "Your own text (opening + body + cta) totalled %d characters and may "
-             "total at most %d. Cut at least %d characters." % (used, spec["budget"], over),
+    added = ("salutation and the blank lines that are" if unit == "characters"
+             else "salutation that is")
+    lines = ["Your rewrite was %d %s; the limit is %d, including the "
+             "%d-%s %s added for you."
+             % (measure(draft.get("plain_text"), unit), unit, spec["max"],
+                spec["composed"], unit[:-1], added),
+             "Your own text (opening + body + cta) totalled %d %s and may "
+             "total at most %d. Cut at least %d %s." % (used, unit, spec["budget"], over, unit),
              "Current lengths:"]
-    lines += ["  - %s: %d characters" % (name, len(text)) for name, text in parts if text]
+    lines += ["  - %s: %d %s" % (name, measure(text, unit), unit)
+              for name, text in parts if text]
     return "\n".join(lines)
 
 
@@ -714,7 +745,7 @@ def structure_plain(faults, label: str) -> list:
         elif m := _FAULT_PUBLIC_NAME_RE.match(fault):
             out.append("a public %s can't name the contact %s" % (label, m.group(1)))
         elif m := LENGTH_FAULT_RE.match(fault):
-            out.append("it was %s characters, over the limit" % m.group(1))
+            out.append("it was %s, over the limit" % fault.split(";")[0][len("rewrite is "):])
         else:
             out.append(fault)
     return out
@@ -774,7 +805,13 @@ def rewrite_instructions(fmt: str, persona=None, original="") -> str:
     # silently asks for 300 plus whatever Python prepends - and the rewrite is
     # then rejected for a length the model was never told about.
     spec = body_budget(key, persona, original)
-    if spec:
+    if spec and spec["unit"] == "words":
+        shape += (" HARD LIMIT: your opening, body_sections and cta together must "
+                  "total at most %d words - the %d-word salutation is added on top "
+                  "and counts towards the %d-word maximum. "
+                  "Be brief; going over means the rewrite is discarded."
+                  % (spec["budget"], spec["composed"], spec["max"]))
+    elif spec:
         shape += (" HARD LIMIT: your opening, body_sections and cta together must "
                   "total at most %d characters - the %d-character salutation and "
                   "the blank lines between blocks are added on top and count "
@@ -948,12 +985,11 @@ def validate_rewrite(raw, fmt: str, banned_names=(), persona=None,
     plain = render_rewrite(rewrite)
     rewrite["plain_text"] = plain
 
-    # A sendable length is structural, not stylistic: a 400-character LinkedIn
-    # note cannot be sent at all.
-    cmax = contract.get("max_chars")
-    if cmax and len(plain) > cmax:
-        faults.append("rewrite is %d characters; %s allows %d"
-                      % (len(plain), FORMATS[key]["label"], cmax))
+    # A sendable length is structural, not stylistic.
+    cap = length_cap(contract)
+    if cap and measure(plain, cap[1]) > cap[0]:
+        faults.append("rewrite is %d %s; %s allows %d"
+                      % (measure(plain, cap[1]), cap[1], FORMATS[key]["label"], cap[0]))
 
     if contract.get("public"):
         blob = plain.lower()

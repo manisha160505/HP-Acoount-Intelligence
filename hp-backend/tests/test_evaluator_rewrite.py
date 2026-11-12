@@ -152,15 +152,19 @@ class TestUntraceableSuggestionsAreWithheld:
 
 # --- the evaluation is told the cap ---------------------------------------------
 
+def _words(n, word="word"):
+    return " ".join([word] * n)
+
+
 class TestTheEvaluationKnowsTheCap:
 
     def test_a_capped_format_states_the_limit_and_the_current_length(self):
-        block = E._cap_block(F.FORMATS["linkedin_message"], "x" * 120)
-        assert "at most 300 characters" in block and "this message is 120" in block
+        block = E._cap_block(F.FORMATS["linkedin_message"], _words(40))
+        assert "at most 110 words" in block and "this message is 40" in block
         assert "REPLACING or CUTTING" not in block
 
     def test_near_the_cap_it_asks_for_swaps_not_additions(self):
-        block = E._cap_block(F.FORMATS["linkedin_message"], "x" * 290)
+        block = E._cap_block(F.FORMATS["linkedin_message"], _words(100))
         assert "REPLACING or" in block and "what" in block
 
     def test_an_uncapped_format_says_nothing(self):
@@ -170,34 +174,46 @@ class TestTheEvaluationKnowsTheCap:
 # --- the budget the model is given is the real one ------------------------------
 
 class TestTheBudgetCountsEverythingPythonAdds:
+    """LinkedIn Message is capped in words (110), as Content Studio writes it:
+    the greeting's words count; blank lines are not words."""
 
-    def test_greeting_and_blank_lines_are_both_subtracted(self):
+    def test_the_greeting_is_subtracted(self):
         spec = F.body_budget("linkedin_message", PERSONA, "")
         greeting = F.compose_greeting(PERSONA, F.rewrite_contract("linkedin_message"), "")
-        # greeting + opening + body + cta = four blocks, three blank lines.
-        assert spec == {"max": 300, "composed": len(greeting), "separators": 6,
-                        "budget": 300 - len(greeting) - 6}
+        words = len(greeting.split())
+        assert spec == {"max": 110, "unit": "words", "composed": words, "separators": 0,
+                        "budget": 110 - words}
 
     def test_a_draft_that_meets_the_budget_exactly_is_accepted(self):
-        """It used to come out four characters over and be refused."""
         spec = F.body_budget("linkedin_message", PERSONA, "")
         third = spec["budget"] // 3
-        raw = {"opening": "a" * third, "body_sections": [{"text": "b" * third}],
-               "cta": "c" * (spec["budget"] - 2 * third)}
+        raw = {"opening": _words(third, "a"), "body_sections": [{"text": _words(third, "b")}],
+               "cta": _words(spec["budget"] - 2 * third, "c")}
         rewrite, faults = F.validate_rewrite(raw, "linkedin_message", (), PERSONA, "")
-        assert faults == [] and len(rewrite["plain_text"]) == 300
+        assert faults == [] and len(rewrite["plain_text"].split()) == 110
+
+    def test_a_content_studio_length_message_is_not_refused(self):
+        """AEON, 12 Nov: a 76-word Content Studio message was refused for 318
+        characters against a 300-character cap."""
+        raw = {"opening": _words(25, "a"), "body_sections": [{"text": _words(40, "b")}],
+               "cta": _words(15, "c")}
+        _rewrite, faults = F.validate_rewrite(raw, "linkedin_message", (), PERSONA, "")
+        assert faults == []
+        checks = F.structure_checks("Hi Taro,\n\n" + _words(80), "linkedin_message")
+        assert not any(c["check"] == "character_limit" for c in checks["checks"])
 
     def test_the_retry_note_gives_the_numbers(self):
-        raw = {"opening": "a" * 150, "body_sections": [{"text": "b" * 150}], "cta": "c" * 50}
+        raw = {"opening": _words(50, "a"), "body_sections": [{"text": _words(50, "b")}],
+               "cta": _words(20, "c")}
         _clean, faults, draft = F.validate_rewrite(raw, "linkedin_message", (), PERSONA, "",
                                                    keep_draft=True)
         assert F.length_only(faults)
         note = F.length_retry_note("linkedin_message", draft, PERSONA, "")
         budget = F.body_budget("linkedin_message", PERSONA, "")["budget"]
-        assert "totalled 350 characters" in note
+        assert "totalled 120 words" in note
         assert "at most %d" % budget in note
-        assert "Cut at least %d characters" % (350 - budget) in note
-        assert "opening: 150 characters" in note
+        assert "Cut at least %d words" % (120 - budget) in note
+        assert "opening: 50 words" in note
 
 
 # --- rewrite_message, end to end with a scripted model ---------------------------
@@ -206,7 +222,7 @@ def _answer(opening, body, cta):
     return {"opening": opening, "body_sections": [{"text": body}], "cta": cta}
 
 
-LONG = _answer("o" * 150, "b" * 150, "c" * 60)             # ~376 characters
+LONG = _answer(_words(50, "open"), _words(50, "body"), _words(20, "ask"))  # 123 words
 FITS = _answer("Saw AEON's store refresh plans.",
                "We help retailers modernise their device estate with less downtime.",
                "Open to a 15-minute call next week?")
@@ -252,20 +268,21 @@ class TestATooLongRewriteIsShortenedNotRefused:
         assert len(asked) == 3, "attempt, retry, one shorten pass"
         assert "Cut at least" in asked[1], "the retry is told how much to cut"
         assert asked[2].startswith("SHORTEN THIS REWRITE")
-        assert json.dumps("o" * 150) in asked[2], "it is shown its own draft"
+        assert json.dumps(_words(50, "open")) in asked[2], "it is shown its own draft"
 
     def test_it_stops_after_two_shorten_passes_with_a_message_to_act_on(self, rewrite):
         run, asked = rewrite
-        shorter = _answer("o" * 120, "b" * 120, "c" * 60)
+        shorter = _answer(_words(45, "open"), _words(45, "body"), _words(20, "ask"))
         with pytest.raises(E.EvaluationError) as err:
             run([LONG, LONG, shorter, shorter, FITS])
         assert len(asked) == 2 + E.SHORTEN_PASSES, "never a third shorten pass"
         message = str(err.value)
-        assert "don't fit in a LinkedIn Message (300 characters)" in message
+        assert "don't fit in a LinkedIn Message (110 words)" in message
         assert "Select fewer changes" in message
         assert "format contract" not in message
+        assert err.value.code == "REWRITE_TOO_LONG"
         shortest = len(F.validate_rewrite(shorter, "linkedin_message", (), PERSONA, "",
-                                          keep_draft=True)[2]["plain_text"])
+                                          keep_draft=True)[2]["plain_text"].split())
         assert "came out at %d" % shortest in message
 
     def test_a_fault_that_is_not_length_is_never_sent_to_shorten(self, rewrite):
@@ -283,6 +300,7 @@ class TestATooLongRewriteIsShortenedNotRefused:
         with pytest.raises(E.EvaluationError) as err:
             run([LONG, LONG, invented])
         assert "40%" in str(err.value) and "Untick the change" in str(err.value)
+        assert err.value.code == "REWRITE_UNSUPPORTED_FIGURE"
 
 
 class TestARewriteMayCiteWhatTheEvaluationOffered:
@@ -415,6 +433,7 @@ class TestAClaimFaultGetsOneRepairPass:
             run([INVENTED, INVENTED, CLEAN, CLEAN])
         assert len(asked) == 2, "exactly one repair pass"
         assert "40%" in str(err.value) and "Untick the change" in str(err.value)
+        assert err.value.code == "REWRITE_UNSUPPORTED_FIGURE"
 
     def test_a_superlative_added_in_a_blocked_market_is_named_plainly(self, rewrite):
         run, _asked = rewrite

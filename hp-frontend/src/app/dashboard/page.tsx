@@ -18,6 +18,7 @@ import { track, stopFeatureTime } from '@/lib/track';
 import { MyActivityPanel } from '@/components/analytics/MyActivityPanel';
 import { useTour } from '@/components/tour/useTour';
 import { CHAT_TIPS, MY_ACTIVITY_CARD } from '@/lib/tourContent';
+import { evaluatorFailureText } from '@/lib/uiCopy';
 import { CountUpText, ScoreRing, growDelay, useParallax } from '@/components/common/motion';
 import { Activity as ActivityIcon } from 'lucide-react';
 import { 
@@ -5623,8 +5624,10 @@ export default function UserDashboardPage() {
                   // after this fires and stores what it finishes - hence the wording.
                   const EVALUATOR_TIMEOUT_MS = 240000;
                   // Never the server's detail or err.message (client, 21 Oct): the
-                  // api client logs the failure; the seller sees one neutral line.
-                  const evaluatorErrorText = (_err: any) => ACTION_ERROR_MESSAGE;
+                  // api client logs the failure. A refusal the seller can act on
+                  // (too long, a figure to untick) gets its own line by error
+                  // code; anything else, the neutral one.
+                  const evaluatorErrorText = (err: unknown) => evaluatorFailureText(err);
 
                   const refreshHistory = async () => {
                     try {
