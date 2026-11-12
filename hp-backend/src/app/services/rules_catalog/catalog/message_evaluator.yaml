@@ -319,7 +319,10 @@ rules:
   purpose: A wrong HP product line or an out-of-angle ask always pulls the score down.
   logic: 'Before the AI scores the draft, two of Content Studio''s content checks are run on it. The first
     looks for an HP product line that this role is never offered, anywhere in the text. The second looks
-    at the ask, meaning the last question in the message or, if there is none, the last sentence. After
+    at the ask: the closing paragraph that asks for something (it has a question or next-step language;
+    otherwise the last paragraph), and within it the last question or, if there is none, the last
+    sentence. The Subject line, greeting and sign-off are not part of it. For a message copied from Content
+    Studio this is its call to action, the same text Content Studio''s check looked at. After
     the AI scores the draft, an issue found by the first check caps Relevance at 39. An issue found by
     the second check caps Next-step Strength at 39. Caps only push scores down: if the AI''s score is
     already lower, it is kept. The summary starts with ''<Quality> scored down: <reason>.'''
@@ -365,7 +368,9 @@ rules:
   logic: The draft is checked for the HP product lines it names, using a fixed list of product line names.
     For each line found, the AI is given up to 3 rules from HP's approved messaging (the offer, up to 3
     facts that may be stated and up to 3 things that must not be said). It is also given up to 2 HP case
-    studies, ranked by how well they match the draft and the account's industry. When no case study fits,
+    studies, ranked by how well they match the draft and the account's industry, plus any case study the
+    draft already cites by customer name or by quoting its headline (as Content Studio's Proof Points
+    section does), so that study's own figures count as supported. When no case study fits,
     the recommendation for a benefit claim with no proof is to cut it. The AI weighs this context in its
     scoring; it does not change any number directly.
   constants:
@@ -482,7 +487,9 @@ rules:
   purpose: Decides which source may confirm which kind of claim.
   logic: Your draft shows only where a phrase sits, never a fact. Account data (the executive summary's
     description, name and headquarters, the intent topic names, the opportunity trigger headlines and
-    the full technology stack) can confirm facts about the account,
+    the full technology stack, plus everything Content Studio writes from - the firmographics, contacts
+    and job openings data and its account evidence lines, such as the technology estate, hiring, research
+    intent, signals, qualified opportunities and filings) can confirm facts about the account,
     but never what an HP product can do. Approved HP facts (the approved facts, conditions and qualifiers
     in the HP recommendations, plus HP product family, device type and category names) can confirm what
     an HP product can do, but never anything about the account. Role context gives the role, department
@@ -512,6 +519,8 @@ rules:
   - hp-backend/src/app/services/evaluator/sources.py:build
   - hp-backend/src/app/services/evaluator/sources.py:_hp_fact_texts
   - hp-backend/src/app/services/evaluator/sources.py:_account_texts
+  - hp-backend/src/app/services/evaluator/sources.py:_content_studio_records
+  - hp-backend/src/app/services/extractors/content_studio.py:account_evidence
   doc_source: Guardrail 13 'HP decks cannot create account evidence' (quoted in grounding.py)
   confidence: high
 - id: me_claim_verdict

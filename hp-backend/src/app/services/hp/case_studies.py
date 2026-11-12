@@ -50,6 +50,7 @@ be tagged with.
 """
 
 import logging
+import re
 
 from app.observability import pipeline
 from app.services.regen import store as widget_store
@@ -498,6 +499,42 @@ def match(db, lines, industry: str = "", signals=None, limit: int = 1) -> list:
 
     candidates.sort(key=lambda s: _score(s, industry, signals), reverse=True)
     return candidates[:max(1, limit)]
+
+
+# A customer name shorter than this is too likely to occur by chance ("Bel").
+NAMED_CUSTOMER_MIN_CHARS = 4
+
+
+def named_in(db, text: str, limit: int = 3) -> list:
+    """Case studies `text` cites - by customer name or by quoting the
+    headline - best first.
+
+    For a message that already cites a study - Content Studio attaches one
+    under Proof Points, chosen by `allocate`, which steers away from studies
+    other surfaces used. Ranking by line alone (`match`) then finds a different
+    one, and the cited study's own figures read as unsupported (AEON, 12 Nov).
+    """
+    low = " %s " % re.sub(r"\s+", " ", str(text or "").lower())
+    if db is None or not low.strip():
+        return []
+    try:
+        everything = list(db[COLLECTION].find({"_id": {"$ne": VERSION_DOC_ID}}))
+    except Exception:
+        logger.exception("case studies: customer lookup failed")
+        return []
+    found = []
+    for study in everything:
+        headline = re.sub(r"\s+", " ", str(study.get("headline") or "").strip().lower())
+        if not headline:
+            continue
+        customer = re.sub(r"\s+", " ", str(study.get("customer") or "").strip().lower())
+        # The customer named, or the study's own headline quoted - Content
+        # Studio copies it word for word, and a headline need not name anyone.
+        if headline in low or (len(customer) >= NAMED_CUSTOMER_MIN_CHARS and re.search(
+                r"(?<!\w)%s(?!\w)" % re.escape(customer), low)):
+            found.append(study)
+    found.sort(key=lambda s: _score(s, "", None), reverse=True)
+    return found[:max(1, limit)]
 
 
 def as_proof_point(study: dict) -> dict | None:

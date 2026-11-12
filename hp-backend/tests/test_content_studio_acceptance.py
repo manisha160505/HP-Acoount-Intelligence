@@ -628,5 +628,8 @@ class TestTheEvidenceBlockIsTheWholeAccount:
         the business description and the industry when it is re-read, so the
         published lines are appended rather than inserted."""
         import inspect
-        source = inspect.getsource(cstudio._build_generation_context)
+        # Gathered in `account_evidence`, shared with the Message Evaluator.
+        source = inspect.getsource(cstudio.account_evidence)
         assert source.index("_account_evidence") < source.index("_published_evidence")
+        assert "account_evidence(db, account_id)" in inspect.getsource(
+            cstudio._build_generation_context)

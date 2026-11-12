@@ -1668,6 +1668,45 @@ def _compose_plain_text(record: dict, contract: dict) -> str:
     return "\n\n".join(x for x in lines if x).strip()
 
 
+def account_evidence(db, account_id: str) -> dict:
+    """The account facts Content Studio writes from.
+
+    {"firmographics", "prospect_contacts", "job_openings": the dataset rows,
+    "company_name", "items": the labelled (label, text) evidence lines, in
+    the order their [A<n>] labels are given}.
+
+    The Message Evaluator checks a draft's figures against these same facts.
+    It used to check against a narrower set - no firmographics, hiring or
+    filings - so a figure Content Studio wrote from the account's own data
+    ("37 job postings") was marked unsupported there (AEON, 12 Nov).
+    """
+    firmo_records = _read_dataset_records(account_id, "firmographics")
+    contacts_records = _read_dataset_records(account_id, "prospect_contacts")
+    job_records = hiring_jobs.account_jobs(account_id).jobs
+
+    company_name, items = _account_evidence(firmo_records, account_id)
+
+    # Open hiring as account evidence (job_openings is sanctioned for this
+    # feature): the HP-relevant clusters, so any persona's copy can say what the
+    # account is recruiting for, the way the reference emails do.
+    hiring_clusters = _derive_role_proxy_personas(job_records)
+    if hiring_clusters:
+        parts = [f"{c['posting_count']} {c['department']} ({c['seniority']}): {', '.join(c['sample_titles'])}"
+                 for c in hiring_clusters]
+        items.append(("Open hiring", f"{len(job_records)} job postings in the last 12 months; HP-relevant roles - "
+                      + "; ".join(parts)))
+
+    # The rest of the account's published intelligence - the estate, the intent
+    # themes, the gated signals, the qualified plays, the filings. Tuning row 8,
+    # Column 4. Added after hiring so the two oldest lines keep their labels:
+    # an asset stored yesterday cites [A1] and [A2], and those must still mean
+    # the business description and the industry when it is re-read.
+    items += _published_evidence(db, account_id)
+
+    return {"firmographics": firmo_records, "prospect_contacts": contacts_records,
+            "job_openings": job_records, "company_name": company_name, "items": items}
+
+
 def _build_generation_context(db, account_id: str, persona_id: str, content_type: str,
                               topic: str, additional_context: str) -> dict:
     """Everything both co-creation steps need: the validated request, the labelled
@@ -1693,35 +1732,20 @@ def _build_generation_context(db, account_id: str, persona_id: str, content_type
         raise ValueError("topic is required")
     additional_context = str(additional_context or "").strip()[:CONTEXT_MAX_CHARS]
 
-    firmo_records = _read_dataset_records(account_id, "firmographics")
-    contacts_records = _read_dataset_records(account_id, "prospect_contacts")
-    job_records = hiring_jobs.account_jobs(account_id).jobs
+    evidence = account_evidence(db, account_id)
+    firmo_records = evidence["firmographics"]
+    contacts_records = evidence["prospect_contacts"]
+    job_records = evidence["job_openings"]
+    account_items = evidence["items"]
 
     persona = _persona_by_id(db, account_id, job_records, persona_id)
     if not persona:
         raise ValueError(f"Unknown persona_id '{persona_id}' for this account")
 
-    company_name, account_items = _account_evidence(firmo_records, account_id)
+    company_name = evidence["company_name"]
     if not company_name:
         account_doc = db["accounts"].find_one({"_id": ObjectId(account_id)}) if ObjectId.is_valid(account_id) else None
         company_name = (account_doc or {}).get("name") or "Target Account"
-
-    # Open hiring as account evidence (job_openings is sanctioned for this
-    # feature): the HP-relevant clusters, so any persona's copy can say what the
-    # account is recruiting for, the way the reference emails do.
-    hiring_clusters = _derive_role_proxy_personas(job_records)
-    if hiring_clusters:
-        parts = [f"{c['posting_count']} {c['department']} ({c['seniority']}): {', '.join(c['sample_titles'])}"
-                 for c in hiring_clusters]
-        account_items.append(("Open hiring", f"{len(job_records)} job postings in the last 12 months; HP-relevant roles - "
-                              + "; ".join(parts)))
-
-    # The rest of the account's published intelligence - the estate, the intent
-    # themes, the gated signals, the qualified plays, the filings. Tuning row 8,
-    # Column 4. Added after hiring so the two oldest lines keep their labels:
-    # an asset stored yesterday cites [A1] and [A2], and those must still mean
-    # the business description and the industry when it is re-read.
-    account_items += _published_evidence(db, account_id)
 
     account_block, a_labels = _label_block("A", account_items)
     persona_block, p_labels = _label_block("P", _persona_evidence(persona))

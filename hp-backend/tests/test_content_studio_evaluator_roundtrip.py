@@ -194,3 +194,137 @@ def test_a_one_pager_of_plain_paragraphs_still_fails():
             "Would you be open to a 30-minute workshop?")
     checks = {c["check"]: c for c in F.structure_checks(text, "one_pager")["checks"]}
     assert not checks["scannable_structure"]["passed"]
+
+
+# --- The facts a figure is checked against are Content Studio's ---------------
+
+ACCOUNT = "6abfaa0357bc331e377c07c5"
+
+
+@pytest.fixture
+def fake_db():
+    from regen_fakes import FakeDb
+    return FakeDb()
+
+
+def _evidence(**over):
+    base = {"firmographics": [{"Company Name": "AEON CO., LTD.", "Employees": "155,000"}],
+            "prospect_contacts": [], "job_openings": [],
+            "company_name": "AEON CO., LTD.",
+            "items": [("Technology estate", "412 technologies in the detected estate"),
+                      ("Open hiring", "37 job postings in the last 12 months")]}
+    return {**base, **over}
+
+
+def test_a_figure_content_studio_wrote_from_is_supported(fake_db, monkeypatch):
+    from app.services.evaluator import sources as SRC
+    monkeypatch.setattr(CS, "account_evidence", lambda _db, _a: _evidence())
+    sources = SRC.build(fake_db, ACCOUNT, {}, "draft")
+    for claim in ("AEON runs 412 technologies across its estate.",
+                  "AEON has 37 open job postings this year.",
+                  "With 155,000 employees, AEON's device fleet is large."):
+        assert sources.verify_claim(claim)["verdict"] == "supported", claim
+
+
+def test_without_it_the_same_figure_was_unsupported(fake_db, monkeypatch):
+    """The gap this closes: the Evaluator's own widgets do not hold it."""
+    from app.services.evaluator import sources as SRC
+    monkeypatch.setattr(CS, "account_evidence", lambda _db, _a: _evidence(items=[]))
+    sources = SRC.build(fake_db, ACCOUNT, {}, "draft")
+    assert sources.verify_claim("AEON runs 412 technologies.")["verdict"] == "unsupported"
+
+
+def test_a_failed_read_still_evaluates(fake_db, monkeypatch):
+    from app.services.evaluator import sources as SRC
+
+    def boom(_db, _a):
+        raise RuntimeError("dataset unreadable")
+
+    monkeypatch.setattr(CS, "account_evidence", boom)
+    sources = SRC.build(fake_db, ACCOUNT, {}, "draft")
+    assert sources.verify_claim("AEON runs 412 technologies.")["verdict"] == "unsupported"
+
+
+def test_content_studio_writes_from_the_same_function():
+    """One function for both, so the facts cannot drift apart."""
+    import inspect
+    assert "account_evidence(db, account_id)" in inspect.getsource(CS._build_generation_context)
+
+
+# --- The case study a message cites is checked against that study ---------------
+
+STUDY = {"_id": "s1", "customer": "Ulster University", "product_featured": "Poly Studio",
+         "headline": "Ulster University equipped 120 hybrid classrooms with Poly video",
+         "outcome": "and cut set-up time by 40%."}
+
+
+def test_a_cited_study_is_found_by_customer_or_headline(fake_db):
+    from app.services.hp import case_studies as cstudies
+    fake_db[cstudies.COLLECTION].insert_one(dict(STUDY))
+    assert [s["customer"] for s in cstudies.named_in(fake_db, "As at Ulster University, ...")] \
+        == ["Ulster University"]
+    quoted = "PROOF POINTS\nUlster University equipped 120 hybrid classrooms with Poly video"
+    assert cstudies.named_in(fake_db, quoted.replace("Ulster University", "One customer")) == []
+    assert len(cstudies.named_in(fake_db, quoted)) == 1
+    assert cstudies.named_in(fake_db, "Nothing cited here.") == []
+
+
+def test_its_figures_are_supported(fake_db, monkeypatch):
+    from app.services.evaluator import evaluate as E, sources as SRC
+    from app.services.hp import case_studies as cstudies
+    fake_db[cstudies.COLLECTION].insert_one(dict(STUDY))
+    monkeypatch.setattr(CS, "account_evidence", lambda _db, _a: _evidence(items=[]))
+    text = ("PROOF POINTS\nUlster University equipped 120 hybrid classrooms with Poly video "
+            "and cut set-up time by 40%.")
+    sources = SRC.build(fake_db, ACCOUNT, {}, text)
+    claim = "Ulster University cut set-up time by 40% across 120 hybrid classrooms."
+    assert sources.verify_claim(claim)["verdict"] == "unsupported"
+    proof = E._proof_available(fake_db, [], "", text)
+    assert [p["customer"] for p in proof] == ["Ulster University"]
+    sources.offer(proof)
+    assert sources.verify_claim(claim)["verdict"] == "supported"
+
+
+# --- Content Studio's layout is not marked down ---------------------------------
+
+@pytest.mark.parametrize(("fmt", "shown"), [("email", True), ("linkedin_message", True),
+                                            ("one_pager", False)])
+def test_the_house_layout_is_explained_where_it_applies(fake_db, monkeypatch, fmt, shown):
+    from app.services.evaluator import evaluate as E, sources as SRC
+    monkeypatch.setattr(CS, "account_evidence", lambda _db, _a: _evidence())
+    text = _copied(fmt)
+    prompt = E._user_prompt(text, {}, "awareness", fmt, E.MODE_LITE,
+                            SRC.build(fake_db, ACCOUNT, {}, text), F.structure_checks(text, fmt))
+    assert (E.HOUSE_LAYOUT in prompt) is shown
+    assert "Sincerely, The HP Inc. Team" in E.HOUSE_LAYOUT and "'Re: '" in E.HOUSE_LAYOUT
+
+
+def test_the_house_layout_is_what_content_studio_writes():
+    text = _copied("email")
+    assert text.startswith("Subject: Re: ")
+    from app.services.evaluator import evaluate as E
+    assert CS.EMAIL_SIGNOFF.replace("\n\n", " ") in E.HOUSE_LAYOUT
+
+
+# --- The ask is the closing paragraph, as Content Studio's cta is ---------------
+
+def test_a_question_in_the_body_is_not_the_ask():
+    from app.services.evaluator import evaluate as E
+    text = ("Subject: Re: Your store refresh\n\nDear [CFO Name],\n\n"
+            "What would pricing for 500 devices mean for your budget? Many retailers ask.\n\n"
+            "I'd welcome a 20-minute call next week.\n\nSincerely,\n\nThe HP Inc. Team")
+    assert E._ask_sentence(text) == "I'd welcome a 20-minute call next week."
+    assert E._severe_failures(text, "cfo") == []
+
+
+def test_a_closing_question_is_still_the_ask():
+    from app.services.evaluator import evaluate as E
+    text = "Your estate is ageing.\n\nShall I send pricing for the fleet?\n\nBest regards,\nAnna"
+    assert E._ask_sentence(text) == "Shall I send pricing for the fleet?"
+    assert E._severe_failures(text, "cfo")
+
+
+@pytest.mark.parametrize("content_type", ["email", "linkedin_message", "one_pager"])
+def test_the_ask_of_a_content_studio_message_is_its_cta(content_type):
+    from app.services.evaluator import evaluate as E
+    assert E._ask_sentence(_copied(content_type)) == CTA

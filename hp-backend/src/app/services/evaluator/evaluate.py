@@ -53,7 +53,10 @@ logger = logging.getLogger(__name__)
 #     same message re-pasted.
 # 10 - 12 Nov: headings read in all the forms a one-pager uses (capitals,
 #     "Label: title", Title Case), and length counted without the subject
-#     line, greeting and sign-off, as Content Studio counts it.
+#     line, greeting and sign-off, as Content Studio counts it; figures
+#     checked against Content Studio's account facts and the case study the
+#     message cites; Content Studio's house layout is not a fault; the ask is
+#     the closing paragraph.
 PROMPT_VERSION = 10
 
 # How close to a format's character cap a message must be before the evaluator
@@ -320,6 +323,16 @@ def _proof_available(db, lines, industry: str, stimulus: str) -> list:
     name the study instead of saying "add proof".
     """
     out = []
+    # A study the message already cites, by its customer's name. Content
+    # Studio attaches one under Proof Points, chosen to avoid studies other
+    # surfaces used, so ranking by line below often finds a different one -
+    # and the cited study's figures then read as unsupported (AEON, 12 Nov).
+    for study in cs.named_in(db, stimulus):
+        point = cs.as_proof_point(study)
+        if point and point.get("text"):
+            out.append({"line": cs.canonical_line(study), "text": point["text"],
+                        "customer": point.get("customer") or "",
+                        "industry": point.get("industry") or ""})
     for line in lines:
         canonical = cs.lines_for_hp_line(line) or cs.lines_for_product_text(line)
         if not canonical:
@@ -328,7 +341,7 @@ def _proof_available(db, lines, industry: str, stimulus: str) -> list:
                               signals=cs.signals_for_opportunity(stimulus),
                               limit=PROOF_POINTS_PER_LINE):
             point = cs.as_proof_point(study)
-            if point and point.get("text"):
+            if point and point.get("text") and all(p["text"] != point["text"] for p in out):
                 out.append({"line": line, "text": point["text"],
                             "customer": point.get("customer") or "",
                             "industry": point.get("industry") or ""})
@@ -397,17 +410,27 @@ def _rulebook_block(positioning, proof, lines) -> str:
 
 
 def _ask_sentence(text):
-    """The message's ask: its closing question, or its last sentence.
+    """The message's ask: the closing question, or last sentence, of its
+    closing paragraph that asks for something.
 
     A generated asset has an `ask` field. A pasted message does not, so the ask
     has to be located - and the committee-angle rule is about the ask
-    specifically, not about the whole message. A question is the ask when there
-    is one; otherwise the last sentence is, because that is where a message puts
-    what it wants.
+    specifically, not about the whole message.
+
+    The paragraph is the last one (before any sign-off) with a question or a
+    next-step request, else the last one: where a message puts what it wants,
+    and the `cta` block of a message copied from Content Studio, which is what
+    its gate checks. The ask used to be the last question ANYWHERE, so when the
+    closing line was not a question, a rhetorical question in the body was
+    judged as the ask - a finding Content Studio never made (AEON, 12 Nov).
     """
-    parts = [p.strip() for p in re.split(r"(?<=[.!?])\s+", str(text or "")) if p.strip()]
-    if not parts:
+    paragraphs = [" ".join(p.split()) for p in re.split(r"\n\s*\n", F.message_body(text))
+                  if p.strip()]
+    if not paragraphs:
         return ""
+    para = next((p for p in reversed(paragraphs) if "?" in p or F.has_next_step(p)),
+                paragraphs[-1])
+    parts = [p.strip() for p in re.split(r"(?<=[.!?])\s+", para) if p.strip()]
     questions = [p for p in parts if p.endswith("?")]
     return questions[-1] if questions else parts[-1]
 
@@ -483,6 +506,19 @@ def _rewrite_persona_block(persona):
     return "\n".join(lines)
 
 
+# What Content Studio, HP's own writer, puts around every email and LinkedIn
+# message. The email criteria penalise "greeting boilerplate", and a message
+# copied from Content Studio was open to being marked down for its own
+# layout (AEON, 12 Nov). Told here, so the two features agree on it.
+HOUSE_LAYOUT = (
+    "HOUSE LAYOUT (not a fault): HP's Content Studio writes a salutation with a "
+    "bracketed placeholder for the seller to complete ('Dear [CIO Name],', 'Hi "
+    "[Name],'), the sign-off 'Sincerely, The HP Inc. Team', and an email subject "
+    "that begins 'Re: '. Do not mark these down as boilerplate, as missing "
+    "personalisation or as a teaser subject, and do not suggest replacing them. "
+    "Judge the personalisation of the text between them.")
+
+
 def _context_block(sources, limit=18):
     account = [c for c in sources.account.cells if c][:limit]
     hp = [c for c in sources.hp.cells if c][:limit]
@@ -519,6 +555,7 @@ def _user_prompt(message, persona, objective, fmt, mode, sources, checks,  # noq
         "OBJECTIVE (funnel stage): %s" % objective.capitalize(),
         "FORMAT: %s" % spec["label"],
         "FORMAT CRITERIA: %s" % spec["criteria"],
+        *([HOUSE_LAYOUT] if (spec.get("rewrite") or {}).get("greeting") else []),
         "",
         "TARGET PERSONA:",
         _persona_block(persona),

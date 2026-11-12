@@ -30,6 +30,13 @@ _NEXT_STEP_RE = re.compile(
     r"reply|respond|get in touch|reach out|next step|follow up|"
     r"would you be open|worth a conversation|interested in)\b", re.I)
 
+
+
+def has_next_step(text: str) -> bool:
+    """True when `text` carries next-step language ("would you be open", "call")."""
+    return bool(_NEXT_STEP_RE.search(str(text or "")))
+
+
 _SUBJECT_RE = re.compile(r"^\s*subject\s*:\s*(.+)$", re.I | re.M)
 _URL_RE = re.compile(r"https?://\S+")
 _QUESTION_RE = re.compile(r"\?")
