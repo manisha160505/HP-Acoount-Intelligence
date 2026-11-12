@@ -414,7 +414,9 @@ rules:
     (''How HP Helps''). A greeting or sign-off line is never a heading. Next-step language means phrases such as: let me know, happy to, are you free or available,
     can we, shall we, book, schedule, set up, arrange, call, meeting, demo, chat, connect, reply, respond,
     get in touch, reach out, next step, follow up, would you be open, worth a conversation, interested
-    in. Any check the draft does not yet meet is given to the AI as a settled result.'
+    in, discuss, discussion, explore how or whether, a technical, brief, quick or joint review, workshop,
+    conversation, walk you through. A message that ends on a question for the reader (in its closing
+    paragraph) also has a next step. Any check the draft does not yet meet is given to the AI as a settled result.'
   table:
     columns:
     - Format
@@ -755,7 +757,7 @@ rules:
     - Create the request fingerprint
     result: The first 16 characters of the fingerprint.
     verified: true
-    expect: f6b532d216c27dd5
+    expect: 90fd050ebe2a4668
   sources:
   - hp-backend/src/app/services/evaluator/storage.py:message_fingerprint
   - hp-backend/src/app/services/evaluator/storage.py:save
@@ -914,7 +916,7 @@ rules:
   constants:
   - label: Instruction version
     ref: py:app.services.evaluator.evaluate:PROMPT_VERSION
-    stated: 10
+    stated: 11
   sources:
   - hp-backend/src/app/services/evaluator/evaluate.py:SYSTEM_PROMPT
   - hp-backend/src/app/services/evaluator/evaluate.py:_user_prompt
