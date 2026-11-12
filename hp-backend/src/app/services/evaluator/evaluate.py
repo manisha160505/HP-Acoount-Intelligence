@@ -57,7 +57,10 @@ logger = logging.getLogger(__name__)
 #     checked against Content Studio's account facts and the case study the
 #     message cites; Content Studio's house layout is not a fault; the ask is
 #     the closing paragraph.
-PROMPT_VERSION = 10
+# 11 - 12 Nov: next-step language includes how Content Studio asks ("the
+#     opportunity to discuss", "a technical review to explore"), and a closing
+#     question for the reader counts as an ask.
+PROMPT_VERSION = 11
 
 # How close to a format's character cap a message must be before the evaluator
 # is told to recommend swaps and cuts rather than additions.

@@ -28,7 +28,15 @@ _NEXT_STEP_RE = re.compile(
     r"\b(let me know|happy to|are you (?:free|available)|can we|shall we|"
     r"book|schedule|set up|arrange|call|meeting|demo|chat|connect|"
     r"reply|respond|get in touch|reach out|next step|follow up|"
-    r"would you be open|worth a conversation|interested in)\b", re.I)
+    r"would you be open|worth a conversation|interested in|"
+    # How Content Studio's own calls to action ask. 14 of the 39 it had
+    # written on the live site failed this check - "We would value the
+    # opportunity to discuss ...", "We would welcome a technical review to
+    # explore ..." (AEON, 12 Nov). Kept to phrasings that ask: "discussed"
+    # does not match (a past discussion is not an ask), nor does a bare
+    # "review" or "opportunity" that a body sentence uses for something else.
+    r"discuss|discussion|explore (?:how|whether)|(?:technical|brief|quick|joint) review|"
+    r"workshop|conversation|walk you through)\b", re.I)
 
 
 
@@ -288,6 +296,22 @@ def heading_lines(text: str) -> list:
     return [line.strip() for line in str(text or "").splitlines() if _is_heading(line)]
 
 
+def closing_question(text) -> str:
+    """The question the message ends on, or "".
+
+    A question for the reader to answer is an ask: Content Studio's LinkedIn
+    messages close on one ("What do you prioritise when selecting workstations
+    for your IT teams?"), and the check missed every such message. Only the
+    closing paragraph counts - a rhetorical question in the body is not the ask.
+    """
+    paragraphs = [p.strip() for p in re.split(r"\n\s*\n", message_body(text)) if p.strip()]
+    if not paragraphs:
+        return ""
+    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", " ".join(paragraphs[-1].split()))]
+    questions = [s for s in sentences if s.endswith("?")]
+    return questions[-1] if questions else ""
+
+
 def message_body(text) -> str:
     """The message without its Subject line, salutation and sign-off.
 
@@ -383,9 +407,14 @@ def structure_checks(message: str, fmt: str) -> dict:
 
     if spec.get("wants_next_step"):
         found = _NEXT_STEP_RE.search(text)
-        add("next_step_request", bool(found),
-            "next-step language found: %r" % found.group(0) if found
-            else "no next-step request detected")
+        question = None if found else closing_question(text)
+        if found:
+            detail = "next-step language found: %r" % found.group(0)
+        elif question:
+            detail = "closes with a question for the reader: %r" % question[:80]
+        else:
+            detail = "no next-step request detected"
+        add("next_step_request", bool(found or question), detail)
 
     if spec.get("wants_headings"):
         count = len(heading_lines(text))

@@ -328,3 +328,71 @@ def test_a_closing_question_is_still_the_ask():
 def test_the_ask_of_a_content_studio_message_is_its_cta(content_type):
     from app.services.evaluator import evaluate as E
     assert E._ask_sentence(_copied(content_type)) == CTA
+
+
+# --- Content Studio's real calls to action are next steps -----------------------
+
+# Every call to action Content Studio had written on the live site that this
+# check missed (14 of 39, 12 Nov), verbatim.
+REAL_CTAS = [
+    "Could we discuss how Z by HP Workstations align with your procurement priorities?",
+    "I would appreciate the opportunity for a brief discussion on how HP Elite & Pro PCs can "
+    "support your financial objectives.",
+    "We would appreciate the opportunity to discuss how Z by HP Workstations can align with your "
+    "IT hardware roadmap.",
+    "We would welcome a brief discussion to explore how Z by HP Workstations align with your IT "
+    "hardware roadmap and cost objectives.",
+    "We would welcome a technical review to explore how HP Elite & Pro PCs can align with your "
+    "fleet modernization goals.",
+    "What are the key factors you consider when choosing hardware for your IT team?",
+    "What are the key factors you consider when selecting workstations for your IT teams?",
+    "What do you prioritize when selecting workstations for your IT teams?",
+    "Let's discuss how HP Elite & Pro PCs can align with your IT hardware roadmap and contribute "
+    "to your objectives for fleet readiness and refresh cost per seat.",
+    "We would appreciate the opportunity to discuss how HP's financing models and lifecycle "
+    "services could support AEON's investment strategy in Vietnam, focusing on TCO and cash flow "
+    "implications.",
+    "We would like to discuss the financial modeling and potential impact on your total lease "
+    "liability and right-of-use assets for a PC refresh initiative.",
+    "We would value the opportunity to discuss how HP's financing models and services could align "
+    "with your capital budget and financial objectives for AEON's strategic expansion.",
+    "We would welcome the opportunity to conduct a technical review of your current print "
+    "infrastructure to identify areas for optimization.",
+    "We would welcome the opportunity to discuss how HP Elite & Pro PCs can align with your IT "
+    "hardware roadmap and contribute to your strategic objectives at AUSTRALIA POST.",
+]
+
+NO_ASK = [
+    "AEON is expanding its investment in Vietnam.",
+    "We discussed the refresh with your team last year.",
+    "A review of the estate showed 400 ageing devices.",
+    "Vietnam presents the opportunity to grow store numbers.",
+    "Why does device cost matter? It drives the budget.\n\nHP DaaS spreads cost over three years.",
+]
+
+
+def _next_step(text: str, fmt: str = "one_pager") -> bool:
+    checks = {c["check"]: c for c in F.structure_checks(text, fmt)["checks"]}
+    return checks["next_step_request"]["passed"]
+
+
+@pytest.mark.parametrize("cta", REAL_CTAS)
+@pytest.mark.parametrize("fmt", ["email", "linkedin_message", "one_pager"])
+def test_a_content_studio_call_to_action_is_a_next_step(cta, fmt):
+    text = "AEON is expanding in Vietnam.\n\nHP DaaS spreads device cost over three years.\n\n" + cta
+    assert _next_step(text, fmt), cta
+
+
+@pytest.mark.parametrize("text", NO_ASK)
+def test_a_message_with_no_ask_still_fails(text):
+    assert not _next_step(text), text
+
+
+def test_the_two_aeon_one_pagers_pass_every_check():
+    """The client's two CFO briefs from Content Studio, 12 Nov: 'no next-step
+    request detected' on both."""
+    for cta in (REAL_CTAS[9], REAL_CTAS[11]):
+        text = ("AEON's Investment in Vietnam\n\nAEON is expanding in Vietnam.\n\n"
+                "OPTIMIZING CAPITAL ALLOCATION\nHP DaaS offers predictable monthly costs.\n\n"
+                "THE HP PLAY\nHP DaaS provides a predictable financial model.\n\n" + cta)
+        assert _failed(text, "one_pager") == [], text
