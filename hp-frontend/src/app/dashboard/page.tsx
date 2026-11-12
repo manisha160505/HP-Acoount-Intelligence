@@ -826,6 +826,31 @@ export default function UserDashboardPage() {
   }, [selectedAccountId]);
   const [evaluatorStep, setEvaluatorStep] = useState<string>('inputs');
 
+  // The format checks (length, subject line, greeting, sign-off, the ask) for
+  // the draft as it is typed - computed in code on the server, no AI - shown
+  // as hints under the box before Evaluate (AEON, 12 Nov). Hints only: an
+  // imperfect draft is what the evaluator is for, so nothing here blocks it.
+  const [liveChecks, setLiveChecks] = useState<any[]>([]);
+  useEffect(() => {
+    if (!selectedAccountId || !selectedFormat || !stimulusText.trim()) {
+      setLiveChecks([]);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const res = await api.post<any>(
+          `/accounts/${selectedAccountId}/widgets/message_evaluator/checks`,
+          { format: selectedFormat, message: stimulusText });
+        if (!cancelled) setLiveChecks(res.data?.checks || []);
+      } catch {
+        // A hint, not a gate: without it the step works as before.
+        if (!cancelled) setLiveChecks([]);
+      }
+    }, 500);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [selectedAccountId, selectedFormat, stimulusText]);
+
   // The tour's Message Evaluator cards open each step - only a step the user
   // could open themselves right now, so it never runs an evaluation or a
   // rewrite or touches what they typed - and the step they were on comes back
@@ -5980,6 +6005,20 @@ export default function UserDashboardPage() {
                               <p className="text-xs font-semibold text-amber-700 mt-1">
                                 Write or paste your full message first (at least {EVAL_MIN_WORDS} words).
                               </p>
+                            )}
+                            {messageLongEnough && liveChecks.length > 0 && (
+                              <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+                                {liveChecks.map((c: any) => (
+                                  <li key={c.check}
+                                    className={`flex items-center gap-1 text-xs ${c.passed ? 'text-slate-500' : 'font-semibold text-amber-700'}`}>
+                                    {c.passed
+                                      ? <Check className="w-3.5 h-3.5 text-green-500" />
+                                      : <AlertCircle className="w-3.5 h-3.5" />}
+                                    <span className="capitalize">{c.check.replace(/_/g, ' ')}:</span>
+                                    <span>{c.detail}</span>
+                                  </li>
+                                ))}
+                              </ul>
                             )}
                           </div>
 

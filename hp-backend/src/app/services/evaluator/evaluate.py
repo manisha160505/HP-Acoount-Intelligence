@@ -683,9 +683,17 @@ def _severe_block(severe):
     return "\n".join(lines)
 
 
+# Scoring at temperature 0, so the same message scores the same each time: at
+# 0.2 one draft read 71, then 69, then 71 (AEON, 12 Nov). A rewrite keeps a
+# little variety, so Try again can find a draft that passes its checks.
+SCORING_TEMPERATURE = 0.0
+REWRITE_TEMPERATURE = 0.2
+
+
 def _ask(system, user):
+    temperature = SCORING_TEMPERATURE if system is SYSTEM_PROMPT else REWRITE_TEMPERATURE
     try:
-        return generate_gpt4o_json_completion(system, user) or {}
+        return generate_gpt4o_json_completion(system, user, temperature=temperature) or {}
     except Exception:
         logger.exception("evaluator: model call failed")
         return {}

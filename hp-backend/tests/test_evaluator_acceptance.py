@@ -446,7 +446,7 @@ class TestT22NonJsonFromTheModel:
 
     def test_a_failed_call_returns_an_empty_dict_rather_than_raising(self, monkeypatch):
         monkeypatch.setattr(E, "generate_gpt4o_json_completion",
-                            lambda _s, _u: (_ for _ in ()).throw(ValueError("not json")))
+                            lambda _s, _u, **_k: (_ for _ in ()).throw(ValueError("not json")))
         assert E._ask("system", "user") == {}
 
     def test_nothing_is_padded_when_the_model_returned_nothing(self):

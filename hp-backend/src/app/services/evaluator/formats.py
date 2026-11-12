@@ -101,6 +101,10 @@ FORMATS = {
             "required": ["subject_line", "opening", "body_sections", "cta"],
             "sections": (1, 2),
             "subject_max": 80,
+            # The guide the score check holds an email to. With no cap here a
+            # rewrite came out at 184 words and its own evaluation marked it
+            # over (AEON, 12 Nov).
+            "max_words": 180,
             "email_shaped": True,
             "greeting": True,
             "signoff": True,
@@ -132,13 +136,15 @@ FORMATS = {
             "required": ["headline", "opening", "body_sections", "cta"],
             "sections": (4, 4),
             "headings": True,
+            # The score check's limit, so a rewrite never fails it.
+            "max_words": 500,
             "shape": ("A one-page executive brief on how HP can help this customer. headline; "
                       "opening summary paragraph; EXACTLY 4 body_sections, each WITH a heading, "
                       "in this order: 'Account Challenge' (the situation the evidence shows); "
                       "'How HP Helps' (what HP proposes); 'Proof Points' (the supporting "
                       "evidence - if no HP proof point is available, say what the account "
                       "evidence supports and no more); 'Next Step' (why now and the recommended "
-                      "action); cta is the recommended action. AT MOST 400 words. No "
+                      "action); cta is the recommended action. No "
                       "subject_line."),
         },
         "label": "One-Pager Exec Brief",
@@ -263,9 +269,9 @@ def structure_checks(message: str, fmt: str) -> dict:
     # finding survives an AI failure and becomes a selectable rewrite change.
     rewrite = spec.get("rewrite") or {}
     if rewrite.get("greeting"):
-        found = _DRAFT_GREETING_RE.search(text)
+        found = _draft_greeting(text)
         add("greeting", bool(found),
-            "opens with %r" % found.group(1).strip() if found
+            "opens with %r" % found[2].strip() if found
             else "no salutation found - the message starts straight into the text")
 
     if rewrite.get("signoff"):
@@ -351,6 +357,28 @@ _GENERIC_HASHTAGS = {"#innovation", "#technology", "#business", "#digital",
 # leaves the person for them to fill in.
 
 DEFAULT_SIGNOFF = "Best regards,\n\n[Your Name]"
+
+# A leading "Subject:" line. An email's salutation is the first line UNDER it:
+# reading the very top of the text, every email with a subject line - every
+# rewrite among them - was reported as having no greeting, and "Fix greeting"
+# came back after every rewrite (AEON, 12 Nov).
+_LEADING_SUBJECT_RE = re.compile(r"\A\s*subject\s*:[^\n]*\n", re.I)
+
+
+def _after_subject(text: str) -> int:
+    """Where the message itself starts: after a leading Subject line, if any."""
+    found = _LEADING_SUBJECT_RE.match(text)
+    return found.end() if found else 0
+
+
+def _draft_greeting(text: str):
+    """(start, end, salutation) of the draft's own greeting, or None."""
+    start = _after_subject(text)
+    found = _DRAFT_GREETING_RE.search(text[start:])
+    if not found:
+        return None
+    return start + found.start(1), start + found.end(1), found.group(1)
+
 
 # A salutation the seller already wrote, at the top of their draft.
 _DRAFT_GREETING_RE = re.compile(
@@ -442,9 +470,9 @@ def compose_greeting(persona, contract, original="") -> str:
     if not contract.get("greeting"):
         return ""
 
-    found = _DRAFT_GREETING_RE.search(str(original or ""))
+    found = _draft_greeting(str(original or ""))
     if found:
-        existing = found.group(1).strip()
+        existing = found[2].strip()
         return existing if existing.endswith(",") else existing + ","
 
     word = contract.get("greeting_word") or "Dear"
@@ -470,11 +498,12 @@ def with_selected_greeting(original, selected=()) -> str:
         new = _SELECTED_GREETING_RE.fullmatch(str(rec))
         if not new:
             continue
-        found = _DRAFT_GREETING_RE.search(text)
+        found = _draft_greeting(text)
         if found:
-            start, end = found.span(1)
+            start, end, _old = found
             return text[:start] + new.group(1).strip() + text[end:]
-        return new.group(1).strip() + "\n\n" + text
+        start = _after_subject(text)
+        return text[:start] + new.group(1).strip() + "\n\n" + text[start:]
     return text
 
 
@@ -562,9 +591,10 @@ def body_budget(fmt: str, persona=None, original="") -> dict | None:
     """What the model's own text may total in a capped format, or None.
 
     {"max": the format's cap, "unit": "words" or "characters", "composed": what
-    Python adds (greeting, sign-off), "separators": characters of blank lines
+    Python adds (greeting, sign-off, and the word "Subject:" in front of an
+    email's subject line), "separators": characters of blank lines
     `render_rewrite` puts between blocks (0 for a cap in words), "budget": what
-    is left for opening + body + cta}.
+    is left for the fields the model writes}.
 
     The blank lines count. The budget used to subtract only the greeting, so a
     LinkedIn rewrite that hit its stated budget exactly still came out four
@@ -580,6 +610,8 @@ def body_budget(fmt: str, persona=None, original="") -> dict | None:
     composed_blocks = [b for b in (compose_greeting(persona, contract, original),
                                    compose_signoff(contract, original)) if b]
     composed = sum(measure(b, unit) for b in composed_blocks)
+    if unit == "words" and "subject_line" in model_fields(key):
+        composed += 1
     separators = 0
     if unit == "characters":
         fields = set(model_fields(key))
@@ -611,20 +643,24 @@ def length_retry_note(fmt: str, draft: dict | None, persona=None, original="") -
     spec = body_budget(fmt, persona, original)
     if not spec or not draft:
         return ""
-    parts = [("opening", draft.get("opening") or "")]
+    parts = [(f, draft.get(f) or "") for f in ("subject_line", "headline")
+             if draft.get(f)]
+    parts.append(("opening", draft.get("opening") or ""))
     parts += [("body_sections[%d].text" % i, s.get("text") or "")
               for i, s in enumerate(draft.get("body_sections") or [])]
+    parts += [("body_sections[%d].heading" % i, s.get("heading") or "")
+              for i, s in enumerate(draft.get("body_sections") or []) if s.get("heading")]
     parts.append(("cta", draft.get("cta") or ""))
     unit = spec["unit"]
     used = sum(measure(text, unit) for _name, text in parts)
     over = max(used - spec["budget"], 1)
     added = ("salutation and the blank lines that are" if unit == "characters"
-             else "salutation that is")
+             else "salutation and sign-off that are")
     lines = ["Your rewrite was %d %s; the limit is %d, including the "
              "%d-%s %s added for you."
              % (measure(draft.get("plain_text"), unit), unit, spec["max"],
                 spec["composed"], unit[:-1], added),
-             "Your own text (opening + body + cta) totalled %d %s and may "
+             "Your own text (every field you wrote) totalled %d %s and may "
              "total at most %d. Cut at least %d %s." % (used, unit, spec["budget"], over, unit),
              "Current lengths:"]
     lines += ["  - %s: %d %s" % (name, measure(text, unit), unit)
@@ -635,10 +671,13 @@ def length_retry_note(fmt: str, draft: dict | None, persona=None, original="") -
 def shorten_prompt(fmt: str, draft: dict, persona=None, original="") -> str:
     """Ask for the SAME rewrite, shorter. Used only when length is the one fault."""
     key = normalize_format(fmt)
-    current = {"opening": draft.get("opening") or "",
-               "body_sections": [{"text": s.get("text") or ""}
-                                 for s in (draft.get("body_sections") or [])],
-               "cta": draft.get("cta") or ""}
+    current = {f: draft[f] for f in ("subject_line", "headline") if draft.get(f)}
+    current.update({"opening": draft.get("opening") or "",
+                    "body_sections": [{k: v for k, v in (("heading", s.get("heading")),
+                                                         ("text", s.get("text") or ""))
+                                       if v is not None}
+                                      for s in (draft.get("body_sections") or [])],
+                    "cta": draft.get("cta") or ""})
     return "\n".join([
         "SHORTEN THIS REWRITE. It is correct but too long to send as a %s."
         % FORMATS[key]["label"],
@@ -806,9 +845,10 @@ def rewrite_instructions(fmt: str, persona=None, original="") -> str:
     # then rejected for a length the model was never told about.
     spec = body_budget(key, persona, original)
     if spec and spec["unit"] == "words":
-        shape += (" HARD LIMIT: your opening, body_sections and cta together must "
-                  "total at most %d words - the %d-word salutation is added on top "
-                  "and counts towards the %d-word maximum. "
+        shape += (" HARD LIMIT: everything you write (every field below) must total "
+                  "at most %d words - the %d words of salutation, sign-off and "
+                  "'Subject:' label are added on top and count towards the %d-word "
+                  "maximum. "
                   "Be brief; going over means the rewrite is discarded."
                   % (spec["budget"], spec["composed"], spec["max"]))
     elif spec:

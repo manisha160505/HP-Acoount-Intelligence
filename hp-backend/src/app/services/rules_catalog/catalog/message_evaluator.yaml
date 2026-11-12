@@ -442,21 +442,21 @@ rules:
     steps:
     - 29 words, within the limit of 180
     - The subject line is 31 characters
-    - The greeting check reads the very start of the text, which here is the Subject line, so the greeting
-      check is not met
+    - The greeting check reads the first line under the Subject line, 'Dear Ms Tan,', so a greeting is
+      found
     - A sign-off is found
     - Next-step language is found
-    result: 4 of 5 checks are met. The greeting check is not met.
+    result: All 5 checks are met.
     verified: true
     expect:
-    - 4
+    - 5
     - 5
     - - - length
         - true
       - - subject_line
         - true
       - - greeting
-        - false
+        - true
       - - sign_off
         - true
       - - next_step_request
@@ -782,7 +782,7 @@ rules:
     - - One-pager
       - Headline, opening, body sections, call to action
       - Exactly 4, each with a heading
-      - The AI is asked to keep it to 400 words
+      - At most 500 words, the score check's limit
       - None / none
   sources:
   - hp-backend/src/app/services/evaluator/evaluate.py:rewrite_message
