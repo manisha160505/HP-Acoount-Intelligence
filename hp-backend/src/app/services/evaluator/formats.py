@@ -449,6 +449,32 @@ def compose_greeting(persona, contract, original="") -> str:
     return "%s [%s Name]," % (word, role) if role else "%s [Name]," % word
 
 
+# A suggested change that is itself a whole salutation: "Dear [CFO's Name],".
+_SELECTED_GREETING_RE = re.compile(
+    r"\s*((?:dear|hi|hello|hey|good (?:morning|afternoon))\b[^\n,]{0,60},?)\s*", re.I)
+
+
+def with_selected_greeting(original, selected=()) -> str:
+    """The draft as the salutation is read from, after a ticked greeting change.
+
+    A salutation the seller wrote is kept (`compose_greeting`) - unless the
+    change they ticked IS a new salutation. The draft "hi" with "Dear [CFO's
+    Name]," ticked came back still opening "hi," while Changes Applied listed
+    the Dear line as done.
+    """
+    text = str(original or "")
+    for rec in selected or ():
+        new = _SELECTED_GREETING_RE.fullmatch(str(rec))
+        if not new:
+            continue
+        found = _DRAFT_GREETING_RE.search(text)
+        if found:
+            start, end = found.span(1)
+            return text[:start] + new.group(1).strip() + text[end:]
+        return new.group(1).strip() + "\n\n" + text
+    return text
+
+
 def compose_signoff(contract, original="") -> str:
     """The closing, or "" for a format that carries none."""
     if not contract.get("signoff"):

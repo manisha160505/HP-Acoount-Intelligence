@@ -482,3 +482,44 @@ class TestOneRequestNeverMakesMoreThanItsBudgetOfCalls:
         with pytest.raises(E.EvaluationError):
             run(script)
         assert len(asked) <= E.MAX_REWRITE_CALLS == 5
+
+
+class TestATickedGreetingReplacesTheSellersOwn:
+    """AEON, 12 Nov: the draft "hi" with "Dear [CFO's Name]," ticked came back
+    opening "hi," while Changes Applied listed the Dear line as done."""
+
+    EMAIL = F.rewrite_contract("email")
+    CFO: typing.ClassVar[dict] = {"title": "Chief Financial Officer"}
+
+    def test_the_ticked_salutation_is_used(self):
+        addressed = F.with_selected_greeting("hi", ["Dear [CFO's Name],"])
+        assert F.compose_greeting(self.CFO, self.EMAIL, addressed) == "Dear [CFO's Name],"
+
+    def test_only_the_greeting_line_changes(self):
+        draft = "Hi Taro,\n\nWe help retailers.\n\nBest regards,\nAnna"
+        addressed = F.with_selected_greeting(draft, ["Dear [CIO Name],"])
+        assert addressed == "Dear [CIO Name],\n\nWe help retailers.\n\nBest regards,\nAnna"
+        assert F.compose_signoff(self.EMAIL, addressed) == "Best regards,\n\nAnna"
+
+    def test_a_draft_without_a_greeting_gets_the_ticked_one(self):
+        addressed = F.with_selected_greeting("We help retailers.", ["Dear [CFO Name],"])
+        assert F.compose_greeting(self.CFO, self.EMAIL, addressed) == "Dear [CFO Name],"
+
+    @pytest.mark.parametrize("rec", [
+        "Hi, I wanted to share how HP can help.",      # a sentence, not a salutation
+        "Fix greeting: no salutation found",
+        "Address the CFO by role in the greeting.",
+    ])
+    def test_other_changes_keep_the_sellers_greeting(self, rec):
+        assert F.with_selected_greeting("hi", [rec]) == "hi"
+        assert F.compose_greeting(self.CFO, self.EMAIL, "hi") == "hi,"
+
+    def test_the_published_rewrite_opens_with_it(self, rewrite, monkeypatch):
+        run, _asked = rewrite
+        rendered = []
+        render = F.render_rewrite
+        monkeypatch.setattr(F, "render_rewrite",
+                            lambda r: rendered.append(render(r)) or rendered[-1])
+        run([FITS], original="Hi there,\n\nWe help retailers modernise.",
+            selected=("Dear [CIO Name],", "Make it specific"))
+        assert rendered and rendered[-1].startswith("Dear [CIO Name],"), rendered

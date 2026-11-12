@@ -340,6 +340,12 @@ function ProofPoint({ proof }: { proof: any }) {
 // triggered (client, 21 Oct). Never the server's `detail` or err.message.
 const ACTION_ERROR_MESSAGE = 'Something went wrong. Please try again.';
 
+// The least the Message Evaluator scores (AEON, 12 Nov): "hi" scored 0 and its
+// rewrite had to invent a whole email, which the fact check then refused. The
+// character count is for scripts written without spaces, such as Japanese.
+const EVAL_MIN_WORDS = 10;
+const EVAL_MIN_CHARS = 60;
+
 // The "Data as of" date in the header, on every feature (client, 15 Oct: one
 // date, Sept 2026, for all features for now). One constant so the next data
 // refresh is a one-line change.
@@ -5605,8 +5611,11 @@ export default function UserDashboardPage() {
                   const chosenObjective = objectives.find((o: any) => o.id === selectedObjective) || null;
                   const chosenFormat = formats.find((f: any) => f.id === selectedFormat) || null;
 
+                  const stimulusWords = stimulusText.trim() ? stimulusText.trim().split(/\s+/).length : 0;
+                  const messageLongEnough = stimulusWords >= EVAL_MIN_WORDS
+                    || stimulusText.trim().length >= EVAL_MIN_CHARS;
                   const canEvaluate = !!selectedPersonaId && !!selectedObjective
-                    && !!selectedFormat && stimulusText.trim().length > 0;
+                    && !!selectedFormat && messageLongEnough;
 
                   // The model is called up to three times for an evaluation and five
                   // for a rewrite. There was no limit in the browser at all, so a slow
@@ -5964,6 +5973,11 @@ export default function UserDashboardPage() {
                             <p className="text-xs text-slate-500 mt-1">
                               {stimulusText.length} characters
                             </p>
+                            {stimulusText.trim() && !messageLongEnough && (
+                              <p className="text-xs font-semibold text-amber-700 mt-1">
+                                Write or paste your full message first (at least {EVAL_MIN_WORDS} words).
+                              </p>
+                            )}
                           </div>
 
                           {/* Previous real submissions. There is no sample generator: a
@@ -5992,7 +6006,7 @@ export default function UserDashboardPage() {
 
                           <button
                             type="button"
-                            disabled={!selectedPersonaId || !selectedObjective || !selectedFormat || !stimulusText.trim()}
+                            disabled={!canEvaluate}
                             onClick={() => setEvaluatorStep('persona')}
                             className="inline-flex items-center gap-2 px-5 py-2.5 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:bg-indigo-300 disabled:cursor-not-allowed transition-colors"
                           >
@@ -6188,7 +6202,7 @@ export default function UserDashboardPage() {
                           <div className="flex flex-wrap gap-3">
                             <button data-tour="evaluator-panel-confirm"
                               type="button"
-                              disabled={isEvaluating}
+                              disabled={isEvaluating || !canEvaluate}
                               onClick={runEvaluation}
                               className="inline-flex items-center gap-2 px-5 py-2.5 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors"
                             >

@@ -1185,6 +1185,10 @@ def rewrite_message(account_id, fingerprint, selected_recommendations,
     selected = [str(s) for s in (selected_recommendations or []) if str(s).strip()]
     if not selected:
         raise EvaluationError("Select at least one suggested change to apply.")
+    # The draft the salutation and sign-off are composed from: the original,
+    # with a ticked "Dear ..." change put in place of the seller's own greeting.
+    # The model and the claim checks still see the original as written.
+    addressed = F.with_selected_greeting(original, selected)
 
     prompt = "\n".join([
         "OBJECTIVE: %s" % evaluation["objective_label"],
@@ -1202,7 +1206,7 @@ def rewrite_message(account_id, fingerprint, selected_recommendations,
         "APPLY ONLY THESE CHANGES:",
         "\n".join("  %d. %s" % (i, s) for i, s in enumerate(selected, 1)),
         "",
-        F.rewrite_instructions(fmt, persona, original),
+        F.rewrite_instructions(fmt, persona, addressed),
     ])
 
     card = _card_for(persona, evaluation.get("mode") or MODE_DEEP)
@@ -1224,7 +1228,7 @@ def rewrite_message(account_id, fingerprint, selected_recommendations,
     def check(answer):
         """(rewrite or None, faults, the draft as built)."""
         clean, found, draft = F.validate_rewrite(answer, fmt, banned, persona,
-                                                 original, keep_draft=True)
+                                                 addressed, keep_draft=True)
         found = found + _rewrite_gate_faults(clean, card, persona, banned, sources,
                                              original, fmt, audit=gate_audit)
         return (None if found else clean), found, draft
@@ -1244,7 +1248,7 @@ def rewrite_message(account_id, fingerprint, selected_recommendations,
         # returned 2") rather than the validator's shorthand.
         notes = [F.structure_repair_note(fmt, faults)]
         if any(F.LENGTH_FAULT_RE.match(f) for f in faults):
-            notes.append(F.length_retry_note(fmt, draft, persona, original))
+            notes.append(F.length_retry_note(fmt, draft, persona, addressed))
         rewrite, faults, draft = check(ask(
             prompt + "\n\nYour previous answer was rejected. Fix exactly this:\n"
             + "\n\n".join(n for n in notes if n)))
@@ -1263,7 +1267,7 @@ def rewrite_message(account_id, fingerprint, selected_recommendations,
         logger.info("evaluator: rewrite is %d characters, shorten pass %d",
                     length, passes)
         rewrite, faults, shorter_draft = check(
-            ask(F.shorten_prompt(fmt, draft, persona, original)))
+            ask(F.shorten_prompt(fmt, draft, persona, addressed)))
         draft = shorter_draft or draft
     if faults and F.length_only(faults) and draft:
         length = len(draft.get("plain_text") or "")
@@ -1322,7 +1326,7 @@ def rewrite_message(account_id, fingerprint, selected_recommendations,
             {"$set": {"rewrite": None,
                       "rewrite_faults": faults,
                       "rewrite_attempted_at": datetime.now(UTC)}})
-        cap = (F.body_budget(fmt, persona, original) or {}).get("max")
+        cap = (F.body_budget(fmt, persona, addressed) or {}).get("max")
         raise EvaluationError(_refusal_message(faults, label, cap, shortest))
 
     if diff_faults:
