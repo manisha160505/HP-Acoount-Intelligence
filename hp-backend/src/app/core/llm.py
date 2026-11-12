@@ -497,7 +497,8 @@ def stream_chat_completion(system_prompt: str, messages: list,
         logger.error("Error streaming chat completion: %s", exc)
 
 
-def generate_gpt4o_json_completion(system_prompt: str, user_prompt: str) -> dict | None:
+def generate_gpt4o_json_completion(system_prompt: str, user_prompt: str,
+                                   temperature: float = 0.2) -> dict | None:
     client = get_openai_client()
     if not client:
         logger.warning("Cannot generate completion: LLM client is uninitialized.")
@@ -526,7 +527,7 @@ def generate_gpt4o_json_completion(system_prompt: str, user_prompt: str) -> dict
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
-                temperature=0.2
+                temperature=temperature
             )
         except Exception as e:
             pipeline.llm_call(model_name, time.monotonic() - started, 0, failed=True)

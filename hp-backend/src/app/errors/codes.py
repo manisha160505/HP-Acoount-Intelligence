@@ -58,6 +58,17 @@ class ErrorCode(StrEnum):
     GENERATION_FAILED = "GENERATION_FAILED"
     INDEX_NOT_READY = "INDEX_NOT_READY"
 
+    # --- Message Evaluator: refusals the seller can act on ------------------
+    # Each gets its own plain line on screen (lib/uiCopy.ts) instead of the
+    # neutral "Something went wrong" - the change to untick, the message to
+    # shorten - so a refusal over the input never reads as a broken system.
+    EVALUATION_NOT_FOUND = "EVALUATION_NOT_FOUND"
+    PERSONA_UNAVAILABLE = "PERSONA_UNAVAILABLE"
+    REWRITE_TOO_LONG = "REWRITE_TOO_LONG"
+    REWRITE_UNSUPPORTED_FIGURE = "REWRITE_UNSUPPORTED_FIGURE"
+    REWRITE_CLAIM_NOT_PERMITTED = "REWRITE_CLAIM_NOT_PERMITTED"
+    REWRITE_PERSONA_BLOCKED = "REWRITE_PERSONA_BLOCKED"
+
     # --- Upstream and infrastructure ---------------------------------------
     LLM_UNAVAILABLE = "LLM_UNAVAILABLE"
     LLM_NOT_CONFIGURED = "LLM_NOT_CONFIGURED"
@@ -102,6 +113,13 @@ STATUS_BY_CODE: dict[ErrorCode, int] = {
     ErrorCode.GENERATION_FAILED: HTTPStatus.BAD_GATEWAY,
     ErrorCode.INDEX_NOT_READY: HTTPStatus.CONFLICT,
 
+    ErrorCode.EVALUATION_NOT_FOUND: HTTPStatus.UNPROCESSABLE_ENTITY,
+    ErrorCode.PERSONA_UNAVAILABLE: HTTPStatus.UNPROCESSABLE_ENTITY,
+    ErrorCode.REWRITE_TOO_LONG: HTTPStatus.UNPROCESSABLE_ENTITY,
+    ErrorCode.REWRITE_UNSUPPORTED_FIGURE: HTTPStatus.UNPROCESSABLE_ENTITY,
+    ErrorCode.REWRITE_CLAIM_NOT_PERMITTED: HTTPStatus.UNPROCESSABLE_ENTITY,
+    ErrorCode.REWRITE_PERSONA_BLOCKED: HTTPStatus.UNPROCESSABLE_ENTITY,
+
     ErrorCode.LLM_UNAVAILABLE: HTTPStatus.SERVICE_UNAVAILABLE,
     ErrorCode.LLM_NOT_CONFIGURED: HTTPStatus.SERVICE_UNAVAILABLE,
     ErrorCode.UPSTREAM_ERROR: HTTPStatus.BAD_GATEWAY,
@@ -143,6 +161,18 @@ DEFAULT_MESSAGE: dict[ErrorCode, str] = {
     ErrorCode.EXTRACTION_FAILED: "This feature could not be built from the current data.",
     ErrorCode.GENERATION_FAILED: "Generation did not complete. Please try again.",
     ErrorCode.INDEX_NOT_READY: "The search index is still building. Try again shortly.",
+
+    ErrorCode.EVALUATION_NOT_FOUND: "Evaluate the message again, then rewrite.",
+    ErrorCode.PERSONA_UNAVAILABLE: "Pick a persona from the list and try again.",
+    ErrorCode.REWRITE_TOO_LONG: "The rewrite came out too long for this format. "
+                                "Untick a change, or shorten your message, and try again.",
+    ErrorCode.REWRITE_UNSUPPORTED_FIGURE: "The rewrite added a figure we can't confirm. "
+                                          "Untick the change that adds it and try again.",
+    ErrorCode.REWRITE_CLAIM_NOT_PERMITTED: "The rewrite added a claim that isn't allowed in "
+                                           "this market. Untick the change that adds it "
+                                           "and try again.",
+    ErrorCode.REWRITE_PERSONA_BLOCKED: "The rewrite added something this persona can't be "
+                                       "sent. Untick the change that adds it and try again.",
 
     ErrorCode.LLM_UNAVAILABLE: "The AI service is not responding. Please try again shortly.",
     ErrorCode.LLM_NOT_CONFIGURED: "AI generation is not configured on this environment.",

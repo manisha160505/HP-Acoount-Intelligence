@@ -18,6 +18,7 @@ import { track, stopFeatureTime } from '@/lib/track';
 import { MyActivityPanel } from '@/components/analytics/MyActivityPanel';
 import { useTour } from '@/components/tour/useTour';
 import { CHAT_TIPS, MY_ACTIVITY_CARD } from '@/lib/tourContent';
+import { evaluatorFailureText } from '@/lib/uiCopy';
 import { CountUpText, ScoreRing, growDelay, useParallax } from '@/components/common/motion';
 import { Activity as ActivityIcon } from 'lucide-react';
 import { 
@@ -339,6 +340,12 @@ function ProofPoint({ proof }: { proof: any }) {
 // The one message an API failure ever shows the seller, for actions they
 // triggered (client, 21 Oct). Never the server's `detail` or err.message.
 const ACTION_ERROR_MESSAGE = 'Something went wrong. Please try again.';
+
+// The least the Message Evaluator scores (AEON, 12 Nov): "hi" scored 0 and its
+// rewrite had to invent a whole email, which the fact check then refused. The
+// character count is for scripts written without spaces, such as Japanese.
+const EVAL_MIN_WORDS = 10;
+const EVAL_MIN_CHARS = 60;
 
 // The "Data as of" date in the header, on every feature (client, 15 Oct: one
 // date, Sept 2026, for all features for now). One constant so the next data
@@ -818,6 +825,31 @@ export default function UserDashboardPage() {
     setEvalOptions(null);
   }, [selectedAccountId]);
   const [evaluatorStep, setEvaluatorStep] = useState<string>('inputs');
+
+  // The format checks (length, subject line, greeting, sign-off, the ask) for
+  // the draft as it is typed - computed in code on the server, no AI - shown
+  // as hints under the box before Evaluate (AEON, 12 Nov). Hints only: an
+  // imperfect draft is what the evaluator is for, so nothing here blocks it.
+  const [liveChecks, setLiveChecks] = useState<any[]>([]);
+  useEffect(() => {
+    if (!selectedAccountId || !selectedFormat || !stimulusText.trim()) {
+      setLiveChecks([]);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const res = await api.post<any>(
+          `/accounts/${selectedAccountId}/widgets/message_evaluator/checks`,
+          { format: selectedFormat, message: stimulusText });
+        if (!cancelled) setLiveChecks(res.data?.checks || []);
+      } catch {
+        // A hint, not a gate: without it the step works as before.
+        if (!cancelled) setLiveChecks([]);
+      }
+    }, 500);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [selectedAccountId, selectedFormat, stimulusText]);
 
   // The tour's Message Evaluator cards open each step - only a step the user
   // could open themselves right now, so it never runs an evaluation or a
@@ -5605,8 +5637,11 @@ export default function UserDashboardPage() {
                   const chosenObjective = objectives.find((o: any) => o.id === selectedObjective) || null;
                   const chosenFormat = formats.find((f: any) => f.id === selectedFormat) || null;
 
+                  const stimulusWords = stimulusText.trim() ? stimulusText.trim().split(/\s+/).length : 0;
+                  const messageLongEnough = stimulusWords >= EVAL_MIN_WORDS
+                    || stimulusText.trim().length >= EVAL_MIN_CHARS;
                   const canEvaluate = !!selectedPersonaId && !!selectedObjective
-                    && !!selectedFormat && stimulusText.trim().length > 0;
+                    && !!selectedFormat && messageLongEnough;
 
                   // The model is called up to three times for an evaluation and five
                   // for a rewrite. There was no limit in the browser at all, so a slow
@@ -5614,8 +5649,10 @@ export default function UserDashboardPage() {
                   // after this fires and stores what it finishes - hence the wording.
                   const EVALUATOR_TIMEOUT_MS = 240000;
                   // Never the server's detail or err.message (client, 21 Oct): the
-                  // api client logs the failure; the seller sees one neutral line.
-                  const evaluatorErrorText = (_err: any) => ACTION_ERROR_MESSAGE;
+                  // api client logs the failure. A refusal the seller can act on
+                  // (too long, a figure to untick) gets its own line by error
+                  // code; anything else, the neutral one.
+                  const evaluatorErrorText = (err: unknown) => evaluatorFailureText(err);
 
                   const refreshHistory = async () => {
                     try {
@@ -5964,6 +6001,25 @@ export default function UserDashboardPage() {
                             <p className="text-xs text-slate-500 mt-1">
                               {stimulusText.length} characters
                             </p>
+                            {stimulusText.trim() && !messageLongEnough && (
+                              <p className="text-xs font-semibold text-amber-700 mt-1">
+                                Write or paste your full message first (at least {EVAL_MIN_WORDS} words).
+                              </p>
+                            )}
+                            {messageLongEnough && liveChecks.length > 0 && (
+                              <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+                                {liveChecks.map((c: any) => (
+                                  <li key={c.check}
+                                    className={`flex items-center gap-1 text-xs ${c.passed ? 'text-slate-500' : 'font-semibold text-amber-700'}`}>
+                                    {c.passed
+                                      ? <Check className="w-3.5 h-3.5 text-green-500" />
+                                      : <AlertCircle className="w-3.5 h-3.5" />}
+                                    <span className="capitalize">{c.check.replace(/_/g, ' ')}:</span>
+                                    <span>{c.detail}</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
                           </div>
 
                           {/* Previous real submissions. There is no sample generator: a
@@ -5992,7 +6048,7 @@ export default function UserDashboardPage() {
 
                           <button
                             type="button"
-                            disabled={!selectedPersonaId || !selectedObjective || !selectedFormat || !stimulusText.trim()}
+                            disabled={!canEvaluate}
                             onClick={() => setEvaluatorStep('persona')}
                             className="inline-flex items-center gap-2 px-5 py-2.5 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:bg-indigo-300 disabled:cursor-not-allowed transition-colors"
                           >
@@ -6188,7 +6244,7 @@ export default function UserDashboardPage() {
                           <div className="flex flex-wrap gap-3">
                             <button data-tour="evaluator-panel-confirm"
                               type="button"
-                              disabled={isEvaluating}
+                              disabled={isEvaluating || !canEvaluate}
                               onClick={runEvaluation}
                               className="inline-flex items-center gap-2 px-5 py-2.5 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors"
                             >

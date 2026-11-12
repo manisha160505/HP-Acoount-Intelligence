@@ -65,6 +65,11 @@ class MessageEvaluateRequest(BaseModel):
     mode: str = "DEEP"
 
 
+class MessageChecksRequest(BaseModel):
+    format: str
+    message: str
+
+
 class MessageRewriteRequest(BaseModel):
     fingerprint: str
     selected_recommendations: list[str] = []

@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 from app.core.deps import require_account_access, require_super_admin, require_user_role
 from app.schemas.widget import (
     ContentGenerateRequest,
+    MessageChecksRequest,
     MessageEvaluateRequest,
     MessageRewriteRequest,
     # Strategy Chat's request body. The only symbol this branch's import block
@@ -1012,7 +1013,30 @@ def evaluate_message_endpoint(
     except (evaluator_evaluate.EvaluationError,
             evaluator_scoring.ScoringError,
             evaluator_formats.FormatError) as exc:
-        raise APIError(ErrorCode.EXTRACTION_FAILED, str(exc), status_code=422,
+        raise APIError(ErrorCode(getattr(exc, "code", None) or ErrorCode.EXTRACTION_FAILED),
+                       str(exc), status_code=422,
+                       log_context={"account_id": account_id}) from exc
+
+
+@router.post("/accounts/{account_id}/widgets/message_evaluator/checks")
+def message_checks_endpoint(
+    account_id: str,
+    body: MessageChecksRequest,
+    current_user: dict = Depends(require_account_access)
+):
+    """The format checks for a draft, while the seller is still writing it.
+
+    The same checks an evaluation runs first - length, subject line, greeting,
+    sign-off, the ask - computed in code with no AI call, so the input step can
+    show them as hints before Evaluate (AEON, 12 Nov).
+    """
+    if not ObjectId.is_valid(account_id):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Invalid account ID format")
+    try:
+        return evaluator_formats.structure_checks(body.message[:20000], body.format)
+    except evaluator_formats.FormatError as exc:
+        raise APIError(ErrorCode.INVALID_PARAMETER, str(exc), status_code=400,
                        log_context={"account_id": account_id}) from exc
 
 
@@ -1031,7 +1055,8 @@ def rewrite_message_endpoint(
     except (evaluator_evaluate.EvaluationError,
             evaluator_scoring.ScoringError,
             evaluator_formats.FormatError) as exc:
-        raise APIError(ErrorCode.EXTRACTION_FAILED, str(exc), status_code=422,
+        raise APIError(ErrorCode(getattr(exc, "code", None) or ErrorCode.EXTRACTION_FAILED),
+                       str(exc), status_code=422,
                        log_context={"account_id": account_id}) from exc
 
 

@@ -152,52 +152,74 @@ class TestUntraceableSuggestionsAreWithheld:
 
 # --- the evaluation is told the cap ---------------------------------------------
 
+def _words(n, word="word"):
+    return " ".join([word] * n)
+
+
 class TestTheEvaluationKnowsTheCap:
 
     def test_a_capped_format_states_the_limit_and_the_current_length(self):
-        block = E._cap_block(F.FORMATS["linkedin_message"], "x" * 120)
-        assert "at most 300 characters" in block and "this message is 120" in block
+        block = E._cap_block(F.FORMATS["linkedin_message"], _words(40))
+        assert "at most 110 words" in block and "this message is 40" in block
         assert "REPLACING or CUTTING" not in block
 
     def test_near_the_cap_it_asks_for_swaps_not_additions(self):
-        block = E._cap_block(F.FORMATS["linkedin_message"], "x" * 290)
+        block = E._cap_block(F.FORMATS["linkedin_message"], _words(100))
         assert "REPLACING or" in block and "what" in block
 
+    def test_an_email_is_held_to_its_180_word_guide(self):
+        """AEON, 12 Nov: an uncapped email rewrite came out at 184 words and
+        its own evaluation marked it over the 180-word guide."""
+        block = E._cap_block(F.FORMATS["email"], _words(150))
+        assert "at most 180 words" in block and "this message is 150" in block
+
     def test_an_uncapped_format_says_nothing(self):
-        assert E._cap_block(F.FORMATS["email"], "x" * 5000) == ""
+        assert E._cap_block({"label": "Note", "rewrite": {}}, _words(500)) == ""
 
 
 # --- the budget the model is given is the real one ------------------------------
 
 class TestTheBudgetCountsEverythingPythonAdds:
+    """LinkedIn Message is capped in words (110), as Content Studio writes it:
+    the greeting's words count; blank lines are not words."""
 
-    def test_greeting_and_blank_lines_are_both_subtracted(self):
+    def test_the_greeting_is_subtracted(self):
         spec = F.body_budget("linkedin_message", PERSONA, "")
         greeting = F.compose_greeting(PERSONA, F.rewrite_contract("linkedin_message"), "")
-        # greeting + opening + body + cta = four blocks, three blank lines.
-        assert spec == {"max": 300, "composed": len(greeting), "separators": 6,
-                        "budget": 300 - len(greeting) - 6}
+        words = len(greeting.split())
+        assert spec == {"max": 110, "unit": "words", "composed": words, "separators": 0,
+                        "budget": 110 - words}
 
     def test_a_draft_that_meets_the_budget_exactly_is_accepted(self):
-        """It used to come out four characters over and be refused."""
         spec = F.body_budget("linkedin_message", PERSONA, "")
         third = spec["budget"] // 3
-        raw = {"opening": "a" * third, "body_sections": [{"text": "b" * third}],
-               "cta": "c" * (spec["budget"] - 2 * third)}
+        raw = {"opening": _words(third, "a"), "body_sections": [{"text": _words(third, "b")}],
+               "cta": _words(spec["budget"] - 2 * third, "c")}
         rewrite, faults = F.validate_rewrite(raw, "linkedin_message", (), PERSONA, "")
-        assert faults == [] and len(rewrite["plain_text"]) == 300
+        assert faults == [] and len(rewrite["plain_text"].split()) == 110
+
+    def test_a_content_studio_length_message_is_not_refused(self):
+        """AEON, 12 Nov: a 76-word Content Studio message was refused for 318
+        characters against a 300-character cap."""
+        raw = {"opening": _words(25, "a"), "body_sections": [{"text": _words(40, "b")}],
+               "cta": _words(15, "c")}
+        _rewrite, faults = F.validate_rewrite(raw, "linkedin_message", (), PERSONA, "")
+        assert faults == []
+        checks = F.structure_checks("Hi Taro,\n\n" + _words(80), "linkedin_message")
+        assert not any(c["check"] == "character_limit" for c in checks["checks"])
 
     def test_the_retry_note_gives_the_numbers(self):
-        raw = {"opening": "a" * 150, "body_sections": [{"text": "b" * 150}], "cta": "c" * 50}
+        raw = {"opening": _words(50, "a"), "body_sections": [{"text": _words(50, "b")}],
+               "cta": _words(20, "c")}
         _clean, faults, draft = F.validate_rewrite(raw, "linkedin_message", (), PERSONA, "",
                                                    keep_draft=True)
         assert F.length_only(faults)
         note = F.length_retry_note("linkedin_message", draft, PERSONA, "")
         budget = F.body_budget("linkedin_message", PERSONA, "")["budget"]
-        assert "totalled 350 characters" in note
+        assert "totalled 120 words" in note
         assert "at most %d" % budget in note
-        assert "Cut at least %d characters" % (350 - budget) in note
-        assert "opening: 150 characters" in note
+        assert "Cut at least %d words" % (120 - budget) in note
+        assert "opening: 50 words" in note
 
 
 # --- rewrite_message, end to end with a scripted model ---------------------------
@@ -206,7 +228,7 @@ def _answer(opening, body, cta):
     return {"opening": opening, "body_sections": [{"text": body}], "cta": cta}
 
 
-LONG = _answer("o" * 150, "b" * 150, "c" * 60)             # ~376 characters
+LONG = _answer(_words(50, "open"), _words(50, "body"), _words(20, "ask"))  # 123 words
 FITS = _answer("Saw AEON's store refresh plans.",
                "We help retailers modernise their device estate with less downtime.",
                "Open to a 15-minute call next week?")
@@ -252,20 +274,21 @@ class TestATooLongRewriteIsShortenedNotRefused:
         assert len(asked) == 3, "attempt, retry, one shorten pass"
         assert "Cut at least" in asked[1], "the retry is told how much to cut"
         assert asked[2].startswith("SHORTEN THIS REWRITE")
-        assert json.dumps("o" * 150) in asked[2], "it is shown its own draft"
+        assert json.dumps(_words(50, "open")) in asked[2], "it is shown its own draft"
 
     def test_it_stops_after_two_shorten_passes_with_a_message_to_act_on(self, rewrite):
         run, asked = rewrite
-        shorter = _answer("o" * 120, "b" * 120, "c" * 60)
+        shorter = _answer(_words(45, "open"), _words(45, "body"), _words(20, "ask"))
         with pytest.raises(E.EvaluationError) as err:
             run([LONG, LONG, shorter, shorter, FITS])
         assert len(asked) == 2 + E.SHORTEN_PASSES, "never a third shorten pass"
         message = str(err.value)
-        assert "don't fit in a LinkedIn Message (300 characters)" in message
+        assert "don't fit in a LinkedIn Message (110 words)" in message
         assert "Select fewer changes" in message
         assert "format contract" not in message
+        assert err.value.code == "REWRITE_TOO_LONG"
         shortest = len(F.validate_rewrite(shorter, "linkedin_message", (), PERSONA, "",
-                                          keep_draft=True)[2]["plain_text"])
+                                          keep_draft=True)[2]["plain_text"].split())
         assert "came out at %d" % shortest in message
 
     def test_a_fault_that_is_not_length_is_never_sent_to_shorten(self, rewrite):
@@ -283,6 +306,7 @@ class TestATooLongRewriteIsShortenedNotRefused:
         with pytest.raises(E.EvaluationError) as err:
             run([LONG, LONG, invented])
         assert "40%" in str(err.value) and "Untick the change" in str(err.value)
+        assert err.value.code == "REWRITE_UNSUPPORTED_FIGURE"
 
 
 class TestARewriteMayCiteWhatTheEvaluationOffered:
@@ -415,6 +439,7 @@ class TestAClaimFaultGetsOneRepairPass:
             run([INVENTED, INVENTED, CLEAN, CLEAN])
         assert len(asked) == 2, "exactly one repair pass"
         assert "40%" in str(err.value) and "Untick the change" in str(err.value)
+        assert err.value.code == "REWRITE_UNSUPPORTED_FIGURE"
 
     def test_a_superlative_added_in_a_blocked_market_is_named_plainly(self, rewrite):
         run, _asked = rewrite
@@ -482,3 +507,109 @@ class TestOneRequestNeverMakesMoreThanItsBudgetOfCalls:
         with pytest.raises(E.EvaluationError):
             run(script)
         assert len(asked) <= E.MAX_REWRITE_CALLS == 5
+
+
+class TestATickedGreetingReplacesTheSellersOwn:
+    """AEON, 12 Nov: the draft "hi" with "Dear [CFO's Name]," ticked came back
+    opening "hi," while Changes Applied listed the Dear line as done."""
+
+    EMAIL = F.rewrite_contract("email")
+    CFO: typing.ClassVar[dict] = {"title": "Chief Financial Officer"}
+
+    def test_the_ticked_salutation_is_used(self):
+        addressed = F.with_selected_greeting("hi", ["Dear [CFO's Name],"])
+        assert F.compose_greeting(self.CFO, self.EMAIL, addressed) == "Dear [CFO's Name],"
+
+    def test_only_the_greeting_line_changes(self):
+        draft = "Hi Taro,\n\nWe help retailers.\n\nBest regards,\nAnna"
+        addressed = F.with_selected_greeting(draft, ["Dear [CIO Name],"])
+        assert addressed == "Dear [CIO Name],\n\nWe help retailers.\n\nBest regards,\nAnna"
+        assert F.compose_signoff(self.EMAIL, addressed) == "Best regards,\n\nAnna"
+
+    def test_a_draft_without_a_greeting_gets_the_ticked_one(self):
+        addressed = F.with_selected_greeting("We help retailers.", ["Dear [CFO Name],"])
+        assert F.compose_greeting(self.CFO, self.EMAIL, addressed) == "Dear [CFO Name],"
+
+    @pytest.mark.parametrize("rec", [
+        "Hi, I wanted to share how HP can help.",      # a sentence, not a salutation
+        "Fix greeting: no salutation found",
+        "Address the CFO by role in the greeting.",
+    ])
+    def test_other_changes_keep_the_sellers_greeting(self, rec):
+        assert F.with_selected_greeting("hi", [rec]) == "hi"
+        assert F.compose_greeting(self.CFO, self.EMAIL, "hi") == "hi,"
+
+    def test_the_published_rewrite_opens_with_it(self, rewrite, monkeypatch):
+        run, _asked = rewrite
+        rendered = []
+        render = F.render_rewrite
+        monkeypatch.setattr(F, "render_rewrite",
+                            lambda r: rendered.append(render(r)) or rendered[-1])
+        run([FITS], original="Hi there,\n\nWe help retailers modernise.",
+            selected=("Dear [CIO Name],", "Make it specific"))
+        assert rendered and rendered[-1].startswith("Dear [CIO Name],"), rendered
+
+
+class TestTheGreetingIsReadUnderTheSubjectLine:
+    """AEON, 12 Nov: every email with a Subject line - every rewrite among them -
+    was reported as having no greeting, so "Fix greeting" came back each time."""
+
+    EMAIL = F.rewrite_contract("email")
+    DRAFT = ("Subject: Lower TCO for AEON\n\nHi Taro,\n\nWe help retailers.\n\n"
+             "Would you be open to a call?\n\nSincerely,\nAnna")
+
+    def test_the_check_finds_it(self):
+        checks = {c["check"]: c for c in F.structure_checks(self.DRAFT, "email")["checks"]}
+        assert checks["greeting"]["passed"], checks["greeting"]
+        assert checks["greeting"]["detail"] == "opens with 'Hi Taro,'"
+
+    def test_the_rewrite_keeps_the_sellers_own(self):
+        assert F.compose_greeting({"title": "CIO"}, self.EMAIL, self.DRAFT) == "Hi Taro,"
+
+    def test_a_ticked_salutation_replaces_it_and_the_subject_stays(self):
+        addressed = F.with_selected_greeting(self.DRAFT, ["Dear [CIO Name],"])
+        assert addressed.startswith("Subject: Lower TCO for AEON\n\nDear [CIO Name],\n\n")
+
+    def test_a_ticked_salutation_goes_under_the_subject_when_there_is_none(self):
+        addressed = F.with_selected_greeting("Subject: Hello\nWe help.", ["Dear [CIO Name],"])
+        assert addressed == "Subject: Hello\nDear [CIO Name],\n\nWe help."
+
+    def test_a_rewrite_passes_its_own_greeting_check(self):
+        raw = {"subject_line": "Lower TCO for AEON", "opening": "Saw your store plans.",
+               "body_sections": [{"text": "We help retailers."}],
+               "cta": "Would you be open to a call?"}
+        rewrite, faults = F.validate_rewrite(raw, "email", (), {"title": "CIO"}, "")
+        assert faults == []
+        checks = F.structure_checks(rewrite["plain_text"], "email")["checks"]
+        assert all(c["passed"] for c in checks), [c for c in checks if not c["passed"]]
+
+
+class TestAnEmailRewriteFitsTheGuideItIsScoredAgainst:
+
+    def test_the_budget_counts_greeting_signoff_and_subject_label(self):
+        spec = F.body_budget("email", {"title": "CIO"}, "")
+        # "Dear [CIO Name]," 3 + "Best regards, [Your Name]" 4 + "Subject:" 1
+        assert spec == {"max": 180, "unit": "words", "composed": 8, "separators": 0,
+                        "budget": 172}
+
+    def test_a_rewrite_over_180_words_is_shortened_not_published(self):
+        raw = {"subject_line": "Lower TCO", "opening": _words(60, "a"),
+               "body_sections": [{"text": _words(100, "b")}], "cta": _words(20, "c")}
+        _clean, faults, draft = F.validate_rewrite(raw, "email", (), {"title": "CIO"}, "",
+                                                   keep_draft=True)
+        assert F.length_only(faults) and faults[0].startswith("rewrite is 190 words")
+        note = F.length_retry_note("email", draft, {"title": "CIO"}, "")
+        assert "subject_line: 2 words" in note
+        assert '"subject_line": "Lower TCO"' in F.shorten_prompt("email", draft, {"title": "CIO"}, "")
+
+
+class TestScoringIsSteady:
+    """AEON, 12 Nov: the same draft scored 71, then 69, then 71."""
+
+    def test_scoring_asks_at_temperature_0_and_a_rewrite_does_not(self, monkeypatch):
+        seen = []
+        monkeypatch.setattr(E, "generate_gpt4o_json_completion",
+                            lambda s, _u, temperature=None: seen.append((s, temperature)) or {"a": 1})
+        E._ask(E.SYSTEM_PROMPT, "score this")
+        E._ask(E.REWRITE_SYSTEM, "rewrite this")
+        assert seen == [(E.SYSTEM_PROMPT, 0.0), (E.REWRITE_SYSTEM, 0.2)]

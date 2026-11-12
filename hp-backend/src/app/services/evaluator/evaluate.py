@@ -26,6 +26,7 @@ import re
 from datetime import UTC, datetime
 
 from app.core.llm import generate_gpt4o_json_completion
+from app.errors.codes import ErrorCode
 from app.services.evaluator import formats as F, scoring as S, sources as SRC, storage, verify
 from app.services.extractors.grounding import corpus_from_texts
 from app.services.hp import (
@@ -83,7 +84,16 @@ SEVERE_FLOOR = 39.0
 
 
 class EvaluationError(Exception):
-    """The request cannot be evaluated as submitted."""
+    """The request cannot be evaluated as submitted.
+
+    `code` is an `ErrorCode` when the seller can act on the refusal (a change
+    to untick, a persona to pick again); None when they cannot, and the screen
+    shows its neutral line.
+    """
+
+    def __init__(self, message, code=None):
+        super().__init__(message)
+        self.code = code
 
 
 SYSTEM_PROMPT = """You evaluate a B2B sales message for an HP seller.
@@ -553,19 +563,22 @@ def _user_prompt(message, persona, objective, fmt, mode, sources, checks,  # noq
 def _cap_block(spec, message) -> str:
     """What a capped format's evaluation must know before it recommends.
 
-    A LinkedIn message is capped at 300 characters. The evaluation used to
-    recommend additions - "name the case study", "add a specific" - to a message
-    already at 290, the seller ticked them, and the rewrite could not fit them:
-    "rewrite is 360 characters; LinkedIn Message allows 300". The recommendation
-    was the fault, so the constraint is stated where recommendations are made.
+    A LinkedIn message is capped (110 words; it was 300 characters). The
+    evaluation used to recommend additions - "name the case study", "add a
+    specific" - to a message already near the cap, the seller ticked them, and
+    the rewrite could not fit them: "rewrite is 360 characters; LinkedIn Message
+    allows 300". The recommendation was the fault, so the constraint is stated
+    where recommendations are made. The cap is the rewrite's, the one a ticked
+    suggestion has to fit.
     """
-    cap = spec.get("max_chars")
-    if not cap:
+    found = F.length_cap(spec.get("rewrite") or {})
+    if not found:
         return ""
-    length = len(str(message or ""))
-    lines = ["LENGTH LIMIT: a %s may be at most %d characters, and this message is "
+    cap, unit = found
+    length = F.measure(message, unit)
+    lines = ["LENGTH LIMIT: a %s may be at most %d %s, and this message is "
              "%d. Every suggestion must be achievable inside that limit."
-             % (spec["label"], cap, length)]
+             % (spec["label"], cap, unit, length)]
     if length >= cap * NEAR_CAP_SHARE:
         lines.append("It is already at or near the limit, so suggest REPLACING or "
                      "CUTTING words. If a suggestion adds anything, it must say what "
@@ -670,9 +683,17 @@ def _severe_block(severe):
     return "\n".join(lines)
 
 
+# Scoring at temperature 0, so the same message scores the same each time: at
+# 0.2 one draft read 71, then 69, then 71 (AEON, 12 Nov). A rewrite keeps a
+# little variety, so Try again can find a draft that passes its checks.
+SCORING_TEMPERATURE = 0.0
+REWRITE_TEMPERATURE = 0.2
+
+
 def _ask(system, user):
+    temperature = SCORING_TEMPERATURE if system is SYSTEM_PROMPT else REWRITE_TEMPERATURE
     try:
-        return generate_gpt4o_json_completion(system, user) or {}
+        return generate_gpt4o_json_completion(system, user, temperature=temperature) or {}
     except Exception:
         logger.exception("evaluator: model call failed")
         return {}
@@ -739,7 +760,8 @@ def evaluate_message(account_id, persona_id, objective, fmt, message,
         logger.warning("evaluator: persona %r does not belong to this account %s",
                        persona_id, account_id)
         raise EvaluationError("That persona isn't available for this account. "
-                              "Pick one from the list and try again.")
+                              "Pick one from the list and try again.",
+                              ErrorCode.PERSONA_UNAVAILABLE)
 
     # The scorer's version travels with the request, so a prompt change or a
     # corrected persona card re-scores rather than serving the old answer.
@@ -1106,8 +1128,8 @@ _SUPERLATIVE_FAULT_RE = re.compile(r"adds a superlative claim \((.+?)\) not perm
 _COMPETITOR_FAULT_RE = re.compile(r"names a competitor \((.+?)\), .* not permitted in (.+)$")
 
 
-def _unsupported_message(diff_faults) -> str:
-    """The seller-facing reason a rewrite was refused for what it claims."""
+def _unsupported(diff_faults) -> EvaluationError:
+    """The seller-facing refusal of a rewrite for what it claims."""
     figures, others = [], []
     for fault in diff_faults:
         fault = str(fault)
@@ -1133,32 +1155,37 @@ def _unsupported_message(diff_faults) -> str:
     if not parts:
         # Nothing the seller can act on: the raw faults stay in the stored
         # evaluation (`rewrite_faults`) and the log; the seller gets one line.
-        return ACTION_FAILED
-    return ("The rewrite was not used: %s. Untick the change that adds it, or remove "
-            "it from your message, then try again." % "; and ".join(parts))
+        return EvaluationError(ACTION_FAILED)
+    return EvaluationError(
+        "The rewrite was not used: %s. Untick the change that adds it, or remove it "
+        "from your message, then try again." % "; and ".join(parts),
+        ErrorCode.REWRITE_UNSUPPORTED_FIGURE if figures
+        else ErrorCode.REWRITE_CLAIM_NOT_PERMITTED)
 
 
-def _refusal_message(faults, label, cap=None, shortest=None) -> str:
-    """The seller-facing reason a rewrite was refused for its shape or a gate.
+def _refusal(faults, label, cap=None, shortest=None, unit="characters") -> EvaluationError:
+    """The seller-facing refusal of a rewrite for its shape or a gate.
 
     The raw faults ("body_sections has 2 entries; 4-4 required") go to the
     stored evaluation and the log. The seller is told what happened and what to
-    do next.
+    do next; the code is what the screen picks its own line by.
     """
     if F.length_only(faults):
-        return ("The selected changes don't fit in a %s (%s characters): the "
-                "shortest rewrite came out at %s. Select fewer changes, or shorten "
-                "the message, then try again." % (label, cap, shortest))
+        return EvaluationError(
+            "The selected changes don't fit in a %s (%s %s): the shortest rewrite "
+            "came out at %s. Select fewer changes, or shorten the message, then try "
+            "again." % (label, cap, unit, shortest), ErrorCode.REWRITE_TOO_LONG)
     if any(str(f) == "no rewrite object was returned" for f in faults):
-        return ACTION_FAILED
+        return EvaluationError(ACTION_FAILED)
     gates = [str(f).split(": ", 1)[1] for f in faults if F.is_gate_fault(f)]
     if gates:
-        return ("The rewrite was not used because it brought in something this "
-                "persona can't be sent: %s. Untick the change that adds it, then "
-                "try again." % "; ".join(gates))
+        return EvaluationError(
+            "The rewrite was not used because it brought in something this persona "
+            "can't be sent: %s. Untick the change that adds it, then try again."
+            % "; ".join(gates), ErrorCode.REWRITE_PERSONA_BLOCKED)
     # A malformed answer is the model's failure, not the seller's: one neutral
     # line (client rule, 21 Oct), the faults stay in `rewrite_faults` and the log.
-    return ACTION_FAILED
+    return EvaluationError(ACTION_FAILED)
 
 
 def rewrite_message(account_id, fingerprint, selected_recommendations,
@@ -1170,7 +1197,8 @@ def rewrite_message(account_id, fingerprint, selected_recommendations,
     evaluation = storage.find_existing(account_id, fingerprint)
     if not evaluation:
         raise EvaluationError("This evaluation couldn't be found for this account. "
-                              "Evaluate the message again, then rewrite.")
+                              "Evaluate the message again, then rewrite.",
+                              ErrorCode.EVALUATION_NOT_FOUND)
 
     fmt = evaluation["format"]
     original = evaluation["message_text"]
@@ -1185,6 +1213,10 @@ def rewrite_message(account_id, fingerprint, selected_recommendations,
     selected = [str(s) for s in (selected_recommendations or []) if str(s).strip()]
     if not selected:
         raise EvaluationError("Select at least one suggested change to apply.")
+    # The draft the salutation and sign-off are composed from: the original,
+    # with a ticked "Dear ..." change put in place of the seller's own greeting.
+    # The model and the claim checks still see the original as written.
+    addressed = F.with_selected_greeting(original, selected)
 
     prompt = "\n".join([
         "OBJECTIVE: %s" % evaluation["objective_label"],
@@ -1202,7 +1234,7 @@ def rewrite_message(account_id, fingerprint, selected_recommendations,
         "APPLY ONLY THESE CHANGES:",
         "\n".join("  %d. %s" % (i, s) for i, s in enumerate(selected, 1)),
         "",
-        F.rewrite_instructions(fmt, persona, original),
+        F.rewrite_instructions(fmt, persona, addressed),
     ])
 
     card = _card_for(persona, evaluation.get("mode") or MODE_DEEP)
@@ -1224,7 +1256,7 @@ def rewrite_message(account_id, fingerprint, selected_recommendations,
     def check(answer):
         """(rewrite or None, faults, the draft as built)."""
         clean, found, draft = F.validate_rewrite(answer, fmt, banned, persona,
-                                                 original, keep_draft=True)
+                                                 addressed, keep_draft=True)
         found = found + _rewrite_gate_faults(clean, card, persona, banned, sources,
                                              original, fmt, audit=gate_audit)
         return (None if found else clean), found, draft
@@ -1244,7 +1276,7 @@ def rewrite_message(account_id, fingerprint, selected_recommendations,
         # returned 2") rather than the validator's shorthand.
         notes = [F.structure_repair_note(fmt, faults)]
         if any(F.LENGTH_FAULT_RE.match(f) for f in faults):
-            notes.append(F.length_retry_note(fmt, draft, persona, original))
+            notes.append(F.length_retry_note(fmt, draft, persona, addressed))
         rewrite, faults, draft = check(ask(
             prompt + "\n\nYour previous answer was rejected. Fix exactly this:\n"
             + "\n\n".join(n for n in notes if n)))
@@ -1256,17 +1288,18 @@ def rewrite_message(account_id, fingerprint, selected_recommendations,
     # the qualifier on a claim.
     shortest = None
     passes = 0
+    unit = (F.body_budget(fmt, persona, addressed) or {}).get("unit", "characters")
     while faults and F.length_only(faults) and draft and passes < SHORTEN_PASSES:
-        length = len(draft.get("plain_text") or "")
+        length = F.measure(draft.get("plain_text"), unit)
         shortest = length if shortest is None else min(shortest, length)
         passes += 1
-        logger.info("evaluator: rewrite is %d characters, shorten pass %d",
-                    length, passes)
+        logger.info("evaluator: rewrite is %d %s, shorten pass %d",
+                    length, unit, passes)
         rewrite, faults, shorter_draft = check(
-            ask(F.shorten_prompt(fmt, draft, persona, original)))
+            ask(F.shorten_prompt(fmt, draft, persona, addressed)))
         draft = shorter_draft or draft
     if faults and F.length_only(faults) and draft:
-        length = len(draft.get("plain_text") or "")
+        length = F.measure(draft.get("plain_text"), unit)
         shortest = length if shortest is None else min(shortest, length)
 
     # One repair pass per request, for whichever needs it. The model is shown
@@ -1322,8 +1355,8 @@ def rewrite_message(account_id, fingerprint, selected_recommendations,
             {"$set": {"rewrite": None,
                       "rewrite_faults": faults,
                       "rewrite_attempted_at": datetime.now(UTC)}})
-        cap = (F.body_budget(fmt, persona, original) or {}).get("max")
-        raise EvaluationError(_refusal_message(faults, label, cap, shortest))
+        cap = (F.body_budget(fmt, persona, addressed) or {}).get("max")
+        raise _refusal(faults, label, cap, shortest, unit)
 
     if diff_faults:
         db[storage.COLLECTION].update_one(
@@ -1331,7 +1364,7 @@ def rewrite_message(account_id, fingerprint, selected_recommendations,
             {"$set": {"rewrite": None, "rewrite_faults": diff_faults,
                       "rewrite_diff": diff,
                       "rewrite_attempted_at": datetime.now(UTC)}})
-        raise EvaluationError(_unsupported_message(diff_faults))
+        raise _unsupported(diff_faults)
 
     rewrite["diff"] = diff
     db[storage.COLLECTION].update_one(
