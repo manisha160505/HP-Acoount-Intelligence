@@ -47,7 +47,11 @@ logger = logging.getLogger(__name__)
 #     a link no source holds, or (where the market blocks them) a superlative
 #     or a competitor name; and the rewrite keeps account facts and HP
 #     statements in separate sentences.
-PROMPT_VERSION = 8
+# 9 - 12 Nov: LinkedIn capped at 110 words (was 300 characters), the greeting
+#     read under a Subject line, scoring at temperature 0. An evaluation stored
+#     under 8 carries the old checks and score, and was handed back for the
+#     same message re-pasted.
+PROMPT_VERSION = 9
 
 # How close to a format's character cap a message must be before the evaluator
 # is told to recommend swaps and cuts rather than additions.

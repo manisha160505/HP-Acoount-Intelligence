@@ -741,7 +741,7 @@ rules:
     - Create the request fingerprint
     result: The first 16 characters of the fingerprint.
     verified: true
-    expect: 143c78db0293a711
+    expect: b9bacde67605d998
   sources:
   - hp-backend/src/app/services/evaluator/storage.py:message_fingerprint
   - hp-backend/src/app/services/evaluator/storage.py:save
@@ -899,7 +899,7 @@ rules:
   constants:
   - label: Instruction version
     ref: py:app.services.evaluator.evaluate:PROMPT_VERSION
-    stated: 8
+    stated: 9
   sources:
   - hp-backend/src/app/services/evaluator/evaluate.py:SYSTEM_PROMPT
   - hp-backend/src/app/services/evaluator/evaluate.py:_user_prompt
