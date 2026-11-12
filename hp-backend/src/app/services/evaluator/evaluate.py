@@ -51,7 +51,10 @@ logger = logging.getLogger(__name__)
 #     read under a Subject line, scoring at temperature 0. An evaluation stored
 #     under 8 carries the old checks and score, and was handed back for the
 #     same message re-pasted.
-PROMPT_VERSION = 9
+# 10 - 12 Nov: headings read in all the forms a one-pager uses (capitals,
+#     "Label: title", Title Case), and length counted without the subject
+#     line, greeting and sign-off, as Content Studio counts it.
+PROMPT_VERSION = 10
 
 # How close to a format's character cap a message must be before the evaluator
 # is told to recommend swaps and cuts rather than additions.
@@ -579,10 +582,12 @@ def _cap_block(spec, message) -> str:
     if not found:
         return ""
     cap, unit = found
-    length = F.measure(message, unit)
-    lines = ["LENGTH LIMIT: a %s may be at most %d %s, and this message is "
+    length = F.counted_length(message, unit)
+    lines = ["LENGTH LIMIT: a %s may be at most %d %s%s, and this message is "
              "%d. Every suggestion must be achievable inside that limit."
-             % (spec["label"], cap, unit, length)]
+             % (spec["label"], cap, unit,
+                " (the subject line, salutation and sign-off are not counted)"
+                if unit == "words" else "", length)]
     if length >= cap * NEAR_CAP_SHARE:
         lines.append("It is already at or near the limit, so suggest REPLACING or "
                      "CUTTING words. If a suggestion adds anything, it must say what "
@@ -1294,7 +1299,7 @@ def rewrite_message(account_id, fingerprint, selected_recommendations,
     passes = 0
     unit = (F.body_budget(fmt, persona, addressed) or {}).get("unit", "characters")
     while faults and F.length_only(faults) and draft and passes < SHORTEN_PASSES:
-        length = F.measure(draft.get("plain_text"), unit)
+        length = F.counted_length(draft.get("plain_text"), unit)
         shortest = length if shortest is None else min(shortest, length)
         passes += 1
         logger.info("evaluator: rewrite is %d %s, shorten pass %d",
@@ -1303,7 +1308,7 @@ def rewrite_message(account_id, fingerprint, selected_recommendations,
             ask(F.shorten_prompt(fmt, draft, persona, addressed)))
         draft = shorter_draft or draft
     if faults and F.length_only(faults) and draft:
-        length = F.measure(draft.get("plain_text"), unit)
+        length = F.counted_length(draft.get("plain_text"), unit)
         shortest = length if shortest is None else min(shortest, length)
 
     # One repair pass per request, for whichever needs it. The model is shown

@@ -401,7 +401,12 @@ rules:
     the end (best regards, kind regards, regards, sincerely, thanks, cheers and similar); and next-step
     language. LinkedIn Message: at most 110 words; a greeting; and next-step language
     (no sign-off needed). One-Pager: at most 500 words; next-step language; and at least 2 heading-like
-    lines. Next-step language means phrases such as: let me know, happy to, are you free or available,
+    lines. Words are counted as Content Studio counts its budget: the Subject line, the greeting and the
+    sign-off are not counted. A heading-like line is a line of its own, of about 12 words or fewer, that
+    is a Markdown heading (''# Account Challenge''), ends in a colon (''Account Challenge:''), is in
+    capitals (''ACCOUNT CHALLENGE'', as Content Studio copies a one-pager), is a short label, a colon
+    and a title (''Account Challenge: Streamlining Operations''), or is in Title Case with no full stop
+    (''How HP Helps''). A greeting or sign-off line is never a heading. Next-step language means phrases such as: let me know, happy to, are you free or available,
     can we, shall we, book, schedule, set up, arrange, call, meeting, demo, chat, connect, reply, respond,
     get in touch, reach out, next step, follow up, would you be open, worth a conversation, interested
     in. Any check the draft does not yet meet is given to the AI as a settled result.'
@@ -440,7 +445,7 @@ rules:
     scenario: 'An email that starts with ''Subject: Re: your Cikarang plant refresh'', then ''Dear Ms
       Tan,'', a body with ''Would you be open to a 20-minute call'', and ''Best regards, Andi''.'
     steps:
-    - 29 words, within the limit of 180
+    - 17 words not counting the Subject line, greeting and sign-off, within the limit of 180
     - The subject line is 31 characters
     - The greeting check reads the first line under the Subject line, 'Dear Ms Tan,', so a greeting is
       found
@@ -741,7 +746,7 @@ rules:
     - Create the request fingerprint
     result: The first 16 characters of the fingerprint.
     verified: true
-    expect: b9bacde67605d998
+    expect: f6b532d216c27dd5
   sources:
   - hp-backend/src/app/services/evaluator/storage.py:message_fingerprint
   - hp-backend/src/app/services/evaluator/storage.py:save
@@ -772,12 +777,12 @@ rules:
     - - Email
       - Subject line, opening, body sections, call to action
       - 1-2, no headings
-      - Subject at most 80 characters
+      - Subject at most 80 characters; at most 180 words, not counting the subject line, greeting and sign-off
       - Dear [<role> Name], / 'Best regards,' with '[Your Name]' two lines below
     - - LinkedIn message
       - Opening, body sections, call to action
       - Exactly 1
-      - Whole message at most 110 words including the greeting
+      - At most 110 words, not counting the greeting
       - Hi [<role> Name], / none
     - - One-pager
       - Headline, opening, body sections, call to action
@@ -829,18 +834,19 @@ rules:
   purpose: A rewrite is shown only when it has the right shape for its format.
   logic: 'Only the parts the format uses are read. A rewrite passes when it has every required part,
     a number of body sections within the allowed range, a heading on each one-pager section, a subject
-    line of at most 80 characters, and a finished message (including greeting and sign-off) within the
-    format''s length limit (LinkedIn: 110 words, the same budget Content Studio writes to).'
+    line of at most 80 characters, and a finished message within the format''s length limit (LinkedIn:
+    110 words, the same budget Content Studio writes to). Words are counted as Content Studio counts
+    them: the subject line, greeting and sign-off are not counted.'
   example:
     scenario: A LinkedIn rewrite with a 60-word opening, a 60-word paragraph and a 4-word call to action.
     steps:
-    - The greeting 'Hi [CFO Name],' (3 words) is added
-    - The finished length is 127 words, which is over 110
+    - The greeting 'Hi [CFO Name],' is added, and is not counted
+    - The message is 124 words, which is over 110
     result: The rewrite is over the LinkedIn limit, so it does not pass.
     verified: true
     expect:
     - null
-    - - rewrite is 127 words; LinkedIn Message allows 110
+    - - rewrite is 124 words; LinkedIn Message allows 110
   sources:
   - hp-backend/src/app/services/evaluator/formats.py:validate_rewrite
   confidence: high
@@ -899,7 +905,7 @@ rules:
   constants:
   - label: Instruction version
     ref: py:app.services.evaluator.evaluate:PROMPT_VERSION
-    stated: 9
+    stated: 10
   sources:
   - hp-backend/src/app/services/evaluator/evaluate.py:SYSTEM_PROMPT
   - hp-backend/src/app/services/evaluator/evaluate.py:_user_prompt
@@ -932,7 +938,7 @@ rules:
   summary: When length is the only thing wrong, the same rewrite is asked for again, shorter.
   purpose: When length is the only thing wrong, the same rewrite is asked for again, shorter.
   logic: 'A format with a length limit (LinkedIn: 110 words) tells the AI how many words its own text may
-    use, after the greeting is taken off. If the rewrite is still too
+    use; the subject line, greeting and sign-off are not counted. If the rewrite is still too
     long, it is told how long each part was and how much to cut. If length is then the only fault left,
     the same rewrite is asked for shorter, up to two more times, keeping every applied change and adding
     nothing. Each shorter version goes through all the same checks. Text is never cut off automatically.

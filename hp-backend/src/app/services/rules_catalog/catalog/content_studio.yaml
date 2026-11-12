@@ -399,7 +399,8 @@ rules:
   summary: Shape of a direct LinkedIn message.
   purpose: Shape of a direct LinkedIn message.
   logic: 'Required: opening, body sections and closing ask. 1 or 2 body paragraphs. No headline, no hashtags,
-    no greeting and no sign-off. Word budget 60-110 (gate G12, a style warning).'
+    and no sign-off. The greeting ''Hi ...,'' is added by the app (see Salutation), never written by the
+    AI, and is outside the word budget. Word budget 60-110 (gate G12, a style warning).'
   constants:
   - label: Word budget
     ref: py:app.services.hp.content_gates:WORD_BUDGETS.linkedin_message
@@ -1193,7 +1194,7 @@ rules:
     stated: 20
   - label: Version of the writing instructions
     ref: py:app.services.extractors.content_studio:CONTENT_PROMPT_VERSION
-    stated: 2026-10-01.1
+    stated: 2026-11-12.1
   sources:
   - hp-backend/src/app/services/extractors/content_studio.py:generate_content_asset
   - hp-backend/src/app/services/extractors/content_studio.py:_request_fingerprint
@@ -1246,14 +1247,16 @@ rules:
   confidence: high
 - id: cs_greeting
   parent: cs_retry_publish
-  name: Salutation and sign-off (email only)
+  name: Salutation and sign-off
   kind: selection
   summary: Who the email is addressed to, decided by fixed rules.
   purpose: Who the email is addressed to, decided by fixed rules.
   logic: 'Filled role (a named person): ''Dear <first name>,'' (''Dear [Name],'' if there is no usable
     first name). Unfilled role: ''Dear [<role> Name],'' for the seller to complete, where the role is
     the title up to the first ''/'' or ''(''. Then the body and the sign-off ''Sincerely,'' followed by
-    ''The HP Inc. Team''. LinkedIn messages and one-pagers have no greeting.'
+    ''The HP Inc. Team''. A LinkedIn message gets the same greeting with ''Hi'' in place of ''Dear'' and
+    no sign-off, so it passes the Message Evaluator''s greeting check when copied there. One-pagers have
+    no greeting.'
   example:
     scenario: A filled CFO 'Budi Santoso', an unfilled CFO, and an unfilled 'VP / Head of Information
       Technology'.

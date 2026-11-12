@@ -179,16 +179,19 @@ class TestTheEvaluationKnowsTheCap:
 
 # --- the budget the model is given is the real one ------------------------------
 
-class TestTheBudgetCountsEverythingPythonAdds:
-    """LinkedIn Message is capped in words (110), as Content Studio writes it:
-    the greeting's words count; blank lines are not words."""
+class TestTheBudgetCountsWhatContentStudioCounts:
+    """LinkedIn Message is capped in words (110), counted as Content Studio
+    counts its budget: the greeting Python adds is not counted (AEON, 12 Nov -
+    a Content Studio message at its 110 words failed here once "Hi ..," was
+    added); blank lines are not words."""
 
-    def test_the_greeting_is_subtracted(self):
+    def test_the_whole_cap_is_the_models(self):
         spec = F.body_budget("linkedin_message", PERSONA, "")
-        greeting = F.compose_greeting(PERSONA, F.rewrite_contract("linkedin_message"), "")
-        words = len(greeting.split())
-        assert spec == {"max": 110, "unit": "words", "composed": words, "separators": 0,
-                        "budget": 110 - words}
+        assert spec == {"max": 110, "unit": "words", "composed": 0, "separators": 0,
+                        "budget": 110}
+
+    def test_the_greeting_is_not_counted(self):
+        assert F.counted_length("Hi [CFO Name],\n\n" + _words(110), "words") == 110
 
     def test_a_draft_that_meets_the_budget_exactly_is_accepted(self):
         spec = F.body_budget("linkedin_message", PERSONA, "")
@@ -196,7 +199,8 @@ class TestTheBudgetCountsEverythingPythonAdds:
         raw = {"opening": _words(third, "a"), "body_sections": [{"text": _words(third, "b")}],
                "cta": _words(spec["budget"] - 2 * third, "c")}
         rewrite, faults = F.validate_rewrite(raw, "linkedin_message", (), PERSONA, "")
-        assert faults == [] and len(rewrite["plain_text"].split()) == 110
+        assert faults == [] and F.counted_length(rewrite["plain_text"], "words") == 110
+        assert rewrite["plain_text"].startswith("Hi [")
 
     def test_a_content_studio_length_message_is_not_refused(self):
         """AEON, 12 Nov: a 76-word Content Studio message was refused for 318
@@ -278,7 +282,7 @@ class TestATooLongRewriteIsShortenedNotRefused:
 
     def test_it_stops_after_two_shorten_passes_with_a_message_to_act_on(self, rewrite):
         run, asked = rewrite
-        shorter = _answer(_words(45, "open"), _words(45, "body"), _words(20, "ask"))
+        shorter = _answer(_words(45, "open"), _words(50, "body"), _words(20, "ask"))
         with pytest.raises(E.EvaluationError) as err:
             run([LONG, LONG, shorter, shorter, FITS])
         assert len(asked) == 2 + E.SHORTEN_PASSES, "never a third shorten pass"
@@ -287,8 +291,9 @@ class TestATooLongRewriteIsShortenedNotRefused:
         assert "Select fewer changes" in message
         assert "format contract" not in message
         assert err.value.code == "REWRITE_TOO_LONG"
-        shortest = len(F.validate_rewrite(shorter, "linkedin_message", (), PERSONA, "",
-                                          keep_draft=True)[2]["plain_text"].split())
+        shortest = F.counted_length(F.validate_rewrite(
+            shorter, "linkedin_message", (), PERSONA, "", keep_draft=True)[2]["plain_text"], "words")
+        assert shortest == 115
         assert "came out at %d" % shortest in message
 
     def test_a_fault_that_is_not_length_is_never_sent_to_shorten(self, rewrite):
@@ -586,20 +591,26 @@ class TestTheGreetingIsReadUnderTheSubjectLine:
 
 class TestAnEmailRewriteFitsTheGuideItIsScoredAgainst:
 
-    def test_the_budget_counts_greeting_signoff_and_subject_label(self):
+    def test_the_subject_greeting_and_signoff_are_outside_the_budget(self):
         spec = F.body_budget("email", {"title": "CIO"}, "")
-        # "Dear [CIO Name]," 3 + "Best regards, [Your Name]" 4 + "Subject:" 1
-        assert spec == {"max": 180, "unit": "words", "composed": 8, "separators": 0,
-                        "budget": 172}
+        assert spec == {"max": 180, "unit": "words", "composed": 0, "separators": 0,
+                        "budget": 180}
+
+    def test_a_rewrite_of_180_words_plus_its_framing_is_accepted(self):
+        raw = {"subject_line": "Lower TCO for AEON", "opening": _words(60, "a"),
+               "body_sections": [{"text": _words(100, "b")}], "cta": _words(20, "c")}
+        rewrite, faults = F.validate_rewrite(raw, "email", (), {"title": "CIO"}, "")
+        assert faults == [] and len(rewrite["plain_text"].split()) > 180
 
     def test_a_rewrite_over_180_words_is_shortened_not_published(self):
         raw = {"subject_line": "Lower TCO", "opening": _words(60, "a"),
-               "body_sections": [{"text": _words(100, "b")}], "cta": _words(20, "c")}
+               "body_sections": [{"text": _words(120, "b")}], "cta": _words(20, "c")}
         _clean, faults, draft = F.validate_rewrite(raw, "email", (), {"title": "CIO"}, "",
                                                    keep_draft=True)
-        assert F.length_only(faults) and faults[0].startswith("rewrite is 190 words")
+        assert F.length_only(faults) and faults[0].startswith("rewrite is 200 words")
         note = F.length_retry_note("email", draft, {"title": "CIO"}, "")
-        assert "subject_line: 2 words" in note
+        assert "totalled 200 words" in note and "Cut at least 20 words" in note
+        assert "subject_line" not in note
         assert '"subject_line": "Lower TCO"' in F.shorten_prompt("email", draft, {"title": "CIO"}, "")
 
 
