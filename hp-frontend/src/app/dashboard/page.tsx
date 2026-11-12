@@ -7962,6 +7962,9 @@ export default function UserDashboardPage() {
                                   {/* The 1-Pager's subtitle: who the document is for and what it
                                       covers. Only the structured contract carries it. */}
                                   {g.subtitle && <p className="-mt-2 text-[13px] text-slate-500">{g.subtitle}</p>}
+                                  {/* A LinkedIn message's "Hi [Name]," - composed by the server and
+                                      part of the copied text, so it is shown where it will be sent. */}
+                                  {generatedAsset.greeting && <p>{generatedAsset.greeting}</p>}
                                   <p>{g.opening}</p>
                                   {(g.body_sections || []).map((sec: any, i: number) => (
                                     <div key={i} className="space-y-1">

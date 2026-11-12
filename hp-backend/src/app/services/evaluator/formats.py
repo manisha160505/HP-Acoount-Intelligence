@@ -30,8 +30,14 @@ _NEXT_STEP_RE = re.compile(
     r"reply|respond|get in touch|reach out|next step|follow up|"
     r"would you be open|worth a conversation|interested in)\b", re.I)
 
+
+
+def has_next_step(text: str) -> bool:
+    """True when `text` carries next-step language ("would you be open", "call")."""
+    return bool(_NEXT_STEP_RE.search(str(text or "")))
+
+
 _SUBJECT_RE = re.compile(r"^\s*subject\s*:\s*(.+)$", re.I | re.M)
-_HEADING_RE = re.compile(r"^\s*(#{1,6}\s+\S|[A-Z][^\n]{0,60}:\s*$)", re.M)
 _URL_RE = re.compile(r"https?://\S+")
 _QUESTION_RE = re.compile(r"\?")
 
@@ -222,6 +228,90 @@ def criteria_for(fmt: str) -> str:
     return FORMATS[normalize_format(fmt)]["criteria"]
 
 
+# What reads as a section heading in a pasted draft. It used to be only "# X" or
+# a short line ending in a colon, so a one-pager copied from Content Studio
+# (headings in capitals: "ACCOUNT CHALLENGE"), the Evaluator's own rewrite
+# ("Account Challenge") and a seller's "Account Challenge: Streamlining ..."
+# all scored "0 heading-like line(s)" (AEON, 12 Nov). A heading is a line of
+# its own, about 12 words or fewer, in one of five forms - see `_is_heading`.
+_HEADING_MAX_WORDS = 12
+_MD_HEADING_RE = re.compile(r"^#{1,6}\s+\S")
+# "Account Challenge: Streamlining Device Inventory" - a label of up to five
+# words, each capitalised, then a colon and the title.
+_LABEL_TITLE_RE = re.compile(r"^[A-Z][\w&'/-]*(?:\s+[\w&'/-]+){0,4}:\s+\S")
+# Little words a Title Case heading leaves in lower case: "How HP Helps with
+# Lifecycle Cost".
+_TITLE_SMALL_WORDS = {"a", "an", "and", "as", "at", "by", "for", "from", "in", "into", "of",
+                      "on", "or", "per", "the", "to", "vs", "via", "with"}
+# A line that is a salutation or a closing is never a heading.
+_NOT_HEADING_RE = re.compile(
+    r"^(?:subject\s*:|(?:dear|hi|hello|hey)\b|(?:best regards|kind regards|warm regards|"
+    r"regards|sincerely|best wishes|many thanks|thanks|thank you|cheers|best)\W*$)", re.I)
+
+
+def _is_title_case(line: str) -> bool:
+    words = re.findall(r"[A-Za-z][\w'&/-]*", line)
+    if not words or not words[0][0].isupper():
+        return False
+    return all(w[0].isupper() or w.lower() in _TITLE_SMALL_WORDS or not w[0].isalpha()
+               for w in words)
+
+
+def _is_heading(line: str) -> bool:
+    """True for a standalone line that reads as a section heading.
+
+    About 12 words or fewer, and one of: a Markdown heading ("# Account
+    Challenge"); a line ending in a colon ("Account Challenge:"); a line in
+    capitals ("ACCOUNT CHALLENGE"); a short label, a colon and a title
+    ("Account Challenge: Streamlining Operations"); or a Title Case line with
+    no full stop ("How HP Helps"). A sentence is none of these - it is longer,
+    or ends in a full stop, or is not in Title Case.
+    """
+    line = line.strip()
+    if (not line or line.startswith("[") or len(line.split()) > _HEADING_MAX_WORDS
+            or _NOT_HEADING_RE.match(line)):
+        return False
+    if _MD_HEADING_RE.match(line):
+        return True
+    if line.endswith(":") and line[0].isupper():
+        return True
+    letters = [c for c in line if c.isalpha()]
+    if len(letters) >= 3 and all(c.isupper() for c in letters):
+        return True
+    if _LABEL_TITLE_RE.match(line) and _is_title_case(line.split(":", 1)[0]):
+        return True
+    return _is_title_case(line) and not line.endswith((".", "!", "?", ",", ";"))
+
+
+def heading_lines(text: str) -> list:
+    """The lines of `text` that read as section headings, in order."""
+    return [line.strip() for line in str(text or "").splitlines() if _is_heading(line)]
+
+
+def message_body(text) -> str:
+    """The message without its Subject line, salutation and sign-off.
+
+    What a length guide counts. Content Studio's word budgets cover "opening +
+    body + ask" - the subject line and the salutation and sign-off it adds are
+    outside them - and the Evaluator counted all of it, so a full-length email
+    from Content Studio scored "183 words (guide up to 180)" (AEON, 12 Nov).
+    """
+    text = str(text or "")
+    start = _after_subject(text)
+    greeting = _DRAFT_GREETING_RE.search(text[start:])
+    if greeting:
+        start += greeting.end(1)
+    body = text[start:]
+    signoff = _DRAFT_SIGNOFF_RE.search(body)
+    return body[:signoff.start()] if signoff else body
+
+
+def counted_length(text, unit: str) -> int:
+    """A whole message's length against its cap: words in `message_body`, or
+    every character (a character limit is the platform's, on what is sent)."""
+    return measure(message_body(text), unit) if unit == "words" else measure(text, unit)
+
+
 def _planks(text: str) -> int:
     """Discrete planks: bullets, numbered items, or blank-line separated blocks."""
     bullets = len(re.findall(r"^\s*(?:[-*•]|\d+[.)])\s+\S", text, re.M))
@@ -249,8 +339,19 @@ def structure_checks(message: str, fmt: str) -> dict:
         checks.append({"check": name, "passed": bool(passed), "detail": detail})
 
     if spec.get("max_words"):
-        add("length", words <= spec["max_words"],
-            "%d words (guide for %s: up to %d)" % (words, spec["label"], spec["max_words"]))
+        # Counted as Content Studio counts its budget, so a draft written there
+        # to the top of its budget is inside the guide here.
+        counted = counted_length(text, "words")
+        contract = spec.get("rewrite") or {}
+        framing = [name for name, has in (("subject line", spec.get("wants_subject")),
+                                          ("greeting", contract.get("greeting")),
+                                          ("sign-off", contract.get("signoff"))) if has]
+        uncounted = (", ".join(framing[:-1]) + " or " + framing[-1] if len(framing) > 1
+                     else "".join(framing))
+        add("length", counted <= spec["max_words"],
+            "%d words (guide for %s: up to %d%s)"
+            % (counted, spec["label"], spec["max_words"],
+               ", not counting the " + uncounted if uncounted else ""))
 
     if spec.get("max_chars"):
         add("character_limit", chars <= spec["max_chars"],
@@ -287,7 +388,7 @@ def structure_checks(message: str, fmt: str) -> dict:
             else "no next-step request detected")
 
     if spec.get("wants_headings"):
-        count = len(_HEADING_RE.findall(text))
+        count = len(heading_lines(text))
         add("scannable_structure", count >= 2,
             "%d heading-like line(s); %s benefits from scannable structure"
             % (count, spec["label"]))
@@ -591,10 +692,11 @@ def body_budget(fmt: str, persona=None, original="") -> dict | None:
     """What the model's own text may total in a capped format, or None.
 
     {"max": the format's cap, "unit": "words" or "characters", "composed": what
-    Python adds (greeting, sign-off, and the word "Subject:" in front of an
-    email's subject line), "separators": characters of blank lines
-    `render_rewrite` puts between blocks (0 for a cap in words), "budget": what
-    is left for the fields the model writes}.
+    Python adds that counts (the greeting, for a cap in characters; 0 for a cap
+    in words, which counts only `message_body`), "separators": characters of
+    blank lines `render_rewrite` puts between blocks (0 for a cap in words),
+    "budget": what is left for the fields the model writes - for a cap in words,
+    every field but the subject line}.
 
     The blank lines count. The budget used to subtract only the greeting, so a
     LinkedIn rewrite that hit its stated budget exactly still came out four
@@ -607,11 +709,14 @@ def body_budget(fmt: str, persona=None, original="") -> dict | None:
     if not cap:
         return None
     cmax, unit = cap
+    if unit == "words":
+        # Counted as `counted_length` counts: the subject line, salutation and
+        # sign-off are outside the cap, as they are in Content Studio's budget.
+        return {"max": cmax, "unit": unit, "composed": 0, "separators": 0,
+                "budget": cmax}
     composed_blocks = [b for b in (compose_greeting(persona, contract, original),
                                    compose_signoff(contract, original)) if b]
     composed = sum(measure(b, unit) for b in composed_blocks)
-    if unit == "words" and "subject_line" in model_fields(key):
-        composed += 1
     separators = 0
     if unit == "characters":
         fields = set(model_fields(key))
@@ -619,7 +724,7 @@ def body_budget(fmt: str, persona=None, original="") -> dict | None:
         if "body_sections" in fields:
             model_blocks += (contract.get("sections") or (1, 1))[1]
         separators = 2 * max(len(composed_blocks) + model_blocks - 1, 0)
-    floor = 20 if unit == "words" else 80
+    floor = 80
     return {"max": cmax, "unit": unit, "composed": composed, "separators": separators,
             "budget": max(cmax - composed - separators, floor)}
 
@@ -643,23 +748,27 @@ def length_retry_note(fmt: str, draft: dict | None, persona=None, original="") -
     spec = body_budget(fmt, persona, original)
     if not spec or not draft:
         return ""
-    parts = [(f, draft.get(f) or "") for f in ("subject_line", "headline")
-             if draft.get(f)]
+    unit = spec["unit"]
+    # A subject line is outside a cap in words.
+    framing = ("headline",) if unit == "words" else ("subject_line", "headline")
+    parts = [(f, draft.get(f) or "") for f in framing if draft.get(f)]
     parts.append(("opening", draft.get("opening") or ""))
     parts += [("body_sections[%d].text" % i, s.get("text") or "")
               for i, s in enumerate(draft.get("body_sections") or [])]
     parts += [("body_sections[%d].heading" % i, s.get("heading") or "")
               for i, s in enumerate(draft.get("body_sections") or []) if s.get("heading")]
     parts.append(("cta", draft.get("cta") or ""))
-    unit = spec["unit"]
     used = sum(measure(text, unit) for _name, text in parts)
     over = max(used - spec["budget"], 1)
-    added = ("salutation and the blank lines that are" if unit == "characters"
-             else "salutation and sign-off that are")
-    lines = ["Your rewrite was %d %s; the limit is %d, including the "
-             "%d-%s %s added for you."
-             % (measure(draft.get("plain_text"), unit), unit, spec["max"],
-                spec["composed"], unit[:-1], added),
+    if unit == "words":
+        head = ("Your rewrite was %d words; the limit is %d, not counting the subject "
+                "line, salutation and sign-off."
+                % (counted_length(draft.get("plain_text"), unit), spec["max"]))
+    else:
+        head = ("Your rewrite was %d characters; the limit is %d, including the "
+                "%d-character salutation and the blank lines that are added for you."
+                % (measure(draft.get("plain_text"), unit), spec["max"], spec["composed"]))
+    lines = [head,
              "Your own text (every field you wrote) totalled %d %s and may "
              "total at most %d. Cut at least %d %s." % (used, unit, spec["budget"], over, unit),
              "Current lengths:"]
@@ -845,12 +954,11 @@ def rewrite_instructions(fmt: str, persona=None, original="") -> str:
     # then rejected for a length the model was never told about.
     spec = body_budget(key, persona, original)
     if spec and spec["unit"] == "words":
-        shape += (" HARD LIMIT: everything you write (every field below) must total "
-                  "at most %d words - the %d words of salutation, sign-off and "
-                  "'Subject:' label are added on top and count towards the %d-word "
-                  "maximum. "
+        shape += (" HARD LIMIT: everything you write (every field below except "
+                  "subject_line) must total at most %d words. The subject line, "
+                  "salutation and sign-off are not counted. "
                   "Be brief; going over means the rewrite is discarded."
-                  % (spec["budget"], spec["composed"], spec["max"]))
+                  % spec["budget"])
     elif spec:
         shape += (" HARD LIMIT: your opening, body_sections and cta together must "
                   "total at most %d characters - the %d-character salutation and "
@@ -1027,9 +1135,9 @@ def validate_rewrite(raw, fmt: str, banned_names=(), persona=None,
 
     # A sendable length is structural, not stylistic.
     cap = length_cap(contract)
-    if cap and measure(plain, cap[1]) > cap[0]:
+    if cap and counted_length(plain, cap[1]) > cap[0]:
         faults.append("rewrite is %d %s; %s allows %d"
-                      % (measure(plain, cap[1]), cap[1], FORMATS[key]["label"], cap[0]))
+                      % (counted_length(plain, cap[1]), cap[1], FORMATS[key]["label"], cap[0]))
 
     if contract.get("public"):
         blob = plain.lower()

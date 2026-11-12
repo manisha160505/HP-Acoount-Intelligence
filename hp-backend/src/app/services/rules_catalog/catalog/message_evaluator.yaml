@@ -319,7 +319,10 @@ rules:
   purpose: A wrong HP product line or an out-of-angle ask always pulls the score down.
   logic: 'Before the AI scores the draft, two of Content Studio''s content checks are run on it. The first
     looks for an HP product line that this role is never offered, anywhere in the text. The second looks
-    at the ask, meaning the last question in the message or, if there is none, the last sentence. After
+    at the ask: the closing paragraph that asks for something (it has a question or next-step language;
+    otherwise the last paragraph), and within it the last question or, if there is none, the last
+    sentence. The Subject line, greeting and sign-off are not part of it. For a message copied from Content
+    Studio this is its call to action, the same text Content Studio''s check looked at. After
     the AI scores the draft, an issue found by the first check caps Relevance at 39. An issue found by
     the second check caps Next-step Strength at 39. Caps only push scores down: if the AI''s score is
     already lower, it is kept. The summary starts with ''<Quality> scored down: <reason>.'''
@@ -365,7 +368,9 @@ rules:
   logic: The draft is checked for the HP product lines it names, using a fixed list of product line names.
     For each line found, the AI is given up to 3 rules from HP's approved messaging (the offer, up to 3
     facts that may be stated and up to 3 things that must not be said). It is also given up to 2 HP case
-    studies, ranked by how well they match the draft and the account's industry. When no case study fits,
+    studies, ranked by how well they match the draft and the account's industry, plus any case study the
+    draft already cites by customer name or by quoting its headline (as Content Studio's Proof Points
+    section does), so that study's own figures count as supported. When no case study fits,
     the recommendation for a benefit claim with no proof is to cut it. The AI weighs this context in its
     scoring; it does not change any number directly.
   constants:
@@ -401,7 +406,12 @@ rules:
     the end (best regards, kind regards, regards, sincerely, thanks, cheers and similar); and next-step
     language. LinkedIn Message: at most 110 words; a greeting; and next-step language
     (no sign-off needed). One-Pager: at most 500 words; next-step language; and at least 2 heading-like
-    lines. Next-step language means phrases such as: let me know, happy to, are you free or available,
+    lines. Words are counted as Content Studio counts its budget: the Subject line, the greeting and the
+    sign-off are not counted. A heading-like line is a line of its own, of about 12 words or fewer, that
+    is a Markdown heading (''# Account Challenge''), ends in a colon (''Account Challenge:''), is in
+    capitals (''ACCOUNT CHALLENGE'', as Content Studio copies a one-pager), is a short label, a colon
+    and a title (''Account Challenge: Streamlining Operations''), or is in Title Case with no full stop
+    (''How HP Helps''). A greeting or sign-off line is never a heading. Next-step language means phrases such as: let me know, happy to, are you free or available,
     can we, shall we, book, schedule, set up, arrange, call, meeting, demo, chat, connect, reply, respond,
     get in touch, reach out, next step, follow up, would you be open, worth a conversation, interested
     in. Any check the draft does not yet meet is given to the AI as a settled result.'
@@ -440,7 +450,7 @@ rules:
     scenario: 'An email that starts with ''Subject: Re: your Cikarang plant refresh'', then ''Dear Ms
       Tan,'', a body with ''Would you be open to a 20-minute call'', and ''Best regards, Andi''.'
     steps:
-    - 29 words, within the limit of 180
+    - 17 words not counting the Subject line, greeting and sign-off, within the limit of 180
     - The subject line is 31 characters
     - The greeting check reads the first line under the Subject line, 'Dear Ms Tan,', so a greeting is
       found
@@ -477,7 +487,9 @@ rules:
   purpose: Decides which source may confirm which kind of claim.
   logic: Your draft shows only where a phrase sits, never a fact. Account data (the executive summary's
     description, name and headquarters, the intent topic names, the opportunity trigger headlines and
-    the full technology stack) can confirm facts about the account,
+    the full technology stack, plus everything Content Studio writes from - the firmographics, contacts
+    and job openings data and its account evidence lines, such as the technology estate, hiring, research
+    intent, signals, qualified opportunities and filings) can confirm facts about the account,
     but never what an HP product can do. Approved HP facts (the approved facts, conditions and qualifiers
     in the HP recommendations, plus HP product family, device type and category names) can confirm what
     an HP product can do, but never anything about the account. Role context gives the role, department
@@ -507,6 +519,8 @@ rules:
   - hp-backend/src/app/services/evaluator/sources.py:build
   - hp-backend/src/app/services/evaluator/sources.py:_hp_fact_texts
   - hp-backend/src/app/services/evaluator/sources.py:_account_texts
+  - hp-backend/src/app/services/evaluator/sources.py:_content_studio_records
+  - hp-backend/src/app/services/extractors/content_studio.py:account_evidence
   doc_source: Guardrail 13 'HP decks cannot create account evidence' (quoted in grounding.py)
   confidence: high
 - id: me_claim_verdict
@@ -741,7 +755,7 @@ rules:
     - Create the request fingerprint
     result: The first 16 characters of the fingerprint.
     verified: true
-    expect: b9bacde67605d998
+    expect: f6b532d216c27dd5
   sources:
   - hp-backend/src/app/services/evaluator/storage.py:message_fingerprint
   - hp-backend/src/app/services/evaluator/storage.py:save
@@ -772,12 +786,12 @@ rules:
     - - Email
       - Subject line, opening, body sections, call to action
       - 1-2, no headings
-      - Subject at most 80 characters
+      - Subject at most 80 characters; at most 180 words, not counting the subject line, greeting and sign-off
       - Dear [<role> Name], / 'Best regards,' with '[Your Name]' two lines below
     - - LinkedIn message
       - Opening, body sections, call to action
       - Exactly 1
-      - Whole message at most 110 words including the greeting
+      - At most 110 words, not counting the greeting
       - Hi [<role> Name], / none
     - - One-pager
       - Headline, opening, body sections, call to action
@@ -829,18 +843,19 @@ rules:
   purpose: A rewrite is shown only when it has the right shape for its format.
   logic: 'Only the parts the format uses are read. A rewrite passes when it has every required part,
     a number of body sections within the allowed range, a heading on each one-pager section, a subject
-    line of at most 80 characters, and a finished message (including greeting and sign-off) within the
-    format''s length limit (LinkedIn: 110 words, the same budget Content Studio writes to).'
+    line of at most 80 characters, and a finished message within the format''s length limit (LinkedIn:
+    110 words, the same budget Content Studio writes to). Words are counted as Content Studio counts
+    them: the subject line, greeting and sign-off are not counted.'
   example:
     scenario: A LinkedIn rewrite with a 60-word opening, a 60-word paragraph and a 4-word call to action.
     steps:
-    - The greeting 'Hi [CFO Name],' (3 words) is added
-    - The finished length is 127 words, which is over 110
+    - The greeting 'Hi [CFO Name],' is added, and is not counted
+    - The message is 124 words, which is over 110
     result: The rewrite is over the LinkedIn limit, so it does not pass.
     verified: true
     expect:
     - null
-    - - rewrite is 127 words; LinkedIn Message allows 110
+    - - rewrite is 124 words; LinkedIn Message allows 110
   sources:
   - hp-backend/src/app/services/evaluator/formats.py:validate_rewrite
   confidence: high
@@ -899,7 +914,7 @@ rules:
   constants:
   - label: Instruction version
     ref: py:app.services.evaluator.evaluate:PROMPT_VERSION
-    stated: 9
+    stated: 10
   sources:
   - hp-backend/src/app/services/evaluator/evaluate.py:SYSTEM_PROMPT
   - hp-backend/src/app/services/evaluator/evaluate.py:_user_prompt
@@ -932,7 +947,7 @@ rules:
   summary: When length is the only thing wrong, the same rewrite is asked for again, shorter.
   purpose: When length is the only thing wrong, the same rewrite is asked for again, shorter.
   logic: 'A format with a length limit (LinkedIn: 110 words) tells the AI how many words its own text may
-    use, after the greeting is taken off. If the rewrite is still too
+    use; the subject line, greeting and sign-off are not counted. If the rewrite is still too
     long, it is told how long each part was and how much to cut. If length is then the only fault left,
     the same rewrite is asked for shorter, up to two more times, keeping every applied change and adding
     nothing. Each shorter version goes through all the same checks. Text is never cut off automatically.

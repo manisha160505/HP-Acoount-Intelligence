@@ -520,14 +520,47 @@ def _hp_fact_texts(db, account_id):
     return [t for t in texts if t]
 
 
+def _content_studio_records(db, account_id) -> dict:
+    """The account facts Content Studio writes from, as corpus records.
+
+    A message written in Content Studio and checked here must be checked
+    against what it was written from. This read used to be narrower - the
+    widgets above and no datasets - so "37 job postings" or "412 technologies"
+    from Content Studio was flagged as an unsupported figure (AEON, 12 Nov).
+    Read through Content Studio's own function, so the two cannot drift.
+
+    Nothing here is required to score: a read that fails leaves the widget
+    evidence, as before.
+    """
+    # Imported here: a heavy module, needed only for this read.
+    from app.services.extractors import content_studio
+
+    try:
+        evidence = content_studio.account_evidence(db, str(account_id))
+    except Exception:
+        logger.exception("evaluator: Content Studio evidence unavailable for %s", account_id)
+        return {}
+    return {
+        # The labelled lines first: readable, and what the model quoted from.
+        "content_studio_evidence": [{"text": text} for _label, text in evidence["items"]],
+        "firmographics": evidence["firmographics"],
+        "prospect_contacts": evidence["prospect_contacts"],
+        "job_openings": evidence["job_openings"],
+    }
+
+
 def build(db, account_id, persona, message, dataset_records=None):
     """Assemble the four sources for one evaluation."""
     account_texts, exec_card = _account_texts(db, account_id)
+    widget_evidence = [{"text": t} for t in account_texts]
 
-    # The uploaded rows themselves, when the extractor already read them.
-    records = dataset_records or {}
-    account = build_corpus({**records, "widget_evidence":
-                            [{"text": t} for t in account_texts]})
+    if dataset_records is None:
+        # The widget evidence stays first: the prompt shows the first cells.
+        account = build_corpus({"widget_evidence": widget_evidence,
+                                **_content_studio_records(db, account_id)})
+    else:
+        # The uploaded rows themselves, when the extractor already read them.
+        account = build_corpus({**dataset_records, "widget_evidence": widget_evidence})
 
     hp_texts = _hp_fact_texts(db, account_id)
     hp = corpus_from_texts(hp_texts)

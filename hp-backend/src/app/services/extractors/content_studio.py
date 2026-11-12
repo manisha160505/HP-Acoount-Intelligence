@@ -398,7 +398,7 @@ def _read_dataset_records(account_id: str, dataset_key: str) -> list[dict]:
 # takes seller input; the other four key on the account's data alone.
 
 # Bump when the prompt changes so cached assets are regenerated.
-CONTENT_PROMPT_VERSION = "2026-10-01.1"    # tuning row 8: estate, intent, signals, plays and filings as evidence
+CONTENT_PROMPT_VERSION = "2026-11-12.1"    # LinkedIn message opens with a composed "Hi ..." greeting
 
 # The one mandated section an HP case study belongs in. Named rather than
 # repeated, because the contract, the fallback template and the attach all have
@@ -493,13 +493,18 @@ CONTENT_TYPE_CONTRACTS = {
         "title": "LinkedIn Message", "subtitle": "Short direct message to one contact",
         "required": ["opening", "body_sections", "cta"],
         "sections": (1, 2),
+        # The salutation is composed in Python, as an email's is - never asked
+        # of the model, which is the route to "Hi there," the spec warns about.
+        # The Message Evaluator checks a LinkedIn message for one, so a message
+        # copied from here without it failed there (AEON, 12 Nov).
+        "greeting": True, "greeting_word": "Hi",
         "shape": ("A direct LinkedIn message to one person - NOT a public post, so no headline and "
                   "no hashtags. opening: one personalised line that references something real "
                   "about their remit or the account's evidence - a generic opener that could be "
                   "sent to anyone is the failure this format is judged on. body_sections: one or "
                   "two short paragraphs naming the one HP line and the ONE capability that meets "
                   "it. cta: one specific, low-friction ask. 60-110 words in total. Do not write a "
-                  "greeting or a sign-off."),
+                  "greeting or a sign-off - the greeting is added automatically."),
     },
     # Spec Section 3.4: "This format does not exist in any current build. It is
     # a structured document, not prose, and the structure is what makes it
@@ -1617,17 +1622,25 @@ def _compose_greeting(persona: dict, contract: dict) -> str:
     """Salutation: the first name for a named contact. For an archetype, the role
     itself on a branded emailer ("Dear CIO,") or a placeholder the seller fills in
     on a plain email ("Dear [CIO Name],"). A placeholder for a hiring proxy, where
-    no person is known."""
+    no person is known. A LinkedIn message opens "Hi" rather than "Dear"."""
+    word = contract.get("greeting_word") or "Dear"
     kind = persona.get("kind")
     if _is_named_person(persona):
         first = str(persona.get("full_name") or "").strip().split(" ")[0]
-        return f"Dear {first}," if first and first.lower() != "unknown" else "Dear [Name],"
+        return f"{word} {first}," if first and first.lower() != "unknown" else f"{word} [Name],"
     if kind in ("archetype", "client_role"):
         role = persona.get("salutation") or re.split(r"\s*[/(]\s*", str(persona.get("title") or ""))[0].strip()
         if not role:
-            return "Dear [Name],"
-        return f"Dear {role}," if contract.get("greeting_role") else f"Dear [{role} Name],"
-    return "Dear [Name],"
+            return f"{word} [Name],"
+        return f"{word} {role}," if contract.get("greeting_role") else f"{word} [{role} Name],"
+    return f"{word} [Name],"
+
+
+def _record_greeting(persona: dict, contract: dict) -> str | None:
+    """The salutation stored on an asset, or None for a format that has none."""
+    if contract.get("email_shaped") or contract.get("greeting"):
+        return _compose_greeting(persona, contract)
+    return None
 
 
 def _compose_plain_text(record: dict, contract: dict) -> str:
@@ -1646,12 +1659,52 @@ def _compose_plain_text(record: dict, contract: dict) -> str:
         head = [f"Subject: {g['subject_line']}"] if g.get("subject_line") else []
         signoff = [EMAIL_SIGNOFF] if contract.get("signoff", True) else []
         return "\n\n".join([*head, record.get("greeting") or "", *paras, *signoff]).strip()
-    lines = [g["headline"]] if g.get("headline") else []
+    lines = [record.get("greeting") or ""] if contract.get("greeting") else []
+    lines += [g["headline"]] if g.get("headline") else []
     lines.append(g.get("opening", ""))
     for sec in (g.get("body_sections") or []):
         lines.append((sec["heading"].upper() + "\n" if sec.get("heading") else "") + sec.get("text", ""))
     lines.append(g.get("cta", ""))
     return "\n\n".join(x for x in lines if x).strip()
+
+
+def account_evidence(db, account_id: str) -> dict:
+    """The account facts Content Studio writes from.
+
+    {"firmographics", "prospect_contacts", "job_openings": the dataset rows,
+    "company_name", "items": the labelled (label, text) evidence lines, in
+    the order their [A<n>] labels are given}.
+
+    The Message Evaluator checks a draft's figures against these same facts.
+    It used to check against a narrower set - no firmographics, hiring or
+    filings - so a figure Content Studio wrote from the account's own data
+    ("37 job postings") was marked unsupported there (AEON, 12 Nov).
+    """
+    firmo_records = _read_dataset_records(account_id, "firmographics")
+    contacts_records = _read_dataset_records(account_id, "prospect_contacts")
+    job_records = hiring_jobs.account_jobs(account_id).jobs
+
+    company_name, items = _account_evidence(firmo_records, account_id)
+
+    # Open hiring as account evidence (job_openings is sanctioned for this
+    # feature): the HP-relevant clusters, so any persona's copy can say what the
+    # account is recruiting for, the way the reference emails do.
+    hiring_clusters = _derive_role_proxy_personas(job_records)
+    if hiring_clusters:
+        parts = [f"{c['posting_count']} {c['department']} ({c['seniority']}): {', '.join(c['sample_titles'])}"
+                 for c in hiring_clusters]
+        items.append(("Open hiring", f"{len(job_records)} job postings in the last 12 months; HP-relevant roles - "
+                      + "; ".join(parts)))
+
+    # The rest of the account's published intelligence - the estate, the intent
+    # themes, the gated signals, the qualified plays, the filings. Tuning row 8,
+    # Column 4. Added after hiring so the two oldest lines keep their labels:
+    # an asset stored yesterday cites [A1] and [A2], and those must still mean
+    # the business description and the industry when it is re-read.
+    items += _published_evidence(db, account_id)
+
+    return {"firmographics": firmo_records, "prospect_contacts": contacts_records,
+            "job_openings": job_records, "company_name": company_name, "items": items}
 
 
 def _build_generation_context(db, account_id: str, persona_id: str, content_type: str,
@@ -1679,35 +1732,20 @@ def _build_generation_context(db, account_id: str, persona_id: str, content_type
         raise ValueError("topic is required")
     additional_context = str(additional_context or "").strip()[:CONTEXT_MAX_CHARS]
 
-    firmo_records = _read_dataset_records(account_id, "firmographics")
-    contacts_records = _read_dataset_records(account_id, "prospect_contacts")
-    job_records = hiring_jobs.account_jobs(account_id).jobs
+    evidence = account_evidence(db, account_id)
+    firmo_records = evidence["firmographics"]
+    contacts_records = evidence["prospect_contacts"]
+    job_records = evidence["job_openings"]
+    account_items = evidence["items"]
 
     persona = _persona_by_id(db, account_id, job_records, persona_id)
     if not persona:
         raise ValueError(f"Unknown persona_id '{persona_id}' for this account")
 
-    company_name, account_items = _account_evidence(firmo_records, account_id)
+    company_name = evidence["company_name"]
     if not company_name:
         account_doc = db["accounts"].find_one({"_id": ObjectId(account_id)}) if ObjectId.is_valid(account_id) else None
         company_name = (account_doc or {}).get("name") or "Target Account"
-
-    # Open hiring as account evidence (job_openings is sanctioned for this
-    # feature): the HP-relevant clusters, so any persona's copy can say what the
-    # account is recruiting for, the way the reference emails do.
-    hiring_clusters = _derive_role_proxy_personas(job_records)
-    if hiring_clusters:
-        parts = [f"{c['posting_count']} {c['department']} ({c['seniority']}): {', '.join(c['sample_titles'])}"
-                 for c in hiring_clusters]
-        account_items.append(("Open hiring", f"{len(job_records)} job postings in the last 12 months; HP-relevant roles - "
-                              + "; ".join(parts)))
-
-    # The rest of the account's published intelligence - the estate, the intent
-    # themes, the gated signals, the qualified plays, the filings. Tuning row 8,
-    # Column 4. Added after hiring so the two oldest lines keep their labels:
-    # an asset stored yesterday cites [A1] and [A2], and those must still mean
-    # the business description and the industry when it is re-read.
-    account_items += _published_evidence(db, account_id)
 
     account_block, a_labels = _label_block("A", account_items)
     persona_block, p_labels = _label_block("P", _persona_evidence(persona))
@@ -2144,7 +2182,7 @@ def generate_content_asset(account_id: str, persona_id: str, content_type: str,
                        content_type=content_type, asset_id=record["asset_id"],
                        published=not is_fallback)
 
-    record["greeting"] = _compose_greeting(persona, contract) if contract.get("email_shaped") else None
+    record["greeting"] = _record_greeting(persona, contract)
     record["plain_text"] = _compose_plain_text(record, contract)
 
     # The remaining variants, each composed the same way so the seller can copy
