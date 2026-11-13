@@ -90,7 +90,7 @@ export function AdminTour() {
         className="flex items-center space-x-1 text-gray-300 hover:text-white hover:bg-white/10 text-xs font-bold px-2 py-1.5 rounded-lg whitespace-nowrap transition duration-150"
       >
         <Compass className="w-3.5 h-3.5" />
-        <span className="hidden xl:inline">Take the tour</span>
+        <span className="sr-only">Take the tour</span>
       </button>
       )}
       {tour.overlay}
