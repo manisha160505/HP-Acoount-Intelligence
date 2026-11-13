@@ -1362,11 +1362,6 @@ export default function UserDashboardPage() {
                 <ChevronLeft className={`w-4 h-4 transition-transform ${isSidebarCollapsed ? 'rotate-180' : ''}`} />
               </button>
             </div>
-            {!isSidebarCollapsed && (
-              <div className="border-t border-slate-800/80 px-4 pb-4 pt-3">
-                <PoweredByBridgeAI tone="light" />
-              </div>
-            )}
 
           </div>
         </aside>
@@ -1377,13 +1372,15 @@ export default function UserDashboardPage() {
         <div className="flex-1 flex flex-col h-screen overflow-hidden">
           
           {/* Top Status Bar (Northstar Header) */}
-          <header className="bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between flex-shrink-0 shadow-xs">
-            <div className="flex items-center space-x-3">
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
-              <h2 className="text-base font-extrabold text-slate-900 tracking-tight">
+          <header className="bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between gap-4 flex-shrink-0 shadow-xs">
+            {/* min-w-0 + truncate: on a narrow window a long account name
+                shortens with an ellipsis instead of wrapping the header. */}
+            <div className="flex items-center space-x-3 min-w-0">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse flex-shrink-0"></span>
+              <h2 className="text-base font-extrabold text-slate-900 tracking-tight truncate" title={selectedAccount?.name}>
                 {selectedAccount ? selectedAccount.name : 'Select Target Account'}
               </h2>
-              <span className="text-[10px] font-bold bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-mono uppercase border border-slate-200">
+              <span className="hidden lg:inline flex-shrink-0 text-[10px] font-bold bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-mono uppercase border border-slate-200">
                 ACTIVE
               </span>
 
@@ -1413,7 +1410,7 @@ export default function UserDashboardPage() {
                 // than a "No signal" one (client, 8 Oct).
                 if (urgency.score == null) return null;
                 return (
-                  <div className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full border text-xs font-bold bg-amber-50 text-amber-800 border-amber-200/80">
+                  <div className="flex-shrink-0 whitespace-nowrap inline-flex items-center space-x-1.5 px-3 py-1 rounded-full border text-xs font-bold bg-amber-50 text-amber-800 border-amber-200/80">
                     <span className="text-[11px]">Urgency Score</span>
                     <span className="px-1.5 py-0.5 rounded font-mono text-[10px] bg-amber-200 text-amber-900">
                       <CountUpText text={urgency.score} />/{urgency.max_score ?? 100}
@@ -1424,6 +1421,9 @@ export default function UserDashboardPage() {
               })()}
             </div>
 
+            {/* The right-hand group stays together at the header's right edge
+                and never shrinks, so "Powered by BridgeAI" is always on screen. */}
+            <div className="flex items-center gap-3 flex-shrink-0">
             {/* The snapshot the account data reasons from, so a dashboard
                 opened months later still names it (Recommendation Tuning
                 Logic section E).
@@ -1436,8 +1436,8 @@ export default function UserDashboardPage() {
                 longer shown - they are October upload days and would contradict
                 the stated date. */}
             {selectedAccount && (
-              <span className="text-[10px] font-mono text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 whitespace-nowrap">
-                Data as of: {DATA_AS_OF_LABEL}
+              <span title={`Data as of: ${DATA_AS_OF_LABEL}`} className="text-[10px] font-mono text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 whitespace-nowrap">
+                <span className="hidden lg:inline">Data as of: </span>{DATA_AS_OF_LABEL}
               </span>
             )}
 
@@ -1452,7 +1452,7 @@ export default function UserDashboardPage() {
                 className="inline-flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl border text-xs font-bold transition shadow-xs bg-white text-slate-700 border-slate-300 hover:bg-slate-50"
               >
                 <Compass className="w-3.5 h-3.5 text-hp-navy" />
-                <span>Take the tour</span>
+                <span className="hidden lg:inline">Take the tour</span>
               </button>
             )}
 
@@ -1463,12 +1463,19 @@ export default function UserDashboardPage() {
                 type="button"
                 data-tour="my-activity"
                 onClick={() => setIsMyActivityOpen(true)}
+                title="My Activity"
+                aria-label="My Activity"
                 className="inline-flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl border text-xs font-bold transition shadow-xs bg-white text-slate-700 border-slate-300 hover:bg-slate-50"
               >
                 <ActivityIcon className="w-3.5 h-3.5 text-hp-navy" />
-                <span>My Activity</span>
+                <span className="hidden lg:inline">My Activity</span>
               </button>
             )}
+
+            {/* In the header, not the sidebar bottom, so it stays on screen
+                with the sidebar collapsed too (client, 12 Nov). */}
+            <PoweredByBridgeAI className="pl-3 border-l border-slate-200 whitespace-nowrap" />
+            </div>
 
           </header>
 

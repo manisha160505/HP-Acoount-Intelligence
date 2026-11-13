@@ -7,6 +7,7 @@ import { useAuth } from '@/providers/AuthProvider';
 import { isAdminRole } from '@/types/auth';
 import { LogOut, User as UserIcon, Shield, Building2, Users, BarChart3, BookOpen, KeyRound, LayoutGrid } from 'lucide-react';
 import HpLogo from '@/components/common/HpLogo';
+import PoweredByBridgeAI from '@/components/common/PoweredByBridgeAI';
 import { AdminTour } from '@/components/tour/AdminTour';
 
 const ADMIN_LINKS = [
@@ -37,31 +38,40 @@ export const Navbar: React.FC = () => {
           <div className="flex items-center gap-3 flex-shrink-0">
             <HpLogo size={36} onDark />
             <span className="hidden sm:block h-7 w-px bg-white/15" aria-hidden="true" />
-            <div className="flex items-center gap-2.5 whitespace-nowrap">
-              <span className="text-[17px] font-semibold tracking-tight text-white">
-                Account Intelligence
-              </span>
-              {/* Dropped on narrower screens so the admin links never wrap. */}
-              <span className="hidden 2xl:inline-flex items-center h-5 px-2 rounded-md border border-sky-400/30 bg-sky-400/10 text-sky-200 text-[9.5px] font-bold uppercase tracking-[0.14em]">
-                Enterprise
-              </span>
+            {/* "Powered by BridgeAI" sits under the product name, so it is on
+                screen on every page after sign-in, for sellers and admins
+                alike, without taking width from the links (client, 12 Nov). */}
+            <div className="flex flex-col justify-center gap-1 whitespace-nowrap">
+              <div className="flex items-center gap-2.5">
+                <span className="text-[17px] leading-tight font-semibold tracking-tight text-white">
+                  Account Intelligence
+                </span>
+                {/* Dropped on narrower screens so the admin links never wrap. */}
+                <span className="hidden 2xl:inline-flex items-center h-5 px-2 rounded-md border border-sky-400/30 bg-sky-400/10 text-sky-200 text-[9.5px] font-bold uppercase tracking-[0.14em]">
+                  Enterprise
+                </span>
+              </div>
+              <PoweredByBridgeAI tone="light" subtitle />
             </div>
           </div>
 
           {isAdminRole(user.role) && (
-            <div data-tour="admin-nav" className="hidden md:flex items-center space-x-1 ml-6 mr-4">
+            <div data-tour="admin-nav" className="hidden md:flex items-center space-x-1 ml-4 mr-3 lg:ml-6 lg:mr-4">
               {ADMIN_LINKS.map(({ href, label, Icon }) => {
                 const active = pathname?.startsWith(href);
                 return (
                   <Link
                     key={href}
                     href={href}
+                    title={label}
+                    aria-label={label}
                     className={`inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition ${
                       active ? 'bg-white/15 text-white' : 'text-gray-300 hover:text-white hover:bg-white/10'
                     }`}
                   >
                     <Icon className="w-3.5 h-3.5" />
-                    <span>{label}</span>
+                    {/* Icons only below lg, so the bar never runs off screen. */}
+                    <span className="hidden lg:inline">{label}</span>
                   </Link>
                 );
               })}
@@ -69,16 +79,17 @@ export const Navbar: React.FC = () => {
           )}
 
           <div className="flex items-center space-x-2 flex-shrink-0">
-            <div className="flex items-center space-x-2 bg-slate-800 px-3 py-1.5 rounded-full border border-slate-700 min-w-0">
+            <div title={user.email} className="flex items-center space-x-2 bg-slate-800 px-2.5 xl:px-3 py-1.5 rounded-full border border-slate-700 min-w-0">
               {isAdminRole(user.role) ? (
                 <Shield className="w-4 h-4 text-emerald-400" />
               ) : (
                 <UserIcon className="w-4 h-4 text-hp-accent" />
               )}
-              <div className="text-xs whitespace-nowrap flex items-center min-w-0">
+              {/* The name from xl up; below that the icon alone, with the email on hover. */}
+              <div className="hidden xl:flex text-xs whitespace-nowrap items-center min-w-0">
                 <span className="font-bold text-gray-200 truncate max-w-[200px]" title={user.email}>{user.full_name}</span>
                 {isAdminRole(user.role) && (
-                  <span className="hidden xl:inline ml-1 text-[10px] text-gray-400 capitalize">({user.role.replace('_', ' ')})</span>
+                  <span className="hidden 2xl:inline ml-1 text-[10px] text-gray-400 capitalize">({user.role.replace('_', ' ')})</span>
                 )}
               </div>
             </div>
@@ -92,15 +103,17 @@ export const Navbar: React.FC = () => {
               className="flex items-center space-x-1 text-gray-300 hover:text-white hover:bg-white/10 text-xs font-bold px-2 py-1.5 rounded-lg whitespace-nowrap transition duration-150"
             >
               <KeyRound className="w-3.5 h-3.5" />
-              <span className="hidden xl:inline">Change password</span>
+              <span className="sr-only">Change password</span>
             </Link>
 
             <button
               onClick={logout}
+              title="Sign Out"
+              aria-label="Sign Out"
               className="flex items-center space-x-1 bg-red-600 hover:bg-red-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg whitespace-nowrap transition duration-150"
             >
               <LogOut className="w-3.5 h-3.5" />
-              <span>Sign Out</span>
+              <span className="hidden sm:inline">Sign Out</span>
             </button>
           </div>
         </div>
